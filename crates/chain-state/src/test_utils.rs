@@ -1,12 +1,19 @@
-use crate::in_memory::ExecutedBlock;
+use crate::{
+    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    CanonStateSubscriptions,
+};
 use rand::Rng;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Address, Block, BlockNumber, Receipts, Requests, SealedBlockWithSenders, TransactionSigned,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::Range,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::broadcast::{self, Sender};
 
 fn get_executed_block(block_number: BlockNumber, receipts: Receipts) -> ExecutedBlock {
     let mut block = Block::default();
@@ -49,4 +56,35 @@ pub fn get_executed_block_with_number(block_number: BlockNumber) -> ExecutedBloc
 /// Generates a range of executed blocks with ascending block numbers.
 pub fn get_executed_blocks(range: Range<u64>) -> impl Iterator<Item = ExecutedBlock> {
     range.map(get_executed_block_with_number)
+}
+
+/// A test `ChainEventSubscriptions`
+#[derive(Clone, Debug, Default)]
+pub struct TestCanonStateSubscriptions {
+    canon_notif_tx: Arc<Mutex<Vec<Sender<CanonStateNotification>>>>,
+}
+
+impl TestCanonStateSubscriptions {
+    /// Adds new block commit to the queue that can be consumed with
+    /// [`TestCanonStateSubscriptions::subscribe_to_canonical_state`]
+    pub fn add_next_commit(&self, new: Arc<Chain>) {
+        let event = CanonStateNotification::Commit { new };
+        self.canon_notif_tx.lock().as_mut().unwrap().retain(|tx| tx.send(event.clone()).is_ok())
+    }
+
+    /// Adds reorg to the queue that can be consumed with
+    /// [`TestCanonStateSubscriptions::subscribe_to_canonical_state`]
+    pub fn add_next_reorg(&self, old: Arc<Chain>, new: Arc<Chain>) {
+        let event = CanonStateNotification::Reorg { old, new };
+        self.canon_notif_tx.lock().as_mut().unwrap().retain(|tx| tx.send(event.clone()).is_ok())
+    }
+}
+
+impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);
+        self.canon_notif_tx.lock().as_mut().unwrap().push(canon_notif_tx);
+
+        canon_notif_rx
+    }
 }
