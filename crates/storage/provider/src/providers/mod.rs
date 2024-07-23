@@ -1,18 +1,18 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, ChainSpecProvider,
+    ChangeSetReader, DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider,
+    HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
+    WithdrawalsProvider,
 };
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::ChainInfoTracker;
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ChainInfoTracker};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
