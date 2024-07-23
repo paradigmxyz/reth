@@ -28,6 +28,7 @@ pub struct BackfillJob<E, P> {
     pub(crate) prune_modes: PruneModes,
     pub(crate) thresholds: ExecutionStageThresholds,
     pub(crate) range: RangeInclusive<BlockNumber>,
+    pub(crate) stream_parallelism: usize,
 }
 
 impl<E, P> Iterator for BackfillJob<E, P>
@@ -148,7 +149,8 @@ impl<E, P> BackfillJob<E, P> {
         E: BlockExecutorProvider + Clone + 'static,
         P: HeaderProvider + BlockReader + StateProviderFactory + Clone + 'static,
     {
-        BackFillJobStream::new(self.into_single_blocks())
+        let parallelism = self.stream_parallelism;
+        BackFillJobStream::new(self.into_single_blocks()).with_parallelism(parallelism)
     }
 }
 

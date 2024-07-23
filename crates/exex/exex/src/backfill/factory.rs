@@ -6,6 +6,8 @@ use reth_primitives::BlockNumber;
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 
+use super::stream::DEFAULT_PARALLELISM;
+
 /// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<E, P> {
@@ -13,6 +15,7 @@ pub struct BackfillJobFactory<E, P> {
     provider: P,
     prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
+    stream_parallelism: usize,
 }
 
 impl<E, P> BackfillJobFactory<E, P> {
@@ -23,6 +26,7 @@ impl<E, P> BackfillJobFactory<E, P> {
             provider,
             prune_modes: PruneModes::none(),
             thresholds: ExecutionStageThresholds::default(),
+            stream_parallelism: DEFAULT_PARALLELISM,
         }
     }
 
@@ -37,6 +41,15 @@ impl<E, P> BackfillJobFactory<E, P> {
         self.thresholds = thresholds;
         self
     }
+
+    /// Sets the stream parallelism.
+    ///
+    /// Configures the [`BackFillJobStream`](super::stream::BackFillJobStream) created via
+    /// [`BackfillJob::into_stream`].
+    pub const fn with_stream_parallelism(mut self, stream_parallelism: usize) -> Self {
+        self.stream_parallelism = stream_parallelism;
+        self
+    }
 }
 
 impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
@@ -48,6 +61,7 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
             prune_modes: self.prune_modes.clone(),
             range,
             thresholds: self.thresholds.clone(),
+            stream_parallelism: self.stream_parallelism,
         }
     }
 }
