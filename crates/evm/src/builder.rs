@@ -84,9 +84,9 @@ pub trait EvmFactory {
 
     /// Returns new EVM with the given database
     ///
-    /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
-    /// the caller to call an appropriate method to fill the transaction and block environment
-    /// before executing any transactions using the provided EVM.
+    /// This does not automatically configure the EVM with [`crate::ConfigureEvmEnv`] methods. It is
+    /// up to the caller to call an appropriate method to fill the transaction and block
+    /// environment before executing any transactions using the provided EVM.
     fn evm<DB: Database>(self, db: DB) -> Evm<'static, Self::DefaultExternalContext<'static>, DB>
     where
         Self: Sized,
@@ -129,9 +129,9 @@ pub trait EvmFactory {
 
     /// Returns a new EVM with the given inspector.
     ///
-    /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It
-    /// is up to the caller to call an appropriate method to fill the transaction and block
-    /// environment before executing any transactions using the provided EVM.
+    /// Caution: This does not automatically configure the EVM with [`crate::ConfigureEvmEnv`]
+    /// methods. It is up to the caller to call an appropriate method to fill the transaction
+    /// and block environment before executing any transactions using the provided EVM.
     fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
     where
         DB: Database,
