@@ -26,8 +26,8 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, CanonStateNotification, ExecutionOutcome, StateProvider, StateProviderFactory,
-    StateRootProvider,
+    BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider,
+    StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -41,6 +41,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::Deref,
     sync::{mpsc::Receiver, Arc},
 };
 use tokio::sync::{
@@ -156,13 +157,90 @@ impl TreeState {
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
-    // TODO: this type needs to include more info, like missing block etc.
-    fn on_new_head(&self, new_head: B256) -> Option<CanonStateNotification> {
-        let new_head_block = self.blocks_by_hash.get(&new_head)?;
+    fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
+        let new_head_block = self.blocks_by_hash.get(&new_head).cloned()?;
+        let mut parent = new_head_block.block.num_hash();
+        let mut new_chain = vec![new_head_block];
+        let mut reorged = vec![];
 
-        // TODO walk the chain back and connect to canonical chain or detect reorg
+        // walk back the chain until we reach the canonical block
+        while parent.hash != self.canonical_block_hash() {
+            if parent.number == self.canonical_head().number {
+                // we have a reorg
+                todo!("handle reorg")
+            }
+            let parent_block = self.blocks_by_hash.get(&new_head).cloned()?;
+            parent = parent_block.block.num_hash();
+            new_chain.push(parent_block);
+        }
 
-        None
+        // reverse the chains
+        new_chain.reverse();
+        reorged.reverse();
+
+        let chain = if reorged.is_empty() {
+            NewCanonicalChain::Commit { new: new_chain }
+        } else {
+            NewCanonicalChain::Reorg { new: new_chain, old: reorged }
+        };
+
+        Some(chain)
+    }
+}
+
+/// Non-empty chain of blocks.
+enum NewCanonicalChain {
+    /// A simple append to the current canonical head
+    Commit {
+        /// all blocks that lead back to the canonical head
+        new: Vec<ExecutedBlock>,
+    },
+    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
+    /// point they diverge.
+    Reorg {
+        /// All blocks of the _new_ chain
+        new: Vec<ExecutedBlock>,
+        /// All blocks of the _old_ chain
+        old: Vec<ExecutedBlock>,
+    },
+}
+
+impl NewCanonicalChain {
+    /// Converts the new chain into a notification that will be emitted to listeners
+    fn to_chain_notification(&self) -> CanonStateNotification {
+        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
+        //  implement this properly
+        match self {
+            Self::Commit { new } => CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    vec![],
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+            },
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                old: Arc::new(Chain::new(
+                    vec![],
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+                new: Arc::new(Chain::new(
+                    vec![],
+                    old.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+            },
+        }
+    }
+
+    /// Returns the new tip of the chain.
+    ///
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
+    fn tip(&self) -> &SealedBlock {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => new.last().unwrap().block(),
+        }
     }
 }
 
