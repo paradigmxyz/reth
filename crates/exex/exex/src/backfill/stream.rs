@@ -111,7 +111,8 @@ where
         while this.tasks.len() < this.parallelism {
             // Take the next `batch_size` blocks from the range and calculate the range bounds
             let mut range = this.range.by_ref().take(this.batch_size);
-            let range_bounds = range.next().zip(range.last());
+            let start = range.next();
+            let range_bounds = start.zip(range.last().or(start));
 
             // Advance the range by `batch_size` blocks
             this.range.nth(this.batch_size);
