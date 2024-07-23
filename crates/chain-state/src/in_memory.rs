@@ -1,6 +1,8 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::{CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker};
+use crate::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
@@ -250,6 +252,11 @@ impl CanonicalInMemoryState {
     /// Subscribe to new blocks events.
     pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
         self.inner.canon_state_notification_sender.subscribe()
+    }
+
+    /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
+    pub fn notify_canon_state(&self, event: CanonStateNotification) {
+        self.inner.canon_state_notification_sender.send(event).ok();
     }
 }
 

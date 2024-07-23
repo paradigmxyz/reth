@@ -1380,7 +1380,9 @@ where
             // TODO
             //  update inmemory state
             //  update trackers
-            //  emit notification
+
+            // sends an event to all active listeners about the new canonical chain
+            self.canonical_in_memory_state.notify_canon_state(update.to_chain_notification());
 
             if let Some(attr) = attrs {
                 let updated = self.process_payload_attributes(attr, &update.tip().header, state);
