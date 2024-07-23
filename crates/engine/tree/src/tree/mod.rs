@@ -1467,7 +1467,7 @@ mod tests {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState(block.clone())));
+            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
             hash_by_number.insert(number, hash);
         }
         let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
