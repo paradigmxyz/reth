@@ -25,6 +25,16 @@ use reth_node_api::FullNodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    version::{
+        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
+        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
+    },
+};
+use reth_node_metrics::{
+    recorder::PROMETHEUS_RECORDER_HANDLE,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+    Collector,
 };
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
@@ -483,15 +493,30 @@ where
 
     /// Starts the prometheus endpoint.
     pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()> {
-        let prometheus_handle = self.node_config().install_prometheus_recorder()?;
-        self.node_config()
-            .start_metrics_endpoint(
-                prometheus_handle,
+        let listen_addr = self.node_config().metrics;
+        if let Some(addr) = listen_addr {
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
+            let config = MetricServerConfig::new(
+                addr,
+                PROMETHEUS_RECORDER_HANDLE.clone(),
                 self.database().clone(),
                 self.static_file_provider(),
+                Collector::default(),
                 self.task_executor().clone(),
-            )
-            .await
+                VersionInfo {
+                    version: CARGO_PKG_VERSION,
+                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
+                    cargo_features: VERGEN_CARGO_FEATURES,
+                    git_sha: VERGEN_GIT_SHA,
+                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
+                    build_profile: BUILD_PROFILE_NAME,
+                },
+            );
+
+            MetricServer::new(config).serve().await?;
+        }
+
+        Ok(())
     }
 
     /// Convenience function to [`Self::init_genesis`]

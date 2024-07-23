@@ -10,22 +10,15 @@ use crate::{
 };
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_metrics::{
-    prometheus_exporter::{self, PROMETHEUS_RECORDER_HANDLE},
-    PrometheusHandle,
-};
+
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
-use reth_provider::{
-    providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
-};
+use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -278,38 +271,6 @@ impl NodeConfig {
     /// Loads '`EnvKzgSettings::Default`'
     pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         Ok(EnvKzgSettings::Default)
-    }
-
-    /// Installs the prometheus recorder.
-    pub fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
-        Ok(PROMETHEUS_RECORDER_HANDLE.clone())
-    }
-
-    /// Serves the prometheus endpoint over HTTP with the given database and prometheus handle.
-    pub async fn start_metrics_endpoint<Metrics>(
-        &self,
-        prometheus_handle: PrometheusHandle,
-        db: Metrics,
-        static_file_provider: StaticFileProvider,
-        task_executor: TaskExecutor,
-    ) -> eyre::Result<()>
-    where
-        Metrics: DatabaseMetrics + 'static + Send + Sync,
-    {
-        if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::serve(
-                listen_addr,
-                prometheus_handle,
-                db,
-                static_file_provider,
-                reth_node_metrics::Collector::default(),
-                task_executor,
-            )
-            .await?;
-        }
-
-        Ok(())
     }
 
     /// Fetches the head block from the database.

@@ -7726,7 +7726,6 @@ dependencies = [
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
- "reth-node-metrics",
  "reth-primitives",
  "reth-provider",
  "reth-prune-types",
@@ -7738,7 +7737,6 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-stages-types",
  "reth-storage-errors",
- "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
@@ -7777,7 +7775,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
- "reth-node-metrics",
  "reth-payload-builder",
  "reth-provider",
  "reth-rpc",
@@ -7818,7 +7815,6 @@ dependencies = [
 name = "reth-node-metrics"
 version = "1.0.3"
 dependencies = [
- "const_format",
  "eyre",
  "http 1.1.0",
  "jsonrpsee",

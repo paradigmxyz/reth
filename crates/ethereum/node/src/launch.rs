@@ -22,7 +22,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
     primitives::Head,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT},
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_node_metrics::version_metrics::VERGEN_GIT_SHA;

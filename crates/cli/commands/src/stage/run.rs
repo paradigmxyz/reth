@@ -11,8 +11,18 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::args::{NetworkArgs, StageEnum};
-use reth_node_metrics::prometheus_exporter;
+use reth_node_core::{
+    args::{NetworkArgs, StageEnum},
+    version::{
+        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
+        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
+    },
+};
+use reth_node_metrics::{
+    recorder::PROMETHEUS_RECORDER_HANDLE,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+};
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter,
@@ -97,15 +107,24 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::serve(
+            let config = MetricServerConfig::new(
                 listen_addr,
-                prometheus_exporter::install_recorder()?,
+                PROMETHEUS_RECORDER_HANDLE.clone(),
                 provider_factory.db_ref().clone(),
                 provider_factory.static_file_provider(),
                 metrics_process::Collector::default(),
                 ctx.task_executor,
-            )
-            .await?;
+                VersionInfo {
+                    version: CARGO_PKG_VERSION,
+                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
+                    cargo_features: VERGEN_CARGO_FEATURES,
+                    git_sha: VERGEN_GIT_SHA,
+                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
+                    build_profile: BUILD_PROFILE_NAME,
+                },
+            );
+
+            MetricServer::new(config).serve().await?;
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
