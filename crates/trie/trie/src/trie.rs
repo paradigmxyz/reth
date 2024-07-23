@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
@@ -10,13 +10,12 @@ use crate::{
     HashBuilder, Nibbles, TrieAccount,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use tracing::trace;
 
 #[cfg(feature = "metrics")]
-use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
+use crate::metrics::{StateRootMetrics, TrieRootMetrics};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
@@ -360,30 +359,6 @@ impl<T, H> StorageRoot<T, H> {
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
-    }
-}
-
-impl<'a, TX: DbTx> StorageRoot<&'a TX, DatabaseHashedCursorFactory<'a, TX>> {
-    /// Create a new storage root calculator from database transaction and raw address.
-    pub fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(
-            tx,
-            DatabaseHashedCursorFactory::new(tx),
-            address,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
-        )
-    }
-
-    /// Create a new storage root calculator from database transaction and hashed address.
-    pub fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
-        Self::new_hashed(
-            tx,
-            DatabaseHashedCursorFactory::new(tx),
-            hashed_address,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
-        )
     }
 }
 

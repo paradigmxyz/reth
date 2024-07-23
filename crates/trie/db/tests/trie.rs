@@ -13,7 +13,7 @@ use reth_trie::{
     BranchNodeCompact, StateRoot, StorageRoot, TrieMask,
 };
 use reth_trie_common::triehash::KeccakHasher;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::Mul,
