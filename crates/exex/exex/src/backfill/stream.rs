@@ -48,7 +48,7 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
     /// - `parallelism`: The parallelism to handle active tasks.
     ///
     /// # Returns
-    /// The modified instance of [`BackFillJobStream`] with the specified parallelism.
+    /// The modified instance of [`StreamBackfillJob`] with the specified parallelism.
     pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
         self.parallelism = parallelism;
         self
