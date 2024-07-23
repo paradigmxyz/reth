@@ -1,12 +1,19 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::ChainInfoTracker;
+use crate::{CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Address, BlockNumHash, Receipts, SealedBlock, SealedHeader, B256};
+use reth_primitives::{
+    Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256,
+};
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, sync::Arc, time::Instant};
+use tokio::sync::broadcast;
+
+/// Size of the broadcast channel used to notify canonical state events.
+const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
 
 /// Container type for in memory state data.
 #[derive(Debug, Default)]
@@ -61,6 +68,7 @@ impl InMemoryState {
 pub(crate) struct CanonicalInMemoryStateInner {
     pub(crate) chain_info_tracker: ChainInfoTracker,
     pub(crate) in_memory_state: InMemoryState,
+    pub(crate) canon_state_notification_sender: CanonStateNotificationSender,
 }
 
 /// This type is responsible for providing the blocks, receipts, and state for
@@ -85,7 +93,14 @@ impl CanonicalInMemoryState {
             None => SealedHeader::default(),
         };
         let chain_info_tracker = ChainInfoTracker::new(header);
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
+        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
+
+        let inner = CanonicalInMemoryStateInner {
+            chain_info_tracker,
+            in_memory_state,
+            canon_state_notification_sender,
+        };
 
         Self { inner: Arc::new(inner) }
     }
@@ -94,7 +109,13 @@ impl CanonicalInMemoryState {
     pub fn with_head(head: SealedHeader) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head);
         let in_memory_state = InMemoryState::default();
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
+        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
+        let inner = CanonicalInMemoryStateInner {
+            chain_info_tracker,
+            in_memory_state,
+            canon_state_notification_sender,
+        };
 
         Self { inner: Arc::new(inner) }
     }
@@ -196,6 +217,40 @@ impl CanonicalInMemoryState {
     pub fn get_safe_header(&self) -> Option<SealedHeader> {
         self.inner.chain_info_tracker.get_safe_header()
     }
+
+    /// Returns the `SealedHeader` corresponding to the pending state.
+    pub fn pending_sealed_header(&self) -> Option<SealedHeader> {
+        self.pending_state().map(|h| h.block().block().header.clone())
+    }
+
+    /// Returns the `Header` corresponding to the pending state.
+    pub fn pending_header(&self) -> Option<Header> {
+        self.pending_sealed_header().map(|sealed_header| sealed_header.unseal())
+    }
+
+    /// Returns the `SealedBlock` corresponding to the pending state.
+    pub fn pending_block(&self) -> Option<SealedBlock> {
+        self.pending_state().map(|block_state| block_state.block().block().clone())
+    }
+
+    /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
+    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+        self.pending_state()
+            .and_then(|block_state| block_state.block().block().clone().seal_with_senders())
+    }
+
+    /// Returns a tuple with the `SealedBlock` corresponding to the pending
+    /// state and a vector of its `Receipt`s.
+    pub fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
+        self.pending_state().map(|block_state| {
+            (block_state.block().block().clone(), block_state.executed_block_receipts())
+        })
+    }
+
+    /// Subscribe to new blocks events.
+    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
+        self.inner.canon_state_notification_sender.subscribe()
+    }
 }
 
 /// State after applying the given block.
@@ -209,24 +264,52 @@ impl BlockState {
         Self(executed_block)
     }
 
-    pub(crate) fn block(&self) -> ExecutedBlock {
+    /// Returns the executed block that determines the state.
+    pub fn block(&self) -> ExecutedBlock {
         self.0.clone()
     }
 
-    pub(crate) fn hash(&self) -> B256 {
+    /// Returns the hash of executed block that determines the state.
+    pub fn hash(&self) -> B256 {
         self.0.block().hash()
     }
 
-    pub(crate) fn number(&self) -> u64 {
+    /// Returns the block number of executed block that determines the state.
+    pub fn number(&self) -> u64 {
         self.0.block().number
     }
 
-    pub(crate) fn state_root(&self) -> B256 {
+    /// Returns the state root after applying the executed block that determines
+    /// the state.
+    pub fn state_root(&self) -> B256 {
         self.0.block().header.state_root
     }
 
-    pub(crate) fn receipts(&self) -> &Receipts {
+    /// Returns the `Receipts` of executed block that determines the state.
+    pub fn receipts(&self) -> &Receipts {
         &self.0.execution_outcome().receipts
+    }
+
+    /// Returns a vector of `Receipt` of executed block that determines the state.
+    /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
+    /// has only one element corresponding to the executed block associated to
+    /// the state.
+    pub fn executed_block_receipts(&self) -> Vec<Receipt> {
+        let receipts = self.receipts();
+
+        debug_assert!(
+            receipts.receipt_vec.len() <= 1,
+            "Expected at most one block's worth of receipts, found {}",
+            receipts.receipt_vec.len()
+        );
+
+        receipts
+            .receipt_vec
+            .first()
+            .map(|block_receipts| {
+                block_receipts.iter().filter_map(|opt_receipt| opt_receipt.clone()).collect()
+            })
+            .unwrap_or_default()
     }
 }
 
