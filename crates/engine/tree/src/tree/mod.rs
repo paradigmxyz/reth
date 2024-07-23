@@ -25,7 +25,10 @@ use reth_primitives::{
     Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
-use reth_provider::{BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider};
+use reth_provider::{
+    BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider,
+    StateProviderFactory, StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -38,9 +41,9 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::Deref,
     sync::{mpsc::Receiver, Arc},
 };
-use std::ops::Deref;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -175,8 +178,8 @@ impl TreeState {
         new_chain.reverse();
         reorged.reverse();
 
-       let chain = if reorged.is_empty() {
-            NewCanonicalChain::Append { new: new_chain }
+        let chain = if reorged.is_empty() {
+            NewCanonicalChain::Commit { new: new_chain }
         } else {
             NewCanonicalChain::Reorg { new: new_chain, old: reorged }
         };
@@ -188,33 +191,45 @@ impl TreeState {
 /// Non-empty chain of blocks.
 enum NewCanonicalChain {
     /// A simple append to the current canonical head
-    Append {
+    Commit {
         /// all blocks that lead back to the canonical head
-        new: Vec<ExecutedBlock>
+        new: Vec<ExecutedBlock>,
     },
-    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which point they diverge.
+    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
+    /// point they diverge.
     Reorg {
         /// All blocks of the _new_ chain
         new: Vec<ExecutedBlock>,
         /// All blocks of the _old_ chain
         old: Vec<ExecutedBlock>,
-    }
+    },
 }
 
 impl NewCanonicalChain {
-
     /// Converts the new chain into a notification that will be emitted to listeners
     fn to_chain_notification(&self) -> CanonStateNotification {
-       // TODO: do we need to merge execution outcome for multiblock append or reorg?
-       //  implement this properly
+        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
+        //  implement this properly
         match self {
-            Self::Append { new } => CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(vec![], new.last().unwrap().execution_output.deref().clone(), None))
+            Self::Commit { new } => CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    vec![],
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
             },
             Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                old: Arc::new(Chain::new(vec![], new.last().unwrap().execution_output.deref().clone(), None)),
-                new: Arc::new(Chain::new(vec![], old.last().unwrap().execution_output.deref().clone(), None))
-            }
+                old: Arc::new(Chain::new(
+                    vec![],
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+                new: Arc::new(Chain::new(
+                    vec![],
+                    old.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+            },
         }
     }
 
@@ -224,10 +239,9 @@ impl NewCanonicalChain {
     /// 1 new block.
     fn tip(&self) -> &SealedBlock {
         match self {
-            Self::Append { new } | Self::Reorg { new, .. } => new.last().unwrap().block(),
+            Self::Commit { new } | Self::Reorg { new, .. } => new.last().unwrap().block(),
         }
     }
-
 }
 
 /// Tracks the state of the engine api internals.
