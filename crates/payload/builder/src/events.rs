@@ -25,7 +25,7 @@ pub struct PayloadEvents<Engine: PayloadTypes> {
 }
 
 impl<Engine: PayloadTypes + 'static> PayloadEvents<Engine> {
-    /// Convert this receiver into a stream of PayloadEvents.
+    /// Convert this receiver into a stream of `PayloadEvents`.
     pub fn into_stream(self) -> BroadcastStream<Events<Engine>> {
         BroadcastStream::new(self.receiver)
     }
