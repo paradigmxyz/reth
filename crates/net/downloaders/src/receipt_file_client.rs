@@ -232,7 +232,7 @@ mod test {
     use tokio_util::codec::Decoder;
 
     #[derive(Debug, PartialEq, Eq, RlpDecodable)]
-    pub struct MockReceipt {
+    struct MockReceipt {
         tx_type: u8,
         status: u64,
         cumulative_gas_used: u64,
