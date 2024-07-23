@@ -373,49 +373,52 @@ where
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
-        // Check for consistency between database and static files. If it fails, it unwinds to
-        // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
-        {
-            // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
-            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+        // OVM chain contains duplicate transactions, so is inconsistent by default
+        if !self.chain_spec().is_optimism_mainnet() {
+            // Check for consistency between database and static files. If it fails, it unwinds to
+            // the first block that's consistent between database and static files.
+            if let Some(unwind_target) = factory
+                .static_file_provider()
+                .check_consistency(&factory.provider()?, has_receipt_pruning)?
+            {
+                // Highly unlikely to happen, and given its destructive nature, it's better to panic
+                // instead.
+                assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+                info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
-            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
+                let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
-            // Builds an unwind-only pipeline
-            let pipeline = Pipeline::builder()
-                .add_stages(DefaultStages::new(
-                    factory.clone(),
-                    tip_rx,
-                    Arc::new(EthBeaconConsensus::new(self.chain_spec())),
-                    NoopHeaderDownloader::default(),
-                    NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::default(),
-                    self.toml_config().stages.clone(),
-                    self.prune_modes(),
-                ))
-                .build(
-                    factory.clone(),
-                    StaticFileProducer::new(factory.clone(), self.prune_modes()),
+                // Builds an unwind-only pipeline
+                let pipeline = Pipeline::builder()
+                    .add_stages(DefaultStages::new(
+                        factory.clone(),
+                        tip_rx,
+                        Arc::new(EthBeaconConsensus::new(self.chain_spec())),
+                        NoopHeaderDownloader::default(),
+                        NoopBodiesDownloader::default(),
+                        NoopBlockExecutorProvider::default(),
+                        self.toml_config().stages.clone(),
+                        self.prune_modes(),
+                    ))
+                    .build(
+                        factory.clone(),
+                        StaticFileProducer::new(factory.clone(), self.prune_modes()),
+                    );
+
+                // Unwinds to block
+                let (tx, rx) = oneshot::channel();
+
+                // Pipeline should be run as blocking and panic if it fails.
+                self.task_executor().spawn_critical_blocking(
+                    "pipeline task",
+                    Box::pin(async move {
+                        let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                        let _ = tx.send(result);
+                    }),
                 );
-
-            // Unwinds to block
-            let (tx, rx) = oneshot::channel();
-
-            // Pipeline should be run as blocking and panic if it fails.
-            self.task_executor().spawn_critical_blocking(
-                "pipeline task",
-                Box::pin(async move {
-                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
-                    let _ = tx.send(result);
-                }),
-            );
-            rx.await??;
+                rx.await??;
+            }
         }
 
         Ok(factory)
