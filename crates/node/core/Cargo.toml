@@ -75,9 +75,6 @@ secp256k1 = { workspace = true, features = [
 futures.workspace = true
 
 
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.16.0"
-
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
