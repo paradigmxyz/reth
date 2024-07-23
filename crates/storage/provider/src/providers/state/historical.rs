@@ -15,8 +15,8 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -285,8 +285,7 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<AccountProof> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state.clone());
-        revert_state
-            .account_proof(self.tx, address, slots)
+        Proof::overlay_account_proof(self.tx, revert_state, address, slots)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
