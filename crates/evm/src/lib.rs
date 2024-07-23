@@ -21,6 +21,7 @@ use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
 
+pub mod builder;
 pub mod either;
 pub mod execute;
 pub mod noop;
