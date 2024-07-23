@@ -426,7 +426,7 @@ where
                         .canonical_in_memory_state
                         .state_by_hash(rpc_block_hash.block_hash)
                         .ok_or(ProviderError::StateForHashNotFound(rpc_block_hash.block_hash))?;
-                    receipts = Some(block_state.flattened_receipts());
+                    receipts = Some(block_state.executed_block_receipts());
                 }
                 Ok(receipts)
             }
@@ -434,7 +434,7 @@ where
                 BlockNumberOrTag::Pending => Ok(self
                     .canonical_in_memory_state
                     .pending_state()
-                    .and_then(|block_state| Some(block_state.flattened_receipts()))),
+                    .and_then(|block_state| Some(block_state.executed_block_receipts()))),
                 _ => {
                     if let Some(num) = self.convert_block_number(num_tag)? {
                         self.receipts_by_block(num.into())

@@ -225,7 +225,7 @@ impl CanonicalInMemoryState {
     /// state and a vector of its `Receipt`s.
     pub fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
         self.pending_state().map(|block_state| {
-            (block_state.block().block().clone(), block_state.flattened_receipts())
+            (block_state.block().block().clone(), block_state.executed_block_receipts())
         })
     }
 }
@@ -268,13 +268,25 @@ impl BlockState {
     }
 
     /// Returns a vector of `Receipt` of executed block that determines the state.
-    pub fn flattened_receipts(&self) -> Vec<Receipt> {
-        self.receipts()
+    /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
+    /// has only one element corresponding to the executed block associated to
+    /// the state.
+    pub fn executed_block_receipts(&self) -> Vec<Receipt> {
+        let receipts = self.receipts();
+
+        debug_assert!(
+            receipts.receipt_vec.len() <= 1,
+            "Expected at most one block's worth of receipts, found {}",
+            receipts.receipt_vec.len()
+        );
+
+        receipts
             .receipt_vec
-            .iter()
-            .flatten()
-            .filter_map(|opt_receipt| opt_receipt.clone())
-            .collect()
+            .first()
+            .map(|block_receipts| {
+                block_receipts.iter().filter_map(|opt_receipt| opt_receipt.clone()).collect()
+            })
+            .unwrap_or_default()
     }
 }
 
