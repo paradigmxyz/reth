@@ -55,10 +55,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        let mut evm =
-            RethEvmBuilder::new(db, self.default_external_context()).with_env(env.env).build();
-        evm.modify_spec_id(evm.spec_id());
-        evm
+        RethEvmBuilder::new(db, self.default_external_context()).with_env(env.into()).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -77,11 +74,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         DB: Database,
         I: GetInspector<DB>,
     {
-        let mut evm = RethEvmBuilder::new(db, self.default_external_context())
-            .with_env(env.env)
-            .build_with_inspector(inspector);
-        evm.modify_spec_id(evm.spec_id());
-        evm
+        RethEvmBuilder::new(db, self.default_external_context())
+            .with_env(env.into())
+            .build_with_inspector(inspector)
     }
 
     /// Returns a new EVM with the given inspector.
