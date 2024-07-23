@@ -32,6 +32,7 @@ metrics.workspace = true
 # misc
 derive_more.workspace = true
 bytes.workspace = true
+eyre.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -65,9 +66,5 @@ assert_matches.workspace = true
 
 [features]
 test-utils = ["arbitrary"]
-arbitrary = [
-    "reth-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-]
+arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest"]
 optimism = ["reth-primitives/optimism"]

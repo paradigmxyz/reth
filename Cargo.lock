@@ -6739,6 +6739,7 @@ dependencies = [
  "bytes",
  "criterion",
  "derive_more",
+ "eyre",
  "iai-callgrind",
  "metrics",
  "modular-bitfield",

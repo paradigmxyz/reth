@@ -62,6 +62,8 @@ impl DatabaseEnvKind {
 /// Arguments for database initialization.
 #[derive(Clone, Debug, Default)]
 pub struct DatabaseArguments {
+    /// The path of the database directory.
+    path: Path,
     /// Client version that accesses the database.
     client_version: ClientVersion,
     /// Database log level. If [None], the default value is used.
@@ -93,13 +95,20 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub const fn new(client_version: ClientVersion) -> Self {
+    pub const fn new(path: Path, client_version: ClientVersion) -> Self {
         Self {
+            path,
             client_version,
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
+    }
+
+    /// Set the database path.
+    pub const fn with_path(mut self, path: Path) -> Self {
+        self.path = path;
+        self
     }
 
     /// Set the log level.
@@ -143,6 +152,7 @@ pub struct DatabaseEnv {
 impl Database for DatabaseEnv {
     type TX = tx::Tx<RO>;
     type TXMut = tx::Tx<RW>;
+    type Opts = DatabaseArguments;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
@@ -158,6 +168,35 @@ impl Database for DatabaseEnv {
             self.metrics.as_ref().cloned(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
+    }
+
+    fn open(opts: Self::Opts) -> eyre::Result<Self> {
+        use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+
+        let rpath = path.as_ref();
+        if is_database_empty(rpath) {
+            reth_fs_util::create_dir_all(rpath).wrap_err_with(|| {
+                format!("Could not create database directory {}", rpath.display())
+            })?;
+            create_db_version_file(rpath)?;
+        } else {
+            match check_db_version_file(rpath) {
+                Ok(_) => (),
+                Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        let client_version = args.client_version().clone();
+        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?;
+        db.create_tables()?;
+        db.record_client_version(client_version)?;
+        Ok(db)
+    }
+
+    fn open_ro(opts: Self::Opts) -> eyre::Result<Self> {
+        DatabaseEnv::open(path, DatabaseEnvKind::RO, args)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
 }
 
