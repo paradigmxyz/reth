@@ -228,24 +228,23 @@ where
 {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         let block = match source {
-            BlockSource::Any => {
-                // check database first
-                let mut block = self.database.block_by_hash(hash)?;
+            BlockSource::Any | BlockSource::Canonical => {
+                // check in memory first
+                // Note: it's fine to return the unsealed block because the caller already has
+                // the hash
+                let mut block = self
+                    .canonical_in_memory_state
+                    .state_by_hash(hash)
+                    .map(|block_state| block_state.block().block().clone().unseal());
+
                 if block.is_none() {
-                    // Note: it's fine to return the unsealed block because the caller already has
-                    // the hash
-                    block = self
-                        .canonical_in_memory_state
-                        .state_by_hash(hash)
-                        .map(|block_state| block_state.block().block().clone().unseal());
+                    block = self.database.block_by_hash(hash)?;
                 }
                 block
             }
-            BlockSource::Pending => self
-                .canonical_in_memory_state
-                .state_by_hash(hash)
-                .map(|block_state| block_state.block().block().clone().unseal()),
-            BlockSource::Canonical => self.database.block_by_hash(hash)?,
+            BlockSource::Pending => {
+                self.canonical_in_memory_state.pending_block().map(|block| block.unseal())
+            }
         };
 
         Ok(block)
