@@ -251,3 +251,10 @@ pub enum DownloadRequest {
     /// Download the given range of blocks.
     BlockRange(B256, u64),
 }
+
+impl DownloadRequest {
+    /// Returns a [`DownloadRequest`] for a single block.
+    pub fn single_block(hash: B256) -> Self {
+        Self::BlockSet(HashSet::from([hash]))
+    }
+}
