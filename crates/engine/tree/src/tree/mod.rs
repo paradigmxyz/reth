@@ -1438,14 +1438,20 @@ impl PersistenceState {
 mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
+    use alloy_rlp::Decodable;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{test_utils::get_executed_blocks, BlockState};
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
+    use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
-    use std::sync::mpsc::{channel, Sender};
+    use reth_rpc_types_compat::engine::block_to_payload_v1;
+    use std::{
+        str::FromStr,
+        sync::mpsc::{channel, Sender},
+    };
     use tokio::sync::mpsc::unbounded_channel;
 
     struct TestHarness {
@@ -1454,6 +1460,44 @@ mod tests {
         blocks: Vec<ExecutedBlock>,
         action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
+    }
+
+    impl TestHarness {
+        fn holesky() -> Self {
+            let (action_tx, action_rx) = channel();
+            let persistence_handle = PersistenceHandle::new(action_tx);
+
+            let chain_spec = HOLESKY.clone();
+            let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+
+            let provider = MockEthProvider::default();
+            let executor_factory = MockExecutorProvider::default();
+
+            let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
+
+            let (to_tree_tx, to_tree_rx) = channel();
+            let (from_tree_tx, from_tree_rx) = unbounded_channel();
+
+            let header = chain_spec.genesis_header().seal_slow();
+            let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
+
+            let (to_payload_service, payload_command_rx) = unbounded_channel();
+            let payload_builder = PayloadBuilderHandle::new(to_payload_service);
+            let tree = EngineApiTreeHandlerImpl::new(
+                provider,
+                executor_factory,
+                consensus,
+                payload_validator,
+                to_tree_rx,
+                from_tree_tx,
+                engine_api_tree_state,
+                header,
+                persistence_handle,
+                payload_builder,
+            );
+
+            Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx }
+        }
     }
 
     fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
@@ -1592,5 +1636,30 @@ mod tests {
 
         let resp = rx.await.unwrap().unwrap().await.unwrap();
         assert!(resp.payload_status.is_syncing());
+    }
+
+    #[tokio::test]
+    async fn test_holesky_payload() {
+        let s = include_str!("../../test-data/holesky/1.rlp");
+        let data = Bytes::from_str(s).unwrap();
+        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let sealed = block.seal_slow();
+        let payload = block_to_payload_v1(sealed);
+
+        let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
+            TestHarness::holesky();
+
+        // set backfill active
+        tree.is_backfill_active = true;
+
+        let (tx, rx) = oneshot::channel();
+        tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {
+            payload: payload.clone().into(),
+            cancun_fields: None,
+            tx,
+        }));
+
+        let resp = rx.await.unwrap().unwrap();
+        assert!(resp.is_syncing());
     }
 }

@@ -6975,6 +6975,7 @@ dependencies = [
 name = "reth-engine-tree"
 version = "1.0.3"
 dependencies = [
+ "alloy-rlp",
  "aquamarine",
  "assert_matches",
  "futures",
@@ -7006,6 +7007,7 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-stages",
  "reth-stages-api",
  "reth-stages-types",
