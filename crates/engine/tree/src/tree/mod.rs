@@ -156,14 +156,45 @@ impl TreeState {
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
-    // TODO: this type needs to include more info, like missing block etc.
-    fn on_new_head(&self, new_head: B256) -> Option<CanonStateNotification> {
-        let new_head_block = self.blocks_by_hash.get(&new_head)?;
+    fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
+        let new_head_block = self.block_by_hash(new_head)?;
+        let mut parent = new_head_block.num_hash();
+        let mut new_chain = vec![new_head_block];
+        let mut reorged = vec![];
+
+        // walk back the chain until we reach the canonical block
+        while parent.hash != self.canonical_block_hash() {
+            if parent.number == self.canonical_head().number {
+                // we have a reorg
+            }
+            let parent_block = self.block_by_hash(parent.hash)?;
+            new_chain.push(parent_block);
+            parent = parent_block.num_hash();
+        }
 
         // TODO walk the chain back and connect to canonical chain or detect reorg
 
         None
     }
+}
+
+enum NewCanonicalChain {
+    Appended {
+        new: Vec<ExecutedBlock>
+    },
+    Reorged {
+        new: Vec<ExecutedBlock>,
+        old: Vec<ExecutedBlock>,
+    }
+}
+
+impl NewCanonicalChain {
+
+    /// Converts the new chain into a notification that will be emitted to listeners
+    fn to_chain_notification(&self) -> CanonStateNotification {
+        todo!("merge execution outcome?")
+    }
+
 }
 
 /// Tracks the state of the engine api internals.
