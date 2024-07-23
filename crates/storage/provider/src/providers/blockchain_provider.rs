@@ -785,7 +785,7 @@ where
     DB: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
-        self.tree.subscribe_to_canonical_state()
+        self.canonical_in_memory_state.subscribe_canon_state()
     }
 }
 
