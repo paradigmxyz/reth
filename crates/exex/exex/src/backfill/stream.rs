@@ -19,7 +19,7 @@ type BackfillTasks = FuturesOrdered<
 >;
 
 /// The default parallelism for active tasks in [`BackFillJobStream`].
-const DEFAULT_PARALLELISM: usize = 4;
+pub(crate) const DEFAULT_PARALLELISM: usize = 4;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
