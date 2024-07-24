@@ -10,3 +10,7 @@ description = "OP primitive types"
 
 [lints]
 workspace = true
+
+[dependencies]
+# ethereum
+alloy-network.workspace = true

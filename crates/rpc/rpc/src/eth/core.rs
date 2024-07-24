@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy_network::Ethereum;
 use derive_more::Deref;
 use futures::Future;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
@@ -120,6 +121,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
+    type Types = Ethereum;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug

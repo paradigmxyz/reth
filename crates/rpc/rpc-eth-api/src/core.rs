@@ -27,6 +27,8 @@ use crate::helpers::{
 pub trait EthApiTypes: Send + Sync {
     /// Extension of [`EthApiError`], with network specific errors.
     type Error: IntoRpcError + FromEthApiError + AsEthApiError + FromEvmError;
+    /// Blockchain data types, specific to network, e.g. block and transaction.
+    type Types: alloy_network::Network;
 }
 
 /// Helper trait to wrap core [`EthApiError`].
