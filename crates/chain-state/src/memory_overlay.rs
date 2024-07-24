@@ -8,6 +8,7 @@ use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
+#[allow(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider {
     /// The collection of executed parent blocks.
     in_memory: Vec<ExecutedBlock>,
