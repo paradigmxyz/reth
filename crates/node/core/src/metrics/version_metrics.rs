@@ -45,6 +45,7 @@ impl VersionInfo {
             ("build_profile", self.build_profile),
         ];
 
-        let _gauge = gauge!("info", &labels);
+        let gauge = gauge!("info", &labels);
+        gauge.set(1)
     }
 }
