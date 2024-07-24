@@ -16,8 +16,8 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
-    StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    writer::StorageWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -140,7 +140,7 @@ where
         );
 
         // We're reusing receipt writing code internal to
-        // `ExecutionOutcome::write_to_storage`, so we just use a default empty
+        // `StorageWriter::append_receipts_from_blocks`, so we just use a default empty
         // `BundleState`.
         let execution_outcome =
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
@@ -149,11 +149,8 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        execution_outcome.write_to_storage(
-            &provider,
-            Some(static_file_producer),
-            OriginalValuesKnown::Yes,
-        )?;
+        let mut storage_writer = StorageWriter::new(Some(&provider), Some(static_file_producer));
+        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
     provider.commit()?;

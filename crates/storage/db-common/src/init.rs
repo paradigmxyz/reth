@@ -11,12 +11,13 @@ use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
-    bundle_state::{BundleStateInit, RevertsInit},
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockNumReader, ChainSpecProvider, DatabaseProviderRW, ExecutionOutcome,
-    HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
-    StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    writer::StorageWriter,
+    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
+    ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
+    ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -202,7 +203,8 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    execution_outcome.write_to_storage(provider, None, OriginalValuesKnown::Yes)?;
+    let mut storage_writer = StorageWriter::new(Some(provider), None);
+    storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -462,7 +464,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = updates.write_to_database(tx)?;
+                let updated_len = provider.write_trie_updates(&updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -482,7 +484,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = updates.write_to_database(tx)?;
+                let updated_len = provider.write_trie_updates(&updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
