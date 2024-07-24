@@ -31,10 +31,9 @@ use reth_node_core::{
     },
 };
 use reth_node_metrics::{
-    recorder::PROMETHEUS_RECORDER_HANDLE,
+    hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
-    Collector,
 };
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
@@ -498,11 +497,6 @@ where
             info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(
                 addr,
-                PROMETHEUS_RECORDER_HANDLE.clone(),
-                self.database().clone(),
-                self.static_file_provider(),
-                Collector::default(),
-                self.task_executor().clone(),
                 VersionInfo {
                     version: CARGO_PKG_VERSION,
                     build_timestamp: VERGEN_BUILD_TIMESTAMP,
@@ -511,6 +505,8 @@ where
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                self.task_executor().clone(),
+                Hooks::new(self.database().clone(), self.static_file_provider()),
             );
 
             MetricServer::new(config).serve().await?;

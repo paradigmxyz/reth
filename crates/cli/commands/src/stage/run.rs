@@ -19,7 +19,7 @@ use reth_node_core::{
     },
 };
 use reth_node_metrics::{
-    recorder::PROMETHEUS_RECORDER_HANDLE,
+    hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
@@ -109,11 +109,6 @@ impl Command {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             let config = MetricServerConfig::new(
                 listen_addr,
-                PROMETHEUS_RECORDER_HANDLE.clone(),
-                provider_factory.db_ref().clone(),
-                provider_factory.static_file_provider(),
-                metrics_process::Collector::default(),
-                ctx.task_executor,
                 VersionInfo {
                     version: CARGO_PKG_VERSION,
                     build_timestamp: VERGEN_BUILD_TIMESTAMP,
@@ -122,6 +117,11 @@ impl Command {
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                ctx.task_executor,
+                Hooks::new(
+                    provider_factory.db_ref().clone(),
+                    provider_factory.static_file_provider(),
+                ),
             );
 
             MetricServer::new(config).serve().await?;

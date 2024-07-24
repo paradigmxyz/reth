@@ -6543,7 +6543,6 @@ dependencies = [
  "futures",
  "human_bytes",
  "itertools 0.13.0",
- "metrics-process",
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
