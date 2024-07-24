@@ -26,8 +26,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
-    StateRootProvider,
+    BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -676,10 +675,7 @@ where
     /// This merges the state of all blocks that are part of the chain that the requested block is
     /// the head of. This includes all blocks that connect back to the canonical block on disk.
     // TODO: return error if the chain has gaps
-    fn state_provider(
-        &self,
-        hash: B256,
-    ) -> ProviderResult<MemoryOverlayStateProvider<Box<dyn StateProvider>>> {
+    fn state_provider(&self, hash: B256) -> ProviderResult<MemoryOverlayStateProvider> {
         let mut in_memory = Vec::new();
         let mut parent_hash = hash;
         while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
