@@ -18,6 +18,9 @@ use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned
 use reth_revm::{Database, EvmBuilder};
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 
@@ -107,10 +110,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
 
-    fn evm<'a, DB: Database + 'a>(
+    fn evm<DB: Database>(
         &self,
         db: DB,
-    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+    ) -> reth_revm::Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         EvmBuilder::default().with_db(db).build()
     }
 }

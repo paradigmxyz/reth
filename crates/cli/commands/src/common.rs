@@ -114,8 +114,6 @@ impl EnvironmentArgs {
         let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider)
             .with_prune_modes(prune_modes.clone());
 
-        info!(target: "reth::cli", "Verifying storage consistency.");
-
         // Check for consistency between database and static files.
         if let Some(unwind_target) = factory
             .static_file_provider()

@@ -15,6 +15,7 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
+use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -562,7 +563,7 @@ mod tests {
                     }
                     let storage = storage_entries
                         .into_iter()
-                        .filter(|v| v.value != U256::ZERO)
+                        .filter(|v| !v.value.is_zero())
                         .map(|v| (v.key, v.value))
                         .collect::<Vec<_>>();
                     accounts.insert(key, (account, storage));
@@ -580,7 +581,7 @@ mod tests {
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
             writer.commit().unwrap();
-            writer.append_header(last_header, U256::ZERO, hash).unwrap();
+            writer.append_header(&last_header, U256::ZERO, &hash).unwrap();
             writer.commit().unwrap();
 
             Ok(blocks)
@@ -636,7 +637,7 @@ mod tests {
                                 storage_cursor.delete_current().unwrap();
                             }
 
-                            if value != U256::ZERO {
+                            if !value.is_zero() {
                                 let storage_entry = StorageEntry { key: hashed_slot, value };
                                 storage_cursor.upsert(hashed_address, storage_entry).unwrap();
                             }

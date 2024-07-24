@@ -47,6 +47,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostStateSorted, Nibbles, StateRoot,
 };
+use reth_trie_db::DatabaseStateRoot;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     cmp::Ordering,
@@ -201,11 +202,11 @@ impl<DB: Database> DatabaseProviderRW<DB> {
             for block_number in 0..block.number {
                 let mut prev = block.header.clone().unseal();
                 prev.number = block_number;
-                writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
             }
         }
 
-        writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
+        writer.append_header(block.header.as_ref(), ttd, &block.hash())?;
 
         self.insert_block(block)
     }
@@ -1001,7 +1002,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // insert value if needed
-                if *old_storage_value != U256::ZERO {
+                if !old_storage_value.is_zero() {
                     plain_storage_cursor.upsert(*address, storage_entry)?;
                 }
             }
@@ -1099,7 +1100,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // insert value if needed
-                if *old_storage_value != U256::ZERO {
+                if !old_storage_value.is_zero() {
                     plain_storage_cursor.upsert(*address, storage_entry)?;
                 }
             }
@@ -1948,7 +1949,7 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
-        if source.is_database() {
+        if source.is_canonical() {
             self.block(hash.into())
         } else {
             Ok(None)
@@ -2508,6 +2509,14 @@ impl<TX: DbTx> StageCheckpointReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
     }
 
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.tx
+            .cursor_read::<tables::StageCheckpoints>()?
+            .walk(None)?
+            .collect::<Result<Vec<(String, StageCheckpoint)>, _>>()
+            .map_err(ProviderError::Database)
+    }
+
     /// Get stage checkpoint progress.
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         Ok(self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?)
@@ -2696,7 +2705,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 hashed_storage.delete_current()?;
             }
 
-            if value != U256::ZERO {
+            if !value.is_zero() {
                 hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
             }
         }
@@ -2736,7 +2745,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     hashed_storage_cursor.delete_current()?;
                 }
 
-                if value != U256::ZERO {
+                if !value.is_zero() {
                     hashed_storage_cursor.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())
@@ -3133,6 +3142,27 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
+    /// Inserts the block into the database, always modifying the following tables:
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`Headers`](tables::Headers)
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    ///
+    /// If there are transactions in the block, the following tables will be modified:
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    ///
+    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// If withdrawals are not empty, this will modify
+    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify
+    /// [`TransactionSenders`](tables::TransactionSenders).
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,

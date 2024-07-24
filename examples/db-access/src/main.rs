@@ -1,5 +1,4 @@
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::open_db_read_only;
 use reth_primitives::{Address, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
@@ -16,20 +15,18 @@ use std::path::Path;
 // Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
-    // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
-    //  doing in 2 steps.
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
-    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new(
-        db,
+    let factory = ProviderFactory::new_with_database_path(
+        db_path,
         spec.into(),
+        Default::default(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
-    );
+    )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.

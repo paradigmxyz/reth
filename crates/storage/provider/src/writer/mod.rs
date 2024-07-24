@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::{providers::StaticFileProviderRWRefMut, DatabaseProviderRW};
 use itertools::Itertools;
 use reth_db::{
@@ -7,7 +9,9 @@ use reth_db::{
     Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_primitives::{BlockNumber, StorageEntry, U256};
+use reth_primitives::{
+    BlockNumber, Header, StaticFileSegment, StorageEntry, TransactionSignedNoHash, B256, U256,
+};
 use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::writer::StorageWriterError;
 use reth_trie::HashedPostStateSorted;
@@ -129,7 +133,7 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
                     }
                 }
 
-                if entry.value != U256::ZERO {
+                if !entry.value.is_zero() {
                     hashed_storage_cursor.upsert(*hashed_address, entry)?;
                 }
             }
@@ -138,10 +142,104 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         Ok(())
     }
 
+    /// Appends headers to static files, using the
+    /// [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties) table to determine the
+    /// total difficulty of the parent block during header insertion.
+    ///
+    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
+    /// the Headers segment.
+    pub fn append_headers_from_blocks<H, I>(
+        &mut self,
+        initial_block_number: BlockNumber,
+        headers: impl Iterator<Item = I>,
+    ) -> ProviderResult<()>
+    where
+        I: Borrow<(H, B256)>,
+        H: Borrow<Header>,
+    {
+        self.ensure_database_writer()?;
+        self.ensure_static_file_writer()?;
+        let mut td_cursor =
+            self.database_writer().tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
+
+        let first_td = if initial_block_number == 0 {
+            U256::ZERO
+        } else {
+            td_cursor
+                .seek_exact(initial_block_number - 1)?
+                .map(|(_, td)| td.0)
+                .ok_or_else(|| ProviderError::TotalDifficultyNotFound(initial_block_number))?
+        };
+
+        for pair in headers {
+            let (header, hash) = pair.borrow();
+            let header = header.borrow();
+            let td = first_td + header.difficulty;
+            self.static_file_writer().append_header(header, td, hash)?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends transactions to static files, using the
+    /// [`BlockBodyIndices`](tables::BlockBodyIndices) table to determine the transaction number
+    /// when appending to static files.
+    ///
+    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
+    /// the Transactions segment.
+    pub fn append_transactions_from_blocks<T>(
+        &mut self,
+        initial_block_number: BlockNumber,
+        transactions: impl Iterator<Item = T>,
+    ) -> ProviderResult<()>
+    where
+        T: Borrow<Vec<TransactionSignedNoHash>>,
+    {
+        self.ensure_database_writer()?;
+        self.ensure_static_file_writer()?;
+
+        let mut bodies_cursor =
+            self.database_writer().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+
+        let mut last_tx_idx = None;
+        for (idx, transactions) in transactions.enumerate() {
+            let block_number = initial_block_number + idx as u64;
+
+            let mut first_tx_index =
+                bodies_cursor.seek_exact(block_number)?.map(|(_, indices)| indices.first_tx_num());
+
+            // If there are no indices, that means there have been no transactions
+            //
+            // So instead of returning an error, use zero
+            if block_number == initial_block_number && first_tx_index.is_none() {
+                first_tx_index = Some(0);
+            }
+
+            let mut tx_index = first_tx_index
+                .or(last_tx_idx)
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+
+            for tx in transactions.borrow() {
+                self.static_file_writer().append_transaction(tx_index, tx)?;
+                tx_index += 1;
+            }
+
+            self.static_file_writer()
+                .increment_block(StaticFileSegment::Transactions, block_number)?;
+
+            // update index
+            last_tx_idx = Some(tx_index);
+        }
+        Ok(())
+    }
+
     /// Appends receipts block by block.
     ///
     /// ATTENTION: If called from [`StorageWriter`] without a static file producer, it will always
     /// write them to database. Otherwise, it will look into the pruning configuration to decide.
+    ///
+    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
+    /// the Receipts segment.
     ///
     /// # Parameters
     /// - `initial_block_number`: The starting block number.
@@ -171,13 +269,26 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
             StorageType::StaticFile(self.static_file_writer())
         };
 
+        let mut last_tx_idx = None;
         for (idx, receipts) in blocks.enumerate() {
             let block_number = initial_block_number + idx as u64;
 
-            let first_tx_index = bodies_cursor
-                .seek_exact(block_number)?
-                .map(|(_, indices)| indices.first_tx_num())
+            let mut first_tx_index =
+                bodies_cursor.seek_exact(block_number)?.map(|(_, indices)| indices.first_tx_num());
+
+            // If there are no indices, that means there have been no transactions
+            //
+            // So instead of returning an error, use zero
+            if block_number == initial_block_number && first_tx_index.is_none() {
+                first_tx_index = Some(0);
+            }
+
+            let first_tx_index = first_tx_index
+                .or(last_tx_idx)
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+
+            // update for empty blocks
+            last_tx_idx = Some(first_tx_index);
 
             match &mut storage_type {
                 StorageType::Database(cursor) => {
@@ -206,7 +317,7 @@ mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
     use reth_db_api::transaction::DbTx;
-    use reth_primitives::{keccak256, Account, Address, B256};
+    use reth_primitives::{keccak256, Account, Address, B256, U256};
     use reth_trie::{HashedPostState, HashedStorage};
 
     #[test]

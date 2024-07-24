@@ -535,7 +535,7 @@ mod tests {
                         storage_cursor.delete_current()?;
                     }
 
-                    if entry.value != U256::ZERO {
+                    if !entry.value.is_zero() {
                         storage_cursor.upsert(bn_address.address(), entry)?;
                     }
                 }

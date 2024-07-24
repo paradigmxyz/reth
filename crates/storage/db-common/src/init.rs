@@ -20,6 +20,7 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -64,7 +65,7 @@ pub enum InitDatabaseError {
     #[error(
         "state root mismatch, state dump: {expected_state_root}, computed: {computed_state_root}"
     )]
-    SateRootMismatch {
+    StateRootMismatch {
         /// Expected state root.
         expected_state_root: B256,
         /// Actual state root.
@@ -282,7 +283,7 @@ pub fn insert_genesis_header<DB: Database>(
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(header, difficulty, hash)?;
+            writer.append_header(&header, difficulty, &hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -333,7 +334,7 @@ pub fn init_from_state_dump<DB: Database>(
             "Computed state root does not match state root in state dump"
         );
 
-        Err(InitDatabaseError::SateRootMismatch { expected_state_root, computed_state_root })?
+        Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
     } else {
         info!(target: "reth::cli",
             ?computed_state_root,

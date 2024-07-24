@@ -245,7 +245,7 @@ where
         let mut old_entries: Vec<_> = new_entries
             .into_iter()
             .filter_map(|entry| {
-                let old = if entry.value != U256::ZERO {
+                let old = if !entry.value.is_zero() {
                     storage.insert(entry.key, entry.value)
                 } else {
                     let old = storage.remove(&entry.key);

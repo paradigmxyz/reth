@@ -1,3 +1,4 @@
+use crate::precompile::HashMap;
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
@@ -6,7 +7,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
-use std::collections::HashMap;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]

@@ -21,7 +21,9 @@ use reth_rpc_eth_types::{
     },
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_server_types::constants::gas_oracle::{ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS};
+use reth_rpc_server_types::constants::gas_oracle::{
+    CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
+};
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
@@ -624,7 +626,11 @@ pub trait Call: LoadState + SpawnBlocking {
 
         // At this point we know the call succeeded but want to find the _best_ (lowest) gas the
         // transaction succeeds with. We find this by doing a binary search over the possible range.
-        //
+
+        // we know the tx succeeded with the configured gas limit, so we can use that as the
+        // highest, in case we applied a gas cap due to caller allowance above
+        highest_gas_limit = env.tx.gas_limit;
+
         // NOTE: this is the gas the transaction used, which is less than the
         // transaction requires to succeed.
         let mut gas_used = res.result.gas_used();
@@ -637,7 +643,7 @@ pub trait Call: LoadState + SpawnBlocking {
         //
         // Calculate the optimistic gas limit by adding gas used and gas refund,
         // then applying a 64/63 multiplier to account for gas forwarding rules.
-        let optimistic_gas_limit = (gas_used + gas_refund) * 64 / 63;
+        let optimistic_gas_limit = (gas_used + gas_refund + CALL_STIPEND_GAS) * 64 / 63;
         if optimistic_gas_limit < highest_gas_limit {
             // Set the transaction's gas limit to the calculated optimistic gas limit.
             env.tx.gas_limit = optimistic_gas_limit;

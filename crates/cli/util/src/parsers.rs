@@ -68,7 +68,7 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::Rng;
+    use rand::Rng;
 
     #[test]
     fn parse_socket_addresses() {

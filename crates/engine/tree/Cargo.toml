@@ -16,6 +16,7 @@ reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-chainspec.workspace = true
+reth-chain-state.workspace = true
 reth-consensus.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
@@ -33,8 +34,8 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-rpc-types.workspace = true
-reth-stages-types.workspace = true
 reth-stages-api.workspace = true
+reth-stages-types.workspace = true
 reth-static-file.workspace = true
 reth-tasks.workspace = true
 reth-tokio-util.workspace = true
@@ -71,7 +72,11 @@ reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
+reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+reth-rpc-types-compat.workspace = true
+
+alloy-rlp.workspace = true
 
 assert_matches.workspace = true
 rand.workspace = true
@@ -81,6 +86,7 @@ test-utils = [
   "reth-db/test-utils",
   "reth-network-p2p/test-utils",
   "reth-stages/test-utils",
+  "reth-chain-state/test-utils",
   "reth-tracing",
   "rand"
 ]

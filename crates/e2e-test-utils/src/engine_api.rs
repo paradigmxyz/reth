@@ -23,7 +23,7 @@ pub struct EngineApiTestContext<E> {
     pub _marker: PhantomData<E>,
 }
 
-impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
+impl<E: EngineTypes> EngineApiTestContext<E> {
     /// Retrieves a v3 payload from the engine api
     pub async fn get_payload_v3(
         &self,

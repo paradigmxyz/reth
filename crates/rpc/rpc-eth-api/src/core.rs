@@ -4,7 +4,8 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    revm_primitives::EVMError, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    revm_primitives::EVMError, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256,
+    U64,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -336,6 +337,10 @@ pub trait EthApi {
     /// Returns the current price per gas in wei.
     #[method(name = "gasPrice")]
     async fn gas_price(&self) -> RpcResult<U256>;
+
+    /// Returns the account details by specifying an address and a block number/tag
+    #[method(name = "getAccount")]
+    async fn get_account(&self, address: Address, block: BlockId) -> RpcResult<Account>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -731,6 +736,11 @@ where
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
         EthFees::gas_price(self).await.map_err(T::Error::into_rpc_err)
+    }
+
+    /// Handler for: `eth_getAccount`
+    async fn get_account(&self, _address: Address, _block: BlockId) -> RpcResult<Account> {
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
