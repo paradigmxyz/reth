@@ -34,7 +34,6 @@ pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use reth_execution_types::*;
 
 pub mod bundle_state;
-pub use bundle_state::{StateChanges, StateReverts};
 
 /// Re-export `OriginalValuesKnown`
 pub use revm::db::states::OriginalValuesKnown;
