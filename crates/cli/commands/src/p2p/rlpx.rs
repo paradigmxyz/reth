@@ -10,7 +10,7 @@ use reth_network_peers::{pk2id, NodeRecord};
 use secp256k1::SECP256K1;
 use tokio::net::TcpStream;
 
-/// The arguments for the `reth p2p rlpx` command
+/// RLPx commands
 #[derive(Parser, Debug)]
 pub struct Command {
     #[clap(subcommand)]
@@ -25,7 +25,7 @@ impl Command {
                 let key = rng_secret_key();
                 let enr = node.parse::<Enr>().unwrap();
                 let enr = EnrCombinedKeyWrapper(enr).into();
-                let node_record = NodeRecord::try_from(&enr).unwrap();
+                let node_record = NodeRecord::try_from(&enr)?;
                 let outgoing =
                     TcpStream::connect((node_record.address, node_record.tcp_port)).await?;
                 let ecies_stream = ECIESStream::connect(outgoing, key, node_record.id).await?;
@@ -47,8 +47,8 @@ impl Command {
 enum Subcommands {
     /// ping node
     Ping {
-        /// The node to ping.
         #[arg(long, short)]
+        /// The node to ping.
         node: String,
     },
 }
