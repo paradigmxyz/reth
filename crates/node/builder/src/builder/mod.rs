@@ -40,7 +40,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
+    DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 
 /// The adapter type for a reth node with the builtin provider type
@@ -374,6 +374,11 @@ where
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi: FullEthApiServer + AddDevSigners,
 {
+    /// Returns a reference to the node builder's config.
+    pub const fn config(&self) -> &NodeConfig {
+        &self.builder.config
+    }
+
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self
     where
@@ -433,6 +438,14 @@ where
             builder: self.builder.install_exex(exex_id, exex),
             task_executor: self.task_executor,
         }
+    }
+
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+    {
+        launcher.launch_node(self.builder).await
     }
 
     /// Launches the node with the given closure.
