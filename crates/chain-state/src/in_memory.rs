@@ -17,11 +17,17 @@ use tokio::sync::broadcast;
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
 
-/// Container type for in memory state data.
+/// Container type for in memory state data of the canonical chain.
+///
+/// This tracks blocks and their state that haven't been persisted to disk yet but are part of the
+/// canonical chain that can be traced back to a canonical block on disk.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState {
+    /// All canonical blocks that are not on disk yet.
     blocks: RwLock<HashMap<B256, Arc<BlockState>>>,
+    /// Mapping of block numbers to block hashes.
     numbers: RwLock<HashMap<u64, B256>>,
+    /// The pending block that has not yet been made canonical.
     pending: RwLock<Option<BlockState>>,
 }
 
