@@ -40,7 +40,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{mpsc::Receiver, Arc},
 };
 use tokio::sync::{
@@ -75,6 +75,8 @@ pub struct TreeState {
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
     /// Currently tracked canonical head of the chain.
     current_canonical_head: BlockNumHash,
+    /// Map of any parent block hash to its children.
+    parent_to_child: HashMap<B256, HashSet<B256>>,
 }
 
 impl TreeState {
@@ -84,6 +86,7 @@ impl TreeState {
             blocks_by_hash: HashMap::new(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
+            parent_to_child: HashMap::new(),
         }
     }
 
@@ -101,9 +104,14 @@ impl TreeState {
 
     /// Insert executed block into the state.
     fn insert_executed(&mut self, executed: ExecutedBlock) {
+        let hash = executed.block.hash();
+        let parent_hash = executed.block.parent_hash;
+
         self.blocks_by_number.entry(executed.block.number).or_default().push(executed.clone());
-        let existing = self.blocks_by_hash.insert(executed.block.hash(), executed);
+        let existing = self.blocks_by_hash.insert(hash, executed);
         debug_assert!(existing.is_none(), "inserted duplicate block");
+
+        self.parent_to_child.entry(parent_hash).or_default().insert(hash);
     }
 
     /// Remove blocks before specified block number.
@@ -114,14 +122,23 @@ impl TreeState {
             .map(|entry| entry.0 < &block_number)
             .unwrap_or_default()
         {
-            let (_, to_remove) = self.blocks_by_number.pop_first().unwrap();
-            for block in to_remove {
+            let (_, mut to_remove) = self.blocks_by_number.pop_first().unwrap();
+            while let Some(block) = to_remove.pop() {
                 let block_hash = block.block.hash();
                 let removed = self.blocks_by_hash.remove(&block_hash);
                 debug_assert!(
                     removed.is_some(),
                     "attempted to remove non-existing block {block_hash}"
                 );
+                // get this child blocks children and add them to the remove list.
+                if let Some(parent_children) = self.parent_to_child.remove(&block_hash) {
+                    // remove child
+                    for child_hash in &parent_children {
+                        if let Some(executed_block) = self.blocks_by_hash.get(child_hash) {
+                            to_remove.push(executed_block.clone());
+                        }
+                    }
+                }
             }
         }
     }
