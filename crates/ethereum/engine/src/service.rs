@@ -19,7 +19,7 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
 use reth_prune::Pruner;
 use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
@@ -65,7 +65,7 @@ where
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<DB>,
-        blockchain_db: BlockchainProvider<DB>,
+        blockchain_db: BlockchainProvider2<DB>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
         payload_builder: PayloadBuilderHandle<EthEngineTypes>,
     ) -> Self {
