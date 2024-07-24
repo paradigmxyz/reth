@@ -16,9 +16,9 @@
 //! the chain state. Performing this task quickly is often the bottleneck for high performance
 //! blockchain systems.
 //!
-//! TODO:
-//! * How to design the critical path to be as fast as possible -> do as much as possible in memory,
-//!   minimize db writes
+//! In order to quickly respond to consensus messages and advance the chain quickly, validation code
+//! must avoid database write operations and perform as much work as possible in-memory. This
+//! requirement is what informs the architecture of consensus message handling in this crate.
 //!
 //! ## Chain synchronization
 //!
@@ -38,21 +38,18 @@
 //! The backfill sync is driven by components which implement the [`BackfillSync`] trait, like
 //! [`PipelineSync`].
 //!
-//! TODO:
-//! * not sure what else to put here
-//!
 //! ## Handling consensus messages
 //!
-//! When a consensus message is received, the node first checks if the message requires any action
-//! from the node, for example downloading a missing parent block or syncing a long range of chain
-//! history. These checks, and
-//!
-//! TODO:
-//! The three layers
+//! Consensus message handling is performed by three main components:
 //! * [`EngineHandler`] -> take incoming events, poll request handler, manage download / pipeline loop
 //! * [`EngineRequestHandler`] -> take incoming requests, poll tree, send any download / pipeline requests back
 //! * [`EngineApiTreeHandlerImpl`] -> take incoming tree events, send validaiton + download / pipeline
 //!   requests back
+//!
+//! The [`EngineHandler`] is the component which processes incoming consensus messages, and
+//! performing any download needed by lower level components.
+//!
+//! The [`EngineRequestHandler`] is a middle layer, which allow
 //!
 //! Finally, a new payload is stored in-memory before the node returns a response to the consensus
 //! client.
