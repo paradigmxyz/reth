@@ -83,6 +83,11 @@ where
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
+
+    /// Gets a clone of `canonical_in_memory_state`.
+    pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState {
+        self.canonical_in_memory_state.clone()
+    }
 }
 
 impl<DB> BlockchainProvider2<DB>
