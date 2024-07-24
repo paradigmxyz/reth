@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(rustdoc::missing_crate_level_docs)]
 
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
