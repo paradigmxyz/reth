@@ -1,8 +1,5 @@
 #![allow(missing_docs)]
 
-use reth_node_ethereum::{launch::EthNodeLauncher, node::EthereumAddOns};
-use reth_provider::providers::BlockchainProvider2;
-
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -17,7 +14,8 @@ mean to build `op-reth`?"
 #[cfg(not(feature = "optimism"))]
 fn main() {
     use reth::cli::Cli;
-    use reth_node_ethereum::EthereumNode;
+    use reth_node_ethereum::{launch::EthNodeLauncher, node::EthereumAddOns, EthereumNode};
+    use reth_provider::providers::BlockchainProvider2;
 
     reth_cli_util::sigsegv_handler::install();
 
