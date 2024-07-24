@@ -64,13 +64,10 @@ where
     /// Remove consumers for a given key, this will also remove the key from the cache.
     pub fn remove(&mut self, key: &K) -> Option<Vec<S>> {
         let _ = self.cache.remove(key);
-        match self.queued.remove(key) {
-            Some(removed) => {
-                self.metrics.queued_consumers_count.decrement(removed.len() as f64);
-                Some(removed)
-            }
-            None => None,
-        }
+        self.queued.remove(key).map(|removed| {
+            self.metrics.queued_consumers_count.decrement(removed.len() as f64);
+            removed
+        })
     }
 
     /// Returns a reference to the value for a given key and promotes that element to be the most
