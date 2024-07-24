@@ -46,6 +46,9 @@ use tokio::sync::{
 };
 
 /// Allows to set a tree viewer for a configured blockchain provider.
+// TODO: remove this helper trait once the engine revamp is done, the new
+// blockchain provider won't require a TreeViewer.
+// https://github.com/paradigmxyz/reth/issues/8742
 pub trait WithTree {
     /// Setter for tree viewer.
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;

@@ -126,6 +126,9 @@ where
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
+        // TODO: remove tree and move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
         let tree = Arc::new(NoopBlockchainTree::with_canon_state_notifications(
             canon_state_notification_sender.clone(),
         ));
