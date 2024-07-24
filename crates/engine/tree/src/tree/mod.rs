@@ -40,7 +40,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     ops::Deref,
     sync::{mpsc::Receiver, Arc},
 };
@@ -1018,7 +1018,7 @@ where
         } else {
             // This happens when the missing parent is on an outdated
             // sidechain and we can only download the missing block itself
-            DownloadRequest::BlockSet(HashSet::from_iter([missing_parent.hash]))
+            DownloadRequest::single_block(missing_parent.hash)
         };
 
         Some(TreeEvent::Download(request))
