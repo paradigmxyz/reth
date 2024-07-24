@@ -1,7 +1,7 @@
 use super::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256};
-use reth_provider::{
+use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
