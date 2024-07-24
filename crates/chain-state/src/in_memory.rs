@@ -179,6 +179,40 @@ impl CanonicalInMemoryState {
         }
     }
 
+    /// Removes blocks from the in memory state that are persisted to the given height.
+    ///
+    /// This will update the links between blocks and remove all blocks that are [..
+    /// `persisted_height`].
+    pub fn remove_persisted_blocks(&self, persisted_height: u64) {
+        let mut blocks = self.inner.in_memory_state.blocks.write();
+        let mut numbers = self.inner.in_memory_state.numbers.write();
+        let _pending = self.inner.in_memory_state.pending.write();
+
+        // clear all numbers
+        numbers.clear();
+
+        // drain all blocks and only keep the ones that are not persisted
+        let mut old_blocks = blocks
+            .drain()
+            .map(|(_, b)| b.block.clone())
+            .filter(|b| b.block().number > persisted_height)
+            .collect::<Vec<_>>();
+
+        // sort the blocks by number so we can insert them back in order
+        old_blocks.sort_unstable_by_key(|block| block.block().number);
+
+        for block in old_blocks {
+            let parent = blocks.get(&block.block().parent_hash).cloned();
+            let block_state = BlockState::with_parent(block.clone(), parent.map(|p| (*p).clone()));
+            let hash = block_state.hash();
+            let number = block_state.number();
+
+            // append new blocks
+            blocks.insert(hash, Arc::new(block_state));
+            numbers.insert(number, hash);
+        }
+    }
+
     /// Returns in memory state corresponding the given hash.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.state_by_hash(hash)
