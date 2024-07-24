@@ -527,8 +527,8 @@ mod tests {
         BlockState::new(get_executed_block_with_number(block_number))
     }
 
-    #[tokio::test]
-    async fn test_in_memory_state_impl_state_by_hash() {
+    #[test]
+    fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::new();
         let number = rand::thread_rng().gen::<u64>();
         let state = Arc::new(create_mock_state(number));
@@ -540,8 +540,8 @@ mod tests {
         assert_eq!(in_memory_state.state_by_hash(B256::random()), None);
     }
 
-    #[tokio::test]
-    async fn test_in_memory_state_impl_state_by_number() {
+    #[test]
+    fn test_in_memory_state_impl_state_by_number() {
         let mut state_by_hash = HashMap::new();
         let mut hash_by_number = HashMap::new();
 
@@ -558,8 +558,8 @@ mod tests {
         assert_eq!(in_memory_state.state_by_number(number + 1), None);
     }
 
-    #[tokio::test]
-    async fn test_in_memory_state_impl_head_state() {
+    #[test]
+    fn test_in_memory_state_impl_head_state() {
         let mut state_by_hash = HashMap::new();
         let mut hash_by_number = HashMap::new();
         let state1 = Arc::new(create_mock_state(1));
@@ -578,8 +578,8 @@ mod tests {
         assert_eq!(head_state.number(), 2);
     }
 
-    #[tokio::test]
-    async fn test_in_memory_state_impl_pending_state() {
+    #[test]
+    fn test_in_memory_state_impl_pending_state() {
         let pending_number = rand::thread_rng().gen::<u64>();
         let pending_state = create_mock_state(pending_number);
         let pending_hash = pending_state.hash();
@@ -594,15 +594,15 @@ mod tests {
         assert_eq!(actual_pending_state.block.block().number, pending_number);
     }
 
-    #[tokio::test]
-    async fn test_in_memory_state_impl_no_pending_state() {
+    #[test]
+    fn test_in_memory_state_impl_no_pending_state() {
         let in_memory_state = InMemoryState::new(HashMap::new(), HashMap::new(), None);
 
         assert_eq!(in_memory_state.pending_state(), None);
     }
 
-    #[tokio::test]
-    async fn test_state_new() {
+    #[test]
+    fn test_state_new() {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
@@ -611,8 +611,8 @@ mod tests {
         assert_eq!(state.block(), block);
     }
 
-    #[tokio::test]
-    async fn test_state_block() {
+    #[test]
+    fn test_state_block() {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
@@ -621,8 +621,8 @@ mod tests {
         assert_eq!(state.block(), block);
     }
 
-    #[tokio::test]
-    async fn test_state_hash() {
+    #[test]
+    fn test_state_hash() {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
@@ -631,8 +631,8 @@ mod tests {
         assert_eq!(state.hash(), block.block().hash());
     }
 
-    #[tokio::test]
-    async fn test_state_number() {
+    #[test]
+    fn test_state_number() {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
@@ -641,8 +641,8 @@ mod tests {
         assert_eq!(state.number(), number);
     }
 
-    #[tokio::test]
-    async fn test_state_state_root() {
+    #[test]
+    fn test_state_state_root() {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
@@ -651,8 +651,8 @@ mod tests {
         assert_eq!(state.state_root(), block.block().state_root);
     }
 
-    #[tokio::test]
-    async fn test_state_receipts() {
+    #[test]
+    fn test_state_receipts() {
         let receipts = Receipts { receipt_vec: vec![vec![Some(Receipt::default())]] };
 
         let block = get_executed_block_with_receipts(receipts.clone());
