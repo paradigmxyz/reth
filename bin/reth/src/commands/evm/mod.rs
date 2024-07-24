@@ -128,16 +128,19 @@ impl EvmCommand {
                     let diff_txs = *current_txs_counter - previous_txs_counter;
                     previous_txs_counter = *current_txs_counter;
 
-                    info!(
-                        target:"exex::evm",
-                        blocks = ?current_block_counter,
-                        txs = ?current_txs_counter,
-                        BPS = ?diff_block,
-                        TPS = ?diff_txs,
-                        throughput = format_gas_throughput(diff_gas, Duration::from_secs(1)),
-                        time = ?start.elapsed(),
-                        "Execution progress"
-                     );
+                    if diff_block > 0 {
+                        info!(
+                            target:"exex::evm",
+                            blocks = ?current_block_counter,
+                            txs = ?current_txs_counter,
+                            BPS = ?diff_block,
+                            TPS = ?diff_txs,
+                            throughput = format_gas_throughput(diff_gas, Duration::from_secs(1)),
+                            time = ?start.elapsed(),
+                            "Execution progress"
+                        );
+                    }
+
                     if *current_block_counter >= (self.end_number - self.begin_number +1) {
                         // return Ok(true);
                     }
