@@ -19,15 +19,15 @@ pub trait StateWriter {
 
 /// A trait specifically for writing state changes or reverts
 pub trait StateChangeWriter {
-    // Write state reverts to the database.
-    //
-    // NOTE: Reverts will delete all wiped storage from plain state.
+    /// Write state reverts to the database.
+    ///
+    /// NOTE: Reverts will delete all wiped storage from plain state.
     fn write_state_reverts(
-        &mut self,
+        &self,
         reverts: PlainStateReverts,
         first_block: BlockNumber,
     ) -> ProviderResult<()>;
 
-    // Write state changes to the database.
-    fn write_state_changes(&mut self, changes: StateChangeset) -> ProviderResult<()>;
+    /// Write state changes to the database.
+    fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
 }
