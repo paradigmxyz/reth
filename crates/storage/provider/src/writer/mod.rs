@@ -1,6 +1,6 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProviderRW, StateChangeWriter, StateWriter,
-    TrieWriter,
+    providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
+    DatabaseProviderRW, StateChangeWriter, StateWriter, TrieWriter,
 };
 use itertools::Itertools;
 use reth_db::{
@@ -33,27 +33,22 @@ enum StorageType<C = (), S = ()> {
 /// [`StorageWriter`] is responsible for managing the writing to either database, static file or
 /// both.
 #[derive(Debug)]
-pub struct StorageWriter<'a, 'b, DB: Database> {
-    database_writer: Option<&'a DatabaseProviderRW<DB>>,
+pub struct StorageWriter<'a, 'b, TX> {
+    database_writer: Option<&'a DatabaseProvider<TX>>,
     static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
 }
 
-impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
+impl<'a, 'b, TX> StorageWriter<'a, 'b, TX> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
     /// - `database_writer`: An optional reference to a database writer.
     /// - `static_file_writer`: An optional mutable reference to a static file writer.
     pub const fn new(
-        database_writer: Option<&'a DatabaseProviderRW<DB>>,
+        database_writer: Option<&'a DatabaseProvider<TX>>,
         static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
     ) -> Self {
         Self { database_writer, static_file_writer }
-    }
-
-    /// Creates a new instance of [`StorageWriter`] from a database writer.
-    pub const fn from_database_writer(database_writer: &'a DatabaseProviderRW<DB>) -> Self {
-        Self::new(Some(database_writer), None)
     }
 
     /// Creates a new instance of [`StorageWriter`] from a static file writer.
@@ -63,11 +58,31 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         Self::new(None, Some(static_file_writer))
     }
 
+    /// Creates a new instance of [`StorageWriter`] from a read-only database provider.
+    pub fn from_database_provider_ro<DB>(
+        database: &'a DatabaseProviderRO<DB>,
+    ) -> StorageWriter<'_, '_, <DB as Database>::TX>
+    where
+        DB: Database,
+    {
+        StorageWriter::new(Some(database), None)
+    }
+
+    /// Creates a new instance of [`StorageWriter`] from a read-write database provider.
+    pub fn from_database_provider_rw<DB>(
+        database: &'a DatabaseProviderRW<DB>,
+    ) -> StorageWriter<'_, '_, <DB as Database>::TXMut>
+    where
+        DB: Database,
+    {
+        StorageWriter::new(Some(database), None)
+    }
+
     /// Returns a reference to the database writer.
     ///
     /// # Panics
     /// If the database writer is not set.
-    fn database_writer(&self) -> &DatabaseProviderRW<DB> {
+    fn database_writer(&self) -> &DatabaseProvider<TX> {
         self.database_writer.as_ref().expect("should exist")
     }
 
@@ -102,7 +117,12 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         }
         Ok(())
     }
+}
 
+impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
+where
+    TX: DbTxMut + DbTx,
+{
     /// Writes the hashed state changes to the database
     pub fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         self.ensure_database_writer()?;
@@ -322,7 +342,10 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
     }
 }
 
-impl<'a, 'b, DB: Database> StateWriter for StorageWriter<'a, 'b, DB> {
+impl<'a, 'b, TX> StateWriter for StorageWriter<'a, 'b, TX>
+where
+    TX: DbTxMut + DbTx,
+{
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
     fn write_to_storage(
