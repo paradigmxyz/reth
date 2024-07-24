@@ -5,13 +5,13 @@ use crate::{
 };
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
     SealedHeader, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::broadcast;
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -67,6 +67,11 @@ impl InMemoryState {
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
         self.pending.read().as_ref().map(|state| Arc::new(BlockState::new(state.block.clone())))
+    }
+
+    #[cfg(test)]
+    fn block_count(&self) -> usize {
+        self.blocks.read().len()
     }
 }
 
@@ -126,6 +131,52 @@ impl CanonicalInMemoryState {
         };
 
         Self { inner: Arc::new(inner) }
+    }
+
+    /// Append new blocks to the in memory state.
+    fn update_blocks<I>(&self, new_blocks: I, reorged: I)
+    where
+        I: IntoIterator<Item = ExecutedBlock>,
+    {
+        // acquire all locks
+        let mut blocks = self.inner.in_memory_state.blocks.write();
+        let mut numbers = self.inner.in_memory_state.numbers.write();
+        let mut pending = self.inner.in_memory_state.pending.write();
+
+        // we first remove the blocks from the reorged chain
+        for block in reorged {
+            let hash = block.block().hash();
+            let number = block.block().number;
+            blocks.remove(&hash);
+            numbers.remove(&number);
+        }
+
+        // insert the new blocks
+        for block in new_blocks {
+            let parent = blocks.get(&block.block().parent_hash).cloned();
+            let block_state = BlockState::with_parent(block.clone(), parent.map(|p| (*p).clone()));
+            let hash = block_state.hash();
+            let number = block_state.number();
+
+            // append new blocks
+            blocks.insert(hash, Arc::new(block_state));
+            numbers.insert(number, hash);
+        }
+
+        // remove the pending state
+        pending.take();
+    }
+
+    /// Update the in memory state with the given chain update.
+    pub fn update_chain(&self, new_chain: NewCanonicalChain) {
+        match new_chain {
+            NewCanonicalChain::Commit { new } => {
+                self.update_blocks(new, vec![]);
+            }
+            NewCanonicalChain::Reorg { new, old } => {
+                self.update_blocks(new, old);
+            }
+        }
     }
 
     /// Returns in memory state corresponding the given hash.
@@ -283,6 +334,11 @@ impl BlockState {
         Self { block, parent: None }
     }
 
+    /// `BlockState` constructor with parent.
+    pub fn with_parent(block: ExecutedBlock, parent: Option<Self>) -> Self {
+        Self { block, parent: parent.map(Box::new) }
+    }
+
     /// Returns the hash and block of the on disk block this state can be traced back to.
     pub fn anchor(&self) -> BlockNumHash {
         if let Some(parent) = &self.parent {
@@ -398,6 +454,65 @@ impl ExecutedBlock {
     /// Returns a reference to the trie updates for the block
     pub fn trie_updates(&self) -> &TrieUpdates {
         &self.trie
+    }
+}
+
+/// Non-empty chain of blocks.
+#[derive(Debug)]
+pub enum NewCanonicalChain {
+    /// A simple append to the current canonical head
+    Commit {
+        /// all blocks that lead back to the canonical head
+        new: Vec<ExecutedBlock>,
+    },
+    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
+    /// point they diverge.
+    Reorg {
+        /// All blocks of the _new_ chain
+        new: Vec<ExecutedBlock>,
+        /// All blocks of the _old_ chain
+        old: Vec<ExecutedBlock>,
+    },
+}
+
+impl NewCanonicalChain {
+    /// Converts the new chain into a notification that will be emitted to listeners
+    pub fn to_chain_notification(&self) -> CanonStateNotification {
+        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
+        //  implement this properly
+        match self {
+            Self::Commit { new } => CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+            },
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Chain::new(
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
+                    new.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+                old: Arc::new(Chain::new(
+                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
+                    old.last().unwrap().execution_output.deref().clone(),
+                    None,
+                )),
+            },
+        }
+    }
+
+    /// Returns the new tip of the chain.
+    ///
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
+    pub fn tip(&self) -> &SealedBlock {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => {
+                new.last().expect("non empty blocks").block()
+            }
+        }
     }
 }
 
@@ -545,5 +660,23 @@ mod tests {
         let state = BlockState::new(block);
 
         assert_eq!(state.receipts(), &receipts);
+    }
+
+    #[test]
+    fn test_in_memory_state_chain_update() {
+        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None);
+        let block1 = get_executed_block_with_number(0);
+        let block2 = get_executed_block_with_number(0);
+        let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
+        state.update_chain(chain);
+        assert_eq!(state.head_state().unwrap().block().block().hash(), block1.block().hash());
+        assert_eq!(state.state_by_number(0).unwrap().block().block().hash(), block1.block().hash());
+
+        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
+        state.update_chain(chain);
+        assert_eq!(state.head_state().unwrap().block().block().hash(), block2.block().hash());
+        assert_eq!(state.state_by_number(0).unwrap().block().block().hash(), block2.block().hash());
+
+        assert_eq!(state.inner.in_memory_state.block_count(), 1);
     }
 }
