@@ -27,6 +27,7 @@ impl PruningArgs {
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
+                // prune all receipts if chain doesn't have deposit contract specified in chain spec
                 receipts: chain_spec
                     .deposit_contract
                     .as_ref()
