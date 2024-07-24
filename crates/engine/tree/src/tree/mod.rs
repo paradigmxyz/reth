@@ -445,7 +445,7 @@ where
                 if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_block_hash)
                 {
                     self.persistence_state.finish(last_persisted_block_hash, block.number);
-                    self.remove_persisted_blocks_from_memory();
+                    self.on_new_persisted_block();
                 } else {
                     error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                 }
@@ -623,7 +623,19 @@ where
             .collect()
     }
 
-    fn remove_persisted_blocks_from_memory(&mut self) {
+    /// This clears the blocks from the in-memory tree state that have been persisted to the
+    /// database.
+    ///
+    /// This also updates the canonical in-memory state to reflect the newest persisted block
+    /// height.
+    fn on_new_persisted_block(&mut self) {
+        self.remove_persisted_blocks_from_tree_state();
+        self.canonical_in_memory_state
+            .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
+    }
+
+    /// Clears persisted blocks from the in-memory tree state.
+    fn remove_persisted_blocks_from_tree_state(&mut self) {
         let keys_to_remove: Vec<BlockNumber> = self
             .state
             .tree_state
