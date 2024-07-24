@@ -73,6 +73,9 @@ where
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
+        // TODO: move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
         let tree_config = BlockchainTreeConfig::default();
 
         // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>

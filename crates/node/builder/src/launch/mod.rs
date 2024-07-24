@@ -120,15 +120,15 @@ where
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
+        // TODO: remove tree and move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
         let tree_config = BlockchainTreeConfig::default();
 
         // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
-        // TODO: remove tree and move tree_config and canon_state_notification_sender
-        // initialization to with_blockchain_db once the engine revamp is done
-        // https://github.com/paradigmxyz/reth/issues/8742
         let tree = Arc::new(NoopBlockchainTree::with_canon_state_notifications(
             canon_state_notification_sender.clone(),
         ));
