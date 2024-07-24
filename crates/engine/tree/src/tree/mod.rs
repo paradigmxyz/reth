@@ -1134,6 +1134,50 @@ where
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
+    /// Updates the tracked finalized block if we have it.
+    fn update_finalized_block(&self, finalized_block_hash: B256) {
+        if finalized_block_hash.is_zero() {}
+
+        // TODO find finalized block and ensure it's canonical
+        // TODO tree cleanup
+    }
+
+    /// Updates the tracked safe block if we have it
+    fn update_safe_block(&self, safe_block_hash: B256) {
+        if safe_block_hash.is_zero() {}
+
+        // TODO find safe block and ensure it's canonical
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(()). Otherwise, this will
+    /// return an instance of [`OnForkChoiceUpdated`] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [`CanonicalInMemoryState`], if they
+    /// are consistent with the head block.
+    fn ensure_consistent_forkchoice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        // Ensure that the finalized block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the finalized block is consistent with the head block, i.e. the
+        // finalized block is an ancestor of the head block.
+        self.update_finalized_block(state.finalized_block_hash);
+
+        // Also ensure that the safe block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the safe block is consistent with the head block, i.e. the safe
+        // block is an ancestor of the head block.
+        self.update_safe_block(state.safe_block_hash);
+
+        Ok(())
+    }
+
     /// Pre-validate forkchoice update and check whether it can be processed.
     ///
     /// This method returns the update outcome if validation fails or
@@ -1379,10 +1423,18 @@ where
             self.state.tree_state.set_canonical_head(update.tip().num_hash());
             // TODO
             //  update inmemory state
-            //  update trackers
+
+            self.canonical_in_memory_state.set_canonical_head(update.tip().header.clone());
 
             // sends an event to all active listeners about the new canonical chain
             self.canonical_in_memory_state.notify_canon_state(update.to_chain_notification());
+
+            // update the safe and finalized blocks and ensure their values are valid, but only
+            // after the head block is made canonical
+            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                // safe or finalized hashes are invalid
+                return Ok(TreeOutcome::new(outcome))
+            }
 
             if let Some(attr) = attrs {
                 let updated = self.process_payload_attributes(attr, &update.tip().header, state);
