@@ -23,7 +23,7 @@ use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes, Paylo
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    SealedBlockWithSenders, B256, U256,
 };
 use reth_provider::{
     BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider,
@@ -411,7 +411,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
-        header: SealedHeader,
+        canonical_in_memory_state: CanonicalInMemoryState,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
     ) -> Self {
@@ -426,7 +426,7 @@ where
             persistence_state: PersistenceState::default(),
             is_backfill_active: false,
             state,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(header),
+            canonical_in_memory_state,
             payload_builder,
         }
     }
@@ -443,6 +443,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
+        canonical_in_memory_state: CanonicalInMemoryState,
     ) -> UnboundedReceiver<EngineApiEvent> {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -462,7 +463,7 @@ where
             incoming,
             tx,
             state,
-            header,
+            canonical_in_memory_state,
             persistence,
             payload_builder,
         );
@@ -1532,6 +1533,7 @@ mod tests {
 
             let header = chain_spec.genesis_header().seal_slow();
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
+            let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
 
             let (to_payload_service, payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -1543,7 +1545,7 @@ mod tests {
                 to_tree_rx,
                 from_tree_tx,
                 engine_api_tree_state,
-                header,
+                canonical_in_memory_state,
                 persistence_handle,
                 payload_builder,
             );
@@ -1599,6 +1601,7 @@ mod tests {
         };
 
         let header = blocks.first().unwrap().block().header.clone();
+        let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -1610,7 +1613,7 @@ mod tests {
             to_tree_rx,
             from_tree_tx,
             engine_api_tree_state,
-            header,
+            canonical_in_memory_state,
             persistence_handle,
             payload_builder,
         );

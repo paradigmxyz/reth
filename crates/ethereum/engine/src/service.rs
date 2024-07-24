@@ -78,6 +78,8 @@ where
         let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
         let executor_factory = EthExecutorProvider::ethereum(chain_spec);
 
+        let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
+
         let from_tree = EngineApiTreeHandlerImpl::spawn_new(
             blockchain_db,
             executor_factory,
@@ -86,6 +88,7 @@ where
             to_tree_rx,
             persistence_handle,
             payload_builder,
+            canonical_in_memory_state,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
