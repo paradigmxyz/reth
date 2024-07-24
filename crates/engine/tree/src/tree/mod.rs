@@ -13,7 +13,7 @@ use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
@@ -26,8 +26,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider,
-    StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -41,7 +40,6 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
     sync::{mpsc::Receiver, Arc},
 };
 use tokio::sync::{
@@ -185,62 +183,6 @@ impl TreeState {
         };
 
         Some(chain)
-    }
-}
-
-/// Non-empty chain of blocks.
-enum NewCanonicalChain {
-    /// A simple append to the current canonical head
-    Commit {
-        /// all blocks that lead back to the canonical head
-        new: Vec<ExecutedBlock>,
-    },
-    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
-    /// point they diverge.
-    Reorg {
-        /// All blocks of the _new_ chain
-        new: Vec<ExecutedBlock>,
-        /// All blocks of the _old_ chain
-        old: Vec<ExecutedBlock>,
-    },
-}
-
-impl NewCanonicalChain {
-    /// Converts the new chain into a notification that will be emitted to listeners
-    fn to_chain_notification(&self) -> CanonStateNotification {
-        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
-        //  implement this properly
-        match self {
-            Self::Commit { new } => CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
-            Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-                old: Arc::new(Chain::new(
-                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    old.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
-        }
-    }
-
-    /// Returns the new tip of the chain.
-    ///
-    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
-    /// 1 new block.
-    fn tip(&self) -> &SealedBlock {
-        match self {
-            Self::Commit { new } | Self::Reorg { new, .. } => new.last().unwrap().block(),
-        }
     }
 }
 
@@ -1418,16 +1360,19 @@ where
         }
 
         // 2. ensure we can apply a new chain update for the head block
-        if let Some(update) = self.state.tree_state.on_new_head(state.head_block_hash) {
+        if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
             // update the tracked canonical head
-            self.state.tree_state.set_canonical_head(update.tip().num_hash());
-            // TODO
-            //  update inmemory state
+            self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
-            self.canonical_in_memory_state.set_canonical_head(update.tip().header.clone());
+            let tip = chain_update.tip().header.clone();
+            let notification = chain_update.to_chain_notification();
+
+            // update the tracked in-memory state with the new chain
+            self.canonical_in_memory_state.update_chain(chain_update);
+            self.canonical_in_memory_state.set_canonical_head(tip.clone());
 
             // sends an event to all active listeners about the new canonical chain
-            self.canonical_in_memory_state.notify_canon_state(update.to_chain_notification());
+            self.canonical_in_memory_state.notify_canon_state(notification);
 
             // update the safe and finalized blocks and ensure their values are valid, but only
             // after the head block is made canonical
@@ -1437,7 +1382,7 @@ where
             }
 
             if let Some(attr) = attrs {
-                let updated = self.process_payload_attributes(attr, &update.tip().header, state);
+                let updated = self.process_payload_attributes(attr, &tip, state);
                 return Ok(TreeOutcome::new(updated))
             }
 
