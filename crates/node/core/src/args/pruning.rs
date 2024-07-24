@@ -21,7 +21,7 @@ impl PruningArgs {
         if !self.full {
             return None
         }
-        Some(PruneConfig {
+        let mut config = PruneConfig {
             block_interval: 5,
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
@@ -41,7 +41,13 @@ impl PruningArgs {
                         .collect(),
                 ),
             },
-        })
+        };
+
+        if chain_spec.is_optimism_mainnet() {
+            config.segments.receipts = Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))
+        }
+
+        Some(config)
     }
 }
 
