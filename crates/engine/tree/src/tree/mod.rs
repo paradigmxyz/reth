@@ -23,10 +23,11 @@ use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes, Paylo
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, B256, U256,
+    SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -1077,19 +1078,62 @@ where
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
-    /// Updates the tracked finalized block if we have it.
-    fn update_finalized_block(&self, finalized_block_hash: B256) {
-        if finalized_block_hash.is_zero() {}
+    /// Attempts to find the header for the given block hash if it is canonical.
+    pub fn find_canonical_header(&self, hash: B256) -> Result<Option<SealedHeader>, ProviderError> {
+        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
-        // TODO find finalized block and ensure it's canonical
-        // TODO tree cleanup
+        if canonical.is_none() {
+            canonical = self.provider.header(&hash)?.map(|header| header.seal(hash));
+        }
+
+        Ok(canonical)
+    }
+
+    /// Updates the tracked finalized block if we have it.
+    fn update_finalized_block(
+        &self,
+        finalized_block_hash: B256,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        if finalized_block_hash.is_zero() {
+            return Ok(())
+        }
+
+        match self.find_canonical_header(finalized_block_hash) {
+            Ok(None) => {
+                // if the finalized block is not known, we can't update the finalized block
+                return Err(OnForkChoiceUpdated::invalid_state())
+            }
+            Ok(Some(finalized)) => {
+                self.canonical_in_memory_state.set_finalized(finalized);
+            }
+            Err(err) => {
+                error!(%err, "Failed to fetch finalized block header");
+            }
+        }
+
+        Ok(())
     }
 
     /// Updates the tracked safe block if we have it
-    fn update_safe_block(&self, safe_block_hash: B256) {
-        if safe_block_hash.is_zero() {}
+    fn update_safe_block(&self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
+        if safe_block_hash.is_zero() {
+            return Ok(())
+        }
 
-        // TODO find safe block and ensure it's canonical
+        match self.find_canonical_header(safe_block_hash) {
+            Ok(None) => {
+                // if the safe block is not known, we can't update the safe block
+                return Err(OnForkChoiceUpdated::invalid_state())
+            }
+            Ok(Some(finalized)) => {
+                self.canonical_in_memory_state.set_safe(finalized);
+            }
+            Err(err) => {
+                error!(%err, "Failed to fetch safe block header");
+            }
+        }
+
+        Ok(())
     }
 
     /// Ensures that the given forkchoice state is consistent, assuming the head block has been
@@ -1109,16 +1153,14 @@ where
         //
         // This ensures that the finalized block is consistent with the head block, i.e. the
         // finalized block is an ancestor of the head block.
-        self.update_finalized_block(state.finalized_block_hash);
+        self.update_finalized_block(state.finalized_block_hash)?;
 
         // Also ensure that the safe block, if not zero, is known and in the canonical chain
         // after the head block is canonicalized.
         //
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
-        self.update_safe_block(state.safe_block_hash);
-
-        Ok(())
+        self.update_safe_block(state.safe_block_hash)
     }
 
     /// Pre-validate forkchoice update and check whether it can be processed.
