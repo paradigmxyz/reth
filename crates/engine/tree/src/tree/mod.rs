@@ -157,6 +157,11 @@ impl TreeState {
         *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
     }
 
+    /// Returns the minimum block number stored.
+    pub(crate) fn min_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.first_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
+
     /// Returns the block number of the pending block: `head + 1`
     const fn pending_block_number(&self) -> BlockNumber {
         self.current_canonical_head.number + 1
@@ -679,19 +684,23 @@ where
     ///
     /// This also updates the canonical in-memory state to reflect the newest persisted block
     /// height.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
         self.remove_persisted_blocks_from_tree_state();
         self.canonical_in_memory_state
-            .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
+            .remove_persisted_blocks(self.persistence_state.last_persisted_block_number.unwrap());
     }
 
     /// Clears persisted blocks from the in-memory tree state.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn remove_persisted_blocks_from_tree_state(&mut self) {
         let keys_to_remove: Vec<BlockNumber> = self
             .state
             .tree_state
             .blocks_by_number
-            .range(..=self.persistence_state.last_persisted_block_number)
+            .range(..=self.persistence_state.last_persisted_block_number.unwrap())
             .map(|(&k, _)| k)
             .collect();
 
@@ -1516,12 +1525,16 @@ where
 #[derive(Default, Debug)]
 struct PersistenceState {
     /// Hash of the last block persisted.
-    last_persisted_block_hash: B256,
+    ///
+    /// A `None` value means no persistence task has been completed yet.
+    last_persisted_block_hash: Option<B256>,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
-    last_persisted_block_number: u64,
+    ///
+    /// A `None` value means no persistence task has been completed yet
+    last_persisted_block_number: Option<u64>,
 }
 
 impl PersistenceState {
@@ -1539,8 +1552,8 @@ impl PersistenceState {
     /// Sets state for a finished persistence task.
     fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
         self.rx = None;
-        self.last_persisted_block_number = last_persisted_block_number;
-        self.last_persisted_block_hash = last_persisted_block_hash;
+        self.last_persisted_block_number = Some(last_persisted_block_number);
+        self.last_persisted_block_hash = Some(last_persisted_block_hash);
     }
 }
 
