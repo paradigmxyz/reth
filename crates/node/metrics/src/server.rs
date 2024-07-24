@@ -253,7 +253,7 @@ mod tests {
         let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
 
         let listen_addr = get_random_available_addr();
-        let config = MetricServerConfig::new(listen_addr.clone(), version_info, executor, hooks);
+        let config = MetricServerConfig::new(listen_addr, version_info, executor, hooks);
 
         MetricServer::new(config).serve().await.unwrap();
 
