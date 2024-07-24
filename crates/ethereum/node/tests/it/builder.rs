@@ -1,11 +1,17 @@
 //! Node builder setup tests.
 
-use reth_db::test_utils::create_test_rw_db;
+use std::sync::Arc;
+
+use reth_db::{
+    test_utils::{create_test_rw_db, TempDatabase},
+    DatabaseEnv,
+};
 use reth_node_builder::{FullNodeComponents, NodeBuilder, NodeConfig};
 use reth_node_ethereum::{
     launch::EthNodeLauncher,
     node::{EthereumAddOns, EthereumNode},
 };
+use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
 
 #[test]
@@ -45,7 +51,7 @@ async fn test_eth_launcher() {
     let db = create_test_rw_db();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types::<EthereumNode>()
+        .with_types_and_provider::<EthereumNode, BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>>()
         .with_components(EthereumNode::components())
         .with_add_ons::<EthereumAddOns>()
         .launch_with_fn(|builder| {

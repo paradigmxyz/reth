@@ -7767,6 +7767,7 @@ dependencies = [
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
+ "reth-blockchain-tree",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
