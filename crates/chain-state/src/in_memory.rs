@@ -128,6 +128,11 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
+    /// Returns in the header corresponding to the given hash.
+    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader> {
+        self.state_by_hash(hash).map(|block| block.block().block.header.clone())
+    }
+
     /// Returns in memory state corresponding the given hash.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.state_by_hash(hash)
