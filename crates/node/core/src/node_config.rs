@@ -27,7 +27,6 @@ use tracing::*;
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -36,10 +35,6 @@ use tracing::*;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder
 ///     let builder = NodeConfig::default();
 ///
@@ -55,7 +50,6 @@ use tracing::*;
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -64,10 +58,6 @@ use tracing::*;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder with a test database, using the `test` method
 ///     let builder = NodeConfig::test();
 ///

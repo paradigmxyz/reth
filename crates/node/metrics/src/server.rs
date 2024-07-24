@@ -199,3 +199,72 @@ fn describe_io_stats() {
 
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Client;
+    use reth_chainspec::MAINNET;
+    use reth_db::{
+        test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+        DatabaseEnv,
+    };
+    use reth_provider::{
+        providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory,
+    };
+    use reth_tasks::TaskManager;
+    use socket2::{Domain, Socket, Type};
+    use std::net::{SocketAddr, TcpListener};
+
+    fn create_test_db() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
+        let (_, static_dir_path) = create_test_static_files_dir();
+        ProviderFactory::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        )
+    }
+
+    fn get_random_available_addr() -> SocketAddr {
+        let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket.set_reuse_address(true).unwrap();
+        socket.bind(addr).unwrap();
+        socket.listen(1).unwrap();
+        let listener = TcpListener::from(socket);
+        listener.local_addr().unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_metrics_endpoint() {
+        let version_info = VersionInfo {
+            version: "test",
+            build_timestamp: "test",
+            cargo_features: "test",
+            git_sha: "test",
+            target_triple: "test",
+            build_profile: "test",
+        };
+
+        let tasks = TaskManager::current();
+        let executor = tasks.executor();
+
+        let factory = create_test_db();
+        let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
+
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(listen_addr.clone(), version_info, executor, hooks);
+
+        MetricServer::new(config).serve().await.unwrap();
+
+        // Send request to the metrics endpoint
+        let url = format!("http://{}", listen_addr);
+        let response = Client::new().get(&url).send().await.unwrap();
+        assert!(response.status().is_success());
+
+        // Check the response body
+        let body = response.text().await.unwrap();
+        assert!(body.contains("reth_db_table_size"));
+        assert!(body.contains("reth_jemalloc_metadata"));
+    }
+}
