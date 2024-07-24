@@ -6,6 +6,7 @@ use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, writer::StorageWriter,
+    TrieWriter,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
@@ -32,7 +33,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             storage_writer.write_hashed_state(&db_state.into_sorted()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.write_to_database(provider_rw.tx_ref()).unwrap();
+            provider_rw.write_trie_updates(&updates).unwrap();
             provider_rw.commit().unwrap();
         }
 

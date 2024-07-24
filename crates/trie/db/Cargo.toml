@@ -73,6 +73,6 @@ similar-asserts.workspace = true
 criterion.workspace = true
 
 [features]
-metrics = ["reth-metrics", "dep:metrics"]
+metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]
 serde = ["dep:serde"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
