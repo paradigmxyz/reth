@@ -33,7 +33,7 @@ Imports a `.rlp` file of blocks.
 Import of >100 million OVM blocks, from genesis to Bedrock, completes in 45 minutes.
 
 ```bash
-./op-reth import-op <exported-blocks>
+$ op-reth import-op <exported-blocks>
 ```
 
 ### 2. Import Receipts
@@ -47,7 +47,7 @@ Imports a `.rlp` file of receipts, that has been exported with command specified
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 
 ```bash
-./op-reth import-receipts-op <exported-receipts>
+$ op-reth import-receipts-op <exported-receipts>
 ```
 
 ### 3. Import State
@@ -58,7 +58,7 @@ reth's database. This should be block 105 235 063, the first Bedrock block (see 
 Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 
 ```bash
-./op-reth init-state --chain optimism <state-dump>
+$ op-reth init-state --chain optimism <state-dump>
 ```
 
 ## Sync from Bedrock to tip
