@@ -1,6 +1,10 @@
 use reth_execution_types::ExecutionOutcome;
+use reth_primitives::BlockNumber;
 use reth_storage_errors::provider::ProviderResult;
-use revm::db::OriginalValuesKnown;
+use revm::db::{
+    states::{PlainStateReverts, StateChangeset},
+    OriginalValuesKnown,
+};
 
 /// A helper trait for [`ExecutionOutcome`] to write state and receipts to storage.
 pub trait StateWriter {
@@ -11,4 +15,19 @@ pub trait StateWriter {
         execution_outcome: ExecutionOutcome,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>;
+}
+
+/// A trait specifically for writing state changes or reverts
+pub trait StateChangeWriter {
+    // Write state reverts to the database.
+    //
+    // NOTE: Reverts will delete all wiped storage from plain state.
+    fn write_state_reverts(
+        &mut self,
+        reverts: PlainStateReverts,
+        first_block: BlockNumber,
+    ) -> ProviderResult<()>;
+
+    // Write state changes to the database.
+    fn write_state_changes(&mut self, changes: StateChangeset) -> ProviderResult<()>;
 }
