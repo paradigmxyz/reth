@@ -313,8 +313,9 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                let (res, _) = this.eth_api().inspect(db, env, &mut inspector)?;
+                                let (res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
                                 let frame = inspector
+                                    .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_geth_builder()
                                     .geth_call_traces(call_config, res.result.gas_used());
                                 Ok(frame.into())
@@ -330,22 +331,23 @@ where
                             TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
 
-                        let frame =
-                            self.inner
-                                .eth_api
-                                .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                    // wrapper is hack to get around 'higher-ranked lifetime error',
-                                    // see <https://github.com/rust-lang/rust/issues/100013>
-                                    let db = db.0;
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                // wrapper is hack to get around 'higher-ranked lifetime error',
+                                // see <https://github.com/rust-lang/rust/issues/100013>
+                                let db = db.0;
 
-                                    let (res, _) =
-                                        this.eth_api().inspect(&mut *db, env, &mut inspector)?;
-                                    let frame = inspector
-                                        .into_geth_builder()
-                                        .geth_prestate_traces(&res, prestate_config, db)?;
-                                    Ok(frame)
-                                })
-                                .await?;
+                                let (res, env) =
+                                    this.eth_api().inspect(&mut *db, env, &mut inspector)?;
+                                let frame = inspector
+                                    .with_transaction_gas_limit(env.tx.gas_limit)
+                                    .into_geth_builder()
+                                    .geth_prestate_traces(&res, prestate_config, db)?;
+                                Ok(frame)
+                            })
+                            .await?;
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
@@ -403,17 +405,20 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, inspector) = self
+        let (res, env, inspector) = self
             .inner
             .eth_api
             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                let (res, _) = this.eth_api().inspect(db, env, &mut inspector)?;
-                Ok((res, inspector))
+                let (res, _) = this.eth_api().inspect(db, env.clone(), &mut inspector)?;
+                Ok((res, env, inspector))
             })
             .await?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
-        let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
+        let frame = inspector
+            .with_transaction_gas_limit(env.tx.gas_limit)
+            .into_geth_builder()
+            .geth_traces(gas_used, return_value, config);
 
         Ok(frame.into())
     }
@@ -566,9 +571,10 @@ where
                             TracingInspectorConfig::from_geth_call_config(&call_config),
                         );
 
-                        let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
+                        let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
 
                         let frame = inspector
+                            .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
@@ -582,13 +588,12 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
-                        let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
+                        let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(
-                            &res,
-                            prestate_config,
-                            db,
-                        )?;
+                        let frame = inspector
+                            .with_transaction_gas_limit(env.tx.gas_limit)
+                            .into_geth_builder()
+                            .geth_prestate_traces(&res, prestate_config, db)?;
 
                         return Ok((frame.into(), res.state))
                     }
@@ -628,10 +633,13 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
+        let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
-        let frame = inspector.into_geth_builder().geth_traces(gas_used, return_value, config);
+        let frame = inspector
+            .with_transaction_gas_limit(env.tx.gas_limit)
+            .into_geth_builder()
+            .geth_traces(gas_used, return_value, config);
 
         Ok((frame.into(), res.state))
     }
