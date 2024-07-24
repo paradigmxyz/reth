@@ -1,6 +1,6 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProviderRW, StateChanges, StateReverts,
-    StateWriter, TrieWriter,
+    providers::StaticFileProviderRWRefMut, DatabaseProviderRW, StateChangeWriter, StateWriter,
+    TrieWriter,
 };
 use itertools::Itertools;
 use reth_db::{
@@ -334,14 +334,14 @@ impl<'a, 'b, DB: Database> StateWriter for StorageWriter<'a, 'b, DB> {
         let (plain_state, reverts) =
             execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db(self.database_writer(), execution_outcome.first_block)?;
+        self.database_writer().write_state_reverts(reverts, execution_outcome.first_block)?;
 
         self.append_receipts_from_blocks(
             execution_outcome.first_block,
             execution_outcome.receipts.into_iter(),
         )?;
 
-        StateChanges(plain_state).write_to_db(self.database_writer())?;
+        self.database_writer().write_state_changes(plain_state)?;
 
         Ok(())
     }
@@ -473,12 +473,10 @@ mod tests {
         let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(&provider)
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        StateReverts(reverts).write_to_db(&provider, 1).expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 1).expect("Could not write reverts to DB");
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
@@ -537,15 +535,13 @@ mod tests {
             [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
         );
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(&provider)
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        StateReverts(reverts).write_to_db(&provider, 2).expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 2).expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(
