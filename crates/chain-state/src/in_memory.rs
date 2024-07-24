@@ -260,18 +260,30 @@ impl CanonicalInMemoryState {
     }
 }
 
-/// State after applying the given block.
+/// State after applying the given block, this block is part of the canonical chain that partially
+/// stored in memory and can be traced back to a canonical block on disk.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BlockState {
-    /// The executed block that determines the state.
-    pub block: ExecutedBlock,
+    /// The executed block that determines the state after this block has been executed.
+    block: ExecutedBlock,
+    /// The block's parent block if it exists.
+    parent: Option<Box<BlockState>>,
 }
 
 #[allow(dead_code)]
 impl BlockState {
     /// `BlockState` constructor.
     pub const fn new(block: ExecutedBlock) -> Self {
-        Self { block }
+        Self { block, parent: None }
+    }
+
+    /// Returns the hash and block of the on disk block this state can be traced back to.
+    pub fn anchor(&self) -> BlockNumHash {
+        if let Some(parent) = &self.parent {
+            parent.anchor()
+        } else {
+            self.block.block().parent_num_hash()
+        }
     }
 
     /// Returns the executed block that determines the state.
