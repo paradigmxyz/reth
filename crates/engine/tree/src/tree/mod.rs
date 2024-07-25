@@ -1107,6 +1107,7 @@ where
 
         match self.find_canonical_header(finalized_block_hash) {
             Ok(None) => {
+                debug!(target: "engine", "Finalized block not found in canonical chain");
                 // if the finalized block is not known, we can't update the finalized block
                 return Err(OnForkChoiceUpdated::invalid_state())
             }
@@ -1114,7 +1115,7 @@ where
                 self.canonical_in_memory_state.set_finalized(finalized);
             }
             Err(err) => {
-                error!(%err, "Failed to fetch finalized block header");
+                error!(target: "engine", %err, "Failed to fetch finalized block header");
             }
         }
 
@@ -1129,6 +1130,7 @@ where
 
         match self.find_canonical_header(safe_block_hash) {
             Ok(None) => {
+                debug!(target: "engine", "Safe block not found in canonical chain");
                 // if the safe block is not known, we can't update the safe block
                 return Err(OnForkChoiceUpdated::invalid_state())
             }
@@ -1136,7 +1138,7 @@ where
                 self.canonical_in_memory_state.set_safe(finalized);
             }
             Err(err) => {
-                error!(%err, "Failed to fetch safe block header");
+                error!(target: "engine", %err, "Failed to fetch safe block header");
             }
         }
 
@@ -1274,11 +1276,13 @@ where
         None
     }
 
+    #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine")]
     fn on_new_payload(
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> ProviderResult<TreeOutcome<PayloadStatus>> {
+        trace!(target: "engine", "invoked new payload");
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
         //    - missing or invalid base fee
@@ -1372,11 +1376,13 @@ where
         Ok(outcome)
     }
 
+    #[instrument(level = "trace", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash), target = "engine")]
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        trace!(target: "engine", ?attrs, "invoked forkchoice update");
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
@@ -1405,12 +1411,14 @@ where
 
         // 1. ensure we have a new head block
         if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
+            trace!(target: "engine", "fcu head hash is already canonical");
             // the head block is already canonical
             return Ok(valid_outcome(state.head_block_hash))
         }
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
+            trace!(target: "engine", "applying new chain update");
             // update the tracked canonical head
             self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
