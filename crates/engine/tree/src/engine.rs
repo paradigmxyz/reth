@@ -84,6 +84,7 @@ where
                                 // bubble up the event
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
+                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
                         }
                     }
                     RequestHandlerEvent::Download(req) => {
@@ -186,7 +187,10 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else { return Poll::Pending };
+        let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
+            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
+        };
+
         let ev = match ev {
             EngineApiEvent::BeaconConsensus(ev) => {
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
