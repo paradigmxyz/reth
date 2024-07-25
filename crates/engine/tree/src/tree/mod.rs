@@ -222,6 +222,7 @@ impl TreeState {
                     current_hash = block.block.parent_hash;
                 } else {
                     // current hash not found in memory
+                    warn!(target: "consensus::engine", invalid_hash=?current_hash, "Block not found in TreeState while walking back fork");
                     return None;
                 }
             }
