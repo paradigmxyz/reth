@@ -75,8 +75,13 @@ pub enum Hardfork {
     /// Ecotone: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#ecotone>.
     #[cfg(feature = "optimism")]
     Ecotone,
+    /// Hekla: the 1st taiko mainnet version: <>
+    #[cfg(feature = "taiko")]
+    Hekla,
+    /// Ontake: the 1st taiko mainnet fork: <>
+    #[cfg(feature = "taiko")]
+    Ontake,
     // ArbOS20Atlas,
-
     // Upcoming
     /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
     Prague,

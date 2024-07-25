@@ -41,6 +41,4 @@ thiserror.workspace = true
 rayon.workspace = true
 
 # raiko
-raiko-core.workspace = true
-raiko-lib.workspace = true
 anyhow.workspace = true
