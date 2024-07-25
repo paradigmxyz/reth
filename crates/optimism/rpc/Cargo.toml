@@ -38,6 +38,7 @@ tokio.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
 
 # misc
 thiserror.workspace = true
@@ -59,6 +60,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism",
     "revm/optimism"
 ]
