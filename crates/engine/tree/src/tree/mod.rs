@@ -166,7 +166,7 @@ impl TreeState {
                 // we have a reorg
                 todo!("handle reorg")
             }
-            let parent_block = self.blocks_by_hash.get(&new_head).cloned()?;
+            let parent_block = self.blocks_by_hash.get(&parent.hash).cloned()?;
             parent = parent_block.block.num_hash();
             new_chain.push(parent_block);
         }
