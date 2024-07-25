@@ -272,9 +272,6 @@ impl EngineApiTreeState {
 }
 
 /// The type responsible for processing engine API requests.
-///
-/// TODO: design: should the engine handler functions also accept the response channel or return the
-/// result and the caller redirects the response
 pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
@@ -1473,7 +1470,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
-            trace!(target: "engine", "applying new chain update");
+            trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
             // update the tracked canonical head
             self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 

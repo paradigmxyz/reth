@@ -515,6 +515,21 @@ pub enum NewCanonicalChain {
 }
 
 impl NewCanonicalChain {
+    /// Returns the length of the new chain.
+    pub fn new_block_count(&self) -> usize {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
+        }
+    }
+
+    /// Returns the length of the reorged chain.
+    pub fn reorged_block_count(&self) -> usize {
+        match self {
+            Self::Commit { .. } => 0,
+            Self::Reorg { old, .. } => old.len(),
+        }
+    }
+
     /// Converts the new chain into a notification that will be emitted to listeners
     pub fn to_chain_notification(&self) -> CanonStateNotification {
         // TODO: do we need to merge execution outcome for multiblock commit or reorg?
