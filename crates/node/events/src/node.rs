@@ -77,10 +77,9 @@ impl<DB> NodeState<DB> {
     fn build_current_stage(
         &self,
         stage_id: StageId,
-        checkpoint: Option<Checkpoint>,
+        checkpoint: StageCheckpoint,
         target: Option<BlockNumber>,
     ) -> CurrentStage {
-        let checkpoint = checkpoint.unwrap_or_default();
         let (eta, entities_checkpoint) = self
             .current_stage
             .as_ref()
@@ -97,6 +96,7 @@ impl<DB> NodeState<DB> {
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
             PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
                 info!(
@@ -110,6 +110,7 @@ impl<DB> NodeState<DB> {
                 self.current_stage = Some(current_stage);
             }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
                 let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
