@@ -1376,7 +1376,7 @@ where
         Ok(outcome)
     }
 
-    #[instrument(level = "trace", skip_all, fields(?state), target = "engine")]
+    #[instrument(level = "trace", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash), target = "engine")]
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
