@@ -39,7 +39,7 @@ impl MultiProof {
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
-        // then it node contains the encoded trie account.
+        // then the node contains the encoded trie account.
         let info = 'info: {
             if let Some(last) = proof.last() {
                 if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
@@ -102,7 +102,7 @@ impl StorageMultiProof {
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
-        // then it node contains the encoded slot value.
+        // then the node contains the encoded slot value.
         let value = 'value: {
             if let Some(last) = proof.last() {
                 if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
