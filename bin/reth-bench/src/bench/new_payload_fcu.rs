@@ -57,11 +57,11 @@ impl Command {
                 };
 
                 let head_block_hash = block.hash();
-                let safe_block_hash =
-                    block_provider.get_block_by_number((block.number - 32).into(), false);
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(32).into(), false);
 
-                let finalized_block_hash =
-                    block_provider.get_block_by_number((block.number - 64).into(), false);
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(64).into(), false);
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
