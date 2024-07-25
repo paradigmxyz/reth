@@ -30,7 +30,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -249,13 +249,15 @@ where
         // Run consensus engine to completion
         let network_handle = ctx.components().network().clone();
         let chainspec = ctx.chain_spec();
-        let (tx, rx) = oneshot::channel();
+        let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 eth_service.orchestrator_mut().start_backfill_sync(initial_target);
             }
+
+            let mut res = Ok(());
 
             // advance the chain and handle events
             while let Some(event) = eth_service.next().await {
@@ -267,7 +269,11 @@ where
                     ChainEvent::BackfillSyncStarted => {
                         network_handle.update_sync_state(SyncState::Syncing);
                     }
-                    ChainEvent::FatalError => break,
+                    ChainEvent::FatalError => {
+                        error!(target: "reth::cli", "Fatal error in consensus engine");
+                        res = Err(eyre::eyre!("Fatal error in consensus engine"));
+                        break
+                    }
                     ChainEvent::Handler(ev) => {
                         if let Some(head) = ev.canonical_header() {
                             let head_block = Head {
@@ -285,7 +291,8 @@ where
                     }
                 }
             }
-            let _ = tx.send(());
+
+            let _ = exit.send(res);
         });
 
         let full_node = FullNode {
@@ -306,7 +313,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { Ok(rx.await?) },
+                async { rx.await? },
                 full_node.config.debug.terminate,
             ),
             node: full_node,
