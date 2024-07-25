@@ -74,21 +74,30 @@ impl<DB> NodeState<DB> {
         self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
     }
 
+    fn build_current_stage(
+        &self,
+        stage_id: StageId,
+        checkpoint: Option<Checkpoint>,
+        target: Option<BlockNumber>,
+    ) -> CurrentStage {
+        let checkpoint = checkpoint.unwrap_or_default();
+        let (eta, entities_checkpoint) = self
+            .current_stage
+            .as_ref()
+            .filter(|current_stage| current_stage.stage_id == stage_id)
+            .map_or_else(
+                || (Eta::default(), None),
+                |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
+            );
+
+        CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }
+    }
+
     /// Processes an event emitted by the pipeline
     fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
             PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
-                let checkpoint = checkpoint.unwrap_or_default();
-                let (eta, entities_checkpoint) = self
-                    .current_stage
-                    .as_ref()
-                    .filter(|current_stage| current_stage.stage_id == stage_id)
-                    .map_or_else(
-                        || (Eta::default(), None),
-                        |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
-                    );
-                let current_stage =
-                    CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target };
+                let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
                 info!(
                     pipeline_stages = %pipeline_stages_progress,
@@ -101,18 +110,7 @@ impl<DB> NodeState<DB> {
                 self.current_stage = Some(current_stage);
             }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
-                let checkpoint = checkpoint.unwrap_or_default();
-
-                let (eta, entities_checkpoint) = self
-                    .current_stage
-                    .as_ref()
-                    .filter(|current_stage| current_stage.stage_id == stage_id)
-                    .map_or_else(
-                        || (Eta::default(), None),
-                        |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
-                    );
-                let current_stage =
-                    CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target };
+                let current_stage = self.build_current_stage(stage_id, checkpoint, target);
 
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                     info!(
