@@ -34,7 +34,8 @@ impl MultiProof {
         let proof = self
             .account_subtree
             .iter()
-            .filter_map(|e| nibbles.starts_with(&e.0).then(|| e.1.clone()))
+            .filter(|(path, _)| nibbles.starts_with(path))
+            .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,
@@ -96,7 +97,8 @@ impl StorageMultiProof {
         let proof = self
             .subtree
             .iter()
-            .filter_map(|e| nibbles.starts_with(&e.0).then(|| e.1.clone()))
+            .filter(|(path, _)| nibbles.starts_with(path))
+            .map(|(_, node)| node.clone())
             .collect::<Vec<_>>();
 
         // Inspect the last node in the proof. If it's a leaf node with matching suffix,

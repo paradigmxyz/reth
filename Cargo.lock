@@ -8114,7 +8114,6 @@ dependencies = [
  "reth-db-api",
  "reth-errors",
  "reth-evm",
- "reth-execution-errors",
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",

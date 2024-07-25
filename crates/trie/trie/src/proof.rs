@@ -103,7 +103,7 @@ where
         Ok(self
             .with_targets(HashMap::from([(
                 keccak256(address),
-                slots.into_iter().map(|slot| keccak256(slot)).collect(),
+                slots.iter().map(keccak256).collect(),
             )]))
             .multi_proof()?
             .account_proof(address, slots)?)
@@ -164,7 +164,7 @@ where
         let target_nibbles = self
             .targets
             .get(&hashed_address)
-            .map_or(Vec::new(), |slots| slots.into_iter().map(Nibbles::unpack).collect());
+            .map_or(Vec::new(), |slots| slots.iter().map(Nibbles::unpack).collect());
 
         let mut prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();

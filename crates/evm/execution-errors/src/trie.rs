@@ -17,8 +17,8 @@ pub enum StateProofError {
 impl From<StateProofError> for ProviderError {
     fn from(value: StateProofError) -> Self {
         match value {
-            StateProofError::DB(error) => ProviderError::Database(error),
-            StateProofError::RLP(error) => ProviderError::RLP(error),
+            StateProofError::DB(error) => Self::Database(error),
+            StateProofError::RLP(error) => Self::RLP(error),
         }
     }
 }

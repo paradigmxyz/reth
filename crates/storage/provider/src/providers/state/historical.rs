@@ -9,7 +9,6 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_execution_errors::trie::StateProofError;
 use reth_primitives::{
     constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
