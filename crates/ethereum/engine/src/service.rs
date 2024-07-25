@@ -74,7 +74,7 @@ where
 
         let (to_tree_tx, to_tree_rx) = channel();
 
-        let persistence_handle = PersistenceHandle::spawn_services(provider, pruner);
+        let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
         let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
         let executor_factory = EthExecutorProvider::ethereum(chain_spec);
 
