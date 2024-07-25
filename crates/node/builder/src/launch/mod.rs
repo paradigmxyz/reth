@@ -6,13 +6,12 @@ mod exex;
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
-use std::{future::Future, sync::Arc};
-
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
+use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -32,6 +31,7 @@ use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
+use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -119,6 +119,19 @@ where
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
+        // TODO: remove tree and move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let tree = Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+            canon_state_notification_sender.clone(),
+        ));
+
         // setup the launch context
         let ctx = ctx
             .with_configured_globals()
@@ -146,7 +159,9 @@ where
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>()?
+            .with_blockchain_db::<T, _>(move |provider_factory| {
+                Ok(BlockchainProvider::new(provider_factory, tree)?)
+            }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs

@@ -1,7 +1,5 @@
 use crate::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    proof::Proof,
     Nibbles,
 };
 use itertools::Itertools;
@@ -12,9 +10,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
 };
-use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
-use reth_trie_common::AccountProof;
 use revm::db::BundleAccount;
 use std::collections::{hash_map, HashMap, HashSet};
 
@@ -192,23 +188,6 @@ impl HashedPostState {
         }
 
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
-    }
-
-    /// Generates the state proof for target account and slots on top of this [`HashedPostState`].
-    pub fn account_proof<TX: DbTx>(
-        &self,
-        tx: &TX,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<AccountProof, StateRootError> {
-        let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted);
-        Proof::from_tx(tx)
-            .with_hashed_cursor_factory(hashed_cursor_factory)
-            .with_prefix_sets_mut(prefix_sets)
-            .account_proof(address, slots)
     }
 }
 
