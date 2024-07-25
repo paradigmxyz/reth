@@ -33,7 +33,7 @@ where
         request: TransactionRequest,
     ) -> Result<TxEnv, Self::Error> {
         let mut env =
-            self.inner.create_txn_env(block_env, request).map_err(Self::Error::from_err)?;
+            self.inner.create_txn_env(block_env, request).map_err(Self::Error::from_eth_err)?;
 
         env.optimism = OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() };
 

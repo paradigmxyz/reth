@@ -59,7 +59,7 @@ where
                         .map(|builder| {
                             op_receipt_fields(builder, tx, receipt, optimism_tx_meta).build()
                         })
-                        .map_err(Self::Error::from_err)
+                        .map_err(Self::Error::from_eth_err)
                 })
                 .collect::<Result<Vec<_>, Self::Error>>();
             return receipts.map(Some)

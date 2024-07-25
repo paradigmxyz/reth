@@ -28,15 +28,15 @@ where
         let (block, receipts) = LoadReceipt::cache(self)
             .get_block_and_receipts(meta.block_hash)
             .await
-            .map_err(Self::Error::from_err)?
-            .ok_or(Self::Error::from_err(EthApiError::UnknownBlockNumber))?;
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(Self::Error::from_eth_err(EthApiError::UnknownBlockNumber))?;
 
         let block = block.unseal();
         let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
-        let resp_builder =
-            ReceiptBuilder::new(&tx, meta, &receipt, &receipts).map_err(Self::Error::from_err)?;
+        let resp_builder = ReceiptBuilder::new(&tx, meta, &receipt, &receipts)
+            .map_err(Self::Error::from_eth_err)?;
         let resp_builder = op_receipt_fields(resp_builder, &tx, &receipt, optimism_tx_meta);
 
         Ok(resp_builder.build())

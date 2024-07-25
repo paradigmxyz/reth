@@ -147,7 +147,7 @@ where
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         let block = Block::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
-            .map_err(Eth::Error::from_err)?;
+            .map_err(Eth::Error::from_eth_err)?;
 
         let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(&block.header).await?;
         // we trace on top the block's parent block
@@ -162,7 +162,7 @@ where
                     .map(|tx| {
                         tx.into_ecrecovered()
                             .ok_or_else(|| EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_err)
+                            .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?
             } else {
@@ -172,7 +172,7 @@ where
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
                             .ok_or_else(|| EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_err)
+                            .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?
             };
@@ -190,7 +190,7 @@ where
             .inner
             .provider
             .block_hash_for_id(block_id)
-            .map_err(Eth::Error::from_err)?
+            .map_err(Eth::Error::from_eth_err)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         let ((cfg, block_env, _), block) = futures::try_join!(
@@ -350,7 +350,7 @@ where
                                 let frame = inspector
                                     .into_geth_builder()
                                     .geth_prestate_traces(&res, prestate_config, db)
-                                    .map_err(Eth::Error::from_err)?;
+                                    .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame)
                             })
                             .await?;
@@ -363,7 +363,7 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = MuxInspector::try_from_config(mux_config)
-                            .map_err(Eth::Error::from_err)?;
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         let frame = self
                             .inner
@@ -377,7 +377,7 @@ where
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector
                                     .try_into_mux_frame(&res, db)
-                                    .map_err(Eth::Error::from_err)?;
+                                    .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame.into())
                             })
                             .await?;
@@ -398,10 +398,10 @@ where
                             let db = db.0;
 
                             let mut inspector =
-                                JsInspector::new(code, config).map_err(Eth::Error::from_err)?;
+                                JsInspector::new(code, config).map_err(Eth::Error::from_eth_err)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
-                            inspector.json_result(res, &env, db).map_err(Eth::Error::from_err)
+                            inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
                         })
                         .await?;
 
@@ -599,7 +599,7 @@ where
                         let frame = inspector
                             .into_geth_builder()
                             .geth_prestate_traces(&res, prestate_config, db)
-                            .map_err(Eth::Error::from_err)?;
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         return Ok((frame.into(), res.state))
                     }
@@ -612,11 +612,12 @@ where
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
                         let mut inspector = MuxInspector::try_from_config(mux_config)
-                            .map_err(Eth::Error::from_err)?;
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
-                        let frame =
-                            inspector.try_into_mux_frame(&res, db).map_err(Eth::Error::from_err)?;
+                        let frame = inspector
+                            .try_into_mux_frame(&res, db)
+                            .map_err(Eth::Error::from_eth_err)?;
                         return Ok((frame.into(), res.state))
                     }
                 },
@@ -627,12 +628,12 @@ where
                         config,
                         transaction_context.unwrap_or_default(),
                     )
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
                     let result =
-                        inspector.json_result(res, &env, db).map_err(Eth::Error::from_err)?;
+                        inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
                 }
             }

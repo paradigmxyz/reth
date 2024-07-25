@@ -16,7 +16,7 @@ impl<T> FromEthApiError for T
 where
     T: From<EthApiError>,
 {
-    fn from_err<E>(err: E) -> Self
+    fn from_eth_err<E>(err: E) -> Self
     where
         EthApiError: From<E>,
     {
@@ -27,7 +27,7 @@ where
 /// Helper trait to wrap core [`EthApiError`].
 pub trait IntoEthApiError: Into<EthApiError> {
     /// Converts into error via [`EthApiError`].
-    fn into_err<E>(self) -> E
+    fn into_eth_err<E>(self) -> E
     where
         E: FromEthApiError;
 }
@@ -36,11 +36,11 @@ impl<T> IntoEthApiError for T
 where
     EthApiError: From<T>,
 {
-    fn into_err<E>(self) -> E
+    fn into_eth_err<E>(self) -> E
     where
         E: FromEthApiError,
     {
-        E::from_err(self)
+        E::from_eth_err(self)
     }
 }
 
@@ -83,6 +83,6 @@ where
     where
         EthApiError: From<E>,
     {
-        err.into_err()
+        err.into_eth_err()
     }
 }

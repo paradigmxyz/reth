@@ -99,7 +99,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
             .await
@@ -130,7 +130,7 @@ where
                 inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_err)
+                    .map_err(Eth::Error::from_eth_err)
             })
             .await
     }
@@ -173,7 +173,7 @@ where
                     let trace_res = inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &db)
-                        .map_err(Eth::Error::from_err)?;
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
 
@@ -204,7 +204,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
             .await
@@ -255,7 +255,7 @@ where
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_err)?
+            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
         };
 
         if start > end {
@@ -275,7 +275,7 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_err)?;
+        let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_eth_err)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -286,7 +286,7 @@ where
                 let from = tx
                     .recover_signer_unchecked()
                     .ok_or(BlockError::InvalidSignature)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
@@ -438,7 +438,7 @@ where
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
                         populate_state_diff(state_diff, db, state.iter())
-                            .map_err(Eth::Error::from_err)?;
+                            .map_err(Eth::Error::from_eth_err)?;
                     }
 
                     let trace = TraceResultsWithTransactionHash {
@@ -526,7 +526,7 @@ where
                 if let Some(header_td) = self
                     .provider()
                     .header_td_by_number(header.number)
-                    .map_err(Eth::Error::from_err)?
+                    .map_err(Eth::Error::from_eth_err)?
                 {
                     base_block_reward(
                         chain_spec.as_ref(),

@@ -30,7 +30,7 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
                 .cache()
                 .get_receipts(meta.block_hash)
                 .await
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 Some(recpts) => recpts,
                 None => return Err(EthApiError::UnknownBlockNumber.into()),

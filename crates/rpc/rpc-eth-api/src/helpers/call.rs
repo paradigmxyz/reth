@@ -61,7 +61,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             let (res, _env) =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
-            ensure_success(res.result).map_err(Self::Error::from_err)
+            ensure_success(res.result).map_err(Self::Error::from_eth_err)
         }
     }
 
@@ -237,7 +237,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             to
         } else {
             let nonce =
-                db.basic_ref(from).map_err(Self::Error::from_err)?.unwrap_or_default().nonce;
+                db.basic_ref(from).map_err(Self::Error::from_eth_err)?.unwrap_or_default().nonce;
             from.create(nonce)
         };
 
@@ -258,7 +258,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             }
             ExecutionResult::Success { .. } => Ok(()),
         }
-        .map_err(Self::Error::from_err)?;
+        .map_err(Self::Error::from_eth_err)?;
 
         let access_list = inspector.into_access_list();
 
@@ -545,7 +545,7 @@ pub trait Call: LoadState + SpawnBlocking {
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {
-            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_err)?;
+            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
         // Optimize for simple transfer transactions, potentially reducing the gas estimate.
@@ -577,7 +577,7 @@ pub trait Call: LoadState + SpawnBlocking {
         if env.tx.gas_price > U256::ZERO {
             // cap the highest gas limit by max gas caller can afford with given gas price
             highest_gas_limit = highest_gas_limit
-                .min(caller_gas_allowance(&mut db, &env.tx).map_err(Self::Error::from_err)?);
+                .min(caller_gas_allowance(&mut db, &env.tx).map_err(Self::Error::from_eth_err)?);
         }
 
         // We can now normalize the highest gas limit to a u64
@@ -610,7 +610,7 @@ pub trait Call: LoadState + SpawnBlocking {
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_err())
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -619,7 +619,7 @@ pub trait Call: LoadState + SpawnBlocking {
                     Err(self.map_out_of_gas_err(block_env_gas_limit, env, &mut db))
                 } else {
                     // the transaction did revert
-                    Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_err())
+                    Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
                 }
             }
         };
@@ -750,7 +750,7 @@ pub trait Call: LoadState + SpawnBlocking {
                         // These cases should be unreachable because we know the transaction
                         // succeeds, but if they occur, treat them as an
                         // error.
-                        return Err(RpcInvalidTransactionError::EvmHalt(err).into_err())
+                        return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
                     }
                 }
             }
@@ -781,14 +781,14 @@ pub trait Call: LoadState + SpawnBlocking {
             ExecutionResult::Success { .. } => {
                 // transaction succeeded by manually increasing the gas limit to
                 // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_err()
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err()
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit
-                RpcInvalidTransactionError::Revert(RevertError::new(output)).into_err()
+                RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err()
             }
             ExecutionResult::Halt { reason, .. } => {
-                RpcInvalidTransactionError::EvmHalt(reason).into_err()
+                RpcInvalidTransactionError::EvmHalt(reason).into_eth_err()
             }
         }
     }
@@ -804,7 +804,7 @@ pub trait Call: LoadState + SpawnBlocking {
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_err())
+            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
         let TransactionRequest {
@@ -843,14 +843,17 @@ pub trait Call: LoadState + SpawnBlocking {
             gas_limit: gas_limit
                 .try_into()
                 .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)
-                .map_err(Self::Error::from_err)?,
+                .map_err(Self::Error::from_eth_err)?,
             nonce,
             caller: from.unwrap_or_default(),
             gas_price,
             gas_priority_fee: max_priority_fee_per_gas,
             transact_to: to.unwrap_or(TxKind::Create),
             value: value.unwrap_or_default(),
-            data: input.try_into_unique_input().map_err(Self::Error::from_err)?.unwrap_or_default(),
+            data: input
+                .try_into_unique_input()
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default(),
             chain_id,
             access_list: access_list.unwrap_or_default().into(),
             // EIP-4844 fields

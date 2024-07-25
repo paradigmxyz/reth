@@ -127,7 +127,7 @@ where
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
             let parent = LoadPendingBlock::provider(&self.inner.eth_api)
                 .header_by_number(parent_block)
-                .map_err(Eth::Error::from_err)?
+                .map_err(Eth::Error::from_eth_err)?
                 .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
             if let Some(base_fee) = parent.next_block_base_fee(
                 LoadPendingBlock::provider(&self.inner.eth_api)
@@ -153,7 +153,7 @@ where
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)
-                    .map_err(Eth::Error::from_err)?
+                    .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
@@ -172,7 +172,7 @@ where
                     // this transaction.
                     if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
                         tx.validate(EnvKzgSettings::Default.get()).map_err(|e| {
-                            Eth::Error::from_err(EthApiError::InvalidParams(e.to_string()))
+                            Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;
                     }
 
@@ -182,7 +182,7 @@ where
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
-                        .map_err(Eth::Error::from_err)?;
+                        .map_err(Eth::Error::from_eth_err)?;
                     Call::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
