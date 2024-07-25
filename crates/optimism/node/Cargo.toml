@@ -80,7 +80,6 @@ optimism = [
     "reth-beacon-consensus/optimism",
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-rpc-eth-types/optimism",
     "reth-optimism-rpc/optimism"
 ]
 test-utils = ["reth-node-builder/test-utils"]

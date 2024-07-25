@@ -334,7 +334,8 @@ pub trait EthApi {
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: FullEthApi,
+    T: FullEthApi,
+    jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {

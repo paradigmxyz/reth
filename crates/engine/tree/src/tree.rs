@@ -272,9 +272,6 @@ impl EngineApiTreeState {
 }
 
 /// The type responsible for processing engine API requests.
-///
-/// TODO: design: should the engine handler functions also accept the response channel or return the
-/// result and the caller redirects the response
 pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
@@ -546,8 +543,8 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // this is a reporting no-op because the engine API impl does not need
-                    // additional input to handle this request
+                    // triggering this hook will record that we received a request from the CL
+                    self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
             FromEngine::DownloadedBlocks(blocks) => {
@@ -1438,6 +1435,8 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
@@ -1473,7 +1472,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
-            trace!(target: "engine", "applying new chain update");
+            trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
             // update the tracked canonical head
             self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
@@ -1755,7 +1754,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_holesky_payload() {
-        let s = include_str!("../../test-data/holesky/1.rlp");
+        let s = include_str!("../test-data/holesky/1.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();

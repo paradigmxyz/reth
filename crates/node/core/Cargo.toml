@@ -35,7 +35,6 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
-reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -44,15 +43,6 @@ reth-stages-types.workspace = true
 alloy-genesis.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-# async
-tokio.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-metrics-exporter-prometheus.workspace = true
-metrics-process.workspace = true
-metrics-util.workspace = true
 
 # misc
 eyre.workspace = true
@@ -61,17 +51,13 @@ humantime.workspace = true
 const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
-once_cell.workspace = true
 
 # io
 dirs-next = "2.0.0"
 shellexpand.workspace = true
 serde_json.workspace = true
 
-# http/rpc
-http.workspace = true
-jsonrpsee.workspace = true
-tower.workspace = true
+
 
 # tracing
 tracing.workspace = true
@@ -86,15 +72,11 @@ secp256k1 = { workspace = true, features = [
 # async
 futures.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemalloc-ctl = { version = "0.5.0", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.16.0"
 
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+tokio.workspace = true
 
 [features]
 optimism = [
@@ -102,10 +84,9 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism",
 ]
 
-jemalloc = ["dep:tikv-jemalloc-ctl"]
+
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

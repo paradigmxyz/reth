@@ -12,8 +12,8 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -96,9 +96,8 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Ok(hashed_state
-            .account_proof(self.tx, address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
+        Proof::overlay_account_proof(self.tx, hashed_state.clone(), address, slots)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 
