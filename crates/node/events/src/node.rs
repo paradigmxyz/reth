@@ -79,23 +79,16 @@ impl<DB> NodeState<DB> {
         match event {
             PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
                 let checkpoint = checkpoint.unwrap_or_default();
-                let current_stage = CurrentStage {
-                    stage_id,
-                    eta: match &self.current_stage {
-                        Some(current_stage) if current_stage.stage_id == stage_id => {
-                            current_stage.eta
-                        }
-                        _ => Eta::default(),
-                    },
-                    checkpoint,
-                    entities_checkpoint: match &self.current_stage {
-                        Some(current_stage) if current_stage.stage_id == stage_id => {
-                            current_stage.entities_checkpoint
-                        }
-                        _ => None,
-                    },
-                    target,
-                };
+                let (eta, entities_checkpoint) = self
+                    .current_stage
+                    .as_ref()
+                    .filter(|current_stage| current_stage.stage_id == stage_id)
+                    .map_or_else(
+                        || (Eta::default(), None),
+                        |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
+                    );
+                let current_stage =
+                    CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target };
 
                 info!(
                     pipeline_stages = %pipeline_stages_progress,
@@ -109,23 +102,17 @@ impl<DB> NodeState<DB> {
             }
             PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
                 let checkpoint = checkpoint.unwrap_or_default();
-                let current_stage = CurrentStage {
-                    stage_id,
-                    eta: match &self.current_stage {
-                        Some(current_stage) if current_stage.stage_id == stage_id => {
-                            current_stage.eta
-                        }
-                        _ => Eta::default(),
-                    },
-                    checkpoint,
-                    entities_checkpoint: match &self.current_stage {
-                        Some(current_stage) if current_stage.stage_id == stage_id => {
-                            current_stage.entities_checkpoint
-                        }
-                        _ => None,
-                    },
-                    target,
-                };
+
+                let (eta, entities_checkpoint) = self
+                    .current_stage
+                    .as_ref()
+                    .filter(|current_stage| current_stage.stage_id == stage_id)
+                    .map_or_else(
+                        || (Eta::default(), None),
+                        |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
+                    );
+                let current_stage =
+                    CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target };
 
                 if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
                     info!(
