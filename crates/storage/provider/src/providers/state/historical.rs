@@ -286,7 +286,7 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state.clone());
         Proof::overlay_account_proof(self.tx, revert_state, address, slots)
-            .map_err(|err| ProviderError::Database(err.into()))
+            .map_err(Into::<ProviderError>::into)
     }
 }
 
