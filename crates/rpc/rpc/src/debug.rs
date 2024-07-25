@@ -409,8 +409,9 @@ where
             .inner
             .eth_api
             .spawn_with_call_at(call, at, overrides, move |db, env| {
+                let tx_gas_limit = env.tx.gas_limit;
                 let (res, _) = this.eth_api().inspect(db, env, &mut inspector)?;
-                Ok((res, env.tx.gas_limit, inspector))
+                Ok((res, tx_gas_limit, inspector))
             })
             .await?;
         let gas_used = res.result.gas_used();
