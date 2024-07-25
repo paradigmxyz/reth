@@ -96,8 +96,8 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Ok(Proof::overlay_account_proof(self.tx, hashed_state.clone(), address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
+        Proof::overlay_account_proof(self.tx, hashed_state.clone(), address, slots)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 
