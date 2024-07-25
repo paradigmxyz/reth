@@ -14,8 +14,9 @@ use crate::OpEthApi;
 
 impl<Eth: EthCall> EthCall for OpEthApi<Eth> where EthApiError: From<Eth::Error> {}
 
-impl<Eth: Call + EthApiTypes> Call for OpEthApi<Eth>
+impl<Eth> Call for OpEthApi<Eth>
 where
+    Eth: Call + EthApiTypes,
     EthApiError: From<Eth::Error>,
 {
     fn call_gas_limit(&self) -> u64 {
