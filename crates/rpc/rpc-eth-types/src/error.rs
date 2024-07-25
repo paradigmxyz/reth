@@ -17,6 +17,7 @@ use reth_transaction_pool::error::{
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+use tracing::error;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -377,6 +378,11 @@ pub enum RpcInvalidTransactionError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
+    /// Unexpected [`InvalidTransaction`](revm::primitives::InvalidTransaction) error, Optimism
+    /// errors should not be handled on this level.
+    // TODO: Remove when optimism feature removed in revm
+    #[error("unexpected transaction error")]
+    UnexpectedTransactionError,
 }
 
 impl RpcInvalidTransactionError {
@@ -471,9 +477,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[allow(unreachable_patterns)]
-            _ => panic!(
-                "use `<OptimismInvalidTransactionError as From<InvalidTransaction>>::try_from`"
-            ),
+            _ => {
+                error!(target: "rpc",
+                    ?err,
+                    "unexpected transaction error"
+                );
+
+                Self::UnexpectedTransactionError
+            }
         }
     }
 }
