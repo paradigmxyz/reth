@@ -1,8 +1,8 @@
 //! RLPx subcommand of P2P Debugging tool.
 
 use clap::{Parser, Subcommand};
-use discv5::Enr;
-use reth_discv5::enr::EnrCombinedKeyWrapper;
+use enr::Enr;
+use futures::StreamExt;
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{HelloMessage, UnauthedP2PStream};
 use reth_network::config::rng_secret_key;
@@ -23,8 +23,7 @@ impl Command {
         match self.subcommand {
             Subcommands::Ping { node } => {
                 let key = rng_secret_key();
-                let enr = node.parse::<Enr>().unwrap();
-                let enr = EnrCombinedKeyWrapper(enr).into();
+                let enr = node.parse::<Enr<secp256k1::SecretKey>>().unwrap();
                 let node_record = NodeRecord::try_from(&enr)?;
                 let outgoing =
                     TcpStream::connect((node_record.address, node_record.tcp_port)).await?;
@@ -33,8 +32,10 @@ impl Command {
                 let peer_id = pk2id(&key.public_key(SECP256K1));
                 let hello = HelloMessage::builder(peer_id).build();
 
-                let (_, their_hello) =
+                let (p2p_stream, their_hello) =
                     UnauthedP2PStream::new(ecies_stream).handshake(hello).await?;
+
+                p2p_stream.send_ping();
 
                 println!("{:#?}", their_hello);
             }

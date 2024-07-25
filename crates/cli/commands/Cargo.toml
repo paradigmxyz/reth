@@ -20,7 +20,6 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
-reth-discv5.workspace = true
 reth-ecies.workspace = true
 reth-eth-wire.workspace = true
 reth-evm.workspace = true
@@ -45,11 +44,11 @@ reth-trie-db = { workspace = true, features = ["metrics"] }
 itertools.workspace = true
 futures.workspace = true
 tokio.workspace = true
-discv5 = { workspace = true, features = ["libp2p"] }
 
 # misc
 ahash = "0.8"
 human_bytes = "0.4.1"
+enr.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
