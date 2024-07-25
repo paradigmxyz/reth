@@ -306,17 +306,15 @@ where
                 num.into(),
                 Some(highest_idx),
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _, _| {
+                move |tx_info, inspector, _, _, _| {
                     if let Some(idx) = tx_info.index {
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
                             return Ok(None)
                         }
                     }
-                    let traces = inspector
-                        .with_transaction_gas_used(res.gas_used())
-                        .into_parity_builder()
-                        .into_localized_transaction_traces(tx_info);
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
                 },
             );
@@ -372,11 +370,9 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _| {
-                    let traces = inspector
-                        .with_transaction_gas_used(res.result.gas_used())
-                        .into_parity_builder()
-                        .into_localized_transaction_traces(tx_info);
+                move |tx_info, inspector, _, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
@@ -391,11 +387,9 @@ where
         let traces = self.inner.eth_api.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, res, _, _| {
-                let traces = inspector
-                    .with_transaction_gas_used(res.gas_used())
-                    .into_parity_builder()
-                    .into_localized_transaction_traces(tx_info);
+            |tx_info, inspector, _, _, _| {
+                let traces =
+                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
