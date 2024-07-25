@@ -563,7 +563,7 @@ mod tests {
     use reth_primitives::Receipt;
 
     fn create_mock_state(block_number: u64) -> BlockState {
-        BlockState::new(get_executed_block_with_number(block_number))
+        BlockState::new(get_executed_block_with_number(block_number, B256::random()))
     }
 
     #[test]
@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn test_state_new() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     fn test_state_block() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -663,17 +663,17 @@ mod tests {
     #[test]
     fn test_state_hash() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
-        assert_eq!(state.hash(), block.block().hash());
+        assert_eq!(state.hash(), block.block.hash());
     }
 
     #[test]
     fn test_state_number() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block);
 
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn test_state_state_root() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -694,7 +694,7 @@ mod tests {
     fn test_state_receipts() {
         let receipts = Receipts { receipt_vec: vec![vec![Some(Receipt::default())]] };
 
-        let block = get_executed_block_with_receipts(receipts.clone());
+        let block = get_executed_block_with_receipts(receipts.clone(), B256::random());
 
         let state = BlockState::new(block);
 
@@ -704,8 +704,8 @@ mod tests {
     #[test]
     fn test_in_memory_state_chain_update() {
         let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None);
-        let block1 = get_executed_block_with_number(0);
-        let block2 = get_executed_block_with_number(0);
+        let block1 = get_executed_block_with_number(0, B256::random());
+        let block2 = get_executed_block_with_number(0, B256::random());
         let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
         state.update_chain(chain);
         assert_eq!(state.head_state().unwrap().block().block().hash(), block1.block().hash());

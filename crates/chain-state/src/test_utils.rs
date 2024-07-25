@@ -6,6 +6,7 @@ use rand::Rng;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Address, Block, BlockNumber, Receipts, Requests, SealedBlockWithSenders, TransactionSigned,
+    B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
@@ -15,18 +16,22 @@ use std::{
 };
 use tokio::sync::broadcast::{self, Sender};
 
-fn get_executed_block(block_number: BlockNumber, receipts: Receipts) -> ExecutedBlock {
+fn get_executed_block(
+    block_number: BlockNumber,
+    receipts: Receipts,
+    parent_hash: B256,
+) -> ExecutedBlock {
     let mut block = Block::default();
     let mut header = block.header.clone();
     header.number = block_number;
+    header.parent_hash = parent_hash;
+    header.ommers_hash = B256::random();
     block.header = header;
-
-    let sender = Address::random();
     let tx = TransactionSigned::default();
     block.body.push(tx);
     let sealed = block.seal_slow();
+    let sender = Address::random();
     let sealed_with_senders = SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
-
     ExecutedBlock::new(
         Arc::new(sealed),
         Arc::new(sealed_with_senders.senders),
@@ -42,20 +47,27 @@ fn get_executed_block(block_number: BlockNumber, receipts: Receipts) -> Executed
 }
 
 /// Generates an `ExecutedBlock` that includes the given `Receipts`.
-pub fn get_executed_block_with_receipts(receipts: Receipts) -> ExecutedBlock {
+pub fn get_executed_block_with_receipts(receipts: Receipts, parent_hash: B256) -> ExecutedBlock {
     let number = rand::thread_rng().gen::<u64>();
-
-    get_executed_block(number, receipts)
+    get_executed_block(number, receipts, parent_hash)
 }
 
 /// Generates an `ExecutedBlock` with the given `BlockNumber`.
-pub fn get_executed_block_with_number(block_number: BlockNumber) -> ExecutedBlock {
-    get_executed_block(block_number, Receipts { receipt_vec: vec![vec![]] })
+pub fn get_executed_block_with_number(
+    block_number: BlockNumber,
+    parent_hash: B256,
+) -> ExecutedBlock {
+    get_executed_block(block_number, Receipts { receipt_vec: vec![vec![]] }, parent_hash)
 }
 
 /// Generates a range of executed blocks with ascending block numbers.
 pub fn get_executed_blocks(range: Range<u64>) -> impl Iterator<Item = ExecutedBlock> {
-    range.map(get_executed_block_with_number)
+    let mut parent_hash = B256::default();
+    range.map(move |number| {
+        let block = get_executed_block_with_number(number, parent_hash);
+        parent_hash = block.block.hash();
+        block
+    })
 }
 
 /// A test `ChainEventSubscriptions`
