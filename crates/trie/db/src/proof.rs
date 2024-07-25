@@ -1,5 +1,5 @@
 use reth_db_api::transaction::DbTx;
-use reth_execution_errors::{trie::StateProofError, StateRootError};
+use reth_execution_errors::StateProofError;
 use reth_primitives::{Address, B256};
 use reth_trie::{
     hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
@@ -19,7 +19,7 @@ pub trait DatabaseProof<'a, TX> {
         post_state: HashedPostState,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof, StateRootError>;
+    ) -> Result<AccountProof, StateProofError>;
 }
 
 impl<'a, TX: DbTx> DatabaseProof<'a, TX> for Proof<&'a TX, DatabaseHashedCursorFactory<'a, TX>> {

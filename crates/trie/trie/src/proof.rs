@@ -7,8 +7,6 @@ use crate::{
     HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::tables;
-use reth_db_api::transaction::DbTx;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives::{keccak256, Address, B256};
 use reth_trie_common::{
