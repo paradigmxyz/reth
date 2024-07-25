@@ -614,13 +614,6 @@ where
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
         let poll_res = loop {
-            // P2PStream wraps `reth_ecies::stream::ECIESStream` in node. `ECIESStream`
-            // internally wraps the network connection in `tokio_util::codec::Framed`.
-            //
-            // Call to `Framed::poll_ready` will flush internally, if limit for buffered messages
-            // reached. `Framed::poll_ready`, only returns `Poll::Pending` or `Poll::Ready(Err(e))`
-            // if it had to call flush - no need to explicitly flush the batch again before
-            // propagating pending or error.
             match this.inner.as_mut().poll_ready(cx) {
                 Poll::Pending => break Poll::Pending,
                 Poll::Ready(Err(err)) => break Poll::Ready(Err(err.into())),
