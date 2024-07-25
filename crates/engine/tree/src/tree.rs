@@ -543,8 +543,8 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // this is a reporting no-op because the engine API impl does not need
-                    // additional input to handle this request
+                    // triggering this hook will record that we received a request from the CL
+                    self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
             FromEngine::DownloadedBlocks(blocks) => {
@@ -1435,6 +1435,8 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
