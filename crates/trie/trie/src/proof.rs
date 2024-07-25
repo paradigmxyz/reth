@@ -81,12 +81,12 @@ where
                 keccak256(address),
                 slots.iter().map(keccak256).collect(),
             )]))
-            .multi_proof()?
+            .multiproof()?
             .account_proof(address, slots)?)
     }
 
     /// Generate a state multiproof according to specified targets.
-    pub fn multi_proof(&self) -> Result<MultiProof, StateProofError> {
+    pub fn multiproof(&self) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
@@ -99,7 +99,7 @@ where
         let retainer = ProofRetainer::from_iter(self.targets.keys().map(Nibbles::unpack));
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
-        let mut storage_multiproofs = HashMap::default();
+        let mut storages = HashMap::default();
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
@@ -116,12 +116,12 @@ where
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                    storage_multiproofs.insert(hashed_address, storage_multiproof);
+                    storages.insert(hashed_address, storage_multiproof);
                 }
             }
         }
         let _ = hash_builder.root();
-        Ok(MultiProof { account_subtree: hash_builder.take_proofs(), storage_multiproofs })
+        Ok(MultiProof { account_subtree: hash_builder.take_proofs(), storages })
     }
 
     /// Generate a storage multiproof according to specified targets.
