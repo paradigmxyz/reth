@@ -83,7 +83,9 @@ struct RpcServerMetricsInner {
 /// This is created per connection and captures metrics for each request.
 #[derive(Clone, Debug)]
 pub struct RpcRequestMetricsService<S> {
+    /// The metrics collector for RPC requests
     metrics: RpcRequestMetrics,
+    /// The inner service being wrapped
     inner: S,
 }
 
