@@ -1,14 +1,12 @@
 use crate::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSetsMut,
-    trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+    trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
     HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::tables;
-use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
@@ -19,24 +17,32 @@ use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAcc
 /// on the hash builder and follows the same algorithm as the state root calculator.
 /// See `StateRoot::root` for more info.
 #[derive(Debug)]
-pub struct Proof<'a, TX, H> {
-    /// A reference to the database transaction.
-    tx: &'a TX,
+pub struct Proof<T, H> {
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
+    /// Creates cursor for traversing trie entities.
+    trie_cursor_factory: T,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
 }
 
-impl<'a, TX, H> Proof<'a, TX, H> {
-    /// Creates a new proof generator.
-    pub fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
-        Self { tx, hashed_cursor_factory, prefix_sets: TriePrefixSetsMut::default() }
+impl<T, H> Proof<T, H> {
+    /// Create a new [Proof] instance.
+    pub fn new(t: T, h: H) -> Self {
+        Self {
+            trie_cursor_factory: t,
+            hashed_cursor_factory: h,
+            prefix_sets: TriePrefixSetsMut::default(),
+        }
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<'a, TX, HF> {
-        Proof { tx: self.tx, hashed_cursor_factory, prefix_sets: self.prefix_sets }
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF> {
+        Proof {
+            trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+        }
     }
 
     /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
@@ -46,16 +52,9 @@ impl<'a, TX, H> Proof<'a, TX, H> {
     }
 }
 
-impl<'a, TX> Proof<'a, TX, DatabaseHashedCursorFactory<'a, TX>> {
-    /// Create a new [Proof] instance from database transaction.
-    pub fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
-    }
-}
-
-impl<'a, TX, H> Proof<'a, TX, H>
+impl<T, H> Proof<T, H>
 where
-    TX: DbTx,
+    T: TrieCursorFactory,
     H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.
@@ -69,8 +68,7 @@ where
         let mut account_proof = AccountProof::new(address);
 
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let trie_cursor =
-            DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
+        let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
@@ -141,10 +139,7 @@ where
         let mut prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
         prefix_set.extend(target_nibbles.clone());
-        let trie_cursor = DatabaseStorageTrieCursor::new(
-            self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
-            hashed_address,
-        );
+        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(hashed_address)?;
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
