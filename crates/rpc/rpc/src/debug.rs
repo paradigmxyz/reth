@@ -405,18 +405,18 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, env, inspector) = self
+        let (res, tx_gas_limit, inspector) = self
             .inner
             .eth_api
             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                let (res, _) = this.eth_api().inspect(db, env.clone(), &mut inspector)?;
-                Ok((res, env, inspector))
+                let (res, _) = this.eth_api().inspect(db, env, &mut inspector)?;
+                Ok((res, env.tx.gas_limit, inspector))
             })
             .await?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
         let frame = inspector
-            .with_transaction_gas_limit(env.tx.gas_limit)
+            .with_transaction_gas_limit(tx_gas_limit)
             .into_geth_builder()
             .geth_traces(gas_used, return_value, config);
 
