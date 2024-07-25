@@ -42,6 +42,7 @@ jsonrpsee.workspace = true
 # misc
 thiserror.workspace = true
 serde = { workspace = true, features = ["derive"] }
+tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

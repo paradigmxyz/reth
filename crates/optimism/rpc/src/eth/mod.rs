@@ -16,12 +16,9 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::eth::DevSigner;
-use reth_rpc_eth_api::{
-    helpers::{
-        AddDevSigners, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
-        SpawnBlocking, Trace, UpdateRawTxForwarder,
-    },
-    RawTransactionForwarder,
+use reth_rpc_eth_api::helpers::{
+    AddDevSigners, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
+    SequencerClient, SpawnBlocking, Trace,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
@@ -42,12 +39,13 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 #[derive(Debug, Clone)]
 pub struct OpEthApi<Eth> {
     inner: Eth,
+    sequencer_client: Option<Arc<SequencerClient>>,
 }
 
 impl<Eth> OpEthApi<Eth> {
     /// Creates a new `OpEthApi` from the provided `Eth` implementation.
     pub const fn new(inner: Eth) -> Self {
-        Self { inner }
+        Self { inner, sequencer_client: None }
     }
 }
 
@@ -162,12 +160,6 @@ impl<Eth: AddDevSigners> AddDevSigners for OpEthApi<Eth> {
     }
 }
 
-impl<Eth: UpdateRawTxForwarder> UpdateRawTxForwarder for OpEthApi<Eth> {
-    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.set_eth_raw_transaction_forwarder(forwarder);
-    }
-}
-
 impl<N, Eth> BuilderProvider<N> for OpEthApi<Eth>
 where
     Eth: BuilderProvider<N>,
@@ -176,6 +168,6 @@ where
     type Ctx<'a> = <Eth as BuilderProvider<N>>::Ctx<'a>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self { inner: Eth::builder()(ctx) })
+        Box::new(|ctx| Self { inner: Eth::builder()(ctx), sequencer_client: None })
     }
 }

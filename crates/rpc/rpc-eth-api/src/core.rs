@@ -15,15 +15,14 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
-    EthTransactions, FullEthApi,
+    EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
-pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+pub trait FullEthApiServer: EthApiServer + FullEthApi + Clone {}
 
-impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]

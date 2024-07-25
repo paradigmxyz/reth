@@ -20,6 +20,7 @@ pub mod call;
 pub mod fee;
 pub mod pending_block;
 pub mod receipt;
+pub mod rpc;
 pub mod signer;
 pub mod spec;
 pub mod state;
@@ -32,11 +33,12 @@ pub use call::{Call, EthCall};
 pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
 pub use receipt::LoadReceipt;
+pub use rpc::SequencerClient;
 pub use signer::{AddDevSigners, EthSigner};
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use trace::Trace;
-pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
+pub use transaction::{EthTransactions, LoadTransaction};
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt:

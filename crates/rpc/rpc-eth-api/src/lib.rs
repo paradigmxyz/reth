@@ -23,8 +23,6 @@ pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use pubsub::EthPubSubApiServer;
 
-pub use helpers::transaction::RawTransactionForwarder;
-
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};
 #[cfg(feature = "client")]

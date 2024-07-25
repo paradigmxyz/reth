@@ -35,17 +35,21 @@ alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-types.workspace = true
+serde_json.workspace = true
 
 # async
 async-trait.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 
 # misc
 auto_impl.workspace = true
 dyn-clone.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
