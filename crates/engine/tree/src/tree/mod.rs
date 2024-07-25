@@ -111,33 +111,43 @@ impl TreeState {
         let existing = self.blocks_by_hash.insert(hash, executed);
         debug_assert!(existing.is_none(), "inserted duplicate block");
 
+        // Add this block as a child of its parent
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
+
+        // If this block already has children (in case of reorgs), update their parent
+        if let Some(children) = self.parent_to_child.remove(&hash) {
+            if !children.is_empty() {
+                self.parent_to_child.insert(hash, children);
+            }
+        }
     }
 
     /// Remove blocks before specified block number.
     pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
-        while self
-            .blocks_by_number
-            .first_key_value()
-            .map(|entry| entry.0 < &block_number)
-            .unwrap_or_default()
-        {
-            let (_, mut to_remove) = self.blocks_by_number.pop_first().unwrap();
-            while let Some(block) = to_remove.pop() {
-                let block_hash = block.block.hash();
-                let removed = self.blocks_by_hash.remove(&block_hash);
-                debug_assert!(
-                    removed.is_some(),
-                    "attempted to remove non-existing block {block_hash}"
-                );
-                // get this child blocks children and add them to the remove list.
-                if let Some(parent_children) = self.parent_to_child.remove(&block_hash) {
-                    // remove child
-                    for child_hash in &parent_children {
-                        if let Some(executed_block) = self.blocks_by_hash.get(child_hash) {
-                            to_remove.push(executed_block.clone());
+        let mut numbers_to_remove = Vec::new();
+        for (&number, _) in self.blocks_by_number.range(..block_number) {
+            numbers_to_remove.push(number);
+        }
+
+        for number in numbers_to_remove {
+            if let Some(blocks) = self.blocks_by_number.remove(&number) {
+                for block in blocks {
+                    let block_hash = block.block.hash();
+                    self.blocks_by_hash.remove(&block_hash);
+
+                    // Remove this block from its parent's children list
+                    if let Some(parent_children) =
+                        self.parent_to_child.get_mut(&block.block.parent_hash)
+                    {
+                        parent_children.remove(&block_hash);
+                        // If the parent has no more children, remove it from the mapping
+                        if parent_children.is_empty() {
+                            self.parent_to_child.remove(&block.block.parent_hash);
                         }
                     }
+
+                    // Remove this block's entry from parent_to_child
+                    self.parent_to_child.remove(&block_hash);
                 }
             }
         }
@@ -1727,5 +1737,70 @@ mod tests {
 
         let resp = rx.await.unwrap().unwrap();
         assert!(resp.is_syncing());
+    }
+
+    #[tokio::test]
+    async fn test_tree_state_insert_executed() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = get_executed_blocks(1..4).collect();
+
+        tree_state.insert_executed(blocks[0].clone());
+        tree_state.insert_executed(blocks[1].clone());
+
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[0].block.hash()),
+            Some(&HashSet::from([blocks[1].block.hash()]))
+        );
+
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
+
+        tree_state.insert_executed(blocks[2].clone());
+
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[1].block.hash()),
+            Some(&HashSet::from([blocks[2].block.hash()]))
+        );
+        assert!(tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
+
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
+    }
+
+    #[tokio::test]
+    async fn test_tree_state_remove_before() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        tree_state.remove_before(3);
+
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
+        assert!(!tree_state.blocks_by_number.contains_key(&1));
+        assert!(!tree_state.blocks_by_number.contains_key(&2));
+
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].block.hash()));
+        assert!(tree_state.blocks_by_number.contains_key(&3));
+        assert!(tree_state.blocks_by_number.contains_key(&4));
+        assert!(tree_state.blocks_by_number.contains_key(&5));
+
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[3].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].block.hash()));
+
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[2].block.hash()),
+            Some(&HashSet::from([blocks[3].block.hash()]))
+        );
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[3].block.hash()),
+            Some(&HashSet::from([blocks[4].block.hash()]))
+        );
     }
 }
