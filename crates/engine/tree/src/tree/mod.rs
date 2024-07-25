@@ -1795,8 +1795,8 @@ mod tests {
         assert!(!tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
     }
 
-    #[test]
-    fn test_tree_state_insert_executed_with_reorg() {
+    #[tokio::test]
+    async fn test_tree_state_insert_executed_with_reorg() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
         let blocks: Vec<_> = get_executed_blocks(1..6).collect();
 
@@ -1869,8 +1869,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_tree_state_on_new_head() {
+    #[tokio::test]
+    async fn test_tree_state_on_new_head() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
         let blocks: Vec<_> = get_executed_blocks(1..6).collect();
 
