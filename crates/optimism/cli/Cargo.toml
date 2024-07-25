@@ -60,6 +60,9 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [features] 
  optimism = [ 
     "reth-primitives/optimism",

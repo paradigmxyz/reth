@@ -1,7 +1,7 @@
 //! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
@@ -55,10 +55,12 @@ impl ImportReceiptsOpCommand {
 
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
-        import_receipts_from_file(
+        // open file
+        let reader = ChunkedFileReader::new(self.path, self.chunk_len).await?;
+
+        import_receipts_from_reader(
             provider_factory,
-            self.path,
-            self.chunk_len,
+            reader,
             |first_block, receipts: &mut Receipts| {
                 let mut total_filtered_out_dup_txns = 0;
                 for (index, receipts_for_block) in receipts.iter_mut().enumerate() {
@@ -81,15 +83,13 @@ impl ImportReceiptsOpCommand {
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
 /// indices in the [`Receipts`] list, to map to sequential block numbers.
-pub async fn import_receipts_from_file<DB, P, F>(
+pub async fn import_receipts_from_reader<DB, F>(
     provider_factory: ProviderFactory<DB>,
-    path: P,
-    chunk_len: Option<u64>,
+    mut reader: ChunkedFileReader,
     mut filter: F,
 ) -> eyre::Result<()>
 where
     DB: Database,
-    P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let provider = provider_factory.provider_rw()?;
@@ -114,16 +114,13 @@ where
     let mut total_decoded_receipts = 0;
     let mut total_filtered_out_dup_txns = 0;
 
-    // open file
-    let mut reader = ChunkedFileReader::new(path, chunk_len).await?;
-
     while let Some(file_client) =
         reader.next_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
     {
         // create a new file client from chunk read from file
         let ReceiptFileClient {
             mut receipts,
-            first_block,
+            mut first_block,
             total_receipts: total_receipts_chunk,
             ..
         } = file_client;
@@ -146,12 +143,13 @@ where
         // those receipts.
         if first_block == 0 {
             // remove the first empty receipts
-            receipts = receipts.remove(0);
+            let genesis_receipts = receipts.remove(0);
+            debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
             // we don't count this as decoded so the partial import check later does not error if
             // this branch is executed
-            total_decoded_receipts -= 1;
+            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to
@@ -222,4 +220,30 @@ where
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use reth_stages::test_utils::test_db::TestStageDB;
+    use tempfile::tempfile;
+
+    use crate::commands::import_receipts::test::{
+        HACK_RECEIPT_ENCODED_BLOCK_1, HACK_RECEIPT_ENCODED_BLOCK_2, HACK_RECEIPT_ENCODED_BLOCK_3,
+    };
+
+    /// No receipts for genesis block
+    const EMPTY_RECEIPTS_GENESIS_BLOCK: &[u8] = &hex!("c0");
+
+    #[tokio::test]
+    async fn import_receipts_from_reader() {
+        let mut f: File = tempfile().unwrap().into();
+        f.write_all(EMPTY_RECEIPTS_GENESIS_BLOCK)?;
+        f.write_all(HACK_RECEIPT_ENCODED_BLOCK_1)?;
+        f.write_all(HACK_RECEIPT_ENCODED_BLOCK_2)?;
+        f.write_all(HACK_RECEIPT_ENCODED_BLOCK_3)?;
+
+        let reader = ChunkedFileReader::from_file(f, None).await.unwrap();
+
+        import_receipts(TestStageDB::default().factory, reader, |_, _| 0).await.unwrap();
+    }
 }
