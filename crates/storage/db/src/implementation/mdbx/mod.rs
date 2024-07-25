@@ -146,7 +146,7 @@ impl DatabaseConfig for DatabaseArguments {
         use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 
         let rpath: &Path = self.path.as_ref();
-        if is_database_empty(&rpath) {
+        if is_database_empty(rpath) {
             reth_fs_util::create_dir_all(rpath).wrap_err_with(|| {
                 format!("Could not create database directory {}", rpath.display())
             })?;

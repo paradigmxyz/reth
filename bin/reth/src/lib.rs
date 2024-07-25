@@ -35,7 +35,6 @@ mod macros;
 
 /// Re-exported utils.
 pub mod utils {
-    pub use reth_db::open_db_read_only;
 
     /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment
     /// on the `reth_node_core::args` re-export for more details.

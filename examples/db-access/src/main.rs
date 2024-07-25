@@ -1,4 +1,5 @@
 use reth_chainspec::ChainSpecBuilder;
+use reth_db::mdbx::DatabaseArguments;
 use reth_primitives::{Address, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
@@ -21,10 +22,9 @@ fn main() -> eyre::Result<()> {
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new_with_database_path(
-        db_path,
+    let factory = ProviderFactory::new_with_database_args(
         spec.into(),
-        Default::default(),
+        DatabaseArguments::new(db_path.into(), Default::default()),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
     )?;
 

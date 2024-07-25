@@ -4,7 +4,7 @@ use clap::{value_parser, Args, Parser};
 use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{DatabaseConfig, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
@@ -179,7 +179,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(self.db.database_args().open()?.with_metrics());
+        let database = Arc::new(self.db.database_args(db_path).open()?.with_metrics());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

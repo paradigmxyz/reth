@@ -1,5 +1,5 @@
 use clap::Parser;
-use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
+use reth_db::{tables_to_generic, DatabaseConfig, DatabaseEnv, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
 use reth_node_core::{
@@ -55,7 +55,7 @@ impl Command {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
+        let second_db = self.second_db.database_args(second_db_path).open_ro()?;
 
         let tables = match &self.table {
             Some(table) => std::slice::from_ref(table),

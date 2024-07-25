@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_chainspec::{ChainInfo, ChainSpec};
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{mdbx::DatabaseArguments, DatabaseConfig, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
@@ -24,7 +24,6 @@ use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::Path,
     sync::Arc,
 };
 use tokio::sync::watch;
@@ -87,14 +86,13 @@ impl<DB> ProviderFactory<DB> {
 impl ProviderFactory<DatabaseEnv> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
-    pub fn new_with_database_path<P: AsRef<Path>>(
-        path: P,
+    pub fn new_with_database_args(
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
         Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            db: Arc::new(args.open().map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),
@@ -658,10 +656,12 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let factory = ProviderFactory::new_with_database_path(
-            tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+        let factory = ProviderFactory::new_with_database_args(
             Arc::new(chain_spec),
-            DatabaseArguments::new(Default::default()),
+            DatabaseArguments::new(
+                tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+                Default::default(),
+            ),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();

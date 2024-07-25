@@ -34,7 +34,7 @@ pub use tables::*;
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-pub use mdbx::{init_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
+pub use mdbx::{DatabaseEnv, DatabaseEnvKind};
 
 pub use reth_db_api::*;
 
@@ -208,8 +208,7 @@ mod tests {
 
         // Database is not empty, version file is malformed
         {
-            reth_fs_util::write(path.clone().join(db_version_file_path(&path)), "invalid-version")
-                .unwrap();
+            reth_fs_util::write(path.join(db_version_file_path(&path)), "invalid-version").unwrap();
             let db = args.clone().open();
             assert!(db.is_err());
             assert_matches!(

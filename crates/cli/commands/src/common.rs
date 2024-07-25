@@ -4,7 +4,7 @@ use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_config::{config::EtlConfig, Config};
-use reth_db::{init_db, open_db_read_only, DatabaseEnv};
+use reth_db::{DatabaseConfig, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
@@ -79,11 +79,11 @@ impl EnvironmentArgs {
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(self.db.database_args().open()?),
+                Arc::new(self.db.database_args(db_path).open()?),
                 StaticFileProvider::read_write(sf_path)?,
             ),
             AccessRights::RO => (
-                Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
+                Arc::new(self.db.database_args(db_path).open_ro()?),
                 StaticFileProvider::read_only(sf_path)?,
             ),
         };
