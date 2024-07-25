@@ -7902,6 +7902,7 @@ dependencies = [
  "reth-static-file-types",
  "serde_json",
  "shellexpand",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
