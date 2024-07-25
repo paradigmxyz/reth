@@ -56,6 +56,4 @@ pub mod noop;
 
 mod state;
 
-pub use state::BlockchainId;
-
 use aquamarine as _;
