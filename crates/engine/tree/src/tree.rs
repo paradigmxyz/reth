@@ -543,7 +543,7 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // triggering this hook will allow us to register the timestamp when we receive FCUs 
+                    // triggering this hook will record that we received a request from the CL
                     self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
