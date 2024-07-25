@@ -142,18 +142,15 @@ impl TreeState {
                     let block_hash = block.block.hash();
                     self.blocks_by_hash.remove(&block_hash);
 
-                    // Remove this block from its parent's children list
                     if let Some(parent_children) =
                         self.parent_to_child.get_mut(&block.block.parent_hash)
                     {
                         parent_children.remove(&block_hash);
-                        // If the parent has no more children, remove it from the mapping
                         if parent_children.is_empty() {
                             self.parent_to_child.remove(&block.block.parent_hash);
                         }
                     }
 
-                    // Remove this block's entry from parent_to_child
                     self.parent_to_child.remove(&block_hash);
                 }
             }
@@ -193,16 +190,17 @@ impl TreeState {
         let mut current_hash = new_head;
         let mut fork_point = None;
 
+        // walk back the chain until we reach the canonical block
         while current_hash != self.canonical_block_hash() {
             let current_block = self.blocks_by_hash.get(&current_hash)?;
             new_chain.push(current_block.clone());
 
-            // Check if this block's parent has multiple children
+            // check if this block's parent has multiple children
             if let Some(children) = self.parent_to_child.get(&current_block.block.parent_hash) {
                 if children.len() > 1 ||
                     self.canonical_block_hash() == current_block.block.parent_hash
                 {
-                    // We've found a fork point
+                    // we've found a fork point
                     fork_point = Some(current_block.block.parent_hash);
                     break;
                 }
@@ -213,16 +211,18 @@ impl TreeState {
 
         new_chain.reverse();
 
-        // If we found a fork point, collect the reorged blocks
+        // if we found a fork point, collect the reorged blocks
         let reorged = if let Some(fork_hash) = fork_point {
             let mut reorged = Vec::new();
             let mut current_hash = self.current_canonical_head.hash;
+            // walk back the chain up to the fork hash
             while current_hash != fork_hash {
                 if let Some(block) = self.blocks_by_hash.get(&current_hash) {
                     reorged.push(block.clone());
                     current_hash = block.block.parent_hash;
                 } else {
-                    return None; // Unable to find reorg path
+                    // current hash not found in memory
+                    return None;
                 }
             }
             reorged.reverse();
