@@ -26,7 +26,7 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, IntoRpcError, RichBlock, StateContext, TransactionRequest,
+    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -705,7 +705,7 @@ where
     ///
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>> {
-        self.inner.eth_api.raw_transaction_by_hash(hash).await.map_err(Eth::Error::into_rpc_err)
+        self.inner.eth_api.raw_transaction_by_hash(hash).await.map_err(Into::into)
     }
 
     /// Handler for `debug_getRawTransactions`
@@ -756,7 +756,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
-            .map_err(Eth::Error::into_rpc_err)
+            .map_err(Into::into)
     }
 
     /// Handler for `debug_traceBlockByHash`
@@ -768,7 +768,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
-            .map_err(Eth::Error::into_rpc_err)
+            .map_err(Into::into)
     }
 
     /// Handler for `debug_traceBlockByNumber`
@@ -780,7 +780,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
-            .map_err(Eth::Error::into_rpc_err)
+            .map_err(Into::into)
     }
 
     /// Handler for `debug_traceTransaction`
@@ -792,7 +792,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
-            .map_err(Eth::Error::into_rpc_err)
+            .map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`
@@ -805,7 +805,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
             .await
-            .map_err(Eth::Error::into_rpc_err)
+            .map_err(Into::into)
     }
 
     async fn debug_trace_call_many(
@@ -815,9 +815,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call_many(self, bundles, state_context, opts)
-            .await
-            .map_err(Eth::Error::into_rpc_err)
+        Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

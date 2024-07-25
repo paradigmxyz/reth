@@ -1,11 +1,17 @@
 //! Trait for specifying `eth` API types that may be network dependent.
 
-use reth_rpc_types::IntoRpcError;
+use std::error::Error;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
 /// Network specific `eth` API types.
 pub trait EthApiTypes: Send + Sync {
     /// Extension of [`EthApiError`], with network specific errors.
-    type Error: IntoRpcError + FromEthApiError + AsEthApiError + FromEvmError;
+    type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
+        + FromEthApiError
+        + AsEthApiError
+        + FromEvmError
+        + Error
+        + Send
+        + Sync;
 }

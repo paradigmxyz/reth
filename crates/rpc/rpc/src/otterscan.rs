@@ -14,7 +14,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, IntoRpcError, RichBlock,
+    AnyTransactionReceipt, BlockTransactions, Header, RichBlock,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -86,7 +86,7 @@ where
                 |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
             )
             .await
-            .map_err(Eth::Error::into_rpc_err)?
+            .map_err(Into::into)?
             .map(|transfer_operations| {
                 transfer_operations
                     .iter()
@@ -117,7 +117,7 @@ where
             })
             .await
             .map(Option::flatten)
-            .map_err(Eth::Error::into_rpc_err)?;
+            .map_err(Into::into)?;
         Ok(maybe_revert)
     }
 
@@ -131,7 +131,7 @@ where
                 move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
             )
             .await
-            .map_err(Eth::Error::into_rpc_err)?
+            .map_err(Into::into)?
             .map(|traces| {
                 traces
                     .into_iter()
@@ -329,7 +329,7 @@ where
                 },
             )
             .await
-            .map_err(Eth::Error::into_rpc_err)?
+            .map_err(Into::into)?
             .map(|traces| {
                 traces
                     .into_iter()

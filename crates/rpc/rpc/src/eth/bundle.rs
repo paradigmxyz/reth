@@ -11,10 +11,7 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};
-use reth_rpc_types::{
-    mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult},
-    IntoRpcError,
-};
+use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
@@ -267,7 +264,7 @@ where
     Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Self::call_bundle(self, request).await.map_err(Eth::Error::into_rpc_err)
+        Self::call_bundle(self, request).await.map_err(Into::into)
     }
 }
 

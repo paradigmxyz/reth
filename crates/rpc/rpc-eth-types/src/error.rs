@@ -9,7 +9,7 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, IntoRpcError, ToRpcError,
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
@@ -239,12 +239,6 @@ where
             EVMError::Custom(err) => Self::EvmCustom(err),
             EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
-    }
-}
-
-impl IntoRpcError for EthApiError {
-    fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
-        self.into()
     }
 }
 
