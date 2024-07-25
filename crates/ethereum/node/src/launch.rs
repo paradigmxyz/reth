@@ -20,6 +20,7 @@ use reth_node_builder::{
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    primitives::Head,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
@@ -247,6 +248,7 @@ where
 
         // Run consensus engine to completion
         let network_handle = ctx.components().network().clone();
+        let chainspec = ctx.chain_spec();
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
@@ -267,6 +269,18 @@ where
                     }
                     ChainEvent::FatalError => break,
                     ChainEvent::Handler(ev) => {
+                        if let Some(head) = ev.canonical_header() {
+                            let head_block = Head {
+                                number: head.number,
+                                hash: head.hash(),
+                                difficulty: head.difficulty,
+                                timestamp: head.timestamp,
+                                total_difficulty: chainspec
+                                    .final_paris_total_difficulty(head.number)
+                                    .unwrap_or_default(),
+                            };
+                            network_handle.update_status(head_block);
+                        }
                         event_sender.notify(ev);
                     }
                 }
