@@ -8,6 +8,7 @@ use reth_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
     },
+    transaction::AccessListWithGasUsedAndError,
     Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
@@ -179,7 +180,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> impl Future<Output = EthResult<AccessListWithGasUsed>> + Send
+    ) -> impl Future<Output = EthResult<AccessListWithGasUsedAndError>> + Send
     where
         Self: Trace,
     {
@@ -202,7 +203,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         block: BlockEnv,
         at: BlockId,
         mut request: TransactionRequest,
-    ) -> EthResult<AccessListWithGasUsed>
+    ) -> EthResult<AccessListWithGasUsedAndError>
     where
         Self: Trace,
     {
@@ -262,7 +263,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         let gas_used =
             self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(AccessListWithGasUsedAndError { access_list, gas_used })
     }
 }
 
