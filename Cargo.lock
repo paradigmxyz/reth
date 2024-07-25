@@ -7906,6 +7906,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-api",
+ "reth-db-common",
  "reth-downloaders",
  "reth-errors",
  "reth-evm-optimism",

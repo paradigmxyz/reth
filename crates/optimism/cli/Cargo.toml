@@ -62,9 +62,12 @@ eyre.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
 
 [features] 
  optimism = [ 
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
+    "reth-provider/optimism",
  ] 
