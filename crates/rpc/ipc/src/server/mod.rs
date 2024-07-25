@@ -32,10 +32,7 @@ use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, instrument, trace, warn, Instrument};
 // re-export so can be used during builder setup
 use crate::{
-    server::{
-        connection::IpcConnDriver,
-        rpc_service::{RpcService, RpcServiceCfg},
-    },
+    server::{connection::IpcConnDriver, rpc_service::RpcServiceCfg},
     stream_codec::StreamCodec,
 };
 use tokio::sync::mpsc;
@@ -45,6 +42,8 @@ use tower::layer::{util::Stack, LayerFn};
 mod connection;
 mod ipc;
 mod rpc_service;
+
+pub use rpc_service::RpcService;
 
 /// Ipc Server implementation
 ///
