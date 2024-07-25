@@ -45,7 +45,7 @@ impl MetricServer {
         Self { config }
     }
 
-    /// Start the metrics server
+    /// Spawns the metrics server
     pub async fn serve(&self) -> eyre::Result<()> {
         let MetricServerConfig { listen_addr, hooks, task_executor, version_info } = &self.config;
 
