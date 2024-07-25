@@ -158,7 +158,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok(StorageMultiProof { root: EMPTY_ROOT_HASH, subtree: BTreeMap::default() })
+            return Ok(StorageMultiProof::default())
         }
 
         let target_nibbles = self
