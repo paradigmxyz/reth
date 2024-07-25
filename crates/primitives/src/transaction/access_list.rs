@@ -3,18 +3,18 @@
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
 pub use alloy_eips::eip2930::{AccessList, AccessListItem};
-use revm_primitives::{EVMError, U256};
+use revm_primitives::U256;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-// #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-pub struct AccessListWithGasUsedAndError<DBError> {
+/// `AccessListWithGasUsedAndError` for handling error from `eth_createAccessList`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessListWithGasUsedAndError {
     /// List with accounts accessed during transaction.
     pub access_list: AccessList,
     /// Estimated gas used with access list.
     pub gas_used: U256,
     /// Optional error message if the transaction failed.
-    pub error: Option<EVMError<DBError>>, // 새로운 필드 추가
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

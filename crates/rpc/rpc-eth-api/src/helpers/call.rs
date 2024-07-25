@@ -27,8 +27,7 @@ use reth_rpc_server_types::constants::gas_oracle::{
 };
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
-    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
-    TransactionRequest,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
@@ -240,18 +239,19 @@ pub trait EthCall: Call + LoadPendingBlock {
 
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
-        match result.result {
-            ExecutionResult::Halt { reason, .. } => Err(match reason {
-                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
-                halt => RpcInvalidTransactionError::EvmHalt(halt),
-            }),
-            ExecutionResult::Revert { output, .. } => {
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
+        let (result, env) = match self.inspect(&mut db, env, &mut inspector) {
+            Ok((res, env)) => (res, env),
+            Err(e) => {
+                return Err(e.into());
             }
-            ExecutionResult::Success { .. } => Ok(()),
-        }?;
+        };
+
+        let error = match result.result {
+            ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason)),
+            ExecutionResult::Revert { output, .. } => Some(format!("{:?}", output)),
+            ExecutionResult::Success { .. } => None,
+        };
 
         let access_list = inspector.into_access_list();
 
@@ -263,7 +263,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         let gas_used =
             self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
-        Ok(AccessListWithGasUsedAndError { access_list, gas_used })
+        Ok(AccessListWithGasUsedAndError { access_list, gas_used, error })
     }
 }
 
