@@ -25,6 +25,7 @@ pub struct DatabaseMock {
 impl Database for DatabaseMock {
     type TX = TxMock;
     type TXMut = TxMock;
+
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Ok(TxMock::default())
     }

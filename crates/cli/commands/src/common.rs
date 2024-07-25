@@ -79,7 +79,7 @@ impl EnvironmentArgs {
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
             AccessRights::RW => (
-                Arc::new(init_db(db_path, self.db.database_args())?),
+                Arc::new(self.db.database_args().open()?),
                 StaticFileProvider::read_write(sf_path)?,
             ),
             AccessRights::RO => (

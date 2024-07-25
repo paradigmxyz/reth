@@ -34,7 +34,7 @@ pub use tables::*;
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
+pub use mdbx::{init_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
 
 pub use reth_db_api::*;
 
@@ -43,6 +43,7 @@ pub use reth_db_api::*;
 pub mod test_utils {
     use super::*;
     use crate::mdbx::DatabaseArguments;
+    use database::DatabaseConfig;
     use reth_db_api::{
         database::Database,
         database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
@@ -139,41 +140,31 @@ pub mod test_utils {
 
     /// Create read/write database for testing
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let path = tempdir_path();
-        let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
-
-        let db = init_db(
-            &path,
-            DatabaseArguments::new(ClientVersion::default())
-                .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-        )
-        .expect(&emsg);
-
-        Arc::new(TempDatabase { db: Some(db), path })
+        create_test_rw_db_with_path(tempdir_path())
     }
 
     /// Create read/write database for testing
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
-        let db = init_db(
-            path.as_path(),
-            DatabaseArguments::new(ClientVersion::default())
-                .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
-        )
-        .expect(ERROR_DB_CREATION);
+        let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
+
+        let db = DatabaseArguments::new(path.clone(), ClientVersion::default())
+            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded))
+            .open()
+            .expect(&emsg);
         Arc::new(TempDatabase { db: Some(db), path })
     }
 
     /// Create read only database for testing
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
-        let args = DatabaseArguments::new(ClientVersion::default())
+        let path = tempdir_path();
+        let args = DatabaseArguments::new(path.clone(), ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
-        let path = tempdir_path();
         {
-            init_db(path.as_path(), args.clone()).expect(ERROR_DB_CREATION);
+            args.clone().open().expect(ERROR_DB_CREATION);
         }
-        let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
+        let db = args.open_ro().expect(ERROR_DB_OPEN);
         Arc::new(TempDatabase { db: Some(db), path })
     }
 }
@@ -181,43 +172,45 @@ pub mod test_utils {
 #[cfg(test)]
 mod tests {
     use crate::{
-        init_db,
         mdbx::DatabaseArguments,
-        open_db, tables,
+        tables,
+        test_utils::tempdir_path,
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
     use reth_db_api::{
-        cursor::DbCursorRO, database::Database, models::ClientVersion, transaction::DbTx,
+        cursor::DbCursorRO,
+        database::{Database, DatabaseConfig},
+        models::ClientVersion,
+        transaction::DbTx,
     };
     use reth_libmdbx::MaxReadTransactionDuration;
     use std::time::Duration;
-    use tempfile::tempdir;
 
     #[test]
     fn db_version() {
-        let path = tempdir().unwrap();
+        let path = tempdir_path();
 
-        let args = DatabaseArguments::new(ClientVersion::default())
+        let args = DatabaseArguments::new(path.clone(), ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         // Database is empty
         {
-            let db = init_db(&path, args.clone());
+            let db = args.clone().open();
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, current version is the same as in the file
         {
-            let db = init_db(&path, args.clone());
+            let db = args.clone().open();
             assert_matches!(db, Ok(_));
         }
 
         // Database is not empty, version file is malformed
         {
-            reth_fs_util::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+            reth_fs_util::write(path.clone().join(db_version_file_path(&path)), "invalid-version")
                 .unwrap();
-            let db = init_db(&path, args.clone());
+            let db = args.clone().open();
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -227,8 +220,8 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            reth_fs_util::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
-            let db = init_db(&path, args);
+            reth_fs_util::write(path.join(db_version_file_path(&path)), "0").unwrap();
+            let db = args.open();
             assert!(db.is_err());
             assert_matches!(
                 db.unwrap_err().downcast_ref::<DatabaseVersionError>(),
@@ -239,11 +232,11 @@ mod tests {
 
     #[test]
     fn db_client_version() {
-        let path = tempdir().unwrap();
+        let path = tempdir_path();
 
         // Empty client version is not recorded
         {
-            let db = init_db(&path, DatabaseArguments::new(ClientVersion::default())).unwrap();
+            let db = DatabaseArguments::new(path.clone(), ClientVersion::default()).open().unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_matches!(cursor.first(), Ok(None));
@@ -252,7 +245,7 @@ mod tests {
         // Client version is recorded
         let first_version = ClientVersion { version: String::from("v1"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db = DatabaseArguments::new(path.clone(), first_version.clone()).open().unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -268,7 +261,7 @@ mod tests {
 
         // Same client version is not duplicated.
         {
-            let db = init_db(&path, DatabaseArguments::new(first_version.clone())).unwrap();
+            let db = DatabaseArguments::new(path.clone(), first_version.clone()).open().unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -286,7 +279,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let second_version = ClientVersion { version: String::from("v2"), ..Default::default() };
         {
-            let db = init_db(&path, DatabaseArguments::new(second_version.clone())).unwrap();
+            let db = DatabaseArguments::new(path.clone(), second_version.clone()).open().unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(
@@ -304,7 +297,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         let third_version = ClientVersion { version: String::from("v3"), ..Default::default() };
         {
-            let db = open_db(path.path(), DatabaseArguments::new(third_version.clone())).unwrap();
+            let db = DatabaseArguments::new(path, third_version.clone()).open().unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_eq!(

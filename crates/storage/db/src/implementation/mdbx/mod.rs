@@ -1,6 +1,7 @@
 //! Module that interacts with MDBX.
 
 use crate::{
+    is_database_empty,
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
     tables::{self, TableType, Tables},
@@ -11,7 +12,7 @@ use eyre::Context;
 use metrics::{gauge, Label};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
+    database::{Database, DatabaseConfig},
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     models::client_version::ClientVersion,
     transaction::{DbTx, DbTxMut},
@@ -24,7 +25,7 @@ use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -63,7 +64,7 @@ impl DatabaseEnvKind {
 #[derive(Clone, Debug, Default)]
 pub struct DatabaseArguments {
     /// The path of the database directory.
-    path: Path,
+    path: PathBuf,
     /// Client version that accesses the database.
     client_version: ClientVersion,
     /// Database log level. If [None], the default value is used.
@@ -95,7 +96,7 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub const fn new(path: Path, client_version: ClientVersion) -> Self {
+    pub const fn new(path: PathBuf, client_version: ClientVersion) -> Self {
         Self {
             path,
             client_version,
@@ -106,7 +107,7 @@ impl DatabaseArguments {
     }
 
     /// Set the database path.
-    pub const fn with_path(mut self, path: Path) -> Self {
+    pub fn with_path(mut self, path: PathBuf) -> Self {
         self.path = path;
         self
     }
@@ -138,6 +139,40 @@ impl DatabaseArguments {
     }
 }
 
+impl DatabaseConfig for DatabaseArguments {
+    type DB = DatabaseEnv;
+
+    fn open(self) -> eyre::Result<Self::DB> {
+        use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+
+        let rpath: &Path = self.path.as_ref();
+        if is_database_empty(&rpath) {
+            reth_fs_util::create_dir_all(rpath).wrap_err_with(|| {
+                format!("Could not create database directory {}", rpath.display())
+            })?;
+            create_db_version_file(rpath)?;
+        } else {
+            match check_db_version_file(rpath) {
+                Ok(_) => (),
+                Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
+                Err(err) => return Err(err.into()),
+            }
+        }
+
+        let client_version = self.client_version().clone();
+        let db = DatabaseEnv::open(self, DatabaseEnvKind::RW)?;
+        db.create_tables()?;
+        db.record_client_version(client_version)?;
+        Ok(db)
+    }
+
+    fn open_ro(self) -> eyre::Result<Self::DB> {
+        let path = self.path.clone(); // todo(onbjerg): this is unfortunate, what do we do
+        DatabaseEnv::open(self, DatabaseEnvKind::RO)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))
+    }
+}
+
 /// Wrapper for the libmdbx environment: [Environment]
 #[derive(Debug)]
 pub struct DatabaseEnv {
@@ -152,7 +187,6 @@ pub struct DatabaseEnv {
 impl Database for DatabaseEnv {
     type TX = tx::Tx<RO>;
     type TXMut = tx::Tx<RW>;
-    type Opts = DatabaseArguments;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
@@ -168,35 +202,6 @@ impl Database for DatabaseEnv {
             self.metrics.as_ref().cloned(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
-    }
-
-    fn open(opts: Self::Opts) -> eyre::Result<Self> {
-        use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
-
-        let rpath = path.as_ref();
-        if is_database_empty(rpath) {
-            reth_fs_util::create_dir_all(rpath).wrap_err_with(|| {
-                format!("Could not create database directory {}", rpath.display())
-            })?;
-            create_db_version_file(rpath)?;
-        } else {
-            match check_db_version_file(rpath) {
-                Ok(_) => (),
-                Err(DatabaseVersionError::MissingFile) => create_db_version_file(rpath)?,
-                Err(err) => return Err(err.into()),
-            }
-        }
-
-        let client_version = args.client_version().clone();
-        let db = DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?;
-        db.create_tables()?;
-        db.record_client_version(client_version)?;
-        Ok(db)
-    }
-
-    fn open_ro(opts: Self::Opts) -> eyre::Result<Self> {
-        DatabaseEnv::open(path, DatabaseEnvKind::RO, args)
-            .with_context(|| format!("Could not open database at path: {}", path.display()))
     }
 }
 
@@ -289,14 +294,13 @@ impl DatabaseEnv {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
     /// It does not create the tables, for that call [`DatabaseEnv::create_tables`].
-    pub fn open(
-        path: &Path,
-        kind: DatabaseEnvKind,
+    pub(crate) fn open(
         args: DatabaseArguments,
+        kind: DatabaseEnvKind,
     ) -> Result<Self, DatabaseError> {
         let _lock_file = if kind.is_rw() {
             Some(
-                StorageLock::try_acquire(path)
+                StorageLock::try_acquire(&args.path)
                     .map_err(|err| DatabaseError::Other(err.to_string()))?,
             )
         } else {
@@ -442,7 +446,7 @@ impl DatabaseEnv {
         }
 
         let env = Self {
-            inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            inner: inner_env.open(&args.path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
             _lock_file,
         };
@@ -528,16 +532,16 @@ mod tests {
     use tempfile::TempDir;
 
     /// Create database for testing
-    fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
+    fn create_test_db() -> Arc<DatabaseEnv> {
         Arc::new(create_test_db_with_path(
-            kind,
             &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
         ))
     }
 
     /// Create database for testing with specified path
-    fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
+    fn create_test_db_with_path(path: &Path) -> DatabaseEnv {
+        let env = DatabaseArguments::new(path.into(), ClientVersion::default())
+            .open()
             .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
@@ -556,12 +560,12 @@ mod tests {
 
     #[test]
     fn db_creation() {
-        create_test_db(DatabaseEnvKind::RW);
+        create_test_db();
     }
 
     #[test]
     fn db_manual_put_get() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let env = create_test_db();
 
         let value = Header::default();
         let key = 1u64;
@@ -580,7 +584,7 @@ mod tests {
 
     #[test]
     fn db_dup_cursor_delete_first() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -619,7 +623,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let env = create_test_db();
 
         let value = Header::default();
         let key = 1u64;
@@ -644,7 +648,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -708,7 +712,7 @@ mod tests {
 
     #[test]
     fn db_cursor_walk_range_on_dup_table() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         let address0 = Address::ZERO;
         let address1 = Address::with_last_byte(1);
@@ -750,7 +754,7 @@ mod tests {
     #[allow(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT (0, 0), (1, 0), (2, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -778,7 +782,7 @@ mod tests {
 
     #[test]
     fn db_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -808,7 +812,7 @@ mod tests {
 
     #[test]
     fn db_reverse_walker() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -838,7 +842,7 @@ mod tests {
 
     #[test]
     fn db_walk_back() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT (0, 0), (1, 0), (3, 0)
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -877,7 +881,7 @@ mod tests {
 
     #[test]
     fn db_cursor_seek_exact_or_previous_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -903,7 +907,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -946,7 +950,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_dup() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -964,7 +968,7 @@ mod tests {
 
     #[test]
     fn db_cursor_delete_current_non_existent() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let key1 = Address::with_last_byte(1);
@@ -992,7 +996,7 @@ mod tests {
 
     #[test]
     fn db_cursor_insert_wherever_cursor_is() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         // PUT
@@ -1025,7 +1029,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1052,7 +1056,7 @@ mod tests {
 
     #[test]
     fn db_cursor_append_failure() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         // PUT
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
@@ -1089,7 +1093,7 @@ mod tests {
 
     #[test]
     fn db_cursor_upsert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
@@ -1124,7 +1128,7 @@ mod tests {
 
     #[test]
     fn db_cursor_dupsort_append() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
 
         let transition_id = 2;
 
@@ -1193,7 +1197,7 @@ mod tests {
             .expect(ERROR_ETH_ADDRESS);
 
         {
-            let env = create_test_db_with_path(DatabaseEnvKind::RW, &path);
+            let env = create_test_db_with_path(&path);
 
             // PUT
             let result = env.update(|tx| {
@@ -1203,12 +1207,9 @@ mod tests {
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
         }
 
-        let env = DatabaseEnv::open(
-            &path,
-            DatabaseEnvKind::RO,
-            DatabaseArguments::new(ClientVersion::default()),
-        )
-        .expect(ERROR_DB_CREATION);
+        let env = DatabaseArguments::new(path, ClientVersion::default())
+            .open_ro()
+            .expect(ERROR_DB_CREATION);
 
         // GET
         let result =
@@ -1219,7 +1220,7 @@ mod tests {
 
     #[test]
     fn db_dup_sort() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let env = create_test_db();
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);
 
@@ -1263,7 +1264,7 @@ mod tests {
 
     #[test]
     fn db_iterate_over_all_dup_values() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let env = create_test_db();
         let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
             .expect(ERROR_ETH_ADDRESS);
         let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
@@ -1309,7 +1310,7 @@ mod tests {
 
     #[test]
     fn dup_value_with_same_subkey() {
-        let env = create_test_db(DatabaseEnvKind::RW);
+        let env = create_test_db();
         let key1 = Address::new([0x11; 20]);
         let key2 = Address::new([0x22; 20]);
 
@@ -1352,7 +1353,7 @@ mod tests {
 
     #[test]
     fn db_sharded_key() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let db: Arc<DatabaseEnv> = create_test_db();
         let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
 
         for i in 1..5 {

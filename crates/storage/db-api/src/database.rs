@@ -1,9 +1,23 @@
 use crate::{
-    table::{Table, TableImporter},
+    table::TableImporter,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use std::{fmt::Debug, sync::Arc};
+
+/// A trait for database configuration, used as the main entrypoint for opening or creating a
+/// database.
+pub trait DatabaseConfig {
+    /// The database this config configures.
+    type DB: Database;
+
+    /// Open the database in read-write mode with the given options, initializing it with the given
+    /// tables if it does not already exist.
+    fn open(self) -> eyre::Result<Self::DB>;
+
+    /// Open the database in readonly mode with the given options.
+    fn open_ro(self) -> eyre::Result<Self::DB>;
+}
 
 /// Main Database trait that can open read-only and read-write transactions.
 ///
@@ -13,15 +27,6 @@ pub trait Database: Sized + Send + Sync {
     type TX: DbTx + Send + Sync + Debug + 'static;
     /// A read-write database transaction
     type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
-    /// Database-specific options for opening an existing database, and initializing a new database.
-    type Opts: Debug;
-
-    /// Open the database in read-write mode with the given options, initializing it with the given
-    /// tables if it does not already exist.
-    fn open(opts: Self::Opts) -> eyre::Result<Self>;
-
-    /// Open the database in readonly mode with the given options.
-    fn open_ro(opts: Self::Opts) -> eyre::Result<Self>;
 
     /// Create read only transaction.
     #[track_caller]
@@ -63,7 +68,6 @@ pub trait Database: Sized + Send + Sync {
 impl<DB: Database> Database for Arc<DB> {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
-    type Opts = <DB as Database>::Opts;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
@@ -71,25 +75,12 @@ impl<DB: Database> Database for Arc<DB> {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
-    }
-
-    fn open(opts: Self::Opts) -> eyre::Result<Self> {
-        <DB as Database>::open(opts).map(Arc::new)
-    }
-
-    fn init(opts: Self::Opts) -> eyre::Result<Self> {
-        <DB as Database>::init(opts).map(Arc::new)
-    }
-
-    fn open_ro(opts: Self::Opts) -> eyre::Result<Self> {
-        <DB as Database>::open_ro(opts).map(Arc::new)
     }
 }
 
 impl<DB: Database> Database for &DB {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
-    type Opts = <DB as Database>::Opts;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         <DB as Database>::tx(self)
@@ -97,17 +88,5 @@ impl<DB: Database> Database for &DB {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
-    }
-
-    fn open(_: Self::Opts) -> eyre::Result<Self> {
-        unimplemented!()
-    }
-
-    fn init(_: Self::Opts) -> eyre::Result<Self> {
-        unimplemented!()
-    }
-
-    fn open_ro(_: Self::Opts) -> eyre::Result<Self> {
-        unimplemented!()
     }
 }

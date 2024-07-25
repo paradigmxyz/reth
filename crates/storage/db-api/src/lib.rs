@@ -80,4 +80,4 @@ mod scale;
 
 mod utils;
 
-pub use database::Database;
+pub use database::{Database, DatabaseConfig};
