@@ -11,11 +11,11 @@ use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 #[allow(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider {
     /// The collection of executed parent blocks.
-    in_memory: Vec<ExecutedBlock>,
+    pub(crate) in_memory: Vec<ExecutedBlock>,
     /// The collection of hashed state from in-memory blocks.
-    hashed_post_state: HashedPostState,
+    pub(crate) hashed_post_state: HashedPostState,
     /// Historical state provider for state lookups that are not found in in-memory blocks.
-    historical: Box<dyn StateProvider>,
+    pub(crate) historical: Box<dyn StateProvider>,
 }
 
 impl MemoryOverlayStateProvider {

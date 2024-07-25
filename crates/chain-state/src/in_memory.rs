@@ -1,7 +1,8 @@
 //! Types for tracking the canonical chain state in memory.
 
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -10,6 +11,7 @@ use reth_primitives::{
     Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
     SealedHeader, B256,
 };
+use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::broadcast;
@@ -354,6 +356,35 @@ impl CanonicalInMemoryState {
     pub fn notify_canon_state(&self, event: CanonStateNotification) {
         self.inner.canon_state_notification_sender.send(event).ok();
     }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the requested block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider(
+        &self,
+        hash: B256,
+        historical: StateProviderBox,
+    ) -> MemoryOverlayStateProvider {
+        let mut in_memory = Vec::new();
+        let mut current_hash = hash;
+
+        if let Some(first_state) = self.state_by_hash(hash) {
+            let anchor = first_state.anchor();
+
+            while let Some(state) = self.state_by_hash(current_hash) {
+                in_memory.insert(0, state.block());
+
+                if anchor.hash == current_hash {
+                    break;
+                }
+
+                current_hash = state.block().block().parent_hash;
+            }
+        }
+
+        MemoryOverlayStateProvider::new(in_memory, historical)
+    }
 }
 
 /// State after applying the given block, this block is part of the canonical chain that partially
@@ -575,10 +606,79 @@ mod tests {
     use super::*;
     use crate::test_utils::{get_executed_block_with_number, get_executed_block_with_receipts};
     use rand::Rng;
-    use reth_primitives::Receipt;
+    use reth_errors::ProviderResult;
+    use reth_primitives::{Account, BlockNumber, Bytecode, Receipt, StorageKey, StorageValue};
+    use reth_storage_api::{
+        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    };
+    use reth_trie::AccountProof;
 
     fn create_mock_state(block_number: u64) -> BlockState {
         BlockState::new(get_executed_block_with_number(block_number, B256::random()))
+    }
+
+    struct MockStateProvider;
+
+    impl StateProvider for MockStateProvider {
+        fn storage(
+            &self,
+            _address: Address,
+            _storage_key: StorageKey,
+        ) -> ProviderResult<Option<StorageValue>> {
+            Ok(None)
+        }
+
+        fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+            Ok(None)
+        }
+    }
+
+    impl BlockHashReader for MockStateProvider {
+        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: BlockNumber,
+            _end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(vec![])
+        }
+    }
+
+    impl AccountReader for MockStateProvider {
+        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+            Ok(None)
+        }
+    }
+
+    impl StateRootProvider for MockStateProvider {
+        fn hashed_state_root(&self, _hashed_state: &HashedPostState) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
+
+        fn hashed_state_root_with_updates(
+            &self,
+            _hashed_state: &HashedPostState,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            Ok((B256::random(), TrieUpdates::default()))
+        }
+
+        fn state_root(&self, _bundle_state: &revm::db::BundleState) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
+    }
+
+    impl StateProofProvider for MockStateProvider {
+        fn hashed_proof(
+            &self,
+            _hashed_state: &HashedPostState,
+            _address: Address,
+            _slots: &[B256],
+        ) -> ProviderResult<AccountProof> {
+            Ok(AccountProof::new(Address::random()))
+        }
     }
 
     #[test]
@@ -732,5 +832,51 @@ mod tests {
         assert_eq!(state.state_by_number(0).unwrap().block().block().hash(), block2.block().hash());
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_state_provider() {
+        let block1 = get_executed_block_with_number(1, B256::random());
+        let block2 = get_executed_block_with_number(2, block1.block().hash());
+        let block3 = get_executed_block_with_number(3, block2.block().hash());
+
+        let state1 = BlockState::new(block1.clone());
+        let state2 = BlockState::with_parent(block2.clone(), Some(state1.clone()));
+        let state3 = BlockState::with_parent(block3.clone(), Some(state2.clone()));
+
+        let mut blocks = HashMap::new();
+        blocks.insert(block1.block().hash(), Arc::new(state1));
+        blocks.insert(block2.block().hash(), Arc::new(state2));
+        blocks.insert(block3.block().hash(), Arc::new(state3));
+
+        let mut numbers = HashMap::new();
+        numbers.insert(1, block1.block().hash());
+        numbers.insert(2, block2.block().hash());
+        numbers.insert(3, block3.block().hash());
+
+        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None);
+
+        let historical: StateProviderBox = Box::new(MockStateProvider);
+
+        let overlay_provider = canonical_state.state_provider(block3.block().hash(), historical);
+
+        assert_eq!(overlay_provider.in_memory.len(), 3);
+        assert_eq!(overlay_provider.in_memory[0].block().number, 1);
+        assert_eq!(overlay_provider.in_memory[1].block().number, 2);
+        assert_eq!(overlay_provider.in_memory[2].block().number, 3);
+
+        assert_eq!(
+            overlay_provider.in_memory[1].block().parent_hash,
+            overlay_provider.in_memory[0].block().hash()
+        );
+        assert_eq!(
+            overlay_provider.in_memory[2].block().parent_hash,
+            overlay_provider.in_memory[1].block().hash()
+        );
+
+        let unknown_hash = B256::random();
+        let empty_overlay_provider =
+            canonical_state.state_provider(unknown_hash, Box::new(MockStateProvider));
+        assert_eq!(empty_overlay_provider.in_memory.len(), 0);
     }
 }
