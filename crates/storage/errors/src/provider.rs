@@ -23,7 +23,7 @@ pub enum ProviderError {
     Database(#[from] crate::db::DatabaseError),
     /// RLP error.
     #[error(transparent)]
-    RLP(#[from] alloy_rlp::Error),
+    Rlp(#[from] alloy_rlp::Error),
     /// Filesystem path error.
     #[error("{0}")]
     FsPathError(String),

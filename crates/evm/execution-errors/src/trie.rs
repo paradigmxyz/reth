@@ -8,17 +8,17 @@ use thiserror_no_std::Error;
 pub enum StateProofError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] DatabaseError),
+    Database(#[from] DatabaseError),
     /// RLP decoding error.
     #[error(transparent)]
-    RLP(#[from] alloy_rlp::Error),
+    Rlp(#[from] alloy_rlp::Error),
 }
 
 impl From<StateProofError> for ProviderError {
     fn from(value: StateProofError) -> Self {
         match value {
-            StateProofError::DB(error) => Self::Database(error),
-            StateProofError::RLP(error) => Self::RLP(error),
+            StateProofError::Database(error) => Self::Database(error),
+            StateProofError::Rlp(error) => Self::Rlp(error),
         }
     }
 }
@@ -28,7 +28,7 @@ impl From<StateProofError> for ProviderError {
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] DatabaseError),
+    Database(#[from] DatabaseError),
     /// Storage root error.
     #[error(transparent)]
     StorageRootError(#[from] StorageRootError),
@@ -37,8 +37,8 @@ pub enum StateRootError {
 impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
-            StateRootError::DB(err) |
-            StateRootError::StorageRootError(StorageRootError::DB(err)) => err,
+            StateRootError::Database(err) |
+            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
         }
     }
 }
@@ -48,5 +48,5 @@ impl From<StateRootError> for DatabaseError {
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
-    DB(#[from] DatabaseError),
+    Database(#[from] DatabaseError),
 }
