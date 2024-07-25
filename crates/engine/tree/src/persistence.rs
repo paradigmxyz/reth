@@ -333,7 +333,7 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_services<DB: Database + 'static>(
+    pub fn spawn_service<DB: Database + 'static>(
         provider_factory: ProviderFactory<DB>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
@@ -420,7 +420,7 @@ mod tests {
             finished_exex_height_rx,
         );
 
-        PersistenceHandle::spawn_services(provider, pruner)
+        PersistenceHandle::spawn_service(provider, pruner)
     }
 
     #[tokio::test]
