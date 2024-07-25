@@ -108,31 +108,22 @@ impl TreeState {
         let parent_hash = executed.block.parent_hash;
         let block_number = executed.block.number;
 
-        // Check if the block already exists
         if self.blocks_by_hash.contains_key(&hash) {
-            // If the block already exists, we don't need to do anything
-            println!("block already exists");
             return;
         }
 
-        // Insert the block into blocks_by_hash
         self.blocks_by_hash.insert(hash, executed.clone());
 
-        // Update blocks_by_number
-        self.blocks_by_number.entry(block_number).or_default().push(executed.clone());
+        self.blocks_by_number.entry(block_number).or_default().push(executed);
 
-        // Update parent_to_child relationship
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
 
-        // Check if this block creates a fork
         if let Some(existing_blocks) = self.blocks_by_number.get(&block_number) {
             if existing_blocks.len() > 1 {
-                // This is a fork. We need to ensure the parent of the new block is aware of it
                 self.parent_to_child.entry(parent_hash).or_default().insert(hash);
             }
         }
 
-        // Remove any children from the parent_to_child map that are not in blocks_by_hash
         for children in self.parent_to_child.values_mut() {
             children.retain(|child| self.blocks_by_hash.contains_key(child));
         }
