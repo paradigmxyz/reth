@@ -106,19 +106,35 @@ impl TreeState {
     fn insert_executed(&mut self, executed: ExecutedBlock) {
         let hash = executed.block.hash();
         let parent_hash = executed.block.parent_hash;
+        let block_number = executed.block.number;
 
-        self.blocks_by_number.entry(executed.block.number).or_default().push(executed.clone());
-        let existing = self.blocks_by_hash.insert(hash, executed);
-        debug_assert!(existing.is_none(), "inserted duplicate block");
+        // Check if the block already exists
+        if self.blocks_by_hash.contains_key(&hash) {
+            // If the block already exists, we don't need to do anything
+            println!("block already exists");
+            return;
+        }
 
-        // Add this block as a child of its parent
+        // Insert the block into blocks_by_hash
+        self.blocks_by_hash.insert(hash, executed.clone());
+
+        // Update blocks_by_number
+        self.blocks_by_number.entry(block_number).or_default().push(executed.clone());
+
+        // Update parent_to_child relationship
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
 
-        // If this block already has children (in case of reorgs), update their parent
-        if let Some(children) = self.parent_to_child.remove(&hash) {
-            if !children.is_empty() {
-                self.parent_to_child.insert(hash, children);
+        // Check if this block creates a fork
+        if let Some(existing_blocks) = self.blocks_by_number.get(&block_number) {
+            if existing_blocks.len() > 1 {
+                // This is a fork. We need to ensure the parent of the new block is aware of it
+                self.parent_to_child.entry(parent_hash).or_default().insert(hash);
             }
+        }
+
+        // Remove any children from the parent_to_child map that are not in blocks_by_hash
+        for children in self.parent_to_child.values_mut() {
+            children.retain(|child| self.blocks_by_hash.contains_key(child));
         }
     }
 
@@ -182,33 +198,53 @@ impl TreeState {
     ///
     /// This also handles reorgs.
     fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
-        let new_head_block = self.blocks_by_hash.get(&new_head).cloned()?;
-        let mut parent = new_head_block.block.num_hash();
-        let mut new_chain = vec![new_head_block];
-        let mut reorged = vec![];
+        let mut new_chain = Vec::new();
+        let mut current_hash = new_head;
+        let mut fork_point = None;
 
-        // walk back the chain until we reach the canonical block
-        while parent.hash != self.canonical_block_hash() {
-            if parent.number == self.canonical_head().number {
-                // we have a reorg
-                todo!("handle reorg")
+        while current_hash != self.canonical_block_hash() {
+            let current_block = self.blocks_by_hash.get(&current_hash)?;
+            new_chain.push(current_block.clone());
+
+            // Check if this block's parent has multiple children
+            if let Some(children) = self.parent_to_child.get(&current_block.block.parent_hash) {
+                if children.len() > 1 ||
+                    self.canonical_block_hash() == current_block.block.parent_hash
+                {
+                    // We've found a fork point
+                    fork_point = Some(current_block.block.parent_hash);
+                    break;
+                }
             }
-            let parent_block = self.blocks_by_hash.get(&parent.hash).cloned()?;
-            parent = parent_block.block.num_hash();
-            new_chain.push(parent_block);
+
+            current_hash = current_block.block.parent_hash;
         }
 
-        // reverse the chains
         new_chain.reverse();
-        reorged.reverse();
 
-        let chain = if reorged.is_empty() {
-            NewCanonicalChain::Commit { new: new_chain }
+        // If we found a fork point, collect the reorged blocks
+        let reorged = if let Some(fork_hash) = fork_point {
+            let mut reorged = Vec::new();
+            let mut current_hash = self.current_canonical_head.hash;
+            while current_hash != fork_hash {
+                if let Some(block) = self.blocks_by_hash.get(&current_hash) {
+                    reorged.push(block.clone());
+                    current_hash = block.block.parent_hash;
+                } else {
+                    return None; // Unable to find reorg path
+                }
+            }
+            reorged.reverse();
+            reorged
         } else {
-            NewCanonicalChain::Reorg { new: new_chain, old: reorged }
+            Vec::new()
         };
 
-        Some(chain)
+        if reorged.is_empty() {
+            Some(NewCanonicalChain::Commit { new: new_chain })
+        } else {
+            Some(NewCanonicalChain::Reorg { new: new_chain, old: reorged })
+        }
     }
 }
 
@@ -1514,7 +1550,10 @@ mod tests {
     use crate::persistence::PersistenceAction;
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::EthBeaconConsensus;
-    use reth_chain_state::{test_utils::get_executed_blocks, BlockState};
+    use reth_chain_state::{
+        test_utils::{get_executed_block_with_number, get_executed_blocks},
+        BlockState,
+    };
     use reth_chainspec::{ChainSpecBuilder, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
@@ -1765,6 +1804,41 @@ mod tests {
         assert!(!tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
     }
 
+    #[test]
+    fn test_tree_state_insert_executed_with_reorg() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+        assert_eq!(tree_state.blocks_by_hash.len(), 5);
+
+        let fork_block_3 = get_executed_block_with_number(3, blocks[1].block.hash());
+        let fork_block_4 = get_executed_block_with_number(4, fork_block_3.block.hash());
+        let fork_block_5 = get_executed_block_with_number(5, fork_block_4.block.hash());
+
+        tree_state.insert_executed(fork_block_3.clone());
+        tree_state.insert_executed(fork_block_4.clone());
+        tree_state.insert_executed(fork_block_5.clone());
+
+        assert_eq!(tree_state.blocks_by_hash.len(), 8);
+        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original and fork)
+        assert_eq!(tree_state.parent_to_child[&blocks[1].block.hash()].len(), 2); // block 2 should have two children
+
+        // verify that we can insert the same block again without issues
+        tree_state.insert_executed(fork_block_4.clone());
+        assert_eq!(tree_state.blocks_by_hash.len(), 8);
+
+        assert!(tree_state.parent_to_child[&fork_block_3.block.hash()]
+            .contains(&fork_block_4.block.hash()));
+        assert!(tree_state.parent_to_child[&fork_block_4.block.hash()]
+            .contains(&fork_block_5.block.hash()));
+
+        assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
+        assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
+    }
+
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
@@ -1802,5 +1876,49 @@ mod tests {
             tree_state.parent_to_child.get(&blocks[3].block.hash()),
             Some(&HashSet::from([blocks[4].block.hash()]))
         );
+    }
+
+    #[test]
+    fn test_tree_state_on_new_head() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        // set block 3 as the current canonical head
+        tree_state.set_canonical_head(blocks[2].block.num_hash());
+
+        // create a fork from block 2
+        let fork_block_3 = get_executed_block_with_number(3, blocks[1].block.hash());
+        let fork_block_4 = get_executed_block_with_number(4, fork_block_3.block.hash());
+        let fork_block_5 = get_executed_block_with_number(5, fork_block_4.block.hash());
+
+        tree_state.insert_executed(fork_block_3.clone());
+        tree_state.insert_executed(fork_block_4.clone());
+        tree_state.insert_executed(fork_block_5.clone());
+
+        // normal (non-reorg) case
+        let result = tree_state.on_new_head(blocks[4].block.hash());
+        assert!(matches!(result, Some(NewCanonicalChain::Commit { .. })));
+        if let Some(NewCanonicalChain::Commit { new }) = result {
+            assert_eq!(new.len(), 2);
+            assert_eq!(new[0].block.hash(), blocks[3].block.hash());
+            assert_eq!(new[1].block.hash(), blocks[4].block.hash());
+        }
+
+        // reorg case
+        let result = tree_state.on_new_head(fork_block_5.block.hash());
+        assert!(matches!(result, Some(NewCanonicalChain::Reorg { .. })));
+        if let Some(NewCanonicalChain::Reorg { new, old }) = result {
+            assert_eq!(new.len(), 3);
+            assert_eq!(new[0].block.hash(), fork_block_3.block.hash());
+            assert_eq!(new[1].block.hash(), fork_block_4.block.hash());
+            assert_eq!(new[2].block.hash(), fork_block_5.block.hash());
+
+            assert_eq!(old.len(), 1);
+            assert_eq!(old[0].block.hash(), blocks[2].block.hash());
+        }
     }
 }

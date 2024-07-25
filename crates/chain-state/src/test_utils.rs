@@ -25,11 +25,12 @@ fn get_executed_block(
     let mut header = block.header.clone();
     header.number = block_number;
     header.parent_hash = parent_hash;
+    header.ommers_hash = B256::random();
     block.header = header;
-    let sender = Address::random();
     let tx = TransactionSigned::default();
     block.body.push(tx);
     let sealed = block.seal_slow();
+    let sender = Address::random();
     let sealed_with_senders = SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
     ExecutedBlock::new(
         Arc::new(sealed),
