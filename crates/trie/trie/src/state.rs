@@ -10,10 +10,6 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
 };
-<<<<<<< HEAD
-=======
-use reth_execution_errors::trie::StateProofError;
->>>>>>> c037d34cb (clippy)
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use revm::db::BundleAccount;
 use std::collections::{hash_map, HashMap, HashSet};

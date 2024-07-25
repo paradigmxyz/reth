@@ -7,18 +7,14 @@ use crate::{
     HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
-<<<<<<< HEAD
-use reth_execution_errors::{StateRootError, StorageRootError};
-=======
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::trie::StateProofError;
->>>>>>> a92a97ac2 (feat(trie): multiproof)
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
+use reth_primitives::{keccak256, Address, B256};
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 /// A struct for generating merkle proofs.
 ///
@@ -37,7 +33,6 @@ pub struct Proof<T, H> {
     targets: HashMap<B256, Vec<B256>>,
 }
 
-<<<<<<< HEAD
 impl<T, H> Proof<T, H> {
     /// Create a new [Proof] instance.
     pub fn new(t: T, h: H) -> Self {
@@ -45,34 +40,17 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory: t,
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
-=======
-impl<'a, TX, H> Proof<'a, TX, H> {
-    /// Creates a new proof generator.
-    pub fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
-        Self {
-            tx,
-            hashed_cursor_factory,
-            prefix_sets: TriePrefixSetsMut::default(),
             targets: HashMap::default(),
->>>>>>> a92a97ac2 (feat(trie): multiproof)
         }
     }
 
     /// Set the hashed cursor factory.
-<<<<<<< HEAD
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF> {
         Proof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
-=======
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<'a, TX, HF> {
-        Proof {
-            tx: self.tx,
-            hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
             targets: self.targets,
->>>>>>> a92a97ac2 (feat(trie): multiproof)
         }
     }
 
