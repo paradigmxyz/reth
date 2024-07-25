@@ -7,7 +7,7 @@ use revm_primitives::EVMError;
 /// Helper trait to wrap core [`EthApiError`].
 pub trait FromEthApiError: From<EthApiError> {
     /// Converts from error via [`EthApiError`].
-    fn from_err<E>(err: E) -> Self
+    fn from_eth_err<E>(err: E) -> Self
     where
         EthApiError: From<E>;
 }
