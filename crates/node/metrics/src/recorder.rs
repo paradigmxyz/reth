@@ -5,9 +5,14 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use once_cell::sync::Lazy;
 
+/// Installs the Prometheus recorder as the global recorder.
+pub fn install_prometheus_recorder() -> &'static PrometheusHandle {
+    &PROMETHEUS_RECORDER_HANDLE
+}
+
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
-pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
+static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
     Lazy::new(|| PrometheusRecorder::install().unwrap());
 
 /// Prometheus recorder installer

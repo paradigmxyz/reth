@@ -1,6 +1,6 @@
 use crate::{
     hooks::{Hook, Hooks},
-    recorder::PROMETHEUS_RECORDER_HANDLE,
+    recorder::install_prometheus_recorder,
     version::VersionInfo,
 };
 use eyre::WrapErr;
@@ -97,7 +97,7 @@ impl MetricServer {
                     }
                 };
 
-                let handle = PROMETHEUS_RECORDER_HANDLE.clone();
+                let handle = install_prometheus_recorder();
                 let hook = hook.clone();
                 let service = tower::service_fn(move |_| {
                     (hook)();
