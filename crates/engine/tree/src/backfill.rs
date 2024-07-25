@@ -139,7 +139,10 @@ where
             }
         };
         let ev = match res {
-            Ok((_, result)) => BackfillEvent::Finished(result),
+            Ok((pipeline, result)) => {
+                self.pipeline_state = PipelineState::Idle(Some(pipeline));
+                BackfillEvent::Finished(result)
+            }
             Err(why) => {
                 // failed to receive the pipeline
                 BackfillEvent::TaskDropped(why.to_string())
