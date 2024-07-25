@@ -339,10 +339,6 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Returns the configured [`PruneConfig`]
     pub fn prune_config(&self) -> Option<PruneConfig> {
-        let config = self.node_config().prune_config();
-        if config.is_some() {
-            return config
-        }
         self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
