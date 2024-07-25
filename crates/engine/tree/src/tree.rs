@@ -359,6 +359,27 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
+/// Represents the state of the backfill synchronization process.
+#[derive(Debug, PartialEq, Eq, Default)]
+enum BackfillSyncState {
+    /// The node is not performing any backfill synchronization.
+    /// This is the initial or default state.
+    #[default]
+    Idle,
+    /// A backfill synchronization has been requested or planned, but processing has not started
+    /// yet.
+    Pending,
+    /// The node is actively engaged in backfill synchronization.
+    Active,
+}
+
+impl BackfillSyncState {
+    /// Returns true if the state is active.
+    const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
 /// The engine API tree handler implementation.
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
@@ -379,8 +400,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     persistence: PersistenceHandle,
     /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
-    /// Flag indicating whether the node is currently syncing via backfill.
-    is_backfill_active: bool,
+    /// Flag indicating the state of the node's backfill synchronization process.
+    is_backfill_active: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
@@ -417,7 +438,7 @@ where
             outgoing,
             persistence,
             persistence_state: PersistenceState::default(),
-            is_backfill_active: false,
+            is_backfill_active: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
             payload_builder,
@@ -509,7 +530,7 @@ where
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "consensus::engine", "received backfill sync started event");
-                    self.is_backfill_active = true;
+                    self.is_backfill_active = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl);
@@ -563,7 +584,7 @@ where
     /// This will also try to connect the buffered blocks.
     fn on_backfill_sync_finished(&mut self, ctrl: ControlFlow) {
         debug!(target: "consensus::engine", "received backfill sync finished event");
-        self.is_backfill_active = false;
+        self.is_backfill_active = BackfillSyncState::Idle;
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
@@ -1043,7 +1064,7 @@ where
             return None
         }
 
-        if self.is_backfill_active {
+        if self.is_backfill_active.is_active() {
             return None
         }
 
@@ -1243,7 +1264,7 @@ where
             return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
-        if self.is_backfill_active {
+        if self.is_backfill_active.is_active() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
@@ -1398,7 +1419,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let status = if self.is_backfill_active {
+        let status = if self.is_backfill_active.is_active() {
             self.buffer_block_without_senders(block).unwrap();
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
@@ -1733,7 +1754,7 @@ mod tests {
             get_default_test_harness(PERSISTENCE_THRESHOLD);
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.is_backfill_active = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::ForkchoiceUpdated {
@@ -1762,7 +1783,7 @@ mod tests {
             TestHarness::holesky();
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.is_backfill_active = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {
