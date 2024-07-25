@@ -78,16 +78,15 @@ impl<DB: Database> PersistenceService<DB> {
             // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
             // TODO: do we provide a static file producer here?
-            execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
+            let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
-                // TODO: use single storage writer in task when sf / db tasks are combined
-                let storage_writer = StorageWriter::new(Some(&provider_rw), None);
                 storage_writer.write_hashed_state(&hashed_state.clone().into_sorted())?;
-                trie_updates.write_to_database(provider_rw.tx_ref())?;
+                storage_writer.write_trie_updates(&trie_updates)?;
             }
 
             // update history indices
@@ -186,7 +185,7 @@ impl<DB: Database> PersistenceService<DB> {
         let receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
 
-        let storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
+        let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
         let receipts_iter = blocks.iter().map(|block| {
             let receipts = block.execution_outcome().receipts().receipt_vec.clone();
             debug_assert!(receipts.len() == 1);
@@ -443,7 +442,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
         let block_number = 0;
-        let executed = get_executed_block_with_number(block_number);
+        let executed = get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.block().hash();
 
         let blocks = vec![executed];
