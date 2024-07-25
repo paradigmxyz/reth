@@ -12,7 +12,7 @@ use reth_rpc_types::{error::EthRpcErrorCode, IntoRpcError};
 pub enum OpEthApiError {
     /// L1 ethereum error.
     #[error(transparent)]
-    Core(#[from] EthApiError),
+    Eth(#[from] EthApiError),
     /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,
@@ -27,7 +27,7 @@ pub enum OpEthApiError {
 impl IntoRpcError for OpEthApiError {
     fn into_rpc_err(self) -> ErrorObject<'static> {
         match self {
-            Self::Core(err) => err.into_rpc_err(),
+            Self::Eth(err) => err.into_rpc_err(),
             Self::L1BlockFeeError | Self::L1BlockGasError => internal_rpc_err(self.to_string()),
             Self::InvalidTransaction(err) => err.into_rpc_err(),
         }
@@ -37,7 +37,7 @@ impl IntoRpcError for OpEthApiError {
 impl AsEthApiError for OpEthApiError {
     fn as_err(&self) -> Option<&EthApiError> {
         match self {
-            Self::Core(err) => Some(err),
+            Self::Eth(err) => Some(err),
             _ => None,
         }
     }
