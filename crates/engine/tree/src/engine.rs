@@ -84,7 +84,7 @@ where
                                 // bubble up the event
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
-                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError)
+                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
                         }
                     }
                     RequestHandlerEvent::Download(req) => {
