@@ -1,5 +1,5 @@
 use crate::{
-    backfill::BackfillAction,
+    backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
@@ -357,32 +357,6 @@ impl TreeEvent {
 pub enum TreeAction {
     /// Make target canonical.
     MakeCanonical(B256),
-}
-
-/// Represents the state of the backfill synchronization process.
-#[derive(Debug, PartialEq, Eq, Default)]
-enum BackfillSyncState {
-    /// The node is not performing any backfill synchronization.
-    /// This is the initial or default state.
-    #[default]
-    Idle,
-    /// A backfill synchronization has been requested or planned, but processing has not started
-    /// yet.
-    Pending,
-    /// The node is actively engaged in backfill synchronization.
-    Active,
-}
-
-impl BackfillSyncState {
-    /// Returns true if the state is idle.
-    const fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle)
-    }
-
-    /// Returns true if the state is active.
-    const fn is_active(&self) -> bool {
-        matches!(self, Self::Active)
-    }
 }
 
 /// The engine API tree handler implementation.
