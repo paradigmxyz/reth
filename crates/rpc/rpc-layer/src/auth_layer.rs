@@ -106,7 +106,7 @@ where
 #[pin_project]
 #[allow(missing_debug_implementations)]
 pub struct ResponseFuture<F> {
-    /// The kind of response future, pinned for async operations
+    /// The kind of response future, error or pending
     #[pin]
     kind: Kind<F>,
 }
