@@ -543,8 +543,7 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // this is a reporting no-op because the engine API impl does not need
-                    // additional input to handle this request
+                    // triggering this hook will allow us to register the timestamp when we receive FCUs 
                     self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
