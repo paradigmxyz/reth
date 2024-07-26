@@ -76,7 +76,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx, hashed_state)
+        StateRoot::overlay_root(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -84,7 +84,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx, hashed_state)
+        StateRoot::overlay_root_with_updates(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
