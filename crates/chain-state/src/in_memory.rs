@@ -699,26 +699,22 @@ mod tests {
     }
 
     impl StateRootProvider for MockStateProvider {
-        fn hashed_state_root(&self, _hashed_state: &HashedPostState) -> ProviderResult<B256> {
+        fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
         fn hashed_state_root_with_updates(
             &self,
-            _hashed_state: &HashedPostState,
+            _hashed_state: HashedPostState,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
-        }
-
-        fn state_root(&self, _bundle_state: &revm::db::BundleState) -> ProviderResult<B256> {
-            Ok(B256::random())
         }
     }
 
     impl StateProofProvider for MockStateProvider {
         fn hashed_proof(
             &self,
-            _hashed_state: &HashedPostState,
+            _hashed_state: HashedPostState,
             _address: Address,
             _slots: &[B256],
         ) -> ProviderResult<AccountProof> {
