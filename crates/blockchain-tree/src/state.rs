@@ -113,7 +113,7 @@ impl TreeState {
 
 /// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct BlockchainId(u64);
+pub(crate) struct BlockchainId(u64);
 
 impl From<BlockchainId> for u64 {
     fn from(value: BlockchainId) -> Self {

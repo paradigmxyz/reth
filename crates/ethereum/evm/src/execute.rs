@@ -24,7 +24,7 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats},
+    batch::BlockBatchRecord,
     db::states::bundle_state::BundleRetention,
     state_change::{apply_blockhashes_update, post_block_balance_increments},
     Evm, State,
@@ -103,11 +103,7 @@ where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let executor = self.eth_executor(db);
-        EthBatchExecutor {
-            executor,
-            batch_record: BlockBatchRecord::default(),
-            stats: BlockExecutorStats::default(),
-        }
+        EthBatchExecutor { executor, batch_record: BlockBatchRecord::default() }
     }
 }
 
@@ -401,7 +397,6 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
     executor: EthBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and records receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
-    stats: BlockExecutorStats,
 }
 
 impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
@@ -446,8 +441,6 @@ where
     }
 
     fn finalize(mut self) -> Self::Output {
-        self.stats.log_debug();
-
         ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),

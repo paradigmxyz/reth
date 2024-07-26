@@ -12,14 +12,9 @@ pub mod args;
 pub mod cli;
 pub mod dirs;
 pub mod exit;
-pub mod metrics;
 pub mod node_config;
 pub mod utils;
 pub mod version;
-
-// Re-export for backwards compatibility.
-pub use metrics::prometheus_exporter;
-
 /// Re-exported from `reth_primitives`.
 pub mod primitives {
     pub use reth_primitives::*;

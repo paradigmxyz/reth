@@ -6,6 +6,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineHandle,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
@@ -30,7 +31,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -171,6 +172,8 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
+        let tree_config = TreeConfig::default().with_persistence_threshold(120);
+
         // Configure the consensus engine
         let mut eth_service = EthService::new(
             ctx.chain_spec(),
@@ -182,6 +185,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder().clone(),
+            tree_config,
         );
 
         let event_sender = EventSender::default();
@@ -249,13 +253,15 @@ where
         // Run consensus engine to completion
         let network_handle = ctx.components().network().clone();
         let chainspec = ctx.chain_spec();
-        let (tx, rx) = oneshot::channel();
+        let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 eth_service.orchestrator_mut().start_backfill_sync(initial_target);
             }
+
+            let mut res = Ok(());
 
             // advance the chain and handle events
             while let Some(event) = eth_service.next().await {
@@ -267,7 +273,11 @@ where
                     ChainEvent::BackfillSyncStarted => {
                         network_handle.update_sync_state(SyncState::Syncing);
                     }
-                    ChainEvent::FatalError => break,
+                    ChainEvent::FatalError => {
+                        error!(target: "reth::cli", "Fatal error in consensus engine");
+                        res = Err(eyre::eyre!("Fatal error in consensus engine"));
+                        break
+                    }
                     ChainEvent::Handler(ev) => {
                         if let Some(head) = ev.canonical_header() {
                             let head_block = Head {
@@ -285,7 +295,8 @@ where
                     }
                 }
             }
-            let _ = tx.send(());
+
+            let _ = exit.send(res);
         });
 
         let full_node = FullNode {
@@ -306,7 +317,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { Ok(rx.await?) },
+                async { rx.await? },
                 full_node.config.debug.terminate,
             ),
             node: full_node,

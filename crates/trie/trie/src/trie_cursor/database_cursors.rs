@@ -13,14 +13,31 @@ use reth_db_api::{
 use reth_primitives::B256;
 use reth_trie_common::StorageTrieEntry;
 
+/// Wrapper struct for database transaction implementing trie cursor factory trait.
+#[derive(Debug)]
+pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+
+impl<'a, TX> Clone for DatabaseTrieCursorFactory<'a, TX> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
+
+impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
+    /// Create new [`DatabaseTrieCursorFactory`].
+    pub const fn new(tx: &'a TX) -> Self {
+        Self(tx)
+    }
+}
+
 /// Implementation of the trie cursor factory for a database transaction.
-impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
+impl<'a, TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'a, TX> {
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?))
+        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
@@ -28,7 +45,7 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
-            self.cursor_dup_read::<tables::StoragesTrie>()?,
+            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         ))
     }

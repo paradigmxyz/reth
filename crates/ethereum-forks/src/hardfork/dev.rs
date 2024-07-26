@@ -31,5 +31,7 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (crate::OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         #[cfg(feature = "optimism")]
         (crate::OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
+        #[cfg(feature = "optimism")]
+        (crate::OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
     ])
 });

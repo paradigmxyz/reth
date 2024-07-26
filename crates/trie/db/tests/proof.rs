@@ -10,7 +10,7 @@ use reth_provider::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{proof::Proof, Nibbles, StateRoot};
 use reth_trie_common::{AccountProof, StorageProof};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
 use std::{str::FromStr, sync::Arc};
 
 /*

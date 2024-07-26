@@ -5,7 +5,7 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::state_root_prehashed,
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
     StateRoot,
 };
 use reth_trie_common::Nibbles;
@@ -18,7 +18,7 @@ proptest! {
     })]
 
     #[test]
-    fn fuzz_in_memory_nodes(mut init_state: BTreeMap<B256, U256>, mut updated_state: BTreeMap<B256, U256>) {
+    fn fuzz_in_memory_nodes(mut init_state: BTreeMap<B256, U256>, state_updates: [BTreeMap<B256, U256>; 10]) {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let mut hashed_account_cursor = provider.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
@@ -29,31 +29,38 @@ proptest! {
         }
 
         // Compute initial root and updates
-        let (_, trie_updates) = StateRoot::from_tx(provider.tx_ref())
-        .root_with_updates()
-        .unwrap();
-
-        // Insert state updates into database
-        let mut changes = PrefixSetMut::default();
-        for (hashed_address, balance) in updated_state.clone() {
-            hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
-            changes.insert(Nibbles::unpack(hashed_address));
-        }
-
-        // Compute root with in-memory trie nodes overlay
-        let (state_root, _) = StateRoot::from_tx(provider.tx_ref())
-            .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(provider.tx_ref(), &trie_updates.into_sorted()))
+        let (_, mut trie_nodes) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .unwrap();
 
-        // Verify the result
-        let mut state = BTreeMap::default();
-        state.append(&mut init_state);
-        state.append(&mut updated_state);
-        let expected_root = state_root_prehashed(
-            state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
-        );
-        assert_eq!(expected_root, state_root);
+        let mut state = init_state;
+        for mut state_update in state_updates {
+             // Insert state updates into database
+            let mut changes = PrefixSetMut::default();
+            for (hashed_address, balance) in state_update.clone() {
+                hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
+                changes.insert(Nibbles::unpack(hashed_address));
+            }
+
+            // Compute root with in-memory trie nodes overlay
+            let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
+                .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
+                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()), &trie_nodes.clone().into_sorted())
+                )
+                .root_with_updates()
+                .unwrap();
+
+            trie_nodes.extend(trie_updates);
+
+            // Verify the result
+            state.append(&mut state_update);
+            let expected_root = state_root_prehashed(
+                state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
+            );
+            assert_eq!(expected_root, state_root);
+        }
+
+
     }
 }

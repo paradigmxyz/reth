@@ -2,8 +2,11 @@
 
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_api::helpers::{EthApiSpec, EthBlocks, LoadBlock, LoadReceipt, LoadTransaction};
-use reth_rpc_eth_types::{EthResult, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_api::{
+    helpers::{EthApiSpec, EthBlocks, LoadBlock, LoadReceipt, LoadTransaction},
+    FromEthApiError,
+};
+use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
 use crate::{op_receipt_fields, OpEthApi};
@@ -19,7 +22,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<Vec<AnyTransactionReceipt>>>
+    ) -> Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>
     where
         Self: LoadReceipt,
     {
@@ -52,11 +55,13 @@ where
                     let optimism_tx_meta =
                         self.build_op_tx_meta(tx, l1_block_info.clone(), timestamp)?;
 
-                    ReceiptBuilder::new(tx, meta, receipt, &receipts).map(|builder| {
-                        op_receipt_fields(builder, tx, receipt, optimism_tx_meta).build()
-                    })
+                    ReceiptBuilder::new(tx, meta, receipt, &receipts)
+                        .map(|builder| {
+                            op_receipt_fields(builder, tx, receipt, optimism_tx_meta).build()
+                        })
+                        .map_err(Self::Error::from_eth_err)
                 })
-                .collect::<EthResult<Vec<_>>>();
+                .collect::<Result<Vec<_>, Self::Error>>();
             return receipts.map(Some)
         }
 

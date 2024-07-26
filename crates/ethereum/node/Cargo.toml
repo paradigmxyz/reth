@@ -36,6 +36,7 @@ reth-node-events.workspace = true
 reth-node-core.workspace = true
 reth-exex.workspace = true
 reth-blockchain-tree.workspace = true
+reth-engine-tree.workspace = true
 
 # misc
 eyre.workspace = true

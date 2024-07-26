@@ -1,5 +1,5 @@
 use crate::{
-    backfill::BackfillAction,
+    backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
@@ -49,13 +49,8 @@ use tokio::sync::{
 };
 use tracing::*;
 
-/// Maximum number of blocks to be kept only in memory without triggering persistence.
-const PERSISTENCE_THRESHOLD: u64 = 256;
-/// Number of pending blocks that cannot be executed due to missing parent and
-/// are kept in cache.
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
-/// Number of invalid headers to keep in cache.
-const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
+mod config;
+pub use config::TreeConfig;
 
 /// Keeps track of the state of the tree.
 ///
@@ -272,9 +267,6 @@ impl EngineApiTreeState {
 }
 
 /// The type responsible for processing engine API requests.
-///
-/// TODO: design: should the engine handler functions also accept the response channel or return the
-/// result and the caller redirects the response
 pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
@@ -382,14 +374,16 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     persistence: PersistenceHandle,
     /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
-    /// Flag indicating whether the node is currently syncing via backfill.
-    is_backfill_active: bool,
+    /// Flag indicating the state of the node's backfill synchronization process.
+    backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
+    /// Configuration settings.
+    config: TreeConfig,
 }
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
@@ -410,6 +404,7 @@ where
         canonical_in_memory_state: CanonicalInMemoryState,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
+        config: TreeConfig,
     ) -> Self {
         Self {
             provider,
@@ -420,10 +415,11 @@ where
             outgoing,
             persistence,
             persistence_state: PersistenceState::default(),
-            is_backfill_active: false,
+            backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
             payload_builder,
+            config,
         }
     }
 
@@ -440,14 +436,15 @@ where
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
+        config: TreeConfig,
     ) -> UnboundedReceiver<EngineApiEvent> {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
         let state = EngineApiTreeState::new(
-            DEFAULT_BLOCK_BUFFER_LIMIT,
-            DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+            config.block_buffer_limit(),
+            config.max_invalid_header_cache_length(),
             header.num_hash(),
         );
 
@@ -462,6 +459,7 @@ where
             canonical_in_memory_state,
             persistence,
             payload_builder,
+            config,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -512,7 +510,7 @@ where
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "consensus::engine", "received backfill sync started event");
-                    self.is_backfill_active = true;
+                    self.backfill_sync_state = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl);
@@ -546,8 +544,8 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // this is a reporting no-op because the engine API impl does not need
-                    // additional input to handle this request
+                    // triggering this hook will record that we received a request from the CL
+                    self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
             FromEngine::DownloadedBlocks(blocks) => {
@@ -566,7 +564,7 @@ where
     /// This will also try to connect the buffered blocks.
     fn on_backfill_sync_finished(&mut self, ctrl: ControlFlow) {
         debug!(target: "consensus::engine", "received backfill sync finished event");
-        self.is_backfill_active = false;
+        self.backfill_sync_state = BackfillSyncState::Idle;
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
@@ -660,12 +658,12 @@ where
     fn should_persist(&self) -> bool {
         self.state.tree_state.max_block_number() -
             self.persistence_state.last_persisted_block_number >=
-            PERSISTENCE_THRESHOLD
+            self.config.persistence_threshold()
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let start = self.persistence_state.last_persisted_block_number;
-        let end = start + PERSISTENCE_THRESHOLD;
+        let end = start + self.config.persistence_threshold();
 
         // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
         self.state
@@ -734,7 +732,7 @@ where
         let mut parent_hash = hash;
         while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
             parent_hash = executed.block.parent_hash;
-            in_memory.insert(0, executed.clone());
+            in_memory.push(executed.clone());
         }
 
         let historical = self.provider.state_by_block_hash(parent_hash)?;
@@ -1046,7 +1044,7 @@ where
             return None
         }
 
-        if self.is_backfill_active {
+        if !self.backfill_sync_state.is_idle() {
             return None
         }
 
@@ -1246,7 +1244,7 @@ where
             return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
-        if self.is_backfill_active {
+        if !self.backfill_sync_state.is_idle() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
@@ -1401,7 +1399,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let status = if self.is_backfill_active {
+        let status = if !self.backfill_sync_state.is_idle() {
             self.buffer_block_without_senders(block).unwrap();
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
@@ -1438,6 +1436,8 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
@@ -1473,7 +1473,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
-            trace!(target: "engine", "applying new chain update");
+            trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
             // update the tracked canonical head
             self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
@@ -1608,6 +1608,7 @@ mod tests {
                 canonical_in_memory_state,
                 persistence_handle,
                 payload_builder,
+                TreeConfig::default(),
             );
 
             Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx }
@@ -1676,6 +1677,7 @@ mod tests {
             canonical_in_memory_state,
             persistence_handle,
             payload_builder,
+            TreeConfig::default(),
         );
         let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(BlockState::new(last_executed_block));
@@ -1689,8 +1691,10 @@ mod tests {
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
+        let tree_config = TreeConfig::default();
+
         let TestHarness { tree, to_tree_tx, action_rx, mut blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
+            get_default_test_harness(tree_config.persistence_threshold() + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
         // send a message to the tree to enter the main loop.
@@ -1700,7 +1704,7 @@ mod tests {
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
-            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
             assert_eq!(saved_blocks, blocks);
         } else {
             panic!("unexpected action received {received_action:?}");
@@ -1732,11 +1736,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
+        let tree_config = TreeConfig::default();
+
         let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD);
+            get_default_test_harness(tree_config.persistence_threshold());
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.backfill_sync_state = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::ForkchoiceUpdated {
@@ -1765,7 +1771,7 @@ mod tests {
             TestHarness::holesky();
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.backfill_sync_state = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {

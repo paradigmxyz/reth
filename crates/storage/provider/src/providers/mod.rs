@@ -75,8 +75,6 @@ pub struct BlockchainProvider<DB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
-    // TODO: replace chain_info with CanonicalInMemoryState.
-    //canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<DB> Clone for BlockchainProvider<DB> {
@@ -85,8 +83,6 @@ impl<DB> Clone for BlockchainProvider<DB> {
             database: self.database.clone(),
             tree: self.tree.clone(),
             chain_info: self.chain_info.clone(),
-            // TODO: add canonical_in_memory_state
-            // canonical_in_memory_state: self.canonical_in_memory_state.clone(),
         }
     }
 }
@@ -97,17 +93,9 @@ impl<DB> BlockchainProvider<DB> {
     pub fn with_latest(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
-        // TODO: add in_memory_state
-        // in_memory_state: Arc<dyn InMemoryState>,
         latest: SealedHeader,
     ) -> Self {
-        Self {
-            database,
-            tree,
-            // TODO: add in_memory_state
-            // in_memory_state,
-            chain_info: ChainInfoTracker::new(latest),
-        }
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 
     /// Sets the treeviewer for the provider.

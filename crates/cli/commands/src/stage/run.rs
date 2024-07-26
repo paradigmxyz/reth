@@ -13,7 +13,15 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
-    prometheus_exporter,
+    version::{
+        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
+        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
+    },
+};
+use reth_node_metrics::{
+    hooks::Hooks,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
 };
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -99,15 +107,24 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::serve(
+            let config = MetricServerConfig::new(
                 listen_addr,
-                prometheus_exporter::install_recorder()?,
-                provider_factory.db_ref().clone(),
-                provider_factory.static_file_provider(),
-                metrics_process::Collector::default(),
+                VersionInfo {
+                    version: CARGO_PKG_VERSION,
+                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
+                    cargo_features: VERGEN_CARGO_FEATURES,
+                    git_sha: VERGEN_GIT_SHA,
+                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
+                    build_profile: BUILD_PROFILE_NAME,
+                },
                 ctx.task_executor,
-            )
-            .await?;
+                Hooks::new(
+                    provider_factory.db_ref().clone(),
+                    provider_factory.static_file_provider(),
+                ),
+            );
+
+            MetricServer::new(config).serve().await?;
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
