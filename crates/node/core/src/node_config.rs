@@ -10,7 +10,7 @@ use crate::{
     utils::get_single_header,
 };
 use metrics_exporter_prometheus::PrometheusHandle;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
@@ -30,8 +30,8 @@ use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
-pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
-    Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
+pub static PROMETHEUS_RECORDER_HANDLE: LazyLock<PrometheusHandle> =
+    LazyLock::new(|| prometheus_exporter::install_recorder().unwrap());
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.

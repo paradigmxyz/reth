@@ -7190,7 +7190,6 @@ dependencies = [
  "auto_impl",
  "crc",
  "dyn-clone",
- "once_cell",
  "proptest",
  "proptest-derive 0.5.0",
  "rustc-hash 2.0.0",
@@ -7459,7 +7458,6 @@ name = "reth-metrics-derive"
 version = "1.0.3"
 dependencies = [
  "metrics",
- "once_cell",
  "proc-macro2",
  "quote",
  "regex",
@@ -7714,7 +7712,6 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
- "once_cell",
  "procfs",
  "proptest",
  "rand 0.8.5",

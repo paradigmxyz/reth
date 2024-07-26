@@ -61,7 +61,6 @@ humantime.workspace = true
 const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
-once_cell.workspace = true
 
 # io
 dirs-next = "2.0.0"

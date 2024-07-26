@@ -6,7 +6,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
@@ -32,7 +32,7 @@ use reth_network_peers::{
 };
 
 /// The Ethereum mainnet spec
-pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
@@ -59,7 +59,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 });
 
 /// The Sepolia spec
-pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
@@ -83,7 +83,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 });
 
 /// The Holesky spec
-pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let mut spec = ChainSpec {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
@@ -108,7 +108,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 ///
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
-pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
@@ -125,7 +125,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Optimism Mainnet spec
 #[cfg(feature = "optimism")]
-pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static OP_MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::optimism_mainnet(),
         // genesis contains empty alloc field because state at first bedrock block is imported
@@ -153,7 +153,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The OP Sepolia spec
 #[cfg(feature = "optimism")]
-pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static OP_SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::from_named(NamedChain::OptimismSepolia),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
@@ -179,7 +179,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Base Sepolia spec
 #[cfg(feature = "optimism")]
-pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static BASE_SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::base_sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
@@ -205,7 +205,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Base mainnet spec
 #[cfg(feature = "optimism")]
-pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static BASE_MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/base.json"))

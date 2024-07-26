@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_db_api::database::Database;
 use reth_primitives::{
@@ -24,7 +24,7 @@ use std::{str::FromStr, sync::Arc};
 
     All expected testspec results were obtained from querying proof RPC on the running geth instance `geth init crates/trie/testdata/proof-genesis.json && geth --http`.
 */
-static TEST_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+static TEST_SPEC: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::from_id(12345),
         genesis: serde_json::from_str(include_str!("../../trie/testdata/proof-genesis.json"))
