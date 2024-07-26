@@ -10,6 +10,7 @@ mod pending_block;
 use std::{future::Future, sync::Arc};
 
 use alloy_primitives::{Address, U64};
+use alloy_rpc_types::optimism::OptimismTransactionFields;
 use op_alloy_network::Optimism;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
@@ -26,6 +27,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -60,6 +62,29 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
+}
+
+impl TransactionBuilder for OpEthApi<Eth> {
+    type Transaction = <Self::NetworkTypes as Network>::TransactionResponse;
+
+    fn fill(
+        tx: TransactionSignedEcRecovered,
+        block_hash: Option<B256>,
+        block_number: Option<BlockNumber>,
+        base_fee: Option<u64>,
+        transaction_index: Option<usize>,
+    ) -> Self::Transaction {
+        let mut resp = Eth::fill(tx, block_hash, block_number, base_fee, transaction_index);
+
+        resp.other = OptimismTransactionFields {
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint(),
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+        }
+        .into();
+
+        resp
+    }
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {

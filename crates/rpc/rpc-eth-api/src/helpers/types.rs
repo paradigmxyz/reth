@@ -2,6 +2,8 @@
 
 use std::error::Error;
 
+use alloy_network::Network;
+
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
 /// Network specific `eth` API types.
@@ -15,5 +17,5 @@ pub trait EthApiTypes: Send + Sync {
         + Send
         + Sync;
     /// Blockchain data types, specific to network, e.g. block and transaction.
-    type NetworkTypes: alloy_network::Network;
+    type NetworkTypes: Network;
 }

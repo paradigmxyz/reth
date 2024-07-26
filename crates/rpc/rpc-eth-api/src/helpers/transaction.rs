@@ -53,7 +53,7 @@ use super::{
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction {
+pub trait EthTransactions: LoadTransaction + FormatTransactionResponse {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.

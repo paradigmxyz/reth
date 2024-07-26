@@ -27,10 +27,12 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
+reth-rpc-types-compat.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-op-alloy-network = "0.1"
+alloy-rpc-types.workspace = true
+op-alloy-network.workspace = true
 revm.workspace = true
 
 # async
