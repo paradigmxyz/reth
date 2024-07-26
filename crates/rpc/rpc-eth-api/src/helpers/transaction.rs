@@ -147,14 +147,12 @@ pub trait EthTransactions: LoadTransaction {
         Self: LoadReceipt + 'static,
     {
         async move {
-            let result = self.load_transaction_and_receipt(hash).await?;
-
-            let (tx, meta, receipt) = match result {
-                Some((tx, meta, receipt)) => (tx, meta, receipt),
-                None => return Ok(None),
-            };
-
-            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            match self.load_transaction_and_receipt(hash).await? {
+                Some((tx, meta, receipt)) => {
+                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                }
+                None => Ok(None),
+            }
         }
     }
 
