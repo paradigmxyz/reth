@@ -455,8 +455,8 @@ impl BlockState {
             .unwrap_or_default()
     }
 
-    /// Returns a vector of parent BlockStates
-    pub fn parent_state_chain(&self) -> Vec<&BlockState> {
+    /// Returns a vector of parent `BlockStates`.
+    pub fn parent_state_chain(&self) -> Vec<&Self> {
         let mut parents = Vec::new();
         let mut current = self.parent.as_deref();
 
@@ -468,9 +468,9 @@ impl BlockState {
         parents
     }
 
-    /// Returns a vector of BlockStates representing the entire chain,
-    /// including self as the first element
-    pub fn chain(&self) -> Vec<&BlockState> {
+    /// Returns a vector of `BlockStates` representing the entire in memory chain,
+    /// including self as the first element.
+    pub fn chain(&self) -> Vec<&Self> {
         let mut chain = self.parent_state_chain();
         chain.insert(0, self);
         chain
