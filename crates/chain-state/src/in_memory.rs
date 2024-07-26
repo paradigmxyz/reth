@@ -455,13 +455,13 @@ impl BlockState {
             .unwrap_or_default()
     }
 
-    /// Returns a vector of parent `BlockStates` starting from the oldest one.
+    /// Returns a vector of parent `BlockStates` starting from the newest one.
     pub fn parent_state_chain(&self) -> Vec<&Self> {
         let mut parents = Vec::new();
         let mut current = self.parent.as_deref();
 
         while let Some(parent) = current {
-            parents.insert(0, parent);
+            parents.push(parent);
             current = parent.parent.as_deref();
         }
 
@@ -469,10 +469,10 @@ impl BlockState {
     }
 
     /// Returns a vector of `BlockStates` representing the entire in memory chain,
-    /// including self as the last element.
+    /// including self as the first element.
     pub fn chain(&self) -> Vec<&Self> {
         let mut chain = self.parent_state_chain();
-        chain.push(self);
+        chain.insert(0, self);
         chain
     }
 }
@@ -889,17 +889,17 @@ mod tests {
         let overlay_provider = canonical_state.state_provider(block3.block().hash(), historical);
 
         assert_eq!(overlay_provider.in_memory.len(), 3);
-        assert_eq!(overlay_provider.in_memory[0].block().number, 1);
+        assert_eq!(overlay_provider.in_memory[0].block().number, 3);
         assert_eq!(overlay_provider.in_memory[1].block().number, 2);
-        assert_eq!(overlay_provider.in_memory[2].block().number, 3);
+        assert_eq!(overlay_provider.in_memory[2].block().number, 1);
 
         assert_eq!(
-            overlay_provider.in_memory[1].block().parent_hash,
-            overlay_provider.in_memory[0].block().hash()
+            overlay_provider.in_memory[0].block().parent_hash,
+            overlay_provider.in_memory[1].block().hash()
         );
         assert_eq!(
-            overlay_provider.in_memory[2].block().parent_hash,
-            overlay_provider.in_memory[1].block().hash()
+            overlay_provider.in_memory[1].block().parent_hash,
+            overlay_provider.in_memory[2].block().hash()
         );
 
         let unknown_hash = B256::random();
@@ -914,14 +914,14 @@ mod tests {
 
         let parents = chain[3].parent_state_chain();
         assert_eq!(parents.len(), 3);
-        assert_eq!(parents[0].block().block.number, 1);
+        assert_eq!(parents[0].block().block.number, 3);
         assert_eq!(parents[1].block().block.number, 2);
-        assert_eq!(parents[2].block().block.number, 3);
+        assert_eq!(parents[2].block().block.number, 1);
 
         let parents = chain[2].parent_state_chain();
         assert_eq!(parents.len(), 2);
-        assert_eq!(parents[0].block().block.number, 1);
-        assert_eq!(parents[1].block().block.number, 2);
+        assert_eq!(parents[0].block().block.number, 2);
+        assert_eq!(parents[1].block().block.number, 1);
 
         let parents = chain[0].parent_state_chain();
         assert_eq!(parents.len(), 0);
@@ -948,14 +948,14 @@ mod tests {
 
         let block_state_chain = chain[2].chain();
         assert_eq!(block_state_chain.len(), 3);
-        assert_eq!(block_state_chain[0].block().block.number, 1);
+        assert_eq!(block_state_chain[0].block().block.number, 3);
         assert_eq!(block_state_chain[1].block().block.number, 2);
-        assert_eq!(block_state_chain[2].block().block.number, 3);
+        assert_eq!(block_state_chain[2].block().block.number, 1);
 
         let block_state_chain = chain[1].chain();
         assert_eq!(block_state_chain.len(), 2);
-        assert_eq!(block_state_chain[0].block().block.number, 1);
-        assert_eq!(block_state_chain[1].block().block.number, 2);
+        assert_eq!(block_state_chain[0].block().block.number, 2);
+        assert_eq!(block_state_chain[1].block().block.number, 1);
 
         let block_state_chain = chain[0].chain();
         assert_eq!(block_state_chain.len(), 1);
