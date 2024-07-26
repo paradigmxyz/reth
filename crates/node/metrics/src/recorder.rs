@@ -3,7 +3,7 @@
 use eyre::WrapErr;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Installs the Prometheus recorder as the global recorder.
 pub fn install_prometheus_recorder() -> &'static PrometheusHandle {
@@ -12,8 +12,8 @@ pub fn install_prometheus_recorder() -> &'static PrometheusHandle {
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
-static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
-    Lazy::new(|| PrometheusRecorder::install().unwrap());
+static PROMETHEUS_RECORDER_HANDLE: LazyLock<PrometheusHandle> =
+    LazyLock::new(|| PrometheusRecorder::install().unwrap());
 
 /// Prometheus recorder installer
 #[derive(Debug)]

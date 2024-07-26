@@ -1,7 +1,7 @@
 use metrics::{
     Counter, Gauge, Histogram, Key, KeyName, Label, Metadata, Recorder, SharedString, Unit,
 };
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use reth_metrics_derive::Metrics;
 use serial_test::serial;
 use std::{collections::HashMap, sync::Mutex};
@@ -58,7 +58,7 @@ struct DynamicScopeMetrics {
     skipped_field_e: u128,
 }
 
-static RECORDER: Lazy<TestRecorder> = Lazy::new(TestRecorder::new);
+static RECORDER: LazyLock<TestRecorder> = LazyLock::new(TestRecorder::new);
 
 fn test_describe(scope: &str) {
     assert_eq!(RECORDER.metrics_len(), 4);

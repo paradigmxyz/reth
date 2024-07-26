@@ -11,7 +11,7 @@ use alloy_rlp::{
 use bytes::Buf;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
@@ -76,8 +76,8 @@ pub type TxHashOrNumber = BlockHashOrNumber;
 
 // Expected number of transactions where we can expect a speed-up by recovering the senders in
 // parallel.
-pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
-    Lazy::new(|| match rayon::current_num_threads() {
+pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
         _ => 5,

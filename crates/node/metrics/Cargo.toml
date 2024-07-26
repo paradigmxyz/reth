@@ -20,8 +20,6 @@ metrics-util.workspace = true
 
 tokio.workspace = true
 
-once_cell.workspace = true
-
 jsonrpsee = { workspace = true, features = ["server"] }
 http.workspace = true
 tower.workspace = true

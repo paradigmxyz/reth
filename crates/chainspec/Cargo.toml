@@ -29,7 +29,6 @@ op-alloy-rpc-types = { workspace = true, optional = true }
 
 
 # misc
-once_cell.workspace = true
 serde = { workspace = true, optional = true }
 serde_json.workspace = true
 derive_more.workspace = true

@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use reth_chainspec::{Chain, MAINNET};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
@@ -25,7 +25,7 @@ use tokio::net::TcpStream;
 type AuthedP2PStream = P2PStream<ECIESStream<TcpStream>>;
 type AuthedEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>>;
 
-pub static MAINNET_BOOT_NODES: Lazy<Vec<NodeRecord>> = Lazy::new(mainnet_nodes);
+pub static MAINNET_BOOT_NODES: LazyLock<Vec<NodeRecord>> = LazyLock::new(mainnet_nodes);
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
