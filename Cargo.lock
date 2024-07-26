@@ -7765,6 +7765,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
+ "reth-engine-tree",
  "reth-ethereum-engine",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
