@@ -4,6 +4,7 @@ use reth_primitives::{BlockNumber, B256};
 use reth_trie::{
     hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
     prefix_set::PrefixSetLoader,
+    trie_cursor::DatabaseTrieCursorFactory,
     updates::TrieUpdates,
     HashedPostState, StateRoot, StateRootProgress,
 };
@@ -103,10 +104,10 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
-    for StateRoot<&'a TX, DatabaseHashedCursorFactory<'a, TX>>
+    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
+        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn incremental_root_calculator(
@@ -145,7 +146,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let sorted = post_state.into_sorted();
         StateRoot::new(
-            tx,
+            DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted),
         )
         .with_prefix_sets(prefix_sets)
@@ -159,7 +160,7 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let sorted = post_state.into_sorted();
         StateRoot::new(
-            tx,
+            DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted),
         )
         .with_prefix_sets(prefix_sets)
