@@ -366,14 +366,11 @@ impl CanonicalInMemoryState {
         hash: B256,
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider {
-        let mut in_memory = Vec::new();
-        let mut current_state = self.state_by_hash(hash);
-
-        while let Some(state) = current_state {
-            in_memory.insert(0, state.block());
-
-            current_state = state.parent.as_ref().map(|parent| Arc::new(*parent.clone()));
-        }
+        let in_memory = if let Some(state) = self.state_by_hash(hash) {
+            state.chain().into_iter().map(|block_state| block_state.block()).collect()
+        } else {
+            Vec::new()
+        };
 
         MemoryOverlayStateProvider::new(in_memory, historical)
     }
@@ -456,6 +453,27 @@ impl BlockState {
                 block_receipts.iter().filter_map(|opt_receipt| opt_receipt.clone()).collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Returns a vector of parent BlockStates
+    pub fn parent_state_chain(&self) -> Vec<&BlockState> {
+        let mut parents = Vec::new();
+        let mut current = self.parent.as_deref();
+
+        while let Some(parent) = current {
+            parents.push(parent);
+            current = parent.parent.as_deref();
+        }
+
+        parents
+    }
+
+    /// Returns a vector of BlockStates representing the entire chain,
+    /// including self as the first element
+    pub fn chain(&self) -> Vec<&BlockState> {
+        let mut chain = self.parent_state_chain();
+        chain.insert(0, self);
+        chain
     }
 }
 
@@ -605,8 +623,26 @@ mod tests {
     };
     use reth_trie::AccountProof;
 
-    fn create_mock_state(block_number: u64) -> BlockState {
-        BlockState::new(get_executed_block_with_number(block_number, B256::random()))
+    fn create_mock_state(block_number: u64, parent_hash: B256) -> BlockState {
+        BlockState::new(get_executed_block_with_number(block_number, parent_hash))
+    }
+
+    fn create_mock_state_chain(num_blocks: u64) -> Vec<BlockState> {
+        let mut chain = Vec::with_capacity(num_blocks as usize);
+        let mut parent_hash = B256::random();
+        let mut parent_state: Option<BlockState> = None;
+
+        for i in 1..=num_blocks {
+            let mut state = create_mock_state(i, parent_hash);
+            if let Some(parent) = parent_state {
+                state.parent = Some(Box::new(parent));
+            }
+            parent_hash = state.hash();
+            parent_state = Some(state.clone());
+            chain.push(state);
+        }
+
+        chain
     }
 
     struct MockStateProvider;
@@ -677,7 +713,7 @@ mod tests {
     fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::new();
         let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
+        let state = Arc::new(create_mock_state(number, B256::random()));
         state_by_hash.insert(state.hash(), state.clone());
 
         let in_memory_state = InMemoryState::new(state_by_hash, HashMap::new(), None);
@@ -692,7 +728,7 @@ mod tests {
         let mut hash_by_number = HashMap::new();
 
         let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
+        let state = Arc::new(create_mock_state(number, B256::random()));
         let hash = state.hash();
 
         state_by_hash.insert(hash, state.clone());
@@ -708,9 +744,9 @@ mod tests {
     fn test_in_memory_state_impl_head_state() {
         let mut state_by_hash = HashMap::new();
         let mut hash_by_number = HashMap::new();
-        let state1 = Arc::new(create_mock_state(1));
-        let state2 = Arc::new(create_mock_state(2));
+        let state1 = Arc::new(create_mock_state(1, B256::random()));
         let hash1 = state1.hash();
+        let state2 = Arc::new(create_mock_state(2, hash1));
         let hash2 = state2.hash();
         hash_by_number.insert(1, hash1);
         hash_by_number.insert(2, hash2);
@@ -727,7 +763,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_pending_state() {
         let pending_number = rand::thread_rng().gen::<u64>();
-        let pending_state = create_mock_state(pending_number);
+        let pending_state = create_mock_state(pending_number, B256::random());
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
@@ -853,22 +889,76 @@ mod tests {
         let overlay_provider = canonical_state.state_provider(block3.block().hash(), historical);
 
         assert_eq!(overlay_provider.in_memory.len(), 3);
-        assert_eq!(overlay_provider.in_memory[0].block().number, 1);
+        assert_eq!(overlay_provider.in_memory[0].block().number, 3);
         assert_eq!(overlay_provider.in_memory[1].block().number, 2);
-        assert_eq!(overlay_provider.in_memory[2].block().number, 3);
+        assert_eq!(overlay_provider.in_memory[2].block().number, 1);
 
         assert_eq!(
-            overlay_provider.in_memory[1].block().parent_hash,
-            overlay_provider.in_memory[0].block().hash()
+            overlay_provider.in_memory[0].block().parent_hash,
+            overlay_provider.in_memory[1].block().hash()
         );
         assert_eq!(
-            overlay_provider.in_memory[2].block().parent_hash,
-            overlay_provider.in_memory[1].block().hash()
+            overlay_provider.in_memory[1].block().parent_hash,
+            overlay_provider.in_memory[2].block().hash()
         );
 
         let unknown_hash = B256::random();
         let empty_overlay_provider =
             canonical_state.state_provider(unknown_hash, Box::new(MockStateProvider));
         assert_eq!(empty_overlay_provider.in_memory.len(), 0);
+    }
+
+    #[test]
+    fn test_block_state_parent_blocks() {
+        let chain = create_mock_state_chain(4);
+
+        let parents = chain[3].parent_state_chain();
+        assert_eq!(parents.len(), 3);
+        assert_eq!(parents[0].block().block.number, 3);
+        assert_eq!(parents[1].block().block.number, 2);
+        assert_eq!(parents[2].block().block.number, 1);
+
+        let parents = chain[2].parent_state_chain();
+        assert_eq!(parents.len(), 2);
+        assert_eq!(parents[0].block().block.number, 2);
+        assert_eq!(parents[1].block().block.number, 1);
+
+        let parents = chain[0].parent_state_chain();
+        assert_eq!(parents.len(), 0);
+    }
+
+    #[test]
+    fn test_block_state_single_block_state_chain() {
+        let single_block_number = 1;
+        let single_block = create_mock_state(single_block_number, B256::random());
+        let single_block_hash = single_block.block().block.hash();
+
+        let parents = single_block.parent_state_chain();
+        assert_eq!(parents.len(), 0);
+
+        let block_state_chain = single_block.chain();
+        assert_eq!(block_state_chain.len(), 1);
+        assert_eq!(block_state_chain[0].block().block.number, single_block_number);
+        assert_eq!(block_state_chain[0].block().block.hash(), single_block_hash);
+    }
+
+    #[test]
+    fn test_block_state_chain() {
+        let chain = create_mock_state_chain(3);
+
+        let block_state_chain = chain[2].chain();
+        assert_eq!(block_state_chain.len(), 3);
+        assert_eq!(block_state_chain[0].block().block.number, 3);
+        assert_eq!(block_state_chain[1].block().block.number, 2);
+        assert_eq!(block_state_chain[2].block().block.number, 1);
+
+        let block_state_chain = chain[1].chain();
+        assert_eq!(block_state_chain.len(), 2);
+        assert_eq!(block_state_chain[0].block().block.number, 2);
+        assert_eq!(block_state_chain[1].block().block.number, 1);
+
+        let block_state_chain = chain[0].chain();
+        assert_eq!(block_state_chain.len(), 1);
+        assert_eq!(block_state_chain[0].block().block.number, 1);
     }
 }
