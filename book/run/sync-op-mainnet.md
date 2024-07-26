@@ -18,12 +18,6 @@ To export the OVM chain from `op-geth`, clone the `testinprod-io/op-geth` repo a
 <https://github.com/testinprod-io/op-geth/pull/1>. Commands to export blocks, receipts and state dump can be
 found in `op-geth/migrate.sh`.
 
-Output from running the command to export state, can also be downloaded from testinprod.
-```bash
-$ wget https://datadirs.testinprod.io/world_trie_state_op_mainnet_b2c2b6e7edb919a0b856b9fd9aa02b11ead5305e63cdb33386babd82b9bc4cfe.jsonl.zst
-$ unzstd world_trie_state_op_mainnet_b2c2b6e7edb919a0b856b9fd9aa02b11ead5305e63cdb33386babd82b9bc4cfe.jsonl.zst
-```
-
 ## Manual Import Steps
 
 ### 1. Import Blocks
