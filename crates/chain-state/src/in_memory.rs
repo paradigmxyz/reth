@@ -455,7 +455,8 @@ impl BlockState {
             .unwrap_or_default()
     }
 
-    /// Returns a vector of parent `BlockStates` starting from the newest one.
+    /// Returns a vector of parent `BlockStates`.
+    /// The block state order in the output vector is newest to oldest.
     pub fn parent_state_chain(&self) -> Vec<&Self> {
         let mut parents = Vec::new();
         let mut current = self.parent.as_deref();
@@ -468,8 +469,9 @@ impl BlockState {
         parents
     }
 
-    /// Returns a vector of `BlockStates` representing the entire in memory chain,
-    /// including self as the first element.
+    /// Returns a vector of `BlockStates` representing the entire in memory chain.
+    /// The block state order in the output vector is newest to oldest, including
+    /// self as the first element.
     pub fn chain(&self) -> Vec<&Self> {
         let mut chain = self.parent_state_chain();
         chain.insert(0, self);

@@ -10,7 +10,7 @@ use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 /// the historical state provider for fallback lookups.
 #[allow(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider {
-    /// The collection of executed parent blocks.
+    /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlock>,
     /// The collection of hashed state from in-memory blocks.
     pub(crate) hashed_post_state: HashedPostState,
