@@ -473,9 +473,14 @@ impl BlockState {
     /// The block state order in the output vector is newest to oldest, including
     /// self as the first element.
     pub fn chain(&self) -> Vec<&Self> {
-        let mut chain = self.parent_state_chain();
-        chain.insert(0, self);
+        let mut chain = vec![self];
+        self.append_parent_chain(&mut chain);
         chain
+    }
+
+    /// Appends the parent chain of this `BlockState` to the given vector.
+    pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
+        chain.extend(self.parent_state_chain());
     }
 }
 
