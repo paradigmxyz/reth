@@ -157,6 +157,11 @@ impl TreeState {
         *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
     }
 
+    /// Returns the minimum block number stored.
+    pub(crate) fn min_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.first_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
+
     /// Returns the block number of the pending block: `head + 1`
     const fn pending_block_number(&self) -> BlockNumber {
         self.current_canonical_head.number + 1
@@ -403,6 +408,7 @@ where
         state: EngineApiTreeState,
         canonical_in_memory_state: CanonicalInMemoryState,
         persistence: PersistenceHandle,
+        persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
     ) -> Self {
@@ -414,7 +420,7 @@ where
             incoming,
             outgoing,
             persistence,
-            persistence_state: PersistenceState::default(),
+            persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
@@ -441,6 +447,12 @@ where
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
+        let persistence_state = PersistenceState {
+            last_persisted_block_hash: header.hash(),
+            last_persisted_block_number: best_block_number,
+            rx: None,
+        };
+
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
         let state = EngineApiTreeState::new(
             config.block_buffer_limit(),
@@ -458,6 +470,7 @@ where
             state,
             canonical_in_memory_state,
             persistence,
+            persistence_state,
             payload_builder,
             config,
         );
@@ -656,9 +669,9 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
-        self.state.tree_state.max_block_number() -
-            self.persistence_state.last_persisted_block_number >=
-            self.config.persistence_threshold()
+        let min_block = self.persistence_state.last_persisted_block_number;
+
+        self.state.tree_state.max_block_number() - min_block >= self.config.persistence_threshold()
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
@@ -679,6 +692,8 @@ where
     ///
     /// This also updates the canonical in-memory state to reflect the newest persisted block
     /// height.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
         self.remove_persisted_blocks_from_tree_state();
         self.canonical_in_memory_state
@@ -686,6 +701,8 @@ where
     }
 
     /// Clears persisted blocks from the in-memory tree state.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn remove_persisted_blocks_from_tree_state(&mut self) {
         let keys_to_remove: Vec<BlockNumber> = self
             .state
@@ -1514,13 +1531,17 @@ where
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
-struct PersistenceState {
+pub struct PersistenceState {
     /// Hash of the last block persisted.
+    ///
+    /// A `None` value means no persistence task has been completed yet.
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
+    ///
+    /// A `None` value means no persistence task has been completed yet
     last_persisted_block_number: u64,
 }
 
@@ -1607,6 +1628,7 @@ mod tests {
                 engine_api_tree_state,
                 canonical_in_memory_state,
                 persistence_handle,
+                PersistenceState::default(),
                 payload_builder,
                 TreeConfig::default(),
             );
@@ -1663,6 +1685,16 @@ mod tests {
 
         let header = blocks.first().unwrap().block().header.clone();
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
+        let last_executed_block = blocks.last().unwrap().clone();
+        let last_header = last_executed_block.block().header();
+
+        // we expect the persistence state to be "at zero" - in practice there will be a genesis
+        // header hash
+        let persistence_state = PersistenceState {
+            last_persisted_block_number: 0,
+            last_persisted_block_hash: B256::ZERO,
+            rx: None,
+        };
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -1676,10 +1708,10 @@ mod tests {
             engine_api_tree_state,
             canonical_in_memory_state,
             persistence_handle,
+            persistence_state,
             payload_builder,
             TreeConfig::default(),
         );
-        let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(BlockState::new(last_executed_block));
         tree.canonical_in_memory_state =
             CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
