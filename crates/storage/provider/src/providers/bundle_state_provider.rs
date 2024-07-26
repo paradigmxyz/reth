@@ -93,7 +93,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state.clone());
+        state.extend(hashed_state);
         self.state_provider.hashed_state_root_with_updates(state)
     }
 }
