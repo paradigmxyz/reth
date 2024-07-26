@@ -8,7 +8,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::EngineApiTreeHandlerImpl,
+    tree::{EngineApiTreeHandlerImpl, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -68,6 +68,7 @@ where
         blockchain_db: BlockchainProvider2<DB>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
         payload_builder: PayloadBuilderHandle<EthEngineTypes>,
+        tree_config: TreeConfig,
     ) -> Self {
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
@@ -89,6 +90,7 @@ where
             persistence_handle,
             payload_builder,
             canonical_in_memory_state,
+            tree_config,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -174,6 +176,7 @@ mod tests {
             blockchain_db,
             pruner,
             PayloadBuilderHandle::new(tx),
+            TreeConfig::default(),
         );
     }
 }

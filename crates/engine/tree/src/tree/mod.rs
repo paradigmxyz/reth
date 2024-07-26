@@ -49,13 +49,8 @@ use tokio::sync::{
 };
 use tracing::*;
 
-/// Maximum number of blocks to be kept only in memory without triggering persistence.
-const PERSISTENCE_THRESHOLD: u64 = 256;
-/// Number of pending blocks that cannot be executed due to missing parent and
-/// are kept in cache.
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
-/// Number of invalid headers to keep in cache.
-const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
+mod config;
+pub use config::{TreeConfig, TreeConfigBuilder};
 
 /// Keeps track of the state of the tree.
 ///
@@ -387,6 +382,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
+    /// Configuration settings.
+    config: TreeConfig,
 }
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
@@ -407,6 +404,7 @@ where
         canonical_in_memory_state: CanonicalInMemoryState,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
+        config: TreeConfig,
     ) -> Self {
         Self {
             provider,
@@ -421,6 +419,7 @@ where
             state,
             canonical_in_memory_state,
             payload_builder,
+            config,
         }
     }
 
@@ -437,14 +436,15 @@ where
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
+        config: TreeConfig,
     ) -> UnboundedReceiver<EngineApiEvent> {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
         let state = EngineApiTreeState::new(
-            DEFAULT_BLOCK_BUFFER_LIMIT,
-            DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+            config.block_buffer_limit(),
+            config.max_invalid_header_cache_length(),
             header.num_hash(),
         );
 
@@ -459,6 +459,7 @@ where
             canonical_in_memory_state,
             persistence,
             payload_builder,
+            config,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -657,12 +658,12 @@ where
     fn should_persist(&self) -> bool {
         self.state.tree_state.max_block_number() -
             self.persistence_state.last_persisted_block_number >=
-            PERSISTENCE_THRESHOLD
+            self.config.persistence_threshold()
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let start = self.persistence_state.last_persisted_block_number;
-        let end = start + PERSISTENCE_THRESHOLD;
+        let end = start + self.config.persistence_threshold();
 
         // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
         self.state
@@ -1607,6 +1608,7 @@ mod tests {
                 canonical_in_memory_state,
                 persistence_handle,
                 payload_builder,
+                TreeConfig::default(),
             );
 
             Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx }
@@ -1675,6 +1677,7 @@ mod tests {
             canonical_in_memory_state,
             persistence_handle,
             payload_builder,
+            TreeConfig::default(),
         );
         let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(BlockState::new(last_executed_block));
@@ -1688,8 +1691,10 @@ mod tests {
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
+        let tree_config = TreeConfig::default();
+
         let TestHarness { tree, to_tree_tx, action_rx, mut blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
+            get_default_test_harness(tree_config.persistence_threshold() + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
         // send a message to the tree to enter the main loop.
@@ -1699,7 +1704,7 @@ mod tests {
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
-            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
             assert_eq!(saved_blocks, blocks);
         } else {
             panic!("unexpected action received {received_action:?}");
@@ -1731,8 +1736,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
+        let tree_config = TreeConfig::default();
+
         let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD);
+            get_default_test_harness(tree_config.persistence_threshold());
 
         // set backfill active
         tree.backfill_sync_state = BackfillSyncState::Active;
@@ -1754,7 +1761,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_holesky_payload() {
-        let s = include_str!("../test-data/holesky/1.rlp");
+        let s = include_str!("../../test-data/holesky/1.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
