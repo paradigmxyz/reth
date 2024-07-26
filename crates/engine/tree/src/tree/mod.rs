@@ -1688,9 +1688,11 @@ mod tests {
         let last_executed_block = blocks.last().unwrap().clone();
         let last_header = last_executed_block.block().header();
 
+        // we expect the persistence state to be "at zero" - in practice there will be a genesis
+        // header hash
         let persistence_state = PersistenceState {
-            last_persisted_block_number: last_header.number,
-            last_persisted_block_hash: last_header.hash_slow(),
+            last_persisted_block_number: 0,
+            last_persisted_block_hash: B256::ZERO,
             rx: None,
         };
 
