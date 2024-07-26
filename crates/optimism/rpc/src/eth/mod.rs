@@ -10,6 +10,7 @@ mod pending_block;
 use std::{future::Future, sync::Arc};
 
 use alloy_primitives::{Address, U64};
+use op_alloy_network::Optimism;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
@@ -58,6 +59,7 @@ where
     Eth: Send + Sync,
 {
     type Error = OpEthApiError;
+    type Types = Optimism;
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
