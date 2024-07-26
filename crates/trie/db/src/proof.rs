@@ -4,6 +4,7 @@ use reth_primitives::{Address, B256};
 use reth_trie::{
     hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
     proof::Proof,
+    trie_cursor::DatabaseTrieCursorFactory,
     HashedPostState,
 };
 use reth_trie_common::AccountProof;
@@ -22,10 +23,12 @@ pub trait DatabaseProof<'a, TX> {
     ) -> Result<AccountProof, StateProofError>;
 }
 
-impl<'a, TX: DbTx> DatabaseProof<'a, TX> for Proof<&'a TX, DatabaseHashedCursorFactory<'a, TX>> {
+impl<'a, TX: DbTx> DatabaseProof<'a, TX>
+    for Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+{
     /// Create a new [Proof] instance from database transaction.
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
+        Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
     }
 
     fn overlay_account_proof(
@@ -38,7 +41,7 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX> for Proof<&'a TX, DatabaseHashedCursorF
         let sorted = post_state.into_sorted();
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted);
-        Proof::from_tx(tx)
+        Self::from_tx(tx)
             .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_prefix_sets_mut(prefix_sets)
             .account_proof(address, slots)

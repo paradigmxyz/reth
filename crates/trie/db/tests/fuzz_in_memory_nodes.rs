@@ -5,7 +5,7 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::state_root_prehashed,
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
     StateRoot,
 };
 use reth_trie_common::Nibbles;
@@ -43,7 +43,11 @@ proptest! {
         // Compute root with in-memory trie nodes overlay
         let (state_root, _) = StateRoot::from_tx(provider.tx_ref())
             .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(provider.tx_ref(), &trie_updates.into_sorted()))
+            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+
+                DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                &trie_updates.into_sorted())
+            )
             .root_with_updates()
             .unwrap();
 
