@@ -46,7 +46,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
                 .account_code(address)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()
                 .original_bytes())
         })
@@ -62,7 +62,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
                 .account_balance(address)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
         })
     }
@@ -78,7 +78,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)?
                     .storage(address, index.0)
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default()
                     .to_be_bytes(),
             ))
@@ -98,14 +98,14 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
-        let chain_info = self.chain_info().map_err(Self::Error::from_err)?;
+        let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
         let block_id = block_id.unwrap_or_default();
 
         // Check whether the distance to the block exceeds the maximum configured window.
         let block_number = self
             .provider()
             .block_number_for_id(block_id)
-            .map_err(Self::Error::from_err)?
+            .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
@@ -122,7 +122,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
                 let proof = state
                     .proof(&BundleState::default(), address, &storage_keys)
-                    .map_err(Self::Error::from_err)?;
+                    .map_err(Self::Error::from_eth_err)?;
                 Ok(from_primitive_account_proof(proof))
             })
             .await
@@ -151,7 +151,7 @@ pub trait LoadState: EthApiTypes {
 
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
-        self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_err)
+        self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
     }
 
     /// Returns the state at the given [`BlockId`] enum.
@@ -159,12 +159,12 @@ pub trait LoadState: EthApiTypes {
     /// Note: if not [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
-        self.provider().state_by_block_id(at).map_err(Self::Error::from_err)
+        self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
     }
 
     /// Returns the _latest_ state
     fn latest_state(&self) -> Result<StateProviderBox, Self::Error> {
-        self.provider().latest().map_err(Self::Error::from_err)
+        self.provider().latest().map_err(Self::Error::from_eth_err)
     }
 
     /// Returns the state at the given [`BlockId`] enum or the latest.
@@ -203,10 +203,13 @@ pub trait LoadState: EthApiTypes {
                 // Use cached values if there is no pending block
                 let block_hash = LoadPendingBlock::provider(self)
                     .block_hash_for_id(at)
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let (cfg, env) =
-                    self.cache().get_evm_env(block_hash).await.map_err(Self::Error::from_err)?;
+                let (cfg, env) = self
+                    .cache()
+                    .get_evm_env(block_hash)
+                    .await
+                    .map_err(Self::Error::from_eth_err)?;
                 Ok((cfg, env, block_hash.into()))
             }
         }
@@ -260,7 +263,10 @@ pub trait LoadState: EthApiTypes {
 
             let state = this.state_at_block_id_or_latest(block_id)?;
             Ok(U256::from(
-                state.account_nonce(address).map_err(Self::Error::from_err)?.unwrap_or_default(),
+                state
+                    .account_nonce(address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default(),
             ))
         })
     }

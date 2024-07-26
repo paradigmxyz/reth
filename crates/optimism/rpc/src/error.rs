@@ -1,18 +1,17 @@
 //! RPC errors specific to OP.
 
-use jsonrpsee::types::ErrorObject;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use reth_rpc_types::{error::EthRpcErrorCode, IntoRpcError};
+use reth_rpc_types::error::EthRpcErrorCode;
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
 pub enum OpEthApiError {
     /// L1 ethereum error.
     #[error(transparent)]
-    Core(#[from] EthApiError),
+    Eth(#[from] EthApiError),
     /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,
@@ -24,21 +23,23 @@ pub enum OpEthApiError {
     InvalidTransaction(OptimismInvalidTransactionError),
 }
 
-impl IntoRpcError for OpEthApiError {
-    fn into_rpc_err(self) -> ErrorObject<'static> {
+impl AsEthApiError for OpEthApiError {
+    fn as_err(&self) -> Option<&EthApiError> {
         match self {
-            Self::Core(err) => err.into_rpc_err(),
-            Self::L1BlockFeeError | Self::L1BlockGasError => internal_rpc_err(self.to_string()),
-            Self::InvalidTransaction(err) => err.into_rpc_err(),
+            Self::Eth(err) => Some(err),
+            _ => None,
         }
     }
 }
 
-impl AsEthApiError for OpEthApiError {
-    fn as_err(&self) -> Option<&EthApiError> {
-        match self {
-            Self::Core(err) => Some(err),
-            _ => None,
+impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: OpEthApiError) -> Self {
+        match err {
+            OpEthApiError::Eth(err) => err.into(),
+            OpEthApiError::L1BlockFeeError | OpEthApiError::L1BlockGasError => {
+                internal_rpc_err(err.to_string())
+            }
+            OpEthApiError::InvalidTransaction(err) => err.into(),
         }
     }
 }
@@ -54,11 +55,12 @@ pub enum OptimismInvalidTransactionError {
     HaltedDepositPostRegolith,
 }
 
-impl IntoRpcError for OptimismInvalidTransactionError {
-    fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
-        match self {
-            Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
-                rpc_err(EthRpcErrorCode::TransactionRejected.code(), self.to_string(), None)
+impl From<OptimismInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: OptimismInvalidTransactionError) -> Self {
+        match err {
+            OptimismInvalidTransactionError::DepositSystemTxPostRegolith |
+            OptimismInvalidTransactionError::HaltedDepositPostRegolith => {
+                rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
         }
     }

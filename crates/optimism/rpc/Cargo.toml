@@ -30,6 +30,7 @@ reth-node-api.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+op-alloy-network = "0.1"
 revm.workspace = true
 
 # async

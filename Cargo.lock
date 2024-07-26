@@ -5230,6 +5230,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-alloy-network"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3cbfa664a74fe4577a78d1c4bce18fa93be56756730782283df8ff3241c7118"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+]
+
+[[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6249,6 +6263,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-events",
+ "reth-node-metrics",
  "reth-node-optimism",
  "reth-optimism-cli",
  "reth-optimism-primitives",
@@ -6481,8 +6496,10 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-errors",
  "reth-execution-types",
  "reth-primitives",
+ "reth-storage-api",
  "reth-trie",
  "revm",
  "tokio",
@@ -6540,7 +6557,6 @@ dependencies = [
  "futures",
  "human_bytes",
  "itertools 0.13.0",
- "metrics-process",
  "proptest",
  "proptest-arbitrary-interop",
  "ratatui",
@@ -6563,6 +6579,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
+ "reth-node-metrics",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
@@ -7288,6 +7305,7 @@ version = "1.0.3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
@@ -7671,6 +7689,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-core",
  "reth-node-events",
+ "reth-node-metrics",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -7705,15 +7724,7 @@ dependencies = [
  "dirs-next",
  "eyre",
  "futures",
- "http 1.1.0",
  "humantime",
- "jsonrpsee",
- "metrics",
- "metrics-exporter-prometheus",
- "metrics-process",
- "metrics-util",
- "once_cell",
- "procfs",
  "proptest",
  "rand 0.8.5",
  "reth-chainspec",
@@ -7725,7 +7736,6 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-fs-util",
- "reth-metrics",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
@@ -7741,15 +7751,12 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-stages-types",
  "reth-storage-errors",
- "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
  "serde_json",
  "shellexpand",
- "tikv-jemalloc-ctl",
  "tokio",
- "tower",
  "tracing",
  "vergen",
 ]
@@ -7772,6 +7779,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
+ "reth-engine-tree",
  "reth-ethereum-engine",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
@@ -7816,6 +7824,34 @@ dependencies = [
  "reth-static-file",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-node-metrics"
+version = "1.0.3"
+dependencies = [
+ "eyre",
+ "http 1.1.0",
+ "jsonrpsee",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "metrics-process",
+ "metrics-util",
+ "once_cell",
+ "procfs",
+ "reqwest",
+ "reth-chainspec",
+ "reth-db",
+ "reth-db-api",
+ "reth-metrics",
+ "reth-provider",
+ "reth-tasks",
+ "socket2 0.4.10",
+ "tikv-jemalloc-ctl",
+ "tokio",
+ "tower",
+ "tracing",
+ "vergen",
 ]
 
 [[package]]
@@ -7885,6 +7921,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-api",
+ "reth-db-common",
  "reth-downloaders",
  "reth-errors",
  "reth-evm-optimism",
@@ -7902,6 +7939,7 @@ dependencies = [
  "reth-static-file-types",
  "serde_json",
  "shellexpand",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
@@ -7945,9 +7983,6 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.3"
-dependencies = [
- "alloy-network",
-]
 
 [[package]]
 name = "reth-optimism-rpc"
@@ -7956,6 +7991,7 @@ dependencies = [
  "alloy-primitives",
  "jsonrpsee",
  "jsonrpsee-types",
+ "op-alloy-network",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-errors",
@@ -8199,7 +8235,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "revm",
- "tracing",
 ]
 
 [[package]]
@@ -8208,6 +8243,7 @@ version = "1.0.3"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
@@ -8377,6 +8413,7 @@ dependencies = [
  "dyn-clone",
  "futures",
  "jsonrpsee",
+ "jsonrpsee-types",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-errors",
@@ -8650,6 +8687,7 @@ dependencies = [
 name = "reth-storage-errors"
 version = "1.0.3"
 dependencies = [
+ "alloy-rlp",
  "reth-fs-util",
  "reth-primitives",
  "thiserror-no-std",
@@ -8886,9 +8924,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af2dc001e37ac3b061dc9087876aea91e28756c188a97cd99416d23a5562ca73"
+checksum = "5296ccad8d7ccbeb6c5a037a57bfe1ff27e81d8c4efbd3ae7df0a554eb1a818a"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",

@@ -24,7 +24,7 @@ use reth_rpc_types::{
         parity::*,
         tracerequest::TraceCallRequest,
     },
-    BlockError, BlockOverrides, Index, IntoRpcError, TransactionRequest,
+    BlockError, BlockOverrides, Index, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -99,7 +99,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
             .await
@@ -130,7 +130,7 @@ where
                 inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_err)
+                    .map_err(Eth::Error::from_eth_err)
             })
             .await
     }
@@ -173,7 +173,7 @@ where
                     let trace_res = inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &db)
-                        .map_err(Eth::Error::from_err)?;
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
 
@@ -204,7 +204,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
             .await
@@ -255,7 +255,7 @@ where
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_err)?
+            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
         };
 
         if start > end {
@@ -275,7 +275,7 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_err)?;
+        let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_eth_err)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -286,7 +286,7 @@ where
                 let from = tx
                     .recover_signer_unchecked()
                     .ok_or(BlockError::InvalidSignature)
-                    .map_err(Eth::Error::from_err)?;
+                    .map_err(Eth::Error::from_eth_err)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;
@@ -306,17 +306,15 @@ where
                 num.into(),
                 Some(highest_idx),
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _, _| {
+                move |tx_info, inspector, _, _, _| {
                     if let Some(idx) = tx_info.index {
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
                             return Ok(None)
                         }
                     }
-                    let traces = inspector
-                        .with_transaction_gas_used(res.gas_used())
-                        .into_parity_builder()
-                        .into_localized_transaction_traces(tx_info);
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
                 },
             );
@@ -372,11 +370,9 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _| {
-                    let traces = inspector
-                        .with_transaction_gas_used(res.result.gas_used())
-                        .into_parity_builder()
-                        .into_localized_transaction_traces(tx_info);
+                move |tx_info, inspector, _, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
@@ -391,11 +387,9 @@ where
         let traces = self.inner.eth_api.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, res, _, _| {
-                let traces = inspector
-                    .with_transaction_gas_used(res.gas_used())
-                    .into_parity_builder()
-                    .into_localized_transaction_traces(tx_info);
+            |tx_info, inspector, _, _, _| {
+                let traces =
+                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -438,7 +432,7 @@ where
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
                         populate_state_diff(state_diff, db, state.iter())
-                            .map_err(Eth::Error::from_err)?;
+                            .map_err(Eth::Error::from_eth_err)?;
                     }
 
                     let trace = TraceResultsWithTransactionHash {
@@ -526,7 +520,7 @@ where
                 if let Some(header_td) = self
                     .provider()
                     .header_td_by_number(header.number)
-                    .map_err(Eth::Error::from_err)?
+                    .map_err(Eth::Error::from_eth_err)?
                 {
                     base_block_reward(
                         chain_spec.as_ref(),
@@ -597,7 +591,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(Self::trace_call(self, request).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_callMany`
@@ -607,7 +601,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -620,7 +614,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
             .await
-            .map_err(Eth::Error::into_rpc_err)?)
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -632,7 +626,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_block_transactions(self, block_id, trace_types)
             .await
-            .map_err(Eth::Error::into_rpc_err)?)
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -642,9 +636,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types)
-            .await
-            .map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_block`
@@ -653,7 +645,7 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_filter`
@@ -663,7 +655,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        Ok(Self::trace_filter(self, filter).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
     }
 
     /// Returns transaction trace at given index.
@@ -676,7 +668,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
             .await
-            .map_err(Eth::Error::into_rpc_err)?)
+            .map_err(Into::into)?)
     }
 
     /// Handler for `trace_transaction`
@@ -685,7 +677,7 @@ where
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -694,15 +686,13 @@ where
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash)
-            .await
-            .map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Eth::Error::into_rpc_err)?)
+        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
     }
 }
 

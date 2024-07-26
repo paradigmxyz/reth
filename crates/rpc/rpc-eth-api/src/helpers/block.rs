@@ -52,10 +52,10 @@ pub trait EthBlocks: LoadBlock {
             let block_hash = block.hash();
             let total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::UnknownBlockNumber)?;
             let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
-                .map_err(Self::Error::from_err)?;
+                .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block.into()))
         }
     }
@@ -72,13 +72,13 @@ pub trait EthBlocks: LoadBlock {
                 // Pending block can be fetched directly without need for caching
                 return Ok(LoadBlock::provider(self)
                     .pending_block()
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .map(|block| block.body.len()))
             }
 
             let block_hash = match LoadBlock::provider(self)
                 .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 Some(block_hash) => block_hash,
                 None => return Ok(None),
@@ -88,7 +88,7 @@ pub trait EthBlocks: LoadBlock {
                 .cache()
                 .get_block_transactions(block_hash)
                 .await
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
                 .map(|txs| txs.len()))
         }
     }
@@ -130,7 +130,7 @@ pub trait EthBlocks: LoadBlock {
 
                         ReceiptBuilder::new(&tx, meta, receipt, &receipts)
                             .map(|builder| builder.build())
-                            .map_err(Self::Error::from_err)
+                            .map_err(Self::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Self::Error>>();
                 return receipts.map(Some)
@@ -152,18 +152,18 @@ pub trait EthBlocks: LoadBlock {
             if block_id.is_pending() {
                 return Ok(LoadBlock::provider(self)
                     .pending_block_and_receipts()
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .map(|(sb, receipts)| (sb, Arc::new(receipts))))
             }
 
             if let Some(block_hash) = LoadBlock::provider(self)
                 .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 return LoadReceipt::cache(self)
                     .get_block_and_receipts(block_hash)
                     .await
-                    .map_err(Self::Error::from_err)
+                    .map_err(Self::Error::from_eth_err)
             }
 
             Ok(None)
@@ -177,7 +177,7 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<reth_primitives::Header>>, Self::Error> {
-        LoadBlock::provider(self).ommers_by_id(block_id).map_err(Self::Error::from_err)
+        LoadBlock::provider(self).ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
     }
 
     /// Returns uncle block at given index in given block.
@@ -193,10 +193,12 @@ pub trait EthBlocks: LoadBlock {
                 // Pending block can be fetched directly without need for caching
                 LoadBlock::provider(self)
                     .pending_block()
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .map(|block| block.ommers)
             } else {
-                LoadBlock::provider(self).ommers_by_id(block_id).map_err(Self::Error::from_err)?
+                LoadBlock::provider(self)
+                    .ommers_by_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
             }
             .unwrap_or_default();
 
@@ -244,7 +246,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 // Pending block can be fetched directly without need for caching
                 let maybe_pending = LoadPendingBlock::provider(self)
                     .pending_block_with_senders()
-                    .map_err(Self::Error::from_err)?;
+                    .map_err(Self::Error::from_eth_err)?;
                 return if maybe_pending.is_some() {
                     Ok(maybe_pending)
                 } else {
@@ -254,7 +256,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
 
             let block_hash = match LoadPendingBlock::provider(self)
                 .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 Some(block_hash) => block_hash,
                 None => return Ok(None),
@@ -263,7 +265,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
             self.cache()
                 .get_sealed_block_with_senders(block_hash)
                 .await
-                .map_err(Self::Error::from_err)
+                .map_err(Self::Error::from_eth_err)
         }
     }
 }

@@ -10,7 +10,7 @@ use reth_trie::{
         DatabaseHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{DatabaseTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
     HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
@@ -93,12 +93,13 @@ where
             .into_par_iter()
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
+                let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_ro.tx_ref());
                 let hashed_cursor_factory = HashedPostStateCursorFactory::new(
                     DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
                     &hashed_state_sorted,
                 );
                 let storage_root_result = StorageRoot::new_hashed(
-                    provider_ro.tx_ref(),
+                    trie_cursor_factory,
                     hashed_cursor_factory,
                     hashed_address,
                     #[cfg(feature = "metrics")]
@@ -118,7 +119,7 @@ where
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
             &hashed_state_sorted,
         );
-        let trie_cursor_factory = provider_ro.tx_ref();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_ro.tx_ref());
 
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
@@ -145,7 +146,7 @@ where
                         None => {
                             tracker.inc_missed_leaves();
                             StorageRoot::new_hashed(
-                                trie_cursor_factory,
+                                trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
                                 #[cfg(feature = "metrics")]
@@ -210,7 +211,7 @@ impl From<ParallelStateRootError> for ProviderError {
     fn from(error: ParallelStateRootError) -> Self {
         match error {
             ParallelStateRootError::Provider(error) => error,
-            ParallelStateRootError::StorageRoot(StorageRootError::DB(error)) => {
+            ParallelStateRootError::StorageRoot(StorageRootError::Database(error)) => {
                 Self::Database(error)
             }
         }

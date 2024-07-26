@@ -9,7 +9,7 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, IntoRpcError, ToRpcError,
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
@@ -17,6 +17,7 @@ use reth_transaction_pool::error::{
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+use tracing::error;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -242,12 +243,6 @@ where
     }
 }
 
-impl IntoRpcError for EthApiError {
-    fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
-        self.into()
-    }
-}
-
 /// An error due to invalid transaction.
 ///
 /// The only reason this exists is to maintain compatibility with other clients de-facto standard
@@ -383,6 +378,11 @@ pub enum RpcInvalidTransactionError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
+    /// Unexpected [`InvalidTransaction`](revm::primitives::InvalidTransaction) error, Optimism
+    /// errors should not be handled on this level.
+    // TODO: Remove when optimism feature removed in revm
+    #[error("unexpected transaction error")]
+    UnexpectedTransactionError,
 }
 
 impl RpcInvalidTransactionError {
@@ -477,9 +477,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[allow(unreachable_patterns)]
-            _ => panic!(
-                "use `<OptimismInvalidTransactionError as From<InvalidTransaction>>::try_from`"
-            ),
+            _ => {
+                error!(target: "rpc",
+                    ?err,
+                    "unexpected transaction error"
+                );
+
+                Self::UnexpectedTransactionError
+            }
         }
     }
 }

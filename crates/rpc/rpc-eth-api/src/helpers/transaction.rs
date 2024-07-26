@@ -88,7 +88,9 @@ pub trait EthTransactions: LoadTransaction {
         &self,
         block: B256,
     ) -> impl Future<Output = Result<Option<Vec<TransactionSigned>>, Self::Error>> + Send {
-        async move { self.cache().get_block_transactions(block).await.map_err(Self::Error::from_err) }
+        async move {
+            self.cache().get_block_transactions(block).await.map_err(Self::Error::from_eth_err)
+        }
     }
 
     /// Returns the EIP-2718 encoded transaction by hash.
@@ -113,7 +115,7 @@ pub trait EthTransactions: LoadTransaction {
             self.spawn_blocking_io(move |ref this| {
                 Ok(LoadTransaction::provider(this)
                     .transaction_by_hash(hash)
-                    .map_err(Self::Error::from_err)?
+                    .map_err(Self::Error::from_eth_err)?
                     .map(|tx| tx.envelope_encoded()))
             })
             .await
@@ -170,7 +172,7 @@ pub trait EthTransactions: LoadTransaction {
         self.spawn_blocking_io(move |_| {
             let (tx, meta) = match LoadTransaction::provider(&this)
                 .transaction_by_hash_with_meta(hash)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),
@@ -178,7 +180,7 @@ pub trait EthTransactions: LoadTransaction {
 
             let receipt = match EthTransactions::provider(&this)
                 .receipt_by_hash(hash)
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             {
                 Some(recpt) => recpt,
                 None => return Ok(None),
@@ -267,7 +269,7 @@ pub trait EthTransactions: LoadTransaction {
                 .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await
-                .map_err(Self::Error::from_err)?;
+                .map_err(Self::Error::from_eth_err)?;
 
             Ok(hash)
         }
@@ -285,11 +287,11 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             let from = match request.from {
                 Some(from) => from,
-                None => return Err(SignError::NoAccount.into_err()),
+                None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_err());
+                return Err(SignError::NoAccount.into_eth_err());
             }
 
             // set nonce if not already set before
@@ -480,7 +482,7 @@ pub trait EthTransactions: LoadTransaction {
             let hash = LoadTransaction::pool(self)
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await
-                .map_err(Self::Error::from_err)?;
+                .map_err(Self::Error::from_eth_err)?;
 
             Ok(hash)
         }
@@ -496,7 +498,7 @@ pub trait EthTransactions: LoadTransaction {
             if signer.is_signer_for(from) {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into_err()),
+                    Err(e) => Err(e.into_eth_err()),
                 }
             }
         }
@@ -514,7 +516,7 @@ pub trait EthTransactions: LoadTransaction {
                 .find_signer(&account)?
                 .sign(account, &message)
                 .await
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
                 .to_hex_bytes())
         }
     }
@@ -524,7 +526,7 @@ pub trait EthTransactions: LoadTransaction {
         Ok(self
             .find_signer(&account)?
             .sign_typed_data(account, data)
-            .map_err(Self::Error::from_err)?
+            .map_err(Self::Error::from_eth_err)?
             .to_hex_bytes())
     }
 
@@ -538,7 +540,7 @@ pub trait EthTransactions: LoadTransaction {
             .iter()
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| dyn_clone::clone_box(&**signer))
-            .ok_or_else(|| SignError::NoAccount.into_err())
+            .ok_or_else(|| SignError::NoAccount.into_eth_err())
     }
 }
 
@@ -582,7 +584,7 @@ pub trait LoadTransaction: SpawnBlocking {
                     match this
                         .provider()
                         .transaction_by_hash_with_meta(hash)
-                        .map_err(Self::Error::from_err)?
+                        .map_err(Self::Error::from_eth_err)?
                     {
                         None => Ok(None),
                         Some((tx, meta)) => {
@@ -678,7 +680,7 @@ pub trait LoadTransaction: SpawnBlocking {
                 .cache()
                 .get_block_with_senders(block_hash)
                 .await
-                .map_err(Self::Error::from_err)?;
+                .map_err(Self::Error::from_eth_err)?;
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
     }

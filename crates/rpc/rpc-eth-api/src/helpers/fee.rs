@@ -76,7 +76,7 @@ pub trait EthFees: LoadFee {
 
             let Some(end_block) = LoadFee::provider(self)
                 .block_number_for_id(newest_block.into())
-                .map_err(Self::Error::from_err)?
+                .map_err(Self::Error::from_eth_err)?
             else {
                 return Err(EthApiError::UnknownBlockNumber.into())
             };
@@ -147,7 +147,7 @@ pub trait EthFees: LoadFee {
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
             // read the requested header range
-            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_err)?;
+            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_eth_err)?;
             if headers.len() != block_count as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
@@ -165,7 +165,7 @@ pub trait EthFees: LoadFee {
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = LoadFee::cache(self)
                         .get_transactions_and_receipts(header.hash())
-                        .await.map_err(Self::Error::from_err)?
+                        .await.map_err(Self::Error::from_eth_err)?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(
                         calculate_reward_percentiles_for_block(
@@ -344,6 +344,6 @@ pub trait LoadFee: LoadBlock {
     where
         Self: 'static,
     {
-        async move { self.gas_oracle().suggest_tip_cap().await.map_err(Self::Error::from_err) }
+        async move { self.gas_oracle().suggest_tip_cap().await.map_err(Self::Error::from_eth_err) }
     }
 }

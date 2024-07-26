@@ -1,7 +1,8 @@
 //! Types for tracking the canonical chain state in memory.
 
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -10,6 +11,7 @@ use reth_primitives::{
     Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
     SealedHeader, B256,
 };
+use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::broadcast;
@@ -79,8 +81,12 @@ impl InMemoryState {
 /// advanced internally by the tree.
 #[derive(Debug)]
 pub(crate) struct CanonicalInMemoryStateInner {
+    /// Tracks certain chain information, such as the canonical head, safe head, and finalized
+    /// head.
     pub(crate) chain_info_tracker: ChainInfoTracker,
+    /// Tracks blocks at the tip of the chain that have not been persisted to disk yet.
     pub(crate) in_memory_state: InMemoryState,
+    /// A broadcast stream that emits events when the canonical chain is updated.
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender,
 }
 
@@ -138,14 +144,24 @@ impl CanonicalInMemoryState {
         self.state_by_hash(hash).map(|block| block.block().block.header.clone())
     }
 
+    /// Updates the pending block with the given block.
+    ///
+    /// Note: This assumes that the parent block of the pending block is canonical.
+    pub fn set_pending_block(&self, pending: ExecutedBlock) {
+        // fetch the state of the pending block's parent block
+        let parent = self.state_by_hash(pending.block().parent_hash);
+        let pending = BlockState::with_parent(pending, parent.map(|p| (*p).clone()));
+        *self.inner.in_memory_state.pending.write() = Some(pending);
+    }
+
     /// Append new blocks to the in memory state.
     fn update_blocks<I>(&self, new_blocks: I, reorged: I)
     where
         I: IntoIterator<Item = ExecutedBlock>,
     {
         // acquire all locks
-        let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut numbers = self.inner.in_memory_state.numbers.write();
+        let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut pending = self.inner.in_memory_state.pending.write();
 
         // we first remove the blocks from the reorged chain
@@ -191,7 +207,7 @@ impl CanonicalInMemoryState {
     pub fn remove_persisted_blocks(&self, persisted_height: u64) {
         let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut numbers = self.inner.in_memory_state.numbers.write();
-        let _pending = self.inner.in_memory_state.pending.write();
+        let mut pending = self.inner.in_memory_state.pending.write();
 
         // clear all numbers
         numbers.clear();
@@ -203,7 +219,7 @@ impl CanonicalInMemoryState {
             .filter(|b| b.block().number > persisted_height)
             .collect::<Vec<_>>();
 
-        // sort the blocks by number so we can insert them back in order
+        // sort the blocks by number so we can insert them back in natural order (low -> high)
         old_blocks.sort_unstable_by_key(|block| block.block().number);
 
         for block in old_blocks {
@@ -215,6 +231,14 @@ impl CanonicalInMemoryState {
             // append new blocks
             blocks.insert(hash, Arc::new(block_state));
             numbers.insert(number, hash);
+        }
+
+        // also shift the pending state if it exists
+        if let Some(pending) = pending.as_mut() {
+            pending.parent = blocks
+                .get(&pending.block().block.parent_hash)
+                .cloned()
+                .map(|p| Box::new((*p).clone()));
         }
     }
 
@@ -354,6 +378,24 @@ impl CanonicalInMemoryState {
     pub fn notify_canon_state(&self, event: CanonStateNotification) {
         self.inner.canon_state_notification_sender.send(event).ok();
     }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    ///
+    /// This merges the state of all blocks that are part of the chain that the requested block is
+    /// the head of. This includes all blocks that connect back to the canonical block on disk.
+    pub fn state_provider(
+        &self,
+        hash: B256,
+        historical: StateProviderBox,
+    ) -> MemoryOverlayStateProvider {
+        let in_memory = if let Some(state) = self.state_by_hash(hash) {
+            state.chain().into_iter().map(|block_state| block_state.block()).collect()
+        } else {
+            Vec::new()
+        };
+
+        MemoryOverlayStateProvider::new(in_memory, historical)
+    }
 }
 
 /// State after applying the given block, this block is part of the canonical chain that partially
@@ -433,6 +475,34 @@ impl BlockState {
                 block_receipts.iter().filter_map(|opt_receipt| opt_receipt.clone()).collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Returns a vector of parent `BlockStates`.
+    /// The block state order in the output vector is newest to oldest.
+    pub fn parent_state_chain(&self) -> Vec<&Self> {
+        let mut parents = Vec::new();
+        let mut current = self.parent.as_deref();
+
+        while let Some(parent) = current {
+            parents.push(parent);
+            current = parent.parent.as_deref();
+        }
+
+        parents
+    }
+
+    /// Returns a vector of `BlockStates` representing the entire in memory chain.
+    /// The block state order in the output vector is newest to oldest, including
+    /// self as the first element.
+    pub fn chain(&self) -> Vec<&Self> {
+        let mut chain = vec![self];
+        self.append_parent_chain(&mut chain);
+        chain
+    }
+
+    /// Appends the parent chain of this `BlockState` to the given vector.
+    pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
+        chain.extend(self.parent_state_chain());
     }
 }
 
@@ -515,6 +585,21 @@ pub enum NewCanonicalChain {
 }
 
 impl NewCanonicalChain {
+    /// Returns the length of the new chain.
+    pub fn new_block_count(&self) -> usize {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
+        }
+    }
+
+    /// Returns the length of the reorged chain.
+    pub fn reorged_block_count(&self) -> usize {
+        match self {
+            Self::Commit { .. } => 0,
+            Self::Reorg { old, .. } => old.len(),
+        }
+    }
+
     /// Converts the new chain into a notification that will be emitted to listeners
     pub fn to_chain_notification(&self) -> CanonStateNotification {
         // TODO: do we need to merge execution outcome for multiblock commit or reorg?
@@ -560,17 +645,100 @@ mod tests {
     use super::*;
     use crate::test_utils::{get_executed_block_with_number, get_executed_block_with_receipts};
     use rand::Rng;
-    use reth_primitives::Receipt;
+    use reth_errors::ProviderResult;
+    use reth_primitives::{Account, BlockNumber, Bytecode, Receipt, StorageKey, StorageValue};
+    use reth_storage_api::{
+        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    };
+    use reth_trie::AccountProof;
 
-    fn create_mock_state(block_number: u64) -> BlockState {
-        BlockState::new(get_executed_block_with_number(block_number))
+    fn create_mock_state(block_number: u64, parent_hash: B256) -> BlockState {
+        BlockState::new(get_executed_block_with_number(block_number, parent_hash))
+    }
+
+    fn create_mock_state_chain(num_blocks: u64) -> Vec<BlockState> {
+        let mut chain = Vec::with_capacity(num_blocks as usize);
+        let mut parent_hash = B256::random();
+        let mut parent_state: Option<BlockState> = None;
+
+        for i in 1..=num_blocks {
+            let mut state = create_mock_state(i, parent_hash);
+            if let Some(parent) = parent_state {
+                state.parent = Some(Box::new(parent));
+            }
+            parent_hash = state.hash();
+            parent_state = Some(state.clone());
+            chain.push(state);
+        }
+
+        chain
+    }
+
+    struct MockStateProvider;
+
+    impl StateProvider for MockStateProvider {
+        fn storage(
+            &self,
+            _address: Address,
+            _storage_key: StorageKey,
+        ) -> ProviderResult<Option<StorageValue>> {
+            Ok(None)
+        }
+
+        fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+            Ok(None)
+        }
+    }
+
+    impl BlockHashReader for MockStateProvider {
+        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
+            Ok(None)
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: BlockNumber,
+            _end: BlockNumber,
+        ) -> ProviderResult<Vec<B256>> {
+            Ok(vec![])
+        }
+    }
+
+    impl AccountReader for MockStateProvider {
+        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+            Ok(None)
+        }
+    }
+
+    impl StateRootProvider for MockStateProvider {
+        fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
+
+        fn hashed_state_root_with_updates(
+            &self,
+            _hashed_state: HashedPostState,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            Ok((B256::random(), TrieUpdates::default()))
+        }
+    }
+
+    impl StateProofProvider for MockStateProvider {
+        fn hashed_proof(
+            &self,
+            _hashed_state: HashedPostState,
+            _address: Address,
+            _slots: &[B256],
+        ) -> ProviderResult<AccountProof> {
+            Ok(AccountProof::new(Address::random()))
+        }
     }
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::new();
         let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
+        let state = Arc::new(create_mock_state(number, B256::random()));
         state_by_hash.insert(state.hash(), state.clone());
 
         let in_memory_state = InMemoryState::new(state_by_hash, HashMap::new(), None);
@@ -585,7 +753,7 @@ mod tests {
         let mut hash_by_number = HashMap::new();
 
         let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
+        let state = Arc::new(create_mock_state(number, B256::random()));
         let hash = state.hash();
 
         state_by_hash.insert(hash, state.clone());
@@ -601,9 +769,9 @@ mod tests {
     fn test_in_memory_state_impl_head_state() {
         let mut state_by_hash = HashMap::new();
         let mut hash_by_number = HashMap::new();
-        let state1 = Arc::new(create_mock_state(1));
-        let state2 = Arc::new(create_mock_state(2));
+        let state1 = Arc::new(create_mock_state(1, B256::random()));
         let hash1 = state1.hash();
+        let state2 = Arc::new(create_mock_state(2, hash1));
         let hash2 = state2.hash();
         hash_by_number.insert(1, hash1);
         hash_by_number.insert(2, hash2);
@@ -620,7 +788,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_pending_state() {
         let pending_number = rand::thread_rng().gen::<u64>();
-        let pending_state = create_mock_state(pending_number);
+        let pending_state = create_mock_state(pending_number, B256::random());
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
@@ -643,7 +811,7 @@ mod tests {
     #[test]
     fn test_state_new() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -653,7 +821,7 @@ mod tests {
     #[test]
     fn test_state_block() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -663,17 +831,17 @@ mod tests {
     #[test]
     fn test_state_hash() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
-        assert_eq!(state.hash(), block.block().hash());
+        assert_eq!(state.hash(), block.block.hash());
     }
 
     #[test]
     fn test_state_number() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block);
 
@@ -683,7 +851,7 @@ mod tests {
     #[test]
     fn test_state_state_root() {
         let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
+        let block = get_executed_block_with_number(number, B256::random());
 
         let state = BlockState::new(block.clone());
 
@@ -694,7 +862,7 @@ mod tests {
     fn test_state_receipts() {
         let receipts = Receipts { receipt_vec: vec![vec![Some(Receipt::default())]] };
 
-        let block = get_executed_block_with_receipts(receipts.clone());
+        let block = get_executed_block_with_receipts(receipts.clone(), B256::random());
 
         let state = BlockState::new(block);
 
@@ -704,8 +872,8 @@ mod tests {
     #[test]
     fn test_in_memory_state_chain_update() {
         let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None);
-        let block1 = get_executed_block_with_number(0);
-        let block2 = get_executed_block_with_number(0);
+        let block1 = get_executed_block_with_number(0, B256::random());
+        let block2 = get_executed_block_with_number(0, B256::random());
         let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
         state.update_chain(chain);
         assert_eq!(state.head_state().unwrap().block().block().hash(), block1.block().hash());
@@ -717,5 +885,105 @@ mod tests {
         assert_eq!(state.state_by_number(0).unwrap().block().block().hash(), block2.block().hash());
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_state_provider() {
+        let block1 = get_executed_block_with_number(1, B256::random());
+        let block2 = get_executed_block_with_number(2, block1.block().hash());
+        let block3 = get_executed_block_with_number(3, block2.block().hash());
+
+        let state1 = BlockState::new(block1.clone());
+        let state2 = BlockState::with_parent(block2.clone(), Some(state1.clone()));
+        let state3 = BlockState::with_parent(block3.clone(), Some(state2.clone()));
+
+        let mut blocks = HashMap::new();
+        blocks.insert(block1.block().hash(), Arc::new(state1));
+        blocks.insert(block2.block().hash(), Arc::new(state2));
+        blocks.insert(block3.block().hash(), Arc::new(state3));
+
+        let mut numbers = HashMap::new();
+        numbers.insert(1, block1.block().hash());
+        numbers.insert(2, block2.block().hash());
+        numbers.insert(3, block3.block().hash());
+
+        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None);
+
+        let historical: StateProviderBox = Box::new(MockStateProvider);
+
+        let overlay_provider = canonical_state.state_provider(block3.block().hash(), historical);
+
+        assert_eq!(overlay_provider.in_memory.len(), 3);
+        assert_eq!(overlay_provider.in_memory[0].block().number, 3);
+        assert_eq!(overlay_provider.in_memory[1].block().number, 2);
+        assert_eq!(overlay_provider.in_memory[2].block().number, 1);
+
+        assert_eq!(
+            overlay_provider.in_memory[0].block().parent_hash,
+            overlay_provider.in_memory[1].block().hash()
+        );
+        assert_eq!(
+            overlay_provider.in_memory[1].block().parent_hash,
+            overlay_provider.in_memory[2].block().hash()
+        );
+
+        let unknown_hash = B256::random();
+        let empty_overlay_provider =
+            canonical_state.state_provider(unknown_hash, Box::new(MockStateProvider));
+        assert_eq!(empty_overlay_provider.in_memory.len(), 0);
+    }
+
+    #[test]
+    fn test_block_state_parent_blocks() {
+        let chain = create_mock_state_chain(4);
+
+        let parents = chain[3].parent_state_chain();
+        assert_eq!(parents.len(), 3);
+        assert_eq!(parents[0].block().block.number, 3);
+        assert_eq!(parents[1].block().block.number, 2);
+        assert_eq!(parents[2].block().block.number, 1);
+
+        let parents = chain[2].parent_state_chain();
+        assert_eq!(parents.len(), 2);
+        assert_eq!(parents[0].block().block.number, 2);
+        assert_eq!(parents[1].block().block.number, 1);
+
+        let parents = chain[0].parent_state_chain();
+        assert_eq!(parents.len(), 0);
+    }
+
+    #[test]
+    fn test_block_state_single_block_state_chain() {
+        let single_block_number = 1;
+        let single_block = create_mock_state(single_block_number, B256::random());
+        let single_block_hash = single_block.block().block.hash();
+
+        let parents = single_block.parent_state_chain();
+        assert_eq!(parents.len(), 0);
+
+        let block_state_chain = single_block.chain();
+        assert_eq!(block_state_chain.len(), 1);
+        assert_eq!(block_state_chain[0].block().block.number, single_block_number);
+        assert_eq!(block_state_chain[0].block().block.hash(), single_block_hash);
+    }
+
+    #[test]
+    fn test_block_state_chain() {
+        let chain = create_mock_state_chain(3);
+
+        let block_state_chain = chain[2].chain();
+        assert_eq!(block_state_chain.len(), 3);
+        assert_eq!(block_state_chain[0].block().block.number, 3);
+        assert_eq!(block_state_chain[1].block().block.number, 2);
+        assert_eq!(block_state_chain[2].block().block.number, 1);
+
+        let block_state_chain = chain[1].chain();
+        assert_eq!(block_state_chain.len(), 2);
+        assert_eq!(block_state_chain[0].block().block.number, 2);
+        assert_eq!(block_state_chain[1].block().block.number, 1);
+
+        let block_state_chain = chain[0].chain();
+        assert_eq!(block_state_chain.len(), 1);
+        assert_eq!(block_state_chain[0].block().block.number, 1);
     }
 }

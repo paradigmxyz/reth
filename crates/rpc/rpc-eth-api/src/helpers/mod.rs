@@ -17,6 +17,7 @@
 pub mod block;
 pub mod blocking_task;
 pub mod call;
+pub mod error;
 pub mod fee;
 pub mod pending_block;
 pub mod receipt;
@@ -25,6 +26,7 @@ pub mod spec;
 pub mod state;
 pub mod trace;
 pub mod transaction;
+pub mod types;
 
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;

@@ -21,6 +21,9 @@ pub use notifications::{
     ForkChoiceSubscriptions,
 };
 
+mod memory_overlay;
+pub use memory_overlay::MemoryOverlayStateProvider;
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
 pub mod test_utils;

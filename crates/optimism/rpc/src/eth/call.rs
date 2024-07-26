@@ -14,8 +14,9 @@ use crate::OpEthApi;
 
 impl<Eth: EthCall> EthCall for OpEthApi<Eth> where EthApiError: From<Eth::Error> {}
 
-impl<Eth: Call + EthApiTypes> Call for OpEthApi<Eth>
+impl<Eth> Call for OpEthApi<Eth>
 where
+    Eth: Call + EthApiTypes,
     EthApiError: From<Eth::Error>,
 {
     fn call_gas_limit(&self) -> u64 {
@@ -32,7 +33,7 @@ where
         request: TransactionRequest,
     ) -> Result<TxEnv, Self::Error> {
         let mut env =
-            self.inner.create_txn_env(block_env, request).map_err(Self::Error::from_err)?;
+            self.inner.create_txn_env(block_env, request).map_err(Self::Error::from_eth_err)?;
 
         env.optimism = OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() };
 

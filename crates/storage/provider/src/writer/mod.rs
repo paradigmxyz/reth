@@ -1,6 +1,6 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProviderRW, StateChanges, StateReverts,
-    StateWriter, TrieWriter,
+    providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
+    DatabaseProviderRW, StateChangeWriter, StateWriter, TrieWriter,
 };
 use itertools::Itertools;
 use reth_db::{
@@ -33,27 +33,22 @@ enum StorageType<C = (), S = ()> {
 /// [`StorageWriter`] is responsible for managing the writing to either database, static file or
 /// both.
 #[derive(Debug)]
-pub struct StorageWriter<'a, 'b, DB: Database> {
-    database_writer: Option<&'a DatabaseProviderRW<DB>>,
+pub struct StorageWriter<'a, 'b, TX> {
+    database_writer: Option<&'a DatabaseProvider<TX>>,
     static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
 }
 
-impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
+impl<'a, 'b, TX> StorageWriter<'a, 'b, TX> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
     /// - `database_writer`: An optional reference to a database writer.
     /// - `static_file_writer`: An optional mutable reference to a static file writer.
     pub const fn new(
-        database_writer: Option<&'a DatabaseProviderRW<DB>>,
+        database_writer: Option<&'a DatabaseProvider<TX>>,
         static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
     ) -> Self {
         Self { database_writer, static_file_writer }
-    }
-
-    /// Creates a new instance of [`StorageWriter`] from a database writer.
-    pub const fn from_database_writer(database_writer: &'a DatabaseProviderRW<DB>) -> Self {
-        Self::new(Some(database_writer), None)
     }
 
     /// Creates a new instance of [`StorageWriter`] from a static file writer.
@@ -63,11 +58,31 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         Self::new(None, Some(static_file_writer))
     }
 
+    /// Creates a new instance of [`StorageWriter`] from a read-only database provider.
+    pub const fn from_database_provider_ro<DB>(
+        database: &'a DatabaseProviderRO<DB>,
+    ) -> StorageWriter<'_, '_, <DB as Database>::TX>
+    where
+        DB: Database,
+    {
+        StorageWriter::new(Some(database), None)
+    }
+
+    /// Creates a new instance of [`StorageWriter`] from a read-write database provider.
+    pub fn from_database_provider_rw<DB>(
+        database: &'a DatabaseProviderRW<DB>,
+    ) -> StorageWriter<'_, '_, <DB as Database>::TXMut>
+    where
+        DB: Database,
+    {
+        StorageWriter::new(Some(database), None)
+    }
+
     /// Returns a reference to the database writer.
     ///
     /// # Panics
     /// If the database writer is not set.
-    fn database_writer(&self) -> &DatabaseProviderRW<DB> {
+    fn database_writer(&self) -> &DatabaseProvider<TX> {
         self.database_writer.as_ref().expect("should exist")
     }
 
@@ -102,50 +117,12 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         }
         Ok(())
     }
+}
 
-    /// Writes the hashed state changes to the database
-    pub fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        self.ensure_database_writer()?;
-
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor =
-            self.database_writer().tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.database_writer().tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
-                {
-                    if db_entry.key == entry.key {
-                        hashed_storage_cursor.delete_current()?;
-                    }
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
+impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
+where
+    TX: DbTx,
+{
     /// Appends headers to static files, using the
     /// [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties) table to determine the
     /// total difficulty of the parent block during header insertion.
@@ -236,6 +213,54 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         }
         Ok(())
     }
+}
+
+impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
+where
+    TX: DbTxMut + DbTx,
+{
+    /// Writes the hashed state changes to the database
+    pub fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        self.ensure_database_writer()?;
+
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor =
+            self.database_writer().tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor =
+            self.database_writer().tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage.storage_slots_sorted() {
+                let entry = StorageEntry { key: hashed_slot, value };
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
+                {
+                    if db_entry.key == entry.key {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 
     /// Appends receipts block by block.
     ///
@@ -322,7 +347,10 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
     }
 }
 
-impl<'a, 'b, DB: Database> StateWriter for StorageWriter<'a, 'b, DB> {
+impl<'a, 'b, TX> StateWriter for StorageWriter<'a, 'b, TX>
+where
+    TX: DbTxMut + DbTx,
+{
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
     fn write_to_storage(
@@ -334,14 +362,14 @@ impl<'a, 'b, DB: Database> StateWriter for StorageWriter<'a, 'b, DB> {
         let (plain_state, reverts) =
             execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db(self.database_writer(), execution_outcome.first_block)?;
+        self.database_writer().write_state_reverts(reverts, execution_outcome.first_block)?;
 
         self.append_receipts_from_blocks(
             execution_outcome.first_block,
             execution_outcome.receipts.into_iter(),
         )?;
 
-        StateChanges(plain_state).write_to_db(self.database_writer())?;
+        self.database_writer().write_state_changes(plain_state)?;
 
         Ok(())
     }
@@ -473,12 +501,10 @@ mod tests {
         let plain_state = revm_bundle_state.into_plain_state(OriginalValuesKnown::Yes);
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(&provider)
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        StateReverts(reverts).write_to_db(&provider, 1).expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 1).expect("Could not write reverts to DB");
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
@@ -537,15 +563,13 @@ mod tests {
             [PlainStorageChangeset { address: address_b, wipe_storage: true, storage: vec![] }]
         );
         assert!(plain_state.contracts.is_empty());
-        StateChanges(plain_state)
-            .write_to_db(&provider)
-            .expect("Could not write plain state to DB");
+        provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        StateReverts(reverts).write_to_db(&provider, 2).expect("Could not write reverts to DB");
+        provider.write_state_reverts(reverts, 2).expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(
@@ -1256,7 +1280,8 @@ mod tests {
                         0,
                         Vec::new()
                     )
-                    .hash_state_slow()
+                    .hash_state_slow(),
+                    Default::default()
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
