@@ -731,7 +731,7 @@ where
         let mut parent_hash = hash;
         while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
             parent_hash = executed.block.parent_hash;
-            in_memory.insert(0, executed.clone());
+            in_memory.push(executed.clone());
         }
 
         let historical = self.provider.state_by_block_hash(parent_hash)?;
