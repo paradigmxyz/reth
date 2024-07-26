@@ -240,16 +240,13 @@ pub trait EthCall: Call + LoadPendingBlock {
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
-        let (result, env) = match self.inspect(&mut db, env, &mut inspector) {
-            Ok((res, env)) => (res, env),
-            Err(e) => {
-                return Err(e.into());
-            }
-        };
+        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
         let error = match result.result {
             ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason)),
-            ExecutionResult::Revert { output, .. } => Some(format!("{:?}", output)),
+            ExecutionResult::Revert { output, .. } => {
+                Some(format!("{:?}", RevertError::new(output)))
+            }
             ExecutionResult::Success { .. } => None,
         };
 
