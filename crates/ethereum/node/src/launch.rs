@@ -172,7 +172,7 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
-        let tree_config = TreeConfig::builder().with_persistence_threshold(120).build();
+        let tree_config = TreeConfig::default().with_persistence_threshold(120);
 
         // Configure the consensus engine
         let mut eth_service = EthService::new(

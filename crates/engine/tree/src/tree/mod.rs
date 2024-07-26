@@ -50,7 +50,7 @@ use tokio::sync::{
 use tracing::*;
 
 mod config;
-pub use config::{TreeConfig, TreeConfigBuilder};
+pub use config::TreeConfig;
 
 /// Keeps track of the state of the tree.
 ///
