@@ -367,20 +367,12 @@ impl CanonicalInMemoryState {
         historical: StateProviderBox,
     ) -> MemoryOverlayStateProvider {
         let mut in_memory = Vec::new();
-        let mut current_hash = hash;
+        let mut current_state = self.state_by_hash(hash);
 
-        if let Some(first_state) = self.state_by_hash(hash) {
-            let anchor = first_state.anchor();
+        while let Some(state) = current_state {
+            in_memory.insert(0, state.block());
 
-            while let Some(state) = self.state_by_hash(current_hash) {
-                in_memory.insert(0, state.block());
-
-                if anchor.hash == current_hash {
-                    break;
-                }
-
-                current_hash = state.block().block().parent_hash;
-            }
+            current_state = state.parent.as_ref().map(|parent| Arc::new(*parent.clone()));
         }
 
         MemoryOverlayStateProvider::new(in_memory, historical)
