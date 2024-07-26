@@ -24,7 +24,7 @@ impl<'a, TX> Clone for DatabaseTrieCursorFactory<'a, TX> {
 }
 
 impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
-    /// Create new [DatabaseTrieCursorFactory].
+    /// Create new [`DatabaseTrieCursorFactory`].
     pub const fn new(tx: &'a TX) -> Self {
         Self(tx)
     }
