@@ -15,5 +15,5 @@ pub trait EthApiTypes: Send + Sync {
         + Send
         + Sync;
     /// Blockchain data types, specific to network, e.g. block and transaction.
-    type Types: alloy_network::Network;
+    type NetworkTypes: alloy_network::Network;
 }

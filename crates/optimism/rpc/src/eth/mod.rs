@@ -59,7 +59,7 @@ where
     Eth: Send + Sync,
 {
     type Error = OpEthApiError;
-    type Types = Optimism;
+    type NetworkTypes = Optimism;
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {

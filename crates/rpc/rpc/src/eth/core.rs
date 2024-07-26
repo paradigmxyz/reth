@@ -121,7 +121,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    type Types = Ethereum;
+    type NetworkTypes = Ethereum;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
