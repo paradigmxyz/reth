@@ -75,16 +75,16 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
-    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx, hashed_state.clone())
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        StateRoot::overlay_root(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx, hashed_state.clone())
+        StateRoot::overlay_root_with_updates(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -92,11 +92,11 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     fn hashed_proof(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Proof::overlay_account_proof(self.tx, hashed_state.clone(), address, slots)
+        Proof::overlay_account_proof(self.tx, hashed_state, address, slots)
             .map_err(Into::<ProviderError>::into)
     }
 }

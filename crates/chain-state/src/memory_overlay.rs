@@ -76,20 +76,20 @@ impl AccountReader for MemoryOverlayStateProvider {
 
 impl StateRootProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
-    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state.clone());
-        self.historical.hashed_state_root(&state)
+        state.extend(hashed_state);
+        self.historical.hashed_state_root(state)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state.clone());
-        self.historical.hashed_state_root_with_updates(&state)
+        state.extend(hashed_state);
+        self.historical.hashed_state_root_with_updates(state)
     }
 }
 
@@ -97,13 +97,13 @@ impl StateProofProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_proof(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state.clone());
-        self.historical.hashed_proof(&state, address, slots)
+        state.extend(hashed_state);
+        self.historical.hashed_proof(state, address, slots)
     }
 }
 
