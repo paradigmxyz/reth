@@ -81,8 +81,12 @@ impl InMemoryState {
 /// advanced internally by the tree.
 #[derive(Debug)]
 pub(crate) struct CanonicalInMemoryStateInner {
+    /// Tracks certain chain information, such as the canonical head, safe head, and finalized
+    /// head.
     pub(crate) chain_info_tracker: ChainInfoTracker,
+    /// Tracks blocks at the tip of the chain that have not been persisted to disk yet.
     pub(crate) in_memory_state: InMemoryState,
+    /// A broadcast stream that emits events when the canonical chain is updated.
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender,
 }
 
@@ -193,7 +197,7 @@ impl CanonicalInMemoryState {
     pub fn remove_persisted_blocks(&self, persisted_height: u64) {
         let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut numbers = self.inner.in_memory_state.numbers.write();
-        let _pending = self.inner.in_memory_state.pending.write();
+        let mut pending = self.inner.in_memory_state.pending.write();
 
         // clear all numbers
         numbers.clear();
@@ -205,7 +209,7 @@ impl CanonicalInMemoryState {
             .filter(|b| b.block().number > persisted_height)
             .collect::<Vec<_>>();
 
-        // sort the blocks by number so we can insert them back in order
+        // sort the blocks by number so we can insert them back in natural order (low -> high)
         old_blocks.sort_unstable_by_key(|block| block.block().number);
 
         for block in old_blocks {
@@ -217,6 +221,14 @@ impl CanonicalInMemoryState {
             // append new blocks
             blocks.insert(hash, Arc::new(block_state));
             numbers.insert(number, hash);
+        }
+
+        // also shift the pending state if it exists
+        if let Some(pending) = pending.as_mut() {
+            pending.parent = blocks
+                .get(&pending.block().block.parent_hash)
+                .cloned()
+                .map(|p| Box::new((*p).clone()));
         }
     }
 
