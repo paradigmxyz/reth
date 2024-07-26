@@ -140,14 +140,24 @@ impl CanonicalInMemoryState {
         self.state_by_hash(hash).map(|block| block.block().block.header.clone())
     }
 
+    /// Updates the pending block with the given block.
+    ///
+    /// Note: This assumes that the parent block of the pending block is canonical.
+    pub fn set_pending_block(&self, pending: ExecutedBlock) {
+        // fetch the state of the pending block's parent block
+        let parent = self.state_by_hash(pending.block().parent_hash);
+        let pending = BlockState::with_parent(pending, parent.map(|p| (*p).clone()));
+        *self.inner.in_memory_state.pending.write() = Some(pending);
+    }
+
     /// Append new blocks to the in memory state.
     fn update_blocks<I>(&self, new_blocks: I, reorged: I)
     where
         I: IntoIterator<Item = ExecutedBlock>,
     {
         // acquire all locks
-        let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut numbers = self.inner.in_memory_state.numbers.write();
+        let mut blocks = self.inner.in_memory_state.blocks.write();
         let mut pending = self.inner.in_memory_state.pending.write();
 
         // we first remove the blocks from the reorged chain
