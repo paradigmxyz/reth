@@ -260,7 +260,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root(self.tx, revert_state)
+        StateRoot::overlay_root(self.tx, revert_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -270,7 +270,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root_with_updates(self.tx, revert_state)
+        StateRoot::overlay_root_with_updates(self.tx, revert_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
