@@ -8218,7 +8218,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "revm",
- "tracing",
 ]
 
 [[package]]
