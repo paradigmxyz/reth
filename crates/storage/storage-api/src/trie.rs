@@ -14,12 +14,11 @@ pub trait StateRootProvider: Send + Sync {
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
     fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        let hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
-        self.hashed_state_root(&hashed_state)
+        self.hashed_state_root(HashedPostState::from_bundle_state(&bundle_state.state))
     }
 
     /// Returns the state root of the `HashedPostState` on top of the current state.
-    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256>;
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
     /// Returns the state root of the BundleState on top of the current state with trie
     /// updates to be committed to the database.
@@ -27,15 +26,14 @@ pub trait StateRootProvider: Send + Sync {
         &self,
         bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
-        self.hashed_state_root_with_updates(&hashed_state)
+        self.hashed_state_root_with_updates(HashedPostState::from_bundle_state(&bundle_state.state))
     }
 
     /// Returns the state root of the `HashedPostState` on top of the current state with trie
     /// updates to be committed to the database.
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 }
 
@@ -51,14 +49,14 @@ pub trait StateProofProvider: Send + Sync {
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let hashed_state = HashedPostState::from_bundle_state(&state.state);
-        self.hashed_proof(&hashed_state, address, slots)
+        self.hashed_proof(hashed_state, address, slots)
     }
 
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
     fn hashed_proof(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof>;
