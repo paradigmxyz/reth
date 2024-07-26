@@ -4,6 +4,7 @@
 use std::{fmt, ops::Deref, sync::Arc};
 
 use alloy_dyn_abi::TypedData;
+use alloy_network::Network;
 use futures::Future;
 use reth_primitives::{
     Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
@@ -21,7 +22,7 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
+use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionBuilder};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError};
@@ -53,7 +54,10 @@ use super::{
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction + FormatTransactionResponse {
+pub trait EthTransactions:
+    LoadTransaction
+    + TransactionBuilder<Transaction = <Self::NetworkTypes as Network>::TransactionResponse>
+{
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -197,7 +201,7 @@ pub trait EthTransactions: LoadTransaction + FormatTransactionResponse {
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Transaction>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Self::Transaction>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
