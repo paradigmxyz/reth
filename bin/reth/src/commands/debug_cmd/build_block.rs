@@ -172,13 +172,13 @@ impl Command {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
                 .into_ecrecovered()
-                .ok_or(eyre::eyre!("failed to recover tx"))?;
+                .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
 
             let encoded_length = match &transaction.transaction {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                    ))?;
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
+                        eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
+                    })?;
 
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
