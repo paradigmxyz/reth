@@ -236,12 +236,19 @@ impl DiskFileBlobStoreInner {
 
     /// Returns all the blob transactions which are in the cache or on the disk.
     fn retain_existing(&self, txs: Vec<B256>) -> Result<Vec<B256>, BlobStoreError> {
-        let mut cache = self.blob_cache.lock();
-        Ok(txs
-            .iter()
-            .filter(|&tx| cache.get(tx).is_some() || self.blob_disk_file(*tx).is_file())
-            .cloned()
-            .collect())
+        let (in_cache, not_in_cache): (Vec<B256>, Vec<B256>) = {
+            let mut cache = self.blob_cache.lock();
+            txs.into_iter().partition(|tx| cache.get(tx).is_some())
+        };
+
+        let mut existing = in_cache;
+        for tx in not_in_cache {
+            if self.blob_disk_file(tx).is_file() {
+                existing.push(tx);
+            }
+        }
+
+        Ok(existing)
     }
 
     /// Retrieves the blob for the given transaction hash from the blob cache or disk.
