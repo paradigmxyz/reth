@@ -529,8 +529,7 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        let res: B256 = EthState::storage_at(self, address, index, block_number).await?;
-        Ok(res)
+        Ok(EthState::storage_at(self, address, index, block_number).await?)
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -597,10 +596,7 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let access_list_with_gas_used =
-            EthCall::create_access_list_at(self, request, block_number).await?;
-
-        Ok(access_list_with_gas_used)
+        Ok(EthCall::create_access_list_at(self, request, block_number).await?)
     }
 
     /// Handler for: `eth_estimateGas`
@@ -623,7 +619,7 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthFees::gas_price(self).await?)
+        Ok(EthFees::gas_price(self).await?)
     }
 
     /// Handler for: `eth_getAccount`
@@ -634,13 +630,13 @@ where
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthFees::suggested_priority_fee(self).await?)
+        Ok(EthFees::suggested_priority_fee(self).await?)
     }
 
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        return Ok(EthFees::blob_base_fee(self).await?)
+        Ok(EthFees::blob_base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -659,9 +655,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(
-            EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
-        )
+        Ok(EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?)
     }
 
     /// Handler for: `eth_mining`
