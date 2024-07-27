@@ -24,9 +24,9 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadFee, LoadState, SpawnBlocking,
         Trace, UpdateRawTxForwarder,
     },
-    EthApiTypes, RawTransactionForwarder, Transaction,
+    EthApiTypes, RawTransactionForwarder,
 };
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_types::{EthStateCache, Transaction};
 use reth_rpc_types::SyncStatus;
 use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
@@ -46,14 +46,15 @@ use crate::OpEthApiError;
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Debug, Clone)]
-pub struct OpEthApi<Eth> {
+pub struct OpEthApi<Eth, EthTxB> {
     inner: Eth,
+    compat: NetworkTypeBuilders<OpTxBuilder<EthTxB>, EthBlockBuilder<OpTxBuilder<EthTxBuilder>>>,
 }
 
 impl<Eth> OpEthApi<Eth> {
     /// Creates a new `OpEthApi` from the provided `Eth` implementation.
     pub const fn new(inner: Eth) -> Self {
-        Self { inner }
+        Self { inner, resp_builder: OpTxBuilder }
     }
 }
 
@@ -63,31 +64,6 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-}
-
-impl<Eth: TransactionBuilder<Transaction = Transaction<Self>>> TransactionBuilder
-    for OpEthApi<Eth>
-{
-    type Transaction = Transaction<Self>;
-
-    fn fill(
-        tx: TransactionSignedEcRecovered,
-        block_hash: Option<B256>,
-        block_number: Option<BlockNumber>,
-        base_fee: Option<u64>,
-        transaction_index: Option<usize>,
-    ) -> Self::Transaction {
-        let mut resp = Eth::fill(tx, block_hash, block_number, base_fee, transaction_index);
-
-        resp.other = OptimismTransactionFields {
-            source_hash: signed_tx.source_hash(),
-            mint: signed_tx.mint(),
-            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
-        }
-        .into();
-
-        resp
-    }
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {

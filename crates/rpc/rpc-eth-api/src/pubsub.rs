@@ -2,12 +2,11 @@
 
 use jsonrpsee::proc_macros::rpc;
 use reth_rpc_types::pubsub::{Params, SubscriptionKind};
-
-use crate::EthApiTypesCompat;
+use reth_rpc_types_compat::TransactionBuilder;
 
 /// Ethereum pub-sub rpc interface.
 #[rpc(server, namespace = "eth")]
-pub trait EthPubSubApi<T: EthApiTypesCompat> {
+pub trait EthPubSubApi<T: TransactionBuilder> {
     /// Create an ethereum subscription for the given params
     #[subscription(
         name = "subscribe" => "subscription",

@@ -15,5 +15,8 @@ pub mod engine;
 pub mod proof;
 pub mod transaction;
 
-pub use block::BlockBuilder;
-pub use transaction::TransactionBuilder;
+mod adapter;
+
+pub use adapter::NetworkTypeBuilders;
+pub use block::{BlockBuilder, EthBlockBuilder};
+pub use transaction::{EthTxBuilder, TransactionBuilder};

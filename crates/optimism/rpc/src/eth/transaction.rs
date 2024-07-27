@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use op_alloy_network::Optimism;
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_primitives::TransactionSigned;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
@@ -105,5 +106,43 @@ where
         };
 
         Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OpTxBuilder<Eth> {
+    l1_resp_builder: Eth,
+}
+
+impl<Eth: TransactionBuilder<Transaction = Optimism::TransactionResponse>> TransactionBuilder
+    for OpTxBuilder
+{
+    type Transaction = Optimism::TransactionResponse; // todo: own tx type for op, wrapper of l1 tx
+
+    fn fill(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        block_hash: Option<B256>,
+        block_number: Option<BlockNumber>,
+        base_fee: Option<u64>,
+        transaction_index: Option<usize>,
+    ) -> Self::Transaction {
+        let mut resp = self.l1_resp_builder.fill(
+            self,
+            tx,
+            block_hash,
+            block_number,
+            base_fee,
+            transaction_index,
+        );
+
+        resp.other = OptimismTransactionFields {
+            source_hash: signed_tx.source_hash(),
+            mint: signed_tx.mint(),
+            is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+        }
+        .into();
+
+        resp
     }
 }

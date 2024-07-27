@@ -1,6 +1,8 @@
 //! Compatibility functions for rpc `Block` type.
 
 use alloy_rlp::Encodable;
+use auto_impl::auto_impl;
+use derive_more::Constructor;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
@@ -8,8 +10,15 @@ use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind
 
 use crate::TransactionBuilder;
 
-/// Builds RPC block response w.r.t. network.
-pub trait BlockBuilder: TransactionBuilder {
+/// Builds RPC block w.r.t. network.
+#[auto_impl(&, Arc)]
+pub trait BlockBuilder {
+    /// RPC transaction type of network.
+    type Transaction: Send;
+
+    /// Returns handle to transaction builder.
+    fn tx_builder(&self) -> impl TransactionBuilder<Transaction = Self::Transaction>;
+
     /// Converts the given primitive block into a [Block] response with the given
     /// [`BlockTransactionsKind`]
     ///
@@ -56,7 +65,7 @@ pub trait BlockBuilder: TransactionBuilder {
             .map(|(idx, (tx, sender))| {
                 let signed_tx_ec_recovered = tx.with_signer(sender);
 
-                self.from_recovered_with_block_context(
+                self.tx_builder().from_recovered_with_block_context(
                     signed_tx_ec_recovered,
                     block_hash,
                     block_number,
@@ -199,5 +208,19 @@ pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
         withdrawals: Some(vec![]),
         size,
         other: Default::default(),
+    }
+}
+
+/// Builds a RPC block response for l1.
+#[derive(Debug, Clone, Copy, Constructor)]
+pub struct EthBlockBuilder<TxB> {
+    tx_builder: TxB,
+}
+
+impl<TxB: TransactionBuilder> BlockBuilder for EthBlockBuilder<TxB> {
+    type Transaction = TxB::Transaction;
+
+    fn tx_builder(&self) -> impl TransactionBuilder<Transaction = Self::Transaction> {
+        &self.tx_builder
     }
 }

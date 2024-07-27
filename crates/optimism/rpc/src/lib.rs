@@ -16,4 +16,8 @@ pub mod eth;
 
 pub use api::OpEthApiServer;
 pub use error::OpEthApiError;
-pub use eth::{receipt::op_receipt_fields, transaction::OptimismTxMeta, OpEthApi};
+pub use eth::{
+    receipt::op_receipt_fields,
+    transaction::{OpTxBuilder, OptimismTxMeta},
+    OpEthApi,
+};

@@ -14,7 +14,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
-use reth_rpc_eth_api::{EthApiTypesCompat, EthFilterApiServer};
+use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
     EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
@@ -37,12 +37,15 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool> {
+#[derive(Clone)]
+pub struct EthFilter<Provider, Pool, Eth> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool>>,
+    /// Assembles response data w.r.t. network.
+    resp_builder: Arc<Eth>,
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: Send + Sync + 'static,
     Pool: Send + Sync + 'static,
@@ -61,6 +64,7 @@ where
         eth_cache: EthStateCache,
         config: EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
+        resp_builder: Eth,
     ) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
@@ -78,7 +82,7 @@ where
             max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
         };
 
-        let eth_filter = Self { inner: Arc::new(inner) };
+        let eth_filter = Self { inner: Arc::new(inner), resp_builder: Arc::new(resp_builder) };
 
         let this = eth_filter.clone();
         eth_filter.inner.task_spawner.spawn_critical(
@@ -123,7 +127,7 @@ where
     }
 }
 
-impl<Provider, Pool> EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
@@ -220,11 +224,11 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool, Eth> EthFilterApiServer<Eth> for EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilterApiServer<Eth> for EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Eth: EthApiTypesCompat,
+    Eth: TransactionBuilder + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -253,7 +257,8 @@ where
             }
             PendingTransactionFilterKind::Full => {
                 let stream = self.inner.pool.new_pending_pool_transactions_listener();
-                let full_txs_receiver = FullTransactionsReceiver::new(stream);
+                let full_txs_receiver =
+                    FullTransactionsReceiver::new(stream, self.resp_builder.clone());
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
                 )))
@@ -306,12 +311,6 @@ where
 impl<Provider, Pool> std::fmt::Debug for EthFilter<Provider, Pool> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
-    }
-}
-
-impl<Provider, Pool> Clone for EthFilter<Provider, Pool> {
-    fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
     }
 }
 
@@ -561,28 +560,29 @@ impl PendingTransactionsReceiver {
 
 /// A structure to manage and provide access to a stream of full transaction details.
 #[derive(Debug, Clone)]
-struct FullTransactionsReceiver<T: PoolTransaction> {
+struct FullTransactionsReceiver<T: PoolTransaction, TxB> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
+    resp_builder: TxB,
 }
 
-impl<T> FullTransactionsReceiver<T>
+impl<T, TxB> FullTransactionsReceiver<T, TxB>
 where
     T: PoolTransaction + 'static,
+    TxB: TransactionBuilder,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
-    fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)) }
+    fn new(stream: NewSubpoolTransactionStream<T>, resp_builder: TxB) -> Self {
+        Self { txs_stream: Arc::new(Mutex::new(stream)), resp_builder }
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain<TxB: TransactionBuilder>(&self) -> FilterChanges<TxB::Transaction> {
+    async fn drain(&self) -> FilterChanges<TxB::Transaction> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(reth_rpc_types_compat::transaction::from_recovered::<TxB>(
-                tx.transaction.to_recovered_transaction(),
-            ))
+            pending_txs
+                .push(self.resp_builder.from_recovered(tx.transaction.to_recovered_transaction()))
         }
         FilterChanges::Transactions(pending_txs)
     }
@@ -590,17 +590,15 @@ where
 
 /// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
 #[async_trait]
-trait FullTransactionsFilter<T: TransactionBuilder>:
-    fmt::Debug + Send + Sync + Unpin + 'static
-{
-    async fn drain(&self) -> FilterChanges<T::Transaction>;
+trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
+    async fn drain(&self) -> FilterChanges<T>;
 }
 
 #[async_trait]
-impl<T, TxB> FullTransactionsFilter<TxB> for FullTransactionsReceiver<T>
+impl<T, TxB> FullTransactionsFilter<TxB::Transaction> for FullTransactionsReceiver<T, TxB>
 where
     T: PoolTransaction + 'static,
-    TxB: TransactionBuilder,
+    TxB: TransactionBuilder + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxB::Transaction> {
         Self::drain::<TxB>(self).await
@@ -615,16 +613,15 @@ where
 #[derive(Debug, Clone)]
 enum PendingTransactionKind {
     Hashes(PendingTransactionsReceiver),
-    FullTransaction(Arc<dyn FullTransactionsFilter<Box<dyn TransactionBuilder>>>),
+    FullTransaction(
+        Arc<dyn FullTransactionsFilter<Box<dyn TransactionBuilder<Transaction = Transaction>>>>,
+    ),
 }
 
-impl<T> PendingTransactionKind<T>
-where
-    T: TransactionBuilder + 'static,
-{
-    async fn drain(&self) -> FilterChanges<T::Transaction> {
+impl PendingTransactionKind {
+    async fn drain(&self) -> FilterChanges {
         match self {
-            Self::Hashes(receiver) => receiver.drain::<T::Transaction>().await,
+            Self::Hashes(receiver) => receiver.drain().await,
             Self::FullTransaction(receiver) => receiver.drain().await,
         }
     }

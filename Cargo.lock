@@ -8533,8 +8533,11 @@ dependencies = [
 name = "reth-rpc-types-compat"
 version = "1.0.3"
 dependencies = [
+ "alloy-network",
  "alloy-rlp",
  "alloy-rpc-types",
+ "auto_impl",
+ "derive_more",
  "reth-primitives",
  "reth-rpc-types",
  "reth-trie-common",
