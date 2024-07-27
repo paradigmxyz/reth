@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 use alloc::vec;
 
 /// Dev hardforks
+#[cfg(feature = "std")]
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
