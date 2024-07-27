@@ -1,12 +1,12 @@
 use crate::{
-    providers::{BundleStateProvider, StaticFileProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderRO, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, BlockchainTreePendingStateProvider,
+    CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider,
+    FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::CanonicalInMemoryState;
@@ -645,16 +645,6 @@ where
             }
         }
         Ok(None)
-    }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.pending()?;
-
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
     }
 }
 

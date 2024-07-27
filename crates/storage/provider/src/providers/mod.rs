@@ -123,12 +123,7 @@ where
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
-}
 
-impl<DB> BlockchainProvider<DB>
-where
-    DB: Database,
-{
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
@@ -145,6 +140,26 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl<DB> BlockchainProvider<DB>
+where
+    Self: StateProviderFactory,
+    DB: Database,
+{
+    /// Return a [`StateProviderBox`] that contains bundle state data provider.
+    /// Used to inspect or execute transaction on the pending state.
+    fn pending_with_provider(
+        &self,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
+    ) -> ProviderResult<StateProviderBox> {
+        let canonical_fork = bundle_state_data.canonical_fork();
+        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
+
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        Ok(Box::new(bundle_state_provider))
     }
 }
 
@@ -662,18 +677,6 @@ where
             return Ok(Some(self.pending_with_provider(state)?))
         }
         Ok(None)
-    }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let canonical_fork = bundle_state_data.canonical_fork();
-        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
-
-        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
     }
 }
 
