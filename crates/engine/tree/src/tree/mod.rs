@@ -154,14 +154,12 @@ impl TreeState {
 
     /// Returns the maximum block number stored.
     pub(crate) fn max_block_number(&self) -> BlockNumber {
-        let block_default = (&BlockNumber::default(), &vec![]);
-        *self.blocks_by_number.last_key_value().unwrap_or(block_default).0
+        self.blocks_by_number.last_key_value().map(|e| *e.0).unwrap_or_default()
     }
 
     /// Returns the minimum block number stored.
     pub(crate) fn min_block_number(&self) -> BlockNumber {
-        let block_default = (&BlockNumber::default(), &vec![]);
-        *self.blocks_by_number.first_key_value().unwrap_or(block_default).0
+        self.blocks_by_number.first_key_value().map(|e| *e.0).unwrap_or_default()
     }
 
     /// Returns the block number of the pending block: `head + 1`
