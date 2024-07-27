@@ -14,7 +14,7 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
-use reth_rpc_eth_api::EthFilterApiServer;
+use reth_rpc_eth_api::{EthApiTypesCompat, EthFilterApiServer};
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
     EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
@@ -22,8 +22,9 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
+    PendingTransactionFilterKind, Transaction,
 };
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use tokio::{
@@ -219,10 +220,11 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
+impl<Provider, Pool, Eth> EthFilterApiServer<Eth> for EthFilter<Provider, Pool>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
+    Eth: EthApiTypesCompat,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -544,7 +546,7 @@ impl PendingTransactionsReceiver {
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain<T>(&self) -> FilterChanges<T> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_receiver.lock().await;
 
@@ -573,12 +575,12 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain<TxB: TransactionBuilder>(&self) -> FilterChanges<TxB::Transaction> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(reth_rpc_types_compat::transaction::from_recovered(
+            pending_txs.push(reth_rpc_types_compat::transaction::from_recovered::<TxB>(
                 tx.transaction.to_recovered_transaction(),
             ))
         }
@@ -588,17 +590,20 @@ where
 
 /// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
 #[async_trait]
-trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
-    async fn drain(&self) -> FilterChanges;
+trait FullTransactionsFilter<T: TransactionBuilder>:
+    fmt::Debug + Send + Sync + Unpin + 'static
+{
+    async fn drain(&self) -> FilterChanges<T::Transaction>;
 }
 
 #[async_trait]
-impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
+impl<T, TxB> FullTransactionsFilter<TxB> for FullTransactionsReceiver<T>
 where
     T: PoolTransaction + 'static,
+    TxB: TransactionBuilder,
 {
-    async fn drain(&self) -> FilterChanges {
-        Self::drain(self).await
+    async fn drain(&self) -> FilterChanges<TxB::Transaction> {
+        Self::drain::<TxB>(self).await
     }
 }
 
@@ -610,13 +615,16 @@ where
 #[derive(Debug, Clone)]
 enum PendingTransactionKind {
     Hashes(PendingTransactionsReceiver),
-    FullTransaction(Arc<dyn FullTransactionsFilter>),
+    FullTransaction(Arc<dyn FullTransactionsFilter<Box<dyn TransactionBuilder>>>),
 }
 
-impl PendingTransactionKind {
-    async fn drain(&self) -> FilterChanges {
+impl<T> PendingTransactionKind<T>
+where
+    T: TransactionBuilder + 'static,
+{
+    async fn drain(&self) -> FilterChanges<T::Transaction> {
         match self {
-            Self::Hashes(receiver) => receiver.drain().await,
+            Self::Hashes(receiver) => receiver.drain::<T::Transaction>().await,
             Self::FullTransaction(receiver) => receiver.drain().await,
         }
     }

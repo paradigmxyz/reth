@@ -9,6 +9,7 @@ mod pending_block;
 
 use std::{future::Future, sync::Arc};
 
+use alloy_network::Network;
 use alloy_primitives::{Address, U64};
 use alloy_rpc_types::optimism::OptimismTransactionFields;
 use op_alloy_network::Optimism;
@@ -23,7 +24,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadFee, LoadState, SpawnBlocking,
         Trace, UpdateRawTxForwarder,
     },
-    EthApiTypes, RawTransactionForwarder,
+    EthApiTypes, RawTransactionForwarder, Transaction,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
@@ -64,8 +65,10 @@ where
     type NetworkTypes = Optimism;
 }
 
-impl TransactionBuilder for OpEthApi<Eth> {
-    type Transaction = <Self::NetworkTypes as Network>::TransactionResponse;
+impl<Eth: TransactionBuilder<Transaction = Transaction<Self>>> TransactionBuilder
+    for OpEthApi<Eth>
+{
+    type Transaction = Transaction<Self>;
 
     fn fill(
         tx: TransactionSignedEcRecovered,

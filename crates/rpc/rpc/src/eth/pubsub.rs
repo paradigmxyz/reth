@@ -9,7 +9,7 @@ use jsonrpsee::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
+use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, EthApiTypesCompat};
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
@@ -17,8 +17,9 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log,
+    FilteredParams, Header, Log, Transaction,
 };
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
@@ -68,13 +69,14 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
 }
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Events, Network> EthPubSubApiServer
+impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth>
     for EthPubSub<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
+    Eth: EthApiTypesCompat<Transaction = Transaction>,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -86,7 +88,7 @@ where
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
         self.subscription_task_spawner.spawn(Box::pin(async move {
-            let _ = handle_accepted(pubsub, sink, kind, params).await;
+            let _ = handle_accepted::<_, _, _, _, Eth>(pubsub, sink, kind, params).await;
         }));
 
         Ok(())
@@ -94,13 +96,15 @@ where
 }
 
 /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Provider, Pool, Events, Network>(
+async fn handle_accepted<Provider, Pool, Events, Network, TxB>(
     pubsub: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
 ) -> Result<(), ErrorObject<'static>>
 where
+    // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
+    TxB: TransactionBuilder<Transaction = Transaction>,
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
@@ -133,7 +137,7 @@ where
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
                             EthSubscriptionResult::FullTransaction(Box::new(
-                                reth_rpc_types_compat::transaction::from_recovered(
+                                reth_rpc_types_compat::transaction::from_recovered::<TxB>(
                                     tx.transaction.to_recovered_transaction(),
                                 ),
                             ))

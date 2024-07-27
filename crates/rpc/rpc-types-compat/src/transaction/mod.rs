@@ -1,5 +1,6 @@
 //! Compatibility functions for rpc `Transaction` type.
 
+pub use signature::*;
 pub use typed::*;
 
 mod signature;
@@ -8,13 +9,13 @@ mod typed;
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxType, B256};
 
-/// Builds a RPC transaction response w.r.t. network.
-pub trait TransactionBuilder {
+/// Builds RPC transaction response w.r.t. network.
+pub trait TransactionBuilder: Send + Sync {
     /// RPC transaction response type.
-    type Transaction;
+    type Transaction: Send;
 
     /// Returns gas price and max fee per gas w.r.t. network specific transaction type.
-    fn gas_price(signed_tx: TransactionSigned, base_fee: Option<u64>) -> GasPrice {
+    fn gas_price(&self, signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
         match signed_tx.tx_type() {
             TxType::Legacy | TxType::Eip2930 => {
                 GasPrice { gas_price: Some(signed_tx.max_fee_per_gas()), max_fee_per_gas: None }
@@ -42,12 +43,35 @@ pub trait TransactionBuilder {
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
     fn fill(
+        &self,
         tx: TransactionSignedEcRecovered,
         block_hash: Option<B256>,
         block_number: Option<BlockNumber>,
         base_fee: Option<u64>,
         transaction_index: Option<usize>,
     ) -> Self::Transaction;
+
+    /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
+    /// environment related fields to `None`.
+    fn from_recovered(&self, tx: TransactionSignedEcRecovered) -> Self::Transaction {
+        self.fill(tx, None, None, None, None)
+    }
+
+    /// Create a new rpc transaction result for a mined transaction, using the given block hash,
+    /// number, and tx index fields to populate the corresponding fields in the rpc result.
+    ///
+    /// The block hash, number, and tx index fields should be from the original block where the
+    /// transaction was mined.
+    fn from_recovered_with_block_context(
+        &self,
+        tx: TransactionSignedEcRecovered,
+        block_hash: B256,
+        block_number: BlockNumber,
+        base_fee: Option<u64>,
+        tx_index: usize,
+    ) -> Self::Transaction {
+        self.fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+    }
 }
 
 /// Gas price and max fee per gas for a transaction. Helper type to format transaction RPC response.
@@ -57,27 +81,6 @@ pub struct GasPrice {
     pub gas_price: Option<u128>,
     /// Max fee per gas for transaction.
     pub max_fee_per_gas: Option<u128>,
-}
-
-/// Create a new rpc transaction result for a mined transaction, using the given block hash,
-/// number, and tx index fields to populate the corresponding fields in the rpc result.
-///
-/// The block hash, number, and tx index fields should be from the original block where the
-/// transaction was mined.
-pub fn from_recovered_with_block_context<T: TransactionBuilder>(
-    tx: TransactionSignedEcRecovered,
-    block_hash: B256,
-    block_number: BlockNumber,
-    base_fee: Option<u64>,
-    tx_index: usize,
-) -> T::Transaction {
-    T::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
-}
-
-/// Create a new rpc transaction result for a _pending_ signed transaction, setting block
-/// environment related fields to `None`.
-pub fn from_recovered<T: TransactionBuilder>(tx: TransactionSignedEcRecovered) -> T::Transaction {
-    T::fill(tx, None, None, None, None)
 }
 
 /// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]

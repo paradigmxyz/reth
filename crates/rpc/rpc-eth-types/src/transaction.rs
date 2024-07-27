@@ -3,8 +3,8 @@
 //! Transaction wrapper that labels transaction with its origin.
 
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_rpc_types::{Transaction, TransactionInfo};
-use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
+use reth_rpc_types::TransactionInfo;
+use reth_rpc_types_compat::TransactionBuilder;
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34,6 +34,22 @@ impl TransactionSource {
     /// Consumes the type and returns the wrapped transaction.
     pub fn into_recovered(self) -> TransactionSignedEcRecovered {
         self.into()
+    }
+
+    /// Conversion into network specific transaction type.
+    pub fn into_transaction<T: TransactionBuilder>(self, tx_builder: &T) -> T::Transaction {
+        match self {
+            TransactionSource::Pool(tx) => tx_builder.from_recovered(tx),
+            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
+                tx_builder.from_recovered_with_block_context(
+                    transaction,
+                    block_hash,
+                    block_number,
+                    base_fee,
+                    index as usize,
+                )
+            }
+        }
     }
 
     /// Returns the transaction and block related info, if not pending
@@ -74,23 +90,6 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
         match value {
             TransactionSource::Pool(tx) => tx,
             TransactionSource::Block { transaction, .. } => transaction,
-        }
-    }
-}
-
-impl From<TransactionSource> for Transaction {
-    fn from(value: TransactionSource) -> Self {
-        match value {
-            TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),
-            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
-                from_recovered_with_block_context(
-                    transaction,
-                    block_hash,
-                    block_number,
-                    base_fee,
-                    index as usize,
-                )
-            }
         }
     }
 }

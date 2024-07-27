@@ -9,26 +9,29 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     state::{EvmOverrides, StateOverride},
     AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, StateContext,
+    SyncStatus, TransactionRequest, Work,
 };
 use tracing::trace;
 
-use crate::helpers::{
-    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
-    EthTransactions, FullEthApi,
+use crate::{
+    helpers::{
+        transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+        EthTransactions, FullEthApi,
+    },
+    Block, EthApiTypes, Transaction,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
-pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+pub trait FullEthApiServer: EthApiServer<Self> + FullEthApi + UpdateRawTxForwarder + Clone {}
 
-impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+impl<T> FullEthApiServer for T where T: EthApiServer<T> + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi: EthApiTypes {
+pub trait EthApi<T: EthApiTypes> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -55,7 +58,7 @@ pub trait EthApi: EthApiTypes {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<Block<T>>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
@@ -63,7 +66,7 @@ pub trait EthApi: EthApiTypes {
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> RpcResult<Option<RichBlock>>;
+    ) -> RpcResult<Option<Block<T>>>;
 
     /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "getBlockTransactionCountByHash")]
@@ -100,7 +103,7 @@ pub trait EthApi: EthApiTypes {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>>;
+    ) -> RpcResult<Option<Block<T>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockNumberAndIndex")]
@@ -108,7 +111,7 @@ pub trait EthApi: EthApiTypes {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>>;
+    ) -> RpcResult<Option<Block<T>>>;
 
     /// Returns the EIP-2718 encoded transaction if it exists.
     ///
@@ -118,7 +121,7 @@ pub trait EthApi: EthApiTypes {
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
-    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
+    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction<T>>>;
 
     /// Returns information about a raw transaction by block hash and transaction index position.
     #[method(name = "getRawTransactionByBlockHashAndIndex")]
@@ -134,7 +137,7 @@ pub trait EthApi: EthApiTypes {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<Transaction<T>>>;
 
     /// Returns information about a raw transaction by block number and transaction index
     /// position.
@@ -151,7 +154,7 @@ pub trait EthApi: EthApiTypes {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<Transaction<T>>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
@@ -332,7 +335,7 @@ pub trait EthApi: EthApiTypes {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer for T
+impl<T> EthApiServer<T> for T
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
@@ -375,7 +378,7 @@ where
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>> {
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<Block<T>>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
         Ok(EthBlocks::rpc_block(self, hash.into(), full).await?)
     }
@@ -385,7 +388,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> RpcResult<Option<RichBlock>> {
+    ) -> RpcResult<Option<Block<T>>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
         Ok(EthBlocks::rpc_block(self, number.into(), full).await?)
     }
@@ -434,7 +437,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>> {
+    ) -> RpcResult<Option<Block<T>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, hash.into(), index).await?)
     }
@@ -444,7 +447,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>> {
+    ) -> RpcResult<Option<Block<T>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, number.into(), index).await?)
     }
@@ -456,9 +459,11 @@ where
     }
 
     /// Handler for: `eth_getTransactionByHash`
-    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>> {
+    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction<T>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        Ok(EthTransactions::transaction_by_hash(self, hash)
+            .await?
+            .map(|tx| tx.into_transaction(self)))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -477,7 +482,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<reth_rpc_types::Transaction>> {
+    ) -> RpcResult<Option<Transaction<T>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into())
             .await?)
@@ -503,7 +508,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<reth_rpc_types::Transaction>> {
+    ) -> RpcResult<Option<Transaction<T>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
             .await?)

@@ -1,27 +1,28 @@
 //! Compatibility functions for rpc `Block` type.
 
-use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
+use crate::{transaction::from_recovered_with_block_context, TransactionBuilder};
+
 /// Converts the given primitive block into a [Block] response with the given
 /// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-pub fn from_block(
+pub fn from_block<T: TransactionBuilder>(
     block: BlockWithSenders,
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
-) -> Result<Block, BlockError> {
+) -> Result<Block<T::Transaction>, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
-            Ok(from_block_with_tx_hashes(block, total_difficulty, block_hash))
+            Ok(from_block_with_tx_hashes::<T>(block, total_difficulty, block_hash))
         }
-        BlockTransactionsKind::Full => from_block_full(block, total_difficulty, block_hash),
+        BlockTransactionsKind::Full => from_block_full::<T>(block, total_difficulty, block_hash),
     }
 }
 
@@ -30,15 +31,15 @@ pub fn from_block(
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [`BlockTransactions::Hashes`]
-pub fn from_block_with_tx_hashes(
+pub fn from_block_with_tx_hashes<T: TransactionBuilder>(
     block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Block {
+) -> Block<T::Transaction> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-    from_block_with_transactions(
+    from_block_with_transactions::<T>(
         block.length(),
         block_hash,
         block.block,
@@ -52,11 +53,11 @@ pub fn from_block_with_tx_hashes(
 ///
 /// This will populate the `transactions` field with the _full_
 /// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
-pub fn from_block_full(
+pub fn from_block_full<T: TransactionBuilder>(
     mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Result<Block, BlockError> {
+) -> Result<Block<T::Transaction>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
     let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -71,7 +72,7 @@ pub fn from_block_full(
         .map(|(idx, (tx, sender))| {
             let signed_tx_ec_recovered = tx.with_signer(sender);
 
-            from_recovered_with_block_context(
+            from_recovered_with_block_context::<T>(
                 signed_tx_ec_recovered,
                 block_hash,
                 block_number,
@@ -81,7 +82,7 @@ pub fn from_block_full(
         })
         .collect::<Vec<_>>();
 
-    Ok(from_block_with_transactions(
+    Ok(from_block_with_transactions::<T>(
         block_length,
         block_hash,
         block.block,
@@ -149,13 +150,13 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
 }
 
 #[inline]
-fn from_block_with_transactions(
+fn from_block_with_transactions<T: TransactionBuilder>(
     block_length: usize,
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
-    transactions: BlockTransactions,
-) -> Block {
+    transactions: BlockTransactions<T::Transaction>,
+) -> Block<T::Transaction> {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let mut header = from_primitive_with_hash(block.header.seal(block_hash));
     header.total_difficulty = Some(total_difficulty);
@@ -178,7 +179,7 @@ fn from_block_with_transactions(
 
 /// Build an RPC block response representing
 /// an Uncle from its header.
-pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
+pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
     let hash = header.hash_slow();
     let rpc_header = from_primitive_with_hash(header.clone().seal(hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };

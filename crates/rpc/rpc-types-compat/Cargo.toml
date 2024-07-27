@@ -17,10 +17,8 @@ reth-rpc-types.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
-alloy-network.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
-op-alloy-network.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

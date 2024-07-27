@@ -1,3 +1,5 @@
+use std::{collections::BTreeMap, marker::PhantomData};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::Address;
@@ -6,39 +8,47 @@ use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
     Transaction,
 };
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
-use std::collections::BTreeMap;
 use tracing::trace;
 
 /// `txpool` API implementation.
 ///
 /// This type provides the functionality for handling `txpool` related requests.
 #[derive(Clone)]
-pub struct TxPoolApi<Pool> {
+pub struct TxPoolApi<Pool, TxB> {
     /// An interface to interact with the pool
     pool: Pool,
+    _phantom: PhantomData<TxB>,
 }
 
-impl<Pool> TxPoolApi<Pool> {
+impl<Pool, TxB> TxPoolApi<Pool, TxB> {
     /// Creates a new instance of `TxpoolApi`.
     pub const fn new(pool: Pool) -> Self {
-        Self { pool }
+        Self { pool, _phantom: PhantomData }
     }
 }
 
-impl<Pool> TxPoolApi<Pool>
+impl<Pool, TxB> TxPoolApi<Pool, TxB>
 where
     Pool: TransactionPool + 'static,
+    // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
+    TxB: TransactionBuilder<Transaction = Transaction>,
 {
     fn content(&self) -> TxpoolContent {
         #[inline]
-        fn insert<T: PoolTransaction>(
-            tx: &T,
-            content: &mut BTreeMap<Address, BTreeMap<String, Transaction>>,
-        ) {
+        fn insert<Tx, TxRespB>(
+            tx: &Tx,
+            content: &mut BTreeMap<Address, BTreeMap<String, TxRespB::Transaction>>,
+        ) where
+            Tx: PoolTransaction,
+            TxRespB: TransactionBuilder<Transaction = Transaction>,
+        {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                reth_rpc_types_compat::transaction::from_recovered(tx.to_recovered_transaction()),
+                reth_rpc_types_compat::transaction::from_recovered::<TxRespB>(
+                    tx.to_recovered_transaction(),
+                ),
             );
         }
 
@@ -46,10 +56,10 @@ where
 
         let mut content = TxpoolContent::default();
         for pending in pending {
-            insert(&pending.transaction, &mut content.pending);
+            insert::<_, TxB>(&pending.transaction, &mut content.pending);
         }
         for queued in queued {
-            insert(&queued.transaction, &mut content.queued);
+            insert::<_, TxB>(&queued.transaction, &mut content.queued);
         }
 
         content
@@ -57,9 +67,10 @@ where
 }
 
 #[async_trait]
-impl<Pool> TxPoolApiServer for TxPoolApi<Pool>
+impl<Pool, TxB> TxPoolApiServer for TxPoolApi<Pool, TxB>
 where
     Pool: TransactionPool + 'static,
+    TxB: TransactionBuilder<Transaction = Transaction> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -134,7 +145,7 @@ where
     }
 }
 
-impl<Pool> std::fmt::Debug for TxPoolApi<Pool> {
+impl<Pool, TxB> std::fmt::Debug for TxPoolApi<Pool, TxB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TxpoolApi").finish_non_exhaustive()
     }

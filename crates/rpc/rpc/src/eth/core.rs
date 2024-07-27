@@ -7,7 +7,9 @@ use alloy_network::Ethereum;
 use derive_more::Deref;
 use futures::Future;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
-use reth_primitives::{BlockNumberOrTag, U256};
+use reth_primitives::{
+    Address, BlockNumber, BlockNumberOrTag, TransactionSignedEcRecovered, TxKind, B256, U256,
+};
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
@@ -16,6 +18,10 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
+};
+use reth_rpc_types_compat::{
+    transaction::{from_primitive_signature, GasPrice},
+    TransactionBuilder,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -124,13 +130,15 @@ where
     type NetworkTypes = Ethereum;
 }
 
-impl<Provider, Pool, Network, EvmConfig> TransactionResponse
+impl<Provider, Pool, Network, EvmConfig> TransactionBuilder
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync,
 {
-    type Transaction = <Self::NetworkTypes as Network>::TransactionResponse;
+    type Transaction =
+        <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse;
 
     fn fill(
-        &self,
         tx: TransactionSignedEcRecovered,
         block_hash: Option<B256>,
         block_number: Option<BlockNumber>,
@@ -145,7 +153,7 @@ impl<Provider, Pool, Network, EvmConfig> TransactionResponse
             TxKind::Call(to) => Some(Address(*to)),
         };
 
-        let GasPrice { gas_price, max_fee_per_gas } = Self::gas_price(signed_tx, base_fee);
+        let GasPrice { gas_price, max_fee_per_gas } = Self::gas_price(&signed_tx, base_fee);
 
         // let chain_id = signed_tx.chain_id().map(U64::from);
         let chain_id = signed_tx.chain_id();
@@ -577,7 +585,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -599,7 +607,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),

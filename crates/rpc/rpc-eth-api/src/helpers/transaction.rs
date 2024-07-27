@@ -4,7 +4,6 @@
 use std::{fmt, ops::Deref, sync::Arc};
 
 use alloy_dyn_abi::TypedData;
-use alloy_network::Network;
 use futures::Future;
 use reth_primitives::{
     Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
@@ -20,12 +19,12 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionBuilder};
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError};
+use crate::{FromEthApiError, IntoEthApiError, Transaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
@@ -55,8 +54,7 @@ use super::{
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 pub trait EthTransactions:
-    LoadTransaction
-    + TransactionBuilder<Transaction = <Self::NetworkTypes as Network>::TransactionResponse>
+    LoadTransaction + TransactionBuilder<Transaction = Transaction<Self>>
 {
     /// Returns a handle for reading data from disk.
     ///
@@ -211,7 +209,7 @@ pub trait EthTransactions:
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
-                    return Ok(Some(from_recovered_with_block_context(
+                    return Ok(Some(self.from_recovered_with_block_context(
                         tx,
                         block_hash,
                         block_number,
