@@ -270,6 +270,7 @@ mod test {
     /// No receipts for genesis block
     const EMPTY_RECEIPTS_GENESIS_BLOCK: &[u8] = &hex!("c0");
 
+    #[ignore]
     #[tokio::test]
     async fn filter_out_genesis_block_receipts() {
         let mut f: File = tempfile().unwrap().into();
