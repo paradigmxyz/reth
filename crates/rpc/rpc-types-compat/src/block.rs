@@ -6,89 +6,97 @@ use reth_primitives::{
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
-use crate::{transaction::from_recovered_with_block_context, TransactionBuilder};
+use crate::TransactionBuilder;
 
-/// Converts the given primitive block into a [Block] response with the given
-/// [`BlockTransactionsKind`]
-///
-/// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-pub fn from_block<T: TransactionBuilder>(
-    block: BlockWithSenders,
-    total_difficulty: U256,
-    kind: BlockTransactionsKind,
-    block_hash: Option<B256>,
-) -> Result<Block<T::Transaction>, BlockError> {
-    match kind {
-        BlockTransactionsKind::Hashes => {
-            Ok(from_block_with_tx_hashes::<T>(block, total_difficulty, block_hash))
+/// Builds RPC block response w.r.t. network.
+pub trait BlockBuilder: TransactionBuilder {
+    /// Converts the given primitive block into a [Block] response with the given
+    /// [`BlockTransactionsKind`]
+    ///
+    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
+    fn from_block(
+        &self,
+        block: BlockWithSenders,
+        total_difficulty: U256,
+        kind: BlockTransactionsKind,
+        block_hash: Option<B256>,
+    ) -> Result<Block<Self::Transaction>, BlockError> {
+        match kind {
+            BlockTransactionsKind::Hashes => {
+                Ok(self.from_block_with_tx_hashes(block, total_difficulty, block_hash))
+            }
+            BlockTransactionsKind::Full => {
+                self.from_block_full(block, total_difficulty, block_hash)
+            }
         }
-        BlockTransactionsKind::Full => from_block_full::<T>(block, total_difficulty, block_hash),
     }
-}
 
-/// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-/// total difficulty to populate its field in the rpc response.
-///
-/// This will populate the `transactions` field with only the hashes of the transactions in the
-/// block: [`BlockTransactions::Hashes`]
-pub fn from_block_with_tx_hashes<T: TransactionBuilder>(
-    block: BlockWithSenders,
-    total_difficulty: U256,
-    block_hash: Option<B256>,
-) -> Block<T::Transaction> {
-    let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-    let transactions = block.body.iter().map(|tx| tx.hash()).collect();
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with the _full_
+    /// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
+    fn from_block_full(
+        &self,
+        mut block: BlockWithSenders,
+        total_difficulty: U256,
+        block_hash: Option<B256>,
+    ) -> Result<Block<Self::Transaction>, BlockError> {
+        let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
+        let block_number = block.block.number;
+        let base_fee_per_gas = block.block.base_fee_per_gas;
 
-    from_block_with_transactions::<T>(
-        block.length(),
-        block_hash,
-        block.block,
-        total_difficulty,
-        BlockTransactions::Hashes(transactions),
-    )
-}
+        // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
+        // `from_block_with_transactions`, however we need to compute the length before
+        let block_length = block.block.length();
+        let body = std::mem::take(&mut block.block.body);
+        let transactions_with_senders = body.into_iter().zip(block.senders);
+        let transactions = transactions_with_senders
+            .enumerate()
+            .map(|(idx, (tx, sender))| {
+                let signed_tx_ec_recovered = tx.with_signer(sender);
 
-/// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-/// total difficulty to populate its field in the rpc response.
-///
-/// This will populate the `transactions` field with the _full_
-/// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
-pub fn from_block_full<T: TransactionBuilder>(
-    mut block: BlockWithSenders,
-    total_difficulty: U256,
-    block_hash: Option<B256>,
-) -> Result<Block<T::Transaction>, BlockError> {
-    let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
-    let block_number = block.block.number;
-    let base_fee_per_gas = block.block.base_fee_per_gas;
+                self.from_recovered_with_block_context(
+                    signed_tx_ec_recovered,
+                    block_hash,
+                    block_number,
+                    base_fee_per_gas,
+                    idx,
+                )
+            })
+            .collect::<Vec<_>>();
 
-    // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
-    // `from_block_with_transactions`, however we need to compute the length before
-    let block_length = block.block.length();
-    let body = std::mem::take(&mut block.block.body);
-    let transactions_with_senders = body.into_iter().zip(block.senders);
-    let transactions = transactions_with_senders
-        .enumerate()
-        .map(|(idx, (tx, sender))| {
-            let signed_tx_ec_recovered = tx.with_signer(sender);
+        Ok(from_block_with_transactions::<Self::Transaction>(
+            block_length,
+            block_hash,
+            block.block,
+            total_difficulty,
+            BlockTransactions::Full(transactions),
+        ))
+    }
 
-            from_recovered_with_block_context::<T>(
-                signed_tx_ec_recovered,
-                block_hash,
-                block_number,
-                base_fee_per_gas,
-                idx,
-            )
-        })
-        .collect::<Vec<_>>();
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with only the hashes of the transactions in the
+    /// block: [`BlockTransactions::Hashes`]
+    fn from_block_with_tx_hashes(
+        &self,
+        block: BlockWithSenders,
+        total_difficulty: U256,
+        block_hash: Option<B256>,
+    ) -> Block<Self::Transaction> {
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
+        let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-    Ok(from_block_with_transactions::<T>(
-        block_length,
-        block_hash,
-        block.block,
-        total_difficulty,
-        BlockTransactions::Full(transactions),
-    ))
+        from_block_with_transactions::<Self::Transaction>(
+            block.length(),
+            block_hash,
+            block.block,
+            total_difficulty,
+            BlockTransactions::Hashes(transactions),
+        )
+    }
 }
 
 /// Converts from a [`reth_primitives::SealedHeader`] to a [`reth_rpc_types::Header`]
@@ -150,13 +158,13 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
 }
 
 #[inline]
-fn from_block_with_transactions<T: TransactionBuilder>(
+fn from_block_with_transactions<T>(
     block_length: usize,
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
-    transactions: BlockTransactions<T::Transaction>,
-) -> Block<T::Transaction> {
+    transactions: BlockTransactions<T>,
+) -> Block<T> {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let mut header = from_primitive_with_hash(block.header.seal(block_hash));
     header.total_difficulty = Some(total_difficulty);
