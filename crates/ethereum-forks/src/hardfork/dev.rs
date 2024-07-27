@@ -1,5 +1,7 @@
 use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
 use alloy_primitives::U256;
+
+#[cfg(feature = "std")]
 use std::sync::LazyLock;
 
 #[cfg(not(feature = "std"))]
