@@ -284,7 +284,7 @@ where
                 block.number.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _, _, _| {
+                move |tx_info, inspector, res, _, _| {
                     let traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
