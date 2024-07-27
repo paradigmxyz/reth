@@ -194,7 +194,7 @@ where
         self.pool.write().set_block_info(info)
     }
 
-    /// Returns the internal `SenderId` for this address
+    /// Returns the internal [`SenderId`] for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
     }
