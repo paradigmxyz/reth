@@ -69,9 +69,8 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        for tx in txs {
-            let _ = self.delete(tx);
-        }
+        let txs = self.inner.retain_existing(txs)?;
+        self.inner.txs_to_delete.write().extend(txs);
         Ok(())
     }
 
@@ -233,6 +232,16 @@ impl DiskFileBlobStoreInner {
         }
         // we only check if the file exists and assume it's valid
         Ok(self.blob_disk_file(tx).is_file())
+    }
+
+    /// Returns all the blob transactions which are in the cache or on the disk.
+    fn retain_existing(&self, txs: Vec<B256>) -> Result<Vec<B256>, BlobStoreError> {
+        let mut cache = self.blob_cache.lock();
+        Ok(txs
+            .iter()
+            .filter(|&tx| cache.get(tx).is_some() || self.blob_disk_file(*tx).is_file())
+            .cloned()
+            .collect())
     }
 
     /// Retrieves the blob for the given transaction hash from the blob cache or disk.
