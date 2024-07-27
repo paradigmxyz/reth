@@ -156,7 +156,9 @@ impl Command {
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
-                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+                block_number
+                    .checked_sub(1)
+                    .ok_or_else(|| eyre::eyre!("GenesisBlockHasNoParent"))?,
             ));
 
             let mut account_hashing_done = false;
