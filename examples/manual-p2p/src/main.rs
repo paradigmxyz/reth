@@ -9,7 +9,6 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use std::sync::LazyLock;
 use reth_chainspec::{Chain, MAINNET};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
@@ -20,6 +19,7 @@ use reth_network::config::rng_secret_key;
 use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
 use reth_primitives::{EthereumHardfork, Head, MAINNET_GENESIS_HASH};
 use secp256k1::{SecretKey, SECP256K1};
+use std::sync::LazyLock;
 use tokio::net::TcpStream;
 
 type AuthedP2PStream = P2PStream<ECIESStream<TcpStream>>;

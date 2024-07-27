@@ -1,6 +1,6 @@
-use std::sync::LazyLock;
 use quote::{quote, ToTokens};
 use regex::Regex;
+use std::sync::LazyLock;
 use syn::{
     punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Expr, Field, Lit, LitBool, LitStr,
     Meta, MetaNameValue, Result, Token,

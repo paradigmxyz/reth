@@ -1,10 +1,12 @@
 use metrics::{
     Counter, Gauge, Histogram, Key, KeyName, Label, Metadata, Recorder, SharedString, Unit,
 };
-use std::sync::LazyLock;
 use reth_metrics_derive::Metrics;
 use serial_test::serial;
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+};
 
 #[allow(dead_code)]
 #[derive(Metrics)]

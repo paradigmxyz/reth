@@ -1,4 +1,3 @@
-use std::sync::LazyLock;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_db_api::database::Database;
 use reth_primitives::{
@@ -11,7 +10,10 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{proof::Proof, Nibbles, StateRoot};
 use reth_trie_common::{AccountProof, StorageProof};
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
-use std::{str::FromStr, sync::Arc};
+use std::{
+    str::FromStr,
+    sync::{Arc, LazyLock},
+};
 
 /*
     World State (sampled from <https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture/6413#6413>)

@@ -6,7 +6,6 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
-use std::sync::LazyLock;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
@@ -22,6 +21,7 @@ use reth_primitives_traits::{
 use reth_trie_common::root::state_root_ref_unhashed;
 #[cfg(feature = "std")]
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
