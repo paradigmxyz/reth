@@ -62,12 +62,16 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
-        self.inner.txs_to_delete.write().insert(tx);
+        if self.inner.contains(tx)? {
+            self.inner.txs_to_delete.write().insert(tx);
+        }
         Ok(())
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        self.inner.txs_to_delete.write().extend(txs);
+        for tx in txs {
+            let _ = self.delete(tx);
+        }
         Ok(())
     }
 
