@@ -188,13 +188,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         if let Some(finalized) =
             last_finalized_block.update(client.finalized_block_number().ok().flatten())
         {
-            match blob_store_tracker.on_finalized_block(finalized) {
-                BlobStoreUpdates::None => {}
-                BlobStoreUpdates::Finalized(blobs) => {
-                    metrics.inc_deleted_tracked_blobs(blobs.len());
-                    // remove all finalized blobs from the blob store
-                    pool.delete_blobs(blobs);
-                }
+            if let BlobStoreUpdates::Finalized(blobs) =
+                blob_store_tracker.on_finalized_block(finalized)
+            {
+                metrics.inc_deleted_tracked_blobs(blobs.len());
+                // remove all finalized blobs from the blob store
+                pool.delete_blobs(blobs);
             }
             // also do periodic cleanup of the blob store
             let pool = pool.clone();
