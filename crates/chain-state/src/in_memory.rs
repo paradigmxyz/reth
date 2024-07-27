@@ -753,6 +753,14 @@ mod tests {
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
+
+        fn storage_root_from_reverts(
+            &self,
+            _address: Address,
+            _from: BlockNumber,
+        ) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
     }
 
     impl StateProofProvider for MockStateProvider {

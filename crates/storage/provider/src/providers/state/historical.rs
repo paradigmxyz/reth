@@ -21,7 +21,13 @@ use reth_trie::{
     HashedPostStateSorted, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness,
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
+    proof::Proof,
+    trie_cursor::DatabaseTrieCursorFactory,
+    updates::TrieUpdates,
+    AccountProof, DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness,
+    HashedAccountsSorted, HashedPostState, HashedPostStateSorted, HashedStorage, StateRoot,
+    StorageRoot,
 };
 use std::{collections::HashMap, fmt::Debug};
 
@@ -291,11 +297,18 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         let hashed_storages = HashMap::from([(hashed_address, hashed_storage_sorted)]);
         let hashed_state_sorted =
             HashedPostStateSorted::new(HashedAccountsSorted::default(), hashed_storages);
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(self.tx, &hashed_state_sorted);
-        StorageRoot::new_hashed(self.tx, hashed_cursor_factory, hashed_address, Default::default())
-            .root()
-            .map_err(|err| ProviderError::Database(err.into()))
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(self.tx),
+            &hashed_state_sorted,
+        );
+        StorageRoot::new_hashed(
+            DatabaseTrieCursorFactory::new(self.tx),
+            hashed_cursor_factory,
+            hashed_address,
+            Default::default(),
+        )
+        .root()
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
