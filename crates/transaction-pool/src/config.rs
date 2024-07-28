@@ -249,7 +249,7 @@ mod tests {
 
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
 
-        // Should contain the inserted ddress
+        // Should contain the inserted address
         assert!(config.contains_local_address(address));
 
         // Should not contain another random address
@@ -265,7 +265,7 @@ mod tests {
             ..Default::default()
         };
 
-        // Shoudl return false as no exemptions is set to true
+        // Should return false as no exemptions is set to true
         assert!(!config.is_local(TransactionOrigin::Local, address));
     }
 
