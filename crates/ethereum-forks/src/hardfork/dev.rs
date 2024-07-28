@@ -5,10 +5,12 @@ use alloy_primitives::U256;
 use std::sync::LazyLock;
 
 #[cfg(not(feature = "std"))]
+use alloc::sync::LazyLock;
+
+#[cfg(not(feature = "std"))]
 use alloc::vec;
 
 /// Dev hardforks
-#[cfg(feature = "std")]
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
