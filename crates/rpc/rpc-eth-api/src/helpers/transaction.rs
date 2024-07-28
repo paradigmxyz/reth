@@ -628,32 +628,12 @@ pub trait LoadTransaction: SpawnBlocking {
     ) -> impl Future<Output = Result<Option<(TransactionSource, BlockId)>, Self::Error>> + Send
     {
         async move {
-            match self.transaction_by_hash(transaction_hash).await? {
-                None => Ok(None),
-                Some(tx) => {
-                    let res = match tx {
-                        tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                        TransactionSource::Block {
-                            transaction,
-                            index,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                        } => {
-                            let at = BlockId::Hash(block_hash.into());
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee,
-                            };
-                            (tx, at)
-                        }
-                    };
-                    Ok(Some(res))
+            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
+                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                tx @ TransactionSource::Block { block_hash, .. } => {
+                    (tx, BlockId::Hash(block_hash.into()))
                 }
-            }
+            }))
         }
     }
 
