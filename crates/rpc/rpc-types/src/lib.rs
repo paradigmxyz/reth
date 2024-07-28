@@ -11,8 +11,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #[allow(hidden_glob_reexports)]
 mod eth;
-mod peer;
 
+/// Alias for a peer identifier
+pub type PeerId = B512;
+
+use alloy_primitives::B512;
 // re-export for convenience
 pub use alloy_rpc_types::serde_helpers;
 
@@ -51,5 +54,3 @@ pub use eth::{
     error::ToRpcError,
     transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
-
-pub use peer::*;

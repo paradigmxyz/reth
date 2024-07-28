@@ -539,13 +539,13 @@ impl AccountReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn hashed_state_root(&self, _state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        _state: &HashedPostState,
+        _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), Default::default()))
     }
@@ -554,7 +554,7 @@ impl StateRootProvider for MockEthProvider {
 impl StateProofProvider for MockEthProvider {
     fn hashed_proof(
         &self,
-        _hashed_state: &HashedPostState,
+        _hashed_state: HashedPostState,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {

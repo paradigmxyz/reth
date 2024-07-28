@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
@@ -24,11 +25,10 @@ use crate::{
     providers::StaticFileProvider,
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, HeaderProvider, PruneCheckpointReader, ReceiptProviderIdExt, RequestsProvider,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
+    ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -312,13 +312,13 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn hashed_state_root(&self, _state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        _state: &HashedPostState,
+        _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -327,7 +327,7 @@ impl StateRootProvider for NoopProvider {
 impl StateProofProvider for NoopProvider {
     fn hashed_proof(
         &self,
-        _hashed_state: &HashedPostState,
+        _hashed_state: HashedPostState,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -441,6 +441,10 @@ impl StageCheckpointReader for NoopProvider {
 
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         Ok(None)
+    }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        Ok(Vec::new())
     }
 }
 

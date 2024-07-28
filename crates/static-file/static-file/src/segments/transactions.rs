@@ -47,7 +47,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             for entry in transactions_walker {
                 let (tx_number, transaction) = entry?;
 
-                static_file_writer.append_transaction(tx_number, transaction)?;
+                static_file_writer.append_transaction(tx_number, &transaction)?;
             }
         }
 

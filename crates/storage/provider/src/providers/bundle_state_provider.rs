@@ -71,11 +71,11 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         self.state_provider.state_root(&state)
     }
 
-    fn hashed_state_root(&self, hashed_state: &reth_trie::HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state.clone());
-        self.state_provider.hashed_state_root(&state)
+        state.extend(hashed_state);
+        self.state_provider.hashed_state_root(state)
     }
 
     fn state_root_with_updates(
@@ -89,12 +89,12 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state.clone());
-        self.state_provider.hashed_state_root_with_updates(&state)
+        state.extend(hashed_state);
+        self.state_provider.hashed_state_root_with_updates(state)
     }
 }
 
@@ -103,14 +103,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
 {
     fn hashed_proof(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state.clone());
-        self.state_provider.hashed_proof(&state, address, slots)
+        state.extend(hashed_state);
+        self.state_provider.hashed_proof(state, address, slots)
     }
 }
 

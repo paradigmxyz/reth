@@ -1,8 +1,8 @@
 //! Canonical chain state notification trait and types.
 
-use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use derive_more::{Deref, DerefMut};
+use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::{SealedBlockWithSenders, SealedHeader};
 use std::{
     pin::Pin,
@@ -61,7 +61,7 @@ impl Stream for CanonStateNotificationStream {
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all [`crate::ExecutionOutcome`] and
+/// and will return all `ExecutionOutcome` and
 /// [`reth_primitives::SealedBlockWithSenders`] of both reverted and committed blocks.
 #[derive(Clone, Debug)]
 pub enum CanonStateNotification {

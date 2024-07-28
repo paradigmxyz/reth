@@ -7,9 +7,9 @@ use reth_primitives::TransactionSigned;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction},
-    RawTransactionForwarder,
+    EthApiTypes, RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthResult, EthStateCache};
+use reth_rpc_eth_types::EthStateCache;
 use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
@@ -79,7 +79,7 @@ where
         tx: &TransactionSigned,
         l1_block_info: Option<L1BlockInfo>,
         block_timestamp: u64,
-    ) -> EthResult<OptimismTxMeta> {
+    ) -> Result<OptimismTxMeta, <Self as EthApiTypes>::Error> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
