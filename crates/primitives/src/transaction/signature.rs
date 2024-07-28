@@ -1,4 +1,5 @@
 use crate::{transaction::util::secp256k1, Address, B256, U256};
+use alloy_consensus::EncodableSignature;
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
@@ -38,21 +39,6 @@ impl Signature {
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
         Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
-    }
-
-    /// Returns the alloy signature, with the given chain id for parity.
-    pub fn as_alloy_signature(&self, chain_id: Option<u64>) -> alloy_primitives::Signature {
-        alloy_primitives::Signature::from_rs_and_parity(
-            self.r,
-            self.s,
-            chain_id.map_or_else(
-                || alloy_primitives::Parity::NonEip155(self.odd_y_parity),
-                |chain_id| {
-                    alloy_primitives::Parity::NonEip155(self.odd_y_parity).with_chain_id(chain_id)
-                },
-            ),
-        )
-        .unwrap()
     }
 }
 
@@ -215,6 +201,38 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
         let odd_y_parity = ((v - 35) % 2) != 0;
         let chain_id = (v - 35) >> 1;
         Ok((odd_y_parity, Some(chain_id)))
+    }
+}
+
+impl EncodableSignature for Signature {
+    fn from_rs_and_parity<
+        P: TryInto<alloy_primitives::Parity, Error = E>,
+        E: Into<alloy_primitives::SignatureError>,
+    >(
+        r: U256,
+        s: U256,
+        parity: P,
+    ) -> Result<Self, alloy_primitives::SignatureError> {
+        let parity: alloy_primitives::Parity = parity.try_into().map_err(Into::into)?;
+        let signature = Self { r, s, odd_y_parity: parity.y_parity() };
+
+        Ok(signature)
+    }
+
+    fn r(&self) -> U256 {
+        self.r
+    }
+
+    fn s(&self) -> U256 {
+        self.s
+    }
+
+    fn v(&self) -> alloy_primitives::Parity {
+        alloy_primitives::Parity::NonEip155(self.odd_y_parity)
+    }
+
+    fn with_parity<T: Into<alloy_primitives::Parity>>(self, parity: T) -> Self {
+        Self { r: self.r, s: self.s, odd_y_parity: parity.into().y_parity() }
     }
 }
 
