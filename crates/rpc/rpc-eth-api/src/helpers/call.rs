@@ -381,7 +381,6 @@ pub trait Call: LoadState + SpawnBlocking {
                 f(StateCacheDbRefMutWrapper(&mut db), env)
             })
             .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError.into())
         }
     }
 
