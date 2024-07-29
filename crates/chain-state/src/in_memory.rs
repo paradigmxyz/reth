@@ -90,6 +90,19 @@ pub(crate) struct CanonicalInMemoryStateInner {
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender,
 }
 
+impl CanonicalInMemoryStateInner {
+    /// Clears all entries in the in memory state.
+    fn clear(&self) {
+        let mut blocks = self.in_memory_state.blocks.write();
+        let mut numbers = self.in_memory_state.numbers.write();
+        let mut pending = self.in_memory_state.pending.write();
+
+        blocks.clear();
+        numbers.clear();
+        pending.take();
+    }
+}
+
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
@@ -142,6 +155,11 @@ impl CanonicalInMemoryState {
     /// Returns in the header corresponding to the given hash.
     pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader> {
         self.state_by_hash(hash).map(|block| block.block().block.header.clone())
+    }
+
+    /// Clears all entries in the in memory state.
+    pub fn clear_state(&self) {
+        self.inner.clear()
     }
 
     /// Updates the pending block with the given block.
