@@ -70,7 +70,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo hack check --workspace --exclude op-reth
+      - run: cargo hack check
 
   msrv:
     name: MSRV / ${{ matrix.network }}
