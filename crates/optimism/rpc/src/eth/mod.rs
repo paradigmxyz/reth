@@ -7,11 +7,9 @@ mod block;
 mod call;
 mod pending_block;
 
-use std::{fmt, future::Future, sync::Arc};
+use std::{fmt, sync::Arc};
 
-use alloy_primitives::{Address, U256, U64};
-use reth_chainspec::{ChainInfo, ChainSpec};
-use reth_errors::RethResult;
+use alloy_primitives::U256;
 use reth_evm::ConfigureEvm;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
@@ -23,19 +21,17 @@ use reth_provider::{
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
-        SpawnBlocking, Trace, UpdateRawTxForwarder,
+        AddDevSigners, EthApiSpec, EthFees, EthState, LoadBlock, LoadFee, LoadState, SpawnBlocking,
+        Trace, UpdateRawTxForwarder,
     },
     EthApiTypes, RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_rpc_types::SyncStatus;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 use crate::OpEthApiError;
 

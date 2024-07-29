@@ -13,8 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-errors.workspace = true
 reth-evm-optimism.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
@@ -57,7 +55,6 @@ client = [
 ]
 
 optimism = [
-    "reth-chainspec/optimism",
     "reth-evm-optimism/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",

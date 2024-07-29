@@ -6,9 +6,9 @@ use reth_primitives::{
 };
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadState, SpawnBlocking},
-    EthApiTypes, FromEthApiError, IntoEthApiError,
+    FromEthApiError, IntoEthApiError,
 };
-use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 use reth_rpc_types::TransactionRequest;
 
 use crate::{OpEthApi, OpEthApiError};
