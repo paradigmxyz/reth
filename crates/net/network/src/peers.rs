@@ -155,6 +155,11 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
+        let trusted_nodes: Vec<NodeRecord> = trusted_nodes
+            .into_iter()
+            .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
+            .collect();
+
         for NodeRecord { address, tcp_port, udp_port, id } in trusted_nodes {
             trusted_peer_ids.insert(id);
             peers.entry(id).or_insert_with(|| {
@@ -1328,14 +1333,13 @@ mod tests {
         session::PendingSessionHandshakeError,
         PeersConfig,
     };
-    use reth_discv4::NodeRecord;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
     };
     use reth_net_banlist::BanList;
     use reth_network_api::{Direction, ReputationChangeKind};
-    use reth_network_peers::PeerId;
+    use reth_network_peers::{PeerId, TrustedPeer};
     use reth_network_types::{peers::reputation::DEFAULT_REPUTATION, BackoffKind};
     use reth_primitives::B512;
     use std::{
@@ -1347,6 +1351,7 @@ mod tests {
         task::{Context, Poll},
         time::Duration,
     };
+    use url::Host;
 
     struct PeerActionFuture<'a> {
         peers: &'a mut PeersManager,
@@ -2290,12 +2295,12 @@ mod tests {
     async fn test_trusted_peers_are_prioritized() {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::test().with_trusted_nodes(HashSet::from([NodeRecord {
-            address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+        let config = PeersConfig::test().with_trusted_nodes(vec![TrustedPeer {
+            host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
             tcp_port: 8008,
             udp_port: 8008,
             id: trusted_peer,
-        }]));
+        }]);
         let mut peers = PeersManager::new(config);
 
         let basic_peer = PeerId::random();
@@ -2329,12 +2334,12 @@ mod tests {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2366,12 +2371,12 @@ mod tests {
     async fn test_incoming_with_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2399,12 +2404,12 @@ mod tests {
     async fn test_incoming_without_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(false);
         let mut peers = PeersManager::new(config);
 

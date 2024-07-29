@@ -3,10 +3,8 @@
 use crate::{BackoffKind, ReputationChangeWeights};
 use reth_net_banlist::BanList;
 use reth_network_peers::{NodeRecord, TrustedPeer};
-use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use std::{
     collections::HashSet,
-    fmt,
     io::{self, ErrorKind},
     path::Path,
     time::Duration,
@@ -124,8 +122,7 @@ pub struct PeersConfig {
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
     /// Trusted nodes to connect to or accept from
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_trusted_nodes"))]
-    pub trusted_nodes: HashSet<NodeRecord>,
+    pub trusted_nodes: Vec<TrustedPeer>,
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
@@ -224,7 +221,7 @@ impl PeersConfig {
     }
 
     /// Nodes to always connect to.
-    pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
+    pub fn with_trusted_nodes(mut self, nodes: Vec<TrustedPeer>) -> Self {
         self.trusted_nodes = nodes;
         self
     }
@@ -292,35 +289,4 @@ impl PeersConfig {
             ..Default::default()
         }
     }
-}
-
-fn deserialize_trusted_nodes<'de, D>(deserializer: D) -> Result<HashSet<NodeRecord>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct TrustedNodesVisitor;
-
-    impl<'de> Visitor<'de> for TrustedNodesVisitor {
-        type Value = HashSet<NodeRecord>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a list of trusted peer records")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<HashSet<NodeRecord>, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut nodes = HashSet::new();
-
-            while let Some(trusted_peer) = seq.next_element::<TrustedPeer>()? {
-                let node_record = trusted_peer.resolve_blocking().map_err(de::Error::custom)?;
-                nodes.insert(node_record);
-            }
-
-            Ok(nodes)
-        }
-    }
-
-    deserializer.deserialize_seq(TrustedNodesVisitor)
 }

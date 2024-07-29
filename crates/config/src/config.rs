@@ -383,8 +383,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Config, EXTENSION};
-    use reth_network_peers::{NodeRecord, TrustedPeer};
-    use std::time::Duration;
+    use reth_network_peers::TrustedPeer;
+    use std::{str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -756,43 +756,24 @@ connect_trusted_nodes_only = true
     #[test]
     fn test_can_support_dns_in_trusted_nodes() {
         let reth_toml = r#"
-[peers]
-trusted_nodes = [
-    "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
-    "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303"
-]
-"#;
+    [peers]
+    trusted_nodes = [
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303"
+    ]
+    "#;
 
         let conf: Config = toml::from_str(reth_toml).unwrap();
         assert_eq!(conf.peers.trusted_nodes.len(), 2);
 
-        let enode1 = "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303";
-        let enode2 = "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303";
+        let expected_enodes = vec![
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+    ];
 
-        let node1 = resolve_enode(enode1);
-        let node2 = resolve_enode(enode2);
-
-        assert!(conf.peers.trusted_nodes.contains(&node1));
-        assert!(conf.peers.trusted_nodes.contains(&node2));
-
-        let node1_expected = NodeRecord {
-        address: "34.159.32.127".parse().unwrap(),
-        tcp_port: 30303,
-        udp_port: 30303,
-        id: "0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc".parse().unwrap(),
-    };
-        let node2_expected = NodeRecord {
-        address: node2.address,
-        tcp_port: 30303,
-        udp_port: 30303,
-        id: "e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18".parse().unwrap(),
-    };
-
-        assert_eq!(node1, node1_expected);
-        assert_eq!(node2, node2_expected);
-    }
-
-    fn resolve_enode(enode: &str) -> NodeRecord {
-        enode.parse::<TrustedPeer>().unwrap().resolve_blocking().unwrap()
+        for enode in expected_enodes {
+            let node = TrustedPeer::from_str(enode).unwrap();
+            assert!(conf.peers.trusted_nodes.contains(&node));
+        }
     }
 }

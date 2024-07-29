@@ -7557,6 +7557,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7661,7 +7662,6 @@ name = "reth-node-builder"
 version = "1.0.3"
 dependencies = [
  "aquamarine",
- "backon",
  "confy",
  "eyre",
  "fdlimit",
