@@ -1,8 +1,7 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 use clap::Parser;
+use reth::cli::Cli;
 use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
 use std::sync::Arc;
 
@@ -11,8 +10,11 @@ use std::sync::Arc;
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+#[cfg(not(feature = "optimism"))]
+compile_error!("Cannot build the `op-reth` binary with the `optimism` feature flag disabled. Did you mean to build `reth`?");
+
+#[cfg(feature = "optimism")]
 fn main() {
-    use reth_optimism_cli::Cli;
     reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
