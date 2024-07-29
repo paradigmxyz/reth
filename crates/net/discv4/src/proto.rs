@@ -938,26 +938,26 @@ mod tests {
             let expected_nodes: Vec<NodeRecord> = vec![
                 NodeRecord {
                     address: "99.33.22.55".parse().unwrap(),
-                    tcp_port: 4444,
-                    udp_port: 4445,
+                    udp_port: 4444,
+                    tcp_port: 4445,
                     id: hex!("3155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32").into(),
                 },
                 NodeRecord {
                     address: "1.2.3.4".parse().unwrap(),
-                    tcp_port: 1,
                     udp_port: 1,
+                    tcp_port: 1,
                     id: hex!("312c55512422cf9b8a4097e9a6ad79402e87a15ae909a4bfefa22398f03d20951933beea1e4dfa6f968212385e829f04c2d314fc2d4e255e0d3bc08792b069db").into(),
                 },
                 NodeRecord {
                     address: "2001:db8:3c4d:15::abcd:ef12".parse().unwrap(),
-                    tcp_port: 3333,
                     udp_port: 3333,
+                    tcp_port: 3333,
                     id: hex!("38643200b172dcfef857492156971f0e6aa2c538d8b74010f8e140811d53b98c765dd2d96126051913f44582e8c199ad7c6d6819e9a56483f637feaac9448aac").into(),
                 },
                 NodeRecord {
                     address: "2001:db8:85a3:8d3:1319:8a2e:370:7348".parse().unwrap(),
-                    tcp_port: 999,
-                    udp_port: 1000,
+                    udp_port: 999,
+                    tcp_port: 1000,
                     id: hex!("8dcab8618c3253b558d459da53bd8fa68935a719aff8b811197101a4b2b47dd2d47295286fc00cc081bb542d760717d1bdd6bec2c37cd72eca367d6dd3b9df73").into(),
                 },
             ];

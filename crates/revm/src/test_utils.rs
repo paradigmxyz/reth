@@ -1,3 +1,4 @@
+use crate::precompile::HashMap;
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
@@ -6,7 +7,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
-use std::collections::HashMap;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -65,13 +68,13 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn hashed_state_root(&self, _hashed_state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        _hashed_state: &HashedPostState,
+        _hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
@@ -80,7 +83,7 @@ impl StateRootProvider for StateProviderTest {
 impl StateProofProvider for StateProviderTest {
     fn hashed_proof(
         &self,
-        _hashed_state: &HashedPostState,
+        _hashed_state: HashedPostState,
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {

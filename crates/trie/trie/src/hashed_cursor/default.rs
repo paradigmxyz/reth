@@ -6,13 +6,30 @@ use reth_db_api::{
 };
 use reth_primitives::{Account, B256, U256};
 
-impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
-    type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccounts>;
+/// A struct wrapping database transaction that implements [`HashedCursorFactory`].
+#[derive(Debug)]
+pub struct DatabaseHashedCursorFactory<'a, TX>(&'a TX);
+
+impl<'a, TX> Clone for DatabaseHashedCursorFactory<'a, TX> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
+
+impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
+    /// Create new database hashed cursor factory.
+    pub const fn new(tx: &'a TX) -> Self {
+        Self(tx)
+    }
+}
+
+impl<'a, TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'a, TX> {
+    type AccountCursor = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
-        self.cursor_read::<tables::HashedAccounts>()
+        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(
@@ -20,24 +37,36 @@ impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         Ok(DatabaseHashedStorageCursor::new(
-            self.cursor_dup_read::<tables::HashedStorages>()?,
+            self.0.cursor_dup_read::<tables::HashedStorages>()?,
             hashed_address,
         ))
     }
 }
 
-impl<C> HashedCursor for C
+/// A struct wrapping database cursor over hashed accounts implementing [`HashedCursor`] for
+/// iterating over accounts.
+#[derive(Debug)]
+pub struct DatabaseHashedAccountCursor<C>(C);
+
+impl<C> DatabaseHashedAccountCursor<C> {
+    /// Create new database hashed account cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self(cursor)
+    }
+}
+
+impl<C> HashedCursor for DatabaseHashedAccountCursor<C>
 where
     C: DbCursorRO<tables::HashedAccounts>,
 {
     type Value = Account;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
-        self.seek(key)
+        self.0.seek(key)
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
-        self.next()
+        self.0.next()
     }
 }
 

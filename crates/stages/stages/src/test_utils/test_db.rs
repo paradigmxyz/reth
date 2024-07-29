@@ -156,11 +156,11 @@ impl TestStageDB {
                 for block_number in 0..header.number {
                     let mut prev = header.clone().unseal();
                     prev.number = block_number;
-                    writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                    writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }
             }
 
-            writer.append_header(header.header().clone(), td, header.hash())?;
+            writer.append_header(header.header(), td, &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
@@ -266,7 +266,7 @@ impl TestStageDB {
 
                 let res = block.body.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
-                        txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+                        txs_writer.append_transaction(next_tx_num, &body_tx.clone().into())?;
                     } else {
                         tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
                     }
@@ -386,7 +386,7 @@ impl TestStageDB {
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.
-                storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
+                storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
 
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;

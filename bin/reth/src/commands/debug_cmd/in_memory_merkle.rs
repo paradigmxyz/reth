@@ -19,14 +19,15 @@ use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
-    StaticFileProviderFactory, StorageReader,
+    writer::StorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -148,8 +149,11 @@ impl Command {
             ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // Unpacked `BundleState::state_root_slow` function
-        let (in_memory_state_root, in_memory_updates) =
-            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
+        let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
+            provider.tx_ref(),
+            execution_outcome.hash_state_slow(),
+            Default::default(),
+        )?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -165,7 +169,8 @@ impl Command {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
+        let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;

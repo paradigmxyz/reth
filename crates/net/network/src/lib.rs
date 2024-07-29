@@ -149,12 +149,12 @@ pub use session::{
     SessionManager,
 };
 
-pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
-
 pub use flattened_response::FlattenedResponse;
 pub use manager::DiscoveredEvent;
 pub use metrics::TxTypesCounter;
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::EthRlpxConnection;
 pub use swarm::NetworkConnectionState;
+pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};

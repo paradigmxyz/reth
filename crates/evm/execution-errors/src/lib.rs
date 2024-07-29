@@ -23,7 +23,7 @@ use revm_primitives::EVMError;
 use alloc::{boxed::Box, string::String};
 
 pub mod trie;
-pub use trie::{StateRootError, StorageRootError};
+pub use trie::*;
 
 /// Transaction validation errors
 #[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
