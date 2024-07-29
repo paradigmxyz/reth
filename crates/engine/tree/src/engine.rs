@@ -216,6 +216,13 @@ pub enum EngineApiEvent {
     Download(DownloadRequest),
 }
 
+impl EngineApiEvent {
+    /// Returns `true` if the event is a backfill action.
+    pub const fn is_backfill_action(&self) -> bool {
+        matches!(self, Self::BackfillAction(_))
+    }
+}
+
 impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
     fn from(event: BeaconConsensusEngineEvent) -> Self {
         Self::BeaconConsensus(event)

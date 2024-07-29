@@ -1,9 +1,8 @@
 use crate::{
-    providers::BundleStateProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, BlockchainTreePendingStateProvider,
-    CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider,
-    FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
+    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError, ProviderFactory,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -32,8 +31,6 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
-
-use super::StaticFileProvider;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -624,28 +621,29 @@ where
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
+        if let Some(block) = self.canonical_in_memory_state.pending_block_num_hash() {
+            let historical = self.database.history_by_block_hash(block.hash)?;
+            let pending_provider =
+                self.canonical_in_memory_state.state_provider(block.hash, historical);
+
+            return Ok(Box::new(pending_provider));
+        }
 
         // fallback to latest state if the pending block is not available
         self.latest()
     }
 
-    fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
+    fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+        let historical = self.database.history_by_block_hash(block_hash)?;
+        if let Some(block) = self.canonical_in_memory_state.pending_block_num_hash() {
+            if block.hash == block_hash {
+                let pending_provider =
+                    self.canonical_in_memory_state.state_provider(block_hash, historical);
 
+                return Ok(Some(Box::new(pending_provider)))
+            }
+        }
         Ok(None)
-    }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let canonical_fork = bundle_state_data.canonical_fork();
-        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
-
-        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
     }
 }
 
@@ -769,19 +767,6 @@ where
                 self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
             }
         }
-    }
-}
-
-impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn find_pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullExecutionDataProvider>> {
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
-        None
     }
 }
 

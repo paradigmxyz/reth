@@ -1,5 +1,5 @@
 use crate::{
-    backfill::BackfillAction,
+    backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
@@ -49,13 +49,8 @@ use tokio::sync::{
 };
 use tracing::*;
 
-/// Maximum number of blocks to be kept only in memory without triggering persistence.
-const PERSISTENCE_THRESHOLD: u64 = 256;
-/// Number of pending blocks that cannot be executed due to missing parent and
-/// are kept in cache.
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
-/// Number of invalid headers to keep in cache.
-const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
+mod config;
+pub use config::TreeConfig;
 
 /// Keeps track of the state of the tree.
 ///
@@ -129,7 +124,7 @@ impl TreeState {
         }
     }
 
-    /// Remove blocks before specified block number.
+    /// Remove blocks before specified block number (exclusive).
     pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
         let mut numbers_to_remove = Vec::new();
         for (&number, _) in self.blocks_by_number.range(..block_number) {
@@ -159,7 +154,12 @@ impl TreeState {
 
     /// Returns the maximum block number stored.
     pub(crate) fn max_block_number(&self) -> BlockNumber {
-        *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+        self.blocks_by_number.last_key_value().map(|e| *e.0).unwrap_or_default()
+    }
+
+    /// Returns the minimum block number stored.
+    pub(crate) fn min_block_number(&self) -> BlockNumber {
+        self.blocks_by_number.first_key_value().map(|e| *e.0).unwrap_or_default()
     }
 
     /// Returns the block number of the pending block: `head + 1`
@@ -185,6 +185,9 @@ impl TreeState {
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
+    ///
+    /// Note: This does not update the tracked state and instead returns the new chain based on the
+    /// given head.
     fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
         let mut new_chain = Vec::new();
         let mut current_hash = new_head;
@@ -272,9 +275,6 @@ impl EngineApiTreeState {
 }
 
 /// The type responsible for processing engine API requests.
-///
-/// TODO: design: should the engine handler functions also accept the response channel or return the
-/// result and the caller redirects the response
 pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
@@ -382,14 +382,16 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     persistence: PersistenceHandle,
     /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
-    /// Flag indicating whether the node is currently syncing via backfill.
-    is_backfill_active: bool,
+    /// Flag indicating the state of the node's backfill synchronization process.
+    backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
+    /// Configuration settings.
+    config: TreeConfig,
 }
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
@@ -409,7 +411,9 @@ where
         state: EngineApiTreeState,
         canonical_in_memory_state: CanonicalInMemoryState,
         persistence: PersistenceHandle,
+        persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
+        config: TreeConfig,
     ) -> Self {
         Self {
             provider,
@@ -419,11 +423,12 @@ where
             incoming,
             outgoing,
             persistence,
-            persistence_state: PersistenceState::default(),
-            is_backfill_active: false,
+            persistence_state,
+            backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
             payload_builder,
+            config,
         }
     }
 
@@ -440,14 +445,21 @@ where
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
+        config: TreeConfig,
     ) -> UnboundedReceiver<EngineApiEvent> {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
+        let persistence_state = PersistenceState {
+            last_persisted_block_hash: header.hash(),
+            last_persisted_block_number: best_block_number,
+            rx: None,
+        };
+
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
         let state = EngineApiTreeState::new(
-            DEFAULT_BLOCK_BUFFER_LIMIT,
-            DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+            config.block_buffer_limit(),
+            config.max_invalid_header_cache_length(),
             header.num_hash(),
         );
 
@@ -461,7 +473,9 @@ where
             state,
             canonical_in_memory_state,
             persistence,
+            persistence_state,
             payload_builder,
+            config,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -512,7 +526,7 @@ where
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "consensus::engine", "received backfill sync started event");
-                    self.is_backfill_active = true;
+                    self.backfill_sync_state = BackfillSyncState::Active;
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl);
@@ -546,8 +560,8 @@ where
                     }
                 }
                 BeaconEngineMessage::TransitionConfigurationExchanged => {
-                    // this is a reporting no-op because the engine API impl does not need
-                    // additional input to handle this request
+                    // triggering this hook will record that we received a request from the CL
+                    self.canonical_in_memory_state.on_transition_configuration_exchanged();
                 }
             },
             FromEngine::DownloadedBlocks(blocks) => {
@@ -560,13 +574,17 @@ where
 
     /// Invoked if the backfill sync has finished to target.
     ///
-    /// Checks the tracked finalized block against the block on disk and restarts backfill if
-    /// needed.
+    /// At this point we consider the block synced to the backfill target.
     ///
-    /// This will also try to connect the buffered blocks.
+    /// Checks the tracked finalized block against the block on disk and requests another backfill
+    /// run if the distance to the tip exceeds the threshold for another backfill run.
+    ///
+    /// This will also do the necessary housekeeping of the tree state, this includes:
+    ///  - removing all blocks below the backfill height
+    ///  - resetting the canonical in-memory state
     fn on_backfill_sync_finished(&mut self, ctrl: ControlFlow) {
         debug!(target: "consensus::engine", "received backfill sync finished event");
-        self.is_backfill_active = false;
+        self.backfill_sync_state = BackfillSyncState::Idle;
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
@@ -576,12 +594,31 @@ where
             return
         }
 
+        // backfill height is the block number that the backfill finished at
+        let Some(backfill_height) = ctrl.block_number() else { return };
+
+        // state house keeping after backfill sync
+        // remove all executed blocks below the backfill height
+        self.state.tree_state.remove_before(backfill_height + 1);
+        // remove all buffered blocks below the backfill height
+        self.state.buffer.remove_old_blocks(backfill_height);
+        // we remove all entries because now we're synced to the backfill target and consider this
+        // the canonical chain
+        self.canonical_in_memory_state.clear_state();
+
+        if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
+            self.state.tree_state.set_canonical_head(new_head.num_hash());
+        }
+
+        // check if we need to run backfill again by comparing the most recent finalized height to
+        // the backfill height
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
             return
         };
 
         if sync_target_state.finalized_block_hash.is_zero() {
+            // no finalized block, can't check distance
             return
         }
 
@@ -592,46 +629,43 @@ where
             .block(&sync_target_state.finalized_block_hash)
             .map(|block| block.number);
 
-        // TODO(mattsse): state housekeeping, this needs to update the tracked canonical state and
-        // attempt to make the current target canonical if we have all the blocks buffered
-
         // The block number that the backfill finished at - if the progress or newest
         // finalized is None then we can't check the distance anyways.
         //
         // If both are Some, we perform another distance check and return the desired
         // backfill target
-        let Some(backfill_target) =
+        if let Some(backfill_target) =
             ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
                 // Determines whether or not we should run backfill again, in case
                 // the new gap is still large enough and requires running backfill again
                 self.backfill_sync_target(progress, finalized_number, None)
             })
-        else {
-            return
+        {
+            // request another backfill run
+            self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
+                backfill_target.into(),
+            )));
         };
-
-        // request another backfill run
-        self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
-            backfill_target.into(),
-        )));
     }
 
     /// Attempts to make the given target canonical.
     ///
     /// This will update the tracked canonical in memory state and do the necessary housekeeping.
-    const fn make_canonical(&self, target: B256) {
-        // TODO: implement state updates and shift canonical state
+    fn make_canonical(&mut self, target: B256) {
+        if let Some(chain_update) = self.state.tree_state.on_new_head(target) {
+            self.on_canonical_chain_update(chain_update);
+        }
     }
 
     /// Convenience function to handle an optional tree event.
-    fn on_maybe_tree_event(&self, event: Option<TreeEvent>) {
+    fn on_maybe_tree_event(&mut self, event: Option<TreeEvent>) {
         if let Some(event) = event {
             self.on_tree_event(event);
         }
     }
 
     /// Handles a tree event.
-    fn on_tree_event(&self, event: TreeEvent) {
+    fn on_tree_event(&mut self, event: TreeEvent) {
         match event {
             TreeEvent::TreeAction(action) => match action {
                 TreeAction::MakeCanonical(target) => {
@@ -648,24 +682,36 @@ where
     }
 
     /// Emits an outgoing event to the engine.
-    fn emit_event(&self, event: impl Into<EngineApiEvent>) {
+    fn emit_event(&mut self, event: impl Into<EngineApiEvent>) {
+        let event = event.into();
+
+        if event.is_backfill_action() {
+            debug_assert_eq!(
+                self.backfill_sync_state,
+                BackfillSyncState::Idle,
+                "backfill action should only be emitted when backfill is idle"
+            );
+            self.backfill_sync_state = BackfillSyncState::Pending;
+            debug!(target: "engine", "emitting backfill action event");
+        }
+
         let _ = self
             .outgoing
-            .send(event.into())
+            .send(event)
             .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
     }
 
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
-        self.state.tree_state.max_block_number() -
-            self.persistence_state.last_persisted_block_number >=
-            PERSISTENCE_THRESHOLD
+        let min_block = self.persistence_state.last_persisted_block_number;
+
+        self.state.tree_state.max_block_number() - min_block >= self.config.persistence_threshold()
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let start = self.persistence_state.last_persisted_block_number;
-        let end = start + PERSISTENCE_THRESHOLD;
+        let end = start + self.config.persistence_threshold();
 
         // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
         self.state
@@ -681,6 +727,8 @@ where
     ///
     /// This also updates the canonical in-memory state to reflect the newest persisted block
     /// height.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
         self.remove_persisted_blocks_from_tree_state();
         self.canonical_in_memory_state
@@ -688,6 +736,8 @@ where
     }
 
     /// Clears persisted blocks from the in-memory tree state.
+    ///
+    /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn remove_persisted_blocks_from_tree_state(&mut self) {
         let keys_to_remove: Vec<BlockNumber> = self
             .state
@@ -734,7 +784,7 @@ where
         let mut parent_hash = hash;
         while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
             parent_hash = executed.block.parent_hash;
-            in_memory.insert(0, executed.clone());
+            in_memory.push(executed.clone());
         }
 
         let historical = self.provider.state_by_block_hash(parent_hash)?;
@@ -991,6 +1041,25 @@ where
         None
     }
 
+    /// Invoked when we the canonical chain has been updated.
+    ///
+    /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
+    fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
+        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        // update the tracked canonical head
+        self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
+
+        let tip = chain_update.tip().header.clone();
+        let notification = chain_update.to_chain_notification();
+
+        // update the tracked in-memory state with the new chain
+        self.canonical_in_memory_state.update_chain(chain_update);
+        self.canonical_in_memory_state.set_canonical_head(tip);
+
+        // sends an event to all active listeners about the new canonical chain
+        self.canonical_in_memory_state.notify_canon_state(notification);
+    }
+
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
     ///
     /// This mainly compares the missing parent of the downloaded block with the current canonical
@@ -1046,7 +1115,7 @@ where
             return None
         }
 
-        if self.is_backfill_active {
+        if !self.backfill_sync_state.is_idle() {
             return None
         }
 
@@ -1054,6 +1123,8 @@ where
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
+                    // we just inserted the current sync target block, we can try to make it
+                    // canonical
                     return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
                         block_num_hash.hash,
                     )))
@@ -1246,7 +1317,7 @@ where
             return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
-        if self.is_backfill_active {
+        if !self.backfill_sync_state.is_idle() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
@@ -1401,7 +1472,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let status = if self.is_backfill_active {
+        let status = if !self.backfill_sync_state.is_idle() {
             self.buffer_block_without_senders(block).unwrap();
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
@@ -1438,6 +1509,8 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
@@ -1473,19 +1546,8 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
-            trace!(target: "engine", "applying new chain update");
-            // update the tracked canonical head
-            self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
-
             let tip = chain_update.tip().header.clone();
-            let notification = chain_update.to_chain_notification();
-
-            // update the tracked in-memory state with the new chain
-            self.canonical_in_memory_state.update_chain(chain_update);
-            self.canonical_in_memory_state.set_canonical_head(tip.clone());
-
-            // sends an event to all active listeners about the new canonical chain
-            self.canonical_in_memory_state.notify_canon_state(notification);
+            self.on_canonical_chain_update(chain_update);
 
             // update the safe and finalized blocks and ensure their values are valid, but only
             // after the head block is made canonical
@@ -1514,13 +1576,17 @@ where
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
-struct PersistenceState {
+pub struct PersistenceState {
     /// Hash of the last block persisted.
+    ///
+    /// A `None` value means no persistence task has been completed yet.
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
+    ///
+    /// A `None` value means no persistence task has been completed yet
     last_persisted_block_number: u64,
 }
 
@@ -1607,7 +1673,9 @@ mod tests {
                 engine_api_tree_state,
                 canonical_in_memory_state,
                 persistence_handle,
+                PersistenceState::default(),
                 payload_builder,
+                TreeConfig::default(),
             );
 
             Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx }
@@ -1662,6 +1730,16 @@ mod tests {
 
         let header = blocks.first().unwrap().block().header.clone();
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
+        let last_executed_block = blocks.last().unwrap().clone();
+        let last_header = last_executed_block.block().header();
+
+        // we expect the persistence state to be "at zero" - in practice there will be a genesis
+        // header hash
+        let persistence_state = PersistenceState {
+            last_persisted_block_number: 0,
+            last_persisted_block_hash: B256::ZERO,
+            rx: None,
+        };
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -1675,9 +1753,10 @@ mod tests {
             engine_api_tree_state,
             canonical_in_memory_state,
             persistence_handle,
+            persistence_state,
             payload_builder,
+            TreeConfig::default(),
         );
-        let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(BlockState::new(last_executed_block));
         tree.canonical_in_memory_state =
             CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
@@ -1689,8 +1768,10 @@ mod tests {
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
+        let tree_config = TreeConfig::default();
+
         let TestHarness { tree, to_tree_tx, action_rx, mut blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
+            get_default_test_harness(tree_config.persistence_threshold() + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
         // send a message to the tree to enter the main loop.
@@ -1700,7 +1781,7 @@ mod tests {
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
-            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
             assert_eq!(saved_blocks, blocks);
         } else {
             panic!("unexpected action received {received_action:?}");
@@ -1732,11 +1813,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
+        let tree_config = TreeConfig::default();
+
         let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            get_default_test_harness(PERSISTENCE_THRESHOLD);
+            get_default_test_harness(tree_config.persistence_threshold());
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.backfill_sync_state = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::ForkchoiceUpdated {
@@ -1755,7 +1838,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_holesky_payload() {
-        let s = include_str!("../test-data/holesky/1.rlp");
+        let s = include_str!("../../test-data/holesky/1.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
@@ -1765,7 +1848,7 @@ mod tests {
             TestHarness::holesky();
 
         // set backfill active
-        tree.is_backfill_active = true;
+        tree.backfill_sync_state = BackfillSyncState::Active;
 
         let (tx, rx) = oneshot::channel();
         tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {

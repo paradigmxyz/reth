@@ -1249,7 +1249,8 @@ impl TransactionsProviderExt for StaticFileProvider {
         let mut channels = Vec::new();
 
         // iterator over the chunks
-        let chunks = (tx_range.start..tx_range.end)
+        let chunks = tx_range
+            .clone()
             .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 

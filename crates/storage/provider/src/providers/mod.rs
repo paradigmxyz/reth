@@ -75,8 +75,6 @@ pub struct BlockchainProvider<DB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
-    // TODO: replace chain_info with CanonicalInMemoryState.
-    //canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<DB> Clone for BlockchainProvider<DB> {
@@ -85,8 +83,6 @@ impl<DB> Clone for BlockchainProvider<DB> {
             database: self.database.clone(),
             tree: self.tree.clone(),
             chain_info: self.chain_info.clone(),
-            // TODO: add canonical_in_memory_state
-            // canonical_in_memory_state: self.canonical_in_memory_state.clone(),
         }
     }
 }
@@ -97,17 +93,9 @@ impl<DB> BlockchainProvider<DB> {
     pub fn with_latest(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
-        // TODO: add in_memory_state
-        // in_memory_state: Arc<dyn InMemoryState>,
         latest: SealedHeader,
     ) -> Self {
-        Self {
-            database,
-            tree,
-            // TODO: add in_memory_state
-            // in_memory_state,
-            chain_info: ChainInfoTracker::new(latest),
-        }
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 
     /// Sets the treeviewer for the provider.
@@ -135,12 +123,7 @@ where
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
-}
 
-impl<DB> BlockchainProvider<DB>
-where
-    DB: Database,
-{
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
@@ -157,6 +140,26 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl<DB> BlockchainProvider<DB>
+where
+    Self: StateProviderFactory,
+    DB: Database,
+{
+    /// Return a [`StateProviderBox`] that contains bundle state data provider.
+    /// Used to inspect or execute transaction on the pending state.
+    fn pending_with_provider(
+        &self,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
+    ) -> ProviderResult<StateProviderBox> {
+        let canonical_fork = bundle_state_data.canonical_fork();
+        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
+
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        Ok(Box::new(bundle_state_provider))
     }
 }
 
@@ -674,18 +677,6 @@ where
             return Ok(Some(self.pending_with_provider(state)?))
         }
         Ok(None)
-    }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let canonical_fork = bundle_state_data.canonical_fork();
-        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
-
-        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
     }
 }
 

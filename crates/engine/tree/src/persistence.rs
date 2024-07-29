@@ -143,8 +143,8 @@ impl<DB: Database> PersistenceService<DB> {
         let provider = self.provider.static_file_provider();
 
         let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-        let provider_rw = self.provider.provider_rw()?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(header_writer));
+        let provider_ro = self.provider.provider()?;
+        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
         storage_writer.append_headers_from_blocks(
             block.header().number,
             std::iter::once(&(block.header(), block.hash())),
@@ -152,7 +152,7 @@ impl<DB: Database> PersistenceService<DB> {
 
         let transactions_writer =
             provider.get_writer(block.number, StaticFileSegment::Transactions)?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(transactions_writer));
+        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
         let no_hash_transactions =
             block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
         storage_writer.append_transactions_from_blocks(
@@ -212,7 +212,7 @@ impl<DB: Database> PersistenceService<DB> {
     fn remove_static_file_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
         debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
         let sf_provider = self.provider.static_file_provider();
-        let db_provider_rw = self.provider.provider_rw()?;
+        let db_provider_ro = self.provider.provider()?;
 
         // get highest static file block for the total block range
         let highest_static_file_block = sf_provider
@@ -221,7 +221,7 @@ impl<DB: Database> PersistenceService<DB> {
 
         // Get the total txs for the block range, so we have the correct number of columns for
         // receipts and transactions
-        let tx_range = db_provider_rw
+        let tx_range = db_provider_ro
             .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
         let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
@@ -333,7 +333,7 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_services<DB: Database + 'static>(
+    pub fn spawn_service<DB: Database + 'static>(
         provider_factory: ProviderFactory<DB>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
@@ -420,7 +420,7 @@ mod tests {
             finished_exex_height_rx,
         );
 
-        PersistenceHandle::spawn_services(provider, pruner)
+        PersistenceHandle::spawn_service(provider, pruner)
     }
 
     #[tokio::test]

@@ -34,6 +34,15 @@ impl TrieUpdates {
         &self.storage_tries
     }
 
+    /// Extends the trie updates.
+    pub fn extend(&mut self, other: Self) {
+        self.account_nodes.extend(other.account_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
+        for (hashed_address, storage_trie) in other.storage_tries {
+            self.storage_tries.entry(hashed_address).or_default().extend(storage_trie);
+        }
+    }
+
     /// Insert storage updates for a given hashed address.
     pub fn insert_storage_updates(
         &mut self,
@@ -136,6 +145,13 @@ impl StorageTrieUpdates {
     /// Sets `deleted` flag on the storage trie.
     pub fn set_deleted(&mut self, deleted: bool) {
         self.is_deleted = deleted;
+    }
+
+    /// Extends storage trie updates.
+    pub fn extend(&mut self, other: Self) {
+        self.is_deleted |= other.is_deleted;
+        self.storage_nodes.extend(other.storage_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
     }
 
     /// Finalize storage trie updates for by taking updates from walker and hash builder.

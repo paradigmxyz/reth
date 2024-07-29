@@ -312,13 +312,13 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn hashed_state_root(&self, _state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        _state: &HashedPostState,
+        _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -327,7 +327,7 @@ impl StateRootProvider for NoopProvider {
 impl StateProofProvider for NoopProvider {
     fn hashed_proof(
         &self,
-        _hashed_state: &HashedPostState,
+        _hashed_state: HashedPostState,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -424,13 +424,6 @@ impl StateProviderFactory for NoopProvider {
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(*self)))
-    }
-
-    fn pending_with_provider<'a>(
-        &'a self,
-        _bundle_state_data: Box<dyn crate::FullExecutionDataProvider + 'a>,
-    ) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(*self))
     }
 }
 

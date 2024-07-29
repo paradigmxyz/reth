@@ -1,5 +1,5 @@
 //! Command for debugging merkle trie calculation.
-use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
+use crate::{args::NetworkArgs, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -14,6 +14,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::StorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
@@ -91,7 +92,7 @@ impl Command {
             )
             .await?;
 
-        let executor_provider = block_executor!(provider_factory.chain_spec());
+        let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
@@ -156,7 +157,9 @@ impl Command {
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
-                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+                block_number
+                    .checked_sub(1)
+                    .ok_or_else(|| eyre::eyre!("GenesisBlockHasNoParent"))?,
             ));
 
             let mut account_hashing_done = false;
@@ -245,7 +248,7 @@ impl Command {
                 }
             }
 
-            // Stoarge trie
+            // Storage trie
             let mut first_mismatched_storage = None;
             let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
             let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();
