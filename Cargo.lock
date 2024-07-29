@@ -7568,6 +7568,7 @@ version = "1.0.3"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-admin",
+ "auto_impl",
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
@@ -8000,6 +8001,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-evm-optimism",
+ "reth-network-api",
  "reth-node-api",
  "reth-primitives",
  "reth-provider",
@@ -8420,6 +8422,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
