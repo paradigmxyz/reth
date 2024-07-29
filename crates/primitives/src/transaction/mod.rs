@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
-pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsedAndError};
+pub use access_list::{AccessList, AccessListItem, AccessListResult};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;

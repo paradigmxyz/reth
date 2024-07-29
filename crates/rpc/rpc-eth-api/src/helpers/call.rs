@@ -8,7 +8,7 @@ use reth_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
     },
-    transaction::AccessListWithGasUsedAndError,
+    transaction::AccessListResult,
     Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
@@ -173,13 +173,13 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`], or latest block.
     fn create_access_list_at(
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> impl Future<Output = EthResult<AccessListWithGasUsedAndError>> + Send
+    ) -> impl Future<Output = EthResult<AccessListResult>> + Send
     where
         Self: Trace,
     {
@@ -194,7 +194,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
@@ -202,7 +202,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         block: BlockEnv,
         at: BlockId,
         mut request: TransactionRequest,
-    ) -> EthResult<AccessListWithGasUsedAndError>
+    ) -> EthResult<AccessListResult>
     where
         Self: Trace,
     {
@@ -243,10 +243,8 @@ pub trait EthCall: Call + LoadPendingBlock {
         let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
         let error = match result.result {
-            ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason)),
-            ExecutionResult::Revert { output, .. } => {
-                Some(format!("{:?}", RevertError::new(output)))
-            }
+            ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason.to_string())),
+            ExecutionResult::Revert { output, .. } => Some(RevertError::new(output).to_string()),
             ExecutionResult::Success { .. } => None,
         };
 
@@ -260,7 +258,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         let gas_used =
             self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
-        Ok(AccessListWithGasUsedAndError { access_list, gas_used, error })
+        Ok(AccessListResult { access_list, gas_used, error })
     }
 }
 

@@ -6,7 +6,7 @@ pub use alloy_eips::eip2930::{AccessList, AccessListItem};
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 
-/// `AccessListResult ` for handling error from `eth_createAccessList`
+/// `AccessListResult` for handling errors from `eth_createAccessList`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccessListResult {
     /// List with accounts accessed during transaction.
