@@ -49,7 +49,7 @@ use reth_node_core::{
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
-/// The main reth cli interface.
+/// The main op-reth cli interface.
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
@@ -113,44 +113,6 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    ///
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use reth::cli::Cli;
-    /// use reth_node_optimism::OptimismNode;
-    ///
-    /// Cli::parse_args()
-    ///     .run(|builder, _| async move {
-    ///         let handle = builder.launch_node(OptimismNode::default()).await?;
-    ///
-    ///         handle.wait_for_node_exit().await
-    ///     })
-    ///     .unwrap();
-    /// ```
-    ///
-    /// # Example
-    ///
-    /// Parse additional CLI arguments for the node command and use it to configure the node.
-    ///
-    /// ```no_run
-    /// use clap::Parser;
-    /// use reth::cli::Cli;
-    ///
-    /// #[derive(Debug, Parser)]
-    /// pub struct MyArgs {
-    ///     pub enable: bool,
-    /// }
-    ///
-    /// Cli::parse()
-    ///     .run(|builder, my_args: MyArgs| async move {
-    ///         // launch the node
-    ///
-    ///         Ok(())
-    ///     })
-    ///     .unwrap();
-    /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
