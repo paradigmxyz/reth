@@ -63,8 +63,7 @@ impl BlockIndices {
     }
 
     /// Return block to chain id
-    #[allow(dead_code)]
-    pub(crate) const fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockchainId> {
+    pub const fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockchainId> {
         &self.blocks_to_chain
     }
 
@@ -203,7 +202,7 @@ impl BlockIndices {
 
     /// Remove chain from indices and return dependent chains that need to be removed.
     /// Does the cleaning of the tree and removing blocks from the chain.
-    pub(crate) fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockchainId> {
+    pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockchainId> {
         chain
             .blocks()
             .iter()

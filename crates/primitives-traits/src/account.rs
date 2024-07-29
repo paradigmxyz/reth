@@ -61,10 +61,6 @@ impl Bytecode {
     /// Create new bytecode from raw bytes.
     ///
     /// No analysis will be performed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if bytecode is EOF and has incorrect format.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
     }
@@ -91,10 +87,10 @@ impl Compact for Bytecode {
                 buf.put_slice(map);
                 1 + 8 + map.len()
             }
-            RevmBytecode::Eof(eof) => {
-                buf.put_u8(3);
-                buf.put_slice(eof.raw().as_ref());
-                1 + eof.raw().as_ref().len()
+            RevmBytecode::Eof(_) => {
+                // buf.put_u8(3);
+                // TODO(EOF)
+                todo!("EOF")
             }
         };
         len + bytecode.len() + 4
@@ -118,10 +114,8 @@ impl Compact for Bytecode {
                     JumpTable::from_slice(buf),
                 )
             }),
-            3 => {
-                // EOF bytecode object will be decoded from the raw bytecode
-                Self(RevmBytecode::new_raw(bytes))
-            }
+            // TODO(EOF)
+            3 => todo!("EOF"),
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])

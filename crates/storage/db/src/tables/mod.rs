@@ -16,7 +16,6 @@ pub mod codecs;
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
-#[cfg(feature = "mdbx")]
 pub(crate) mod utils;
 
 use reth_db_api::{

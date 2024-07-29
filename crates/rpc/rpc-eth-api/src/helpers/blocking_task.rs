@@ -2,14 +2,12 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
-use crate::EthApiTypes;
-
 /// Executes code on a blocking thread.
-pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
+pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
     /// Runtime access in default trait method implementations.
@@ -35,9 +33,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     ///
     /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
     /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
-    fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = Result<R, Self::Error>> + Send
+    fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
-        F: FnOnce(Self) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
@@ -55,9 +53,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`
     /// under the hood, for blocking IO futures use [`spawn_blocking`](Self::spawn_blocking_io). See
     /// <https://ryhl.io/blog/async-what-is-blocking/>.
-    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = Result<R, Self::Error>> + Send
+    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
-        F: FnOnce(Self) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let this = self.clone();

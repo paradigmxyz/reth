@@ -235,7 +235,7 @@ where
         + ChainSpecProvider
         + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
-    EngineT: EngineTypes + Unpin,
+    EngineT: EngineTypes + Unpin + 'static,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
@@ -1801,7 +1801,7 @@ where
         + ChainSpecProvider
         + Unpin
         + 'static,
-    EngineT: EngineTypes + Unpin,
+    EngineT: EngineTypes + Unpin + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 

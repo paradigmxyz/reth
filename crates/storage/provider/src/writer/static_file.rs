@@ -14,12 +14,10 @@ impl<'a> ReceiptWriter for StaticFileWriter<'a, StaticFileProviderRWRefMut<'_>> 
     ) -> ProviderResult<()> {
         // Increment block on static file header.
         self.0.increment_block(StaticFileSegment::Receipts, block_number)?;
-        let receipts = receipts.iter().enumerate().map(|(tx_idx, receipt)| {
+        let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
             Ok((
                 first_tx_index + tx_idx as u64,
-                receipt
-                    .as_ref()
-                    .expect("receipt should not be filtered when saving to static files."),
+                receipt.expect("receipt should not be filtered when saving to static files."),
             ))
         });
         self.0.append_receipts(receipts)?;

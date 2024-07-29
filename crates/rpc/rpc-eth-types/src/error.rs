@@ -17,7 +17,6 @@ use reth_transaction_pool::error::{
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
-use tracing::error;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -137,11 +136,6 @@ impl EthApiError {
     /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
-    }
-
-    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
-    pub const fn is_gas_too_high(&self) -> bool {
-        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
     }
 }
 
@@ -378,17 +372,35 @@ pub enum RpcInvalidTransactionError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
-    /// Unexpected [`InvalidTransaction`](revm::primitives::InvalidTransaction) error, Optimism
-    /// errors should not be handled on this level.
-    // TODO: Remove when optimism feature removed in revm
-    #[error("unexpected transaction error")]
-    UnexpectedTransactionError,
 }
 
 impl RpcInvalidTransactionError {
     /// crates a new [`RpcInvalidTransactionError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
+    }
+}
+
+/// Optimism specific invalid transaction errors
+#[cfg(feature = "optimism")]
+#[derive(thiserror::Error, Debug)]
+pub enum OptimismInvalidTransactionError {
+    /// A deposit transaction was submitted as a system transaction post-regolith.
+    #[error("no system transactions allowed after regolith")]
+    DepositSystemTxPostRegolith,
+    /// A deposit transaction halted post-regolith
+    #[error("deposit transaction halted after regolith")]
+    HaltedDepositPostRegolith,
+}
+
+#[cfg(feature = "optimism")]
+impl ToRpcError for OptimismInvalidTransactionError {
+    fn to_rpc_error(&self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        match self {
+            Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
+                rpc_err(EthRpcErrorCode::TransactionRejected.code(), self.to_string(), None)
+            }
+        }
     }
 }
 
@@ -450,7 +462,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock |
+            InvalidTransaction::CallerGasLimitMoreThanBlock => Self::GasTooHigh,
             InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
@@ -476,15 +488,17 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::AuthorizationListInvalidFields => {
                 Self::AuthorizationListInvalidFields
             }
-            #[allow(unreachable_patterns)]
-            _ => {
-                error!(target: "rpc",
-                    ?err,
-                    "unexpected transaction error"
-                );
-
-                Self::UnexpectedTransactionError
-            }
+            #[cfg(feature = "optimism")]
+            InvalidTransaction::OptimismError(err) => match err {
+                revm_primitives::OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
+                    Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
+                }
+                revm_primitives::OptimismInvalidTransaction::HaltedDepositPostRegolith => {
+                    Self::Other(Box::new(
+                        OptimismInvalidTransactionError::HaltedDepositPostRegolith,
+                    ))
+                }
+            },
         }
     }
 }

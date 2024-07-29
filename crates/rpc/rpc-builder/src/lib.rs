@@ -93,7 +93,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
-//!     EngineT: EngineTypes,
+//!     EngineT: EngineTypes + 'static,
 //!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
@@ -177,9 +177,10 @@ use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
 
-use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-
-pub use cors::CorsDomainError;
+use crate::{
+    auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
+    metrics::RpcRequestMetrics,
+};
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
@@ -207,7 +208,6 @@ pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;
-pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
@@ -434,7 +434,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>,
     )
     where
-        EngineT: EngineTypes,
+        EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer,
     {
@@ -974,7 +974,7 @@ where
     /// Note: This does _not_ register the `engine_` in this registry.
     pub fn create_auth_module<EngineApi, EngineT>(&self, engine_api: EngineApi) -> AuthRpcModule
     where
-        EngineT: EngineTypes,
+        EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
     {
         let mut module = RpcModule::new(());
@@ -1141,6 +1141,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
     /// Configurable RPC middleware
+    #[allow(dead_code)]
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
@@ -1336,9 +1337,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
-        RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-        for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-            Send + Sync + 'static + RpcServiceT<'a>,
+        RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+        <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
@@ -1396,7 +1396,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                     )
                     .set_rpc_middleware(
-                        self.rpc_middleware.clone().layer(
+                        RpcServiceBuilder::new().layer(
                             modules
                                 .http
                                 .as_ref()
@@ -1444,8 +1444,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware
-                        .clone()
+                    RpcServiceBuilder::new()
                         .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
                 )
                 .build(ws_socket_addr)
@@ -1469,7 +1468,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware.clone().layer(
+                    RpcServiceBuilder::new().layer(
                         modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
                     ),
                 )

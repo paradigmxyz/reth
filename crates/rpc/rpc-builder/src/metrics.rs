@@ -81,11 +81,9 @@ struct RpcServerMetricsInner {
 /// A [`RpcServiceT`] middleware that captures RPC metrics for the server.
 ///
 /// This is created per connection and captures metrics for each request.
-#[derive(Clone, Debug)]
-pub struct RpcRequestMetricsService<S> {
-    /// The metrics collector for RPC requests
+#[derive(Clone)]
+pub(crate) struct RpcRequestMetricsService<S> {
     metrics: RpcRequestMetrics,
-    /// The inner service being wrapped
     inner: S,
 }
 
@@ -127,7 +125,7 @@ impl<S> Drop for RpcRequestMetricsService<S> {
 
 /// Response future to update the metrics for a single request/response pair.
 #[pin_project::pin_project]
-pub struct MeteredRequestFuture<F> {
+pub(crate) struct MeteredRequestFuture<F> {
     #[pin]
     fut: F,
     /// time when the request started

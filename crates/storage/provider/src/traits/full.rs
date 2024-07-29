@@ -1,11 +1,10 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, HeaderProvider, StageCheckpointReader, StateProviderFactory,
-    StaticFileProviderFactory, TransactionsProvider,
+    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, StageCheckpointReader,
+    StateProviderFactory, StaticFileProviderFactory, TransactionsProvider,
 };
-use reth_chain_state::CanonStateSubscriptions;
 use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.

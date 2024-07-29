@@ -1,26 +1,26 @@
 use super::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256};
-use reth_storage_api::{
+use reth_provider::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
-#[allow(missing_debug_implementations)]
-pub struct MemoryOverlayStateProvider {
+#[derive(Debug)]
+pub struct MemoryOverlayStateProvider<H> {
     /// The collection of executed parent blocks.
-    pub(crate) in_memory: Vec<ExecutedBlock>,
+    in_memory: Vec<ExecutedBlock>,
     /// The collection of hashed state from in-memory blocks.
-    pub(crate) hashed_post_state: HashedPostState,
+    hashed_post_state: HashedPostState,
     /// Historical state provider for state lookups that are not found in in-memory blocks.
-    pub(crate) historical: Box<dyn StateProvider>,
+    historical: H,
 }
 
-impl MemoryOverlayStateProvider {
+impl<H> MemoryOverlayStateProvider<H> {
     /// Create new memory overlay state provider.
-    pub fn new(in_memory: Vec<ExecutedBlock>, historical: Box<dyn StateProvider>) -> Self {
+    pub fn new(in_memory: Vec<ExecutedBlock>, historical: H) -> Self {
         let mut hashed_post_state = HashedPostState::default();
         for block in &in_memory {
             hashed_post_state.extend(block.hashed_state.as_ref().clone());
@@ -29,7 +29,10 @@ impl MemoryOverlayStateProvider {
     }
 }
 
-impl BlockHashReader for MemoryOverlayStateProvider {
+impl<H> BlockHashReader for MemoryOverlayStateProvider<H>
+where
+    H: BlockHashReader,
+{
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in self.in_memory.iter().rev() {
             if block.block.number == number {
@@ -62,7 +65,10 @@ impl BlockHashReader for MemoryOverlayStateProvider {
     }
 }
 
-impl AccountReader for MemoryOverlayStateProvider {
+impl<H> AccountReader for MemoryOverlayStateProvider<H>
+where
+    H: AccountReader + Send,
+{
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         for block in self.in_memory.iter().rev() {
             if let Some(account) = block.execution_output.account(&address) {
@@ -74,7 +80,10 @@ impl AccountReader for MemoryOverlayStateProvider {
     }
 }
 
-impl StateRootProvider for MemoryOverlayStateProvider {
+impl<H> StateRootProvider for MemoryOverlayStateProvider<H>
+where
+    H: StateRootProvider + Send,
+{
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
         let mut state = self.hashed_post_state.clone();
@@ -93,7 +102,10 @@ impl StateRootProvider for MemoryOverlayStateProvider {
     }
 }
 
-impl StateProofProvider for MemoryOverlayStateProvider {
+impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
+where
+    H: StateProofProvider + Send,
+{
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_proof(
         &self,
@@ -107,7 +119,10 @@ impl StateProofProvider for MemoryOverlayStateProvider {
     }
 }
 
-impl StateProvider for MemoryOverlayStateProvider {
+impl<H> StateProvider for MemoryOverlayStateProvider<H>
+where
+    H: StateProvider + Send,
+{
     fn storage(
         &self,
         address: Address,

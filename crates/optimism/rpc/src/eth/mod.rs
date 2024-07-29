@@ -18,18 +18,16 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StatePr
 use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadFee, LoadState, SpawnBlocking,
-        Trace, UpdateRawTxForwarder,
+        AddDevSigners, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
+        SpawnBlocking, Trace, UpdateRawTxForwarder,
     },
-    EthApiTypes, RawTransactionForwarder,
+    RawTransactionForwarder,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
-
-use crate::OpEthApiError;
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -51,13 +49,6 @@ impl<Eth> OpEthApi<Eth> {
     pub const fn new(inner: Eth) -> Self {
         Self { inner }
     }
-}
-
-impl<Eth> EthApiTypes for OpEthApi<Eth>
-where
-    Eth: Send + Sync,
-{
-    type Error = OpEthApiError;
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
@@ -150,6 +141,8 @@ impl<Eth: EthState> EthState for OpEthApi<Eth> {
         self.inner.max_proof_window()
     }
 }
+
+impl<Eth: EthCall> EthCall for OpEthApi<Eth> {}
 
 impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
 

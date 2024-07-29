@@ -15,8 +15,6 @@ mod auth_client_layer;
 mod auth_layer;
 mod jwt_validator;
 
-pub use auth_layer::{AuthService, ResponseFuture};
-
 // Export alloy JWT types
 pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
 

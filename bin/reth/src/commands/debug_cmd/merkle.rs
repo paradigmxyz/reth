@@ -17,8 +17,8 @@ use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::StorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -151,10 +151,7 @@ impl Command {
                 ),
             ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
-            let execution_outcome = executor.finalize();
-
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
-            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+            executor.finalize().write_to_storage(&provider_rw, None, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
                 block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,

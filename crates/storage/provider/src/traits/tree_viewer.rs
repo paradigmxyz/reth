@@ -1,6 +1,5 @@
-use crate::BlockchainTreePendingStateProvider;
+use crate::{BlockchainTreePendingStateProvider, CanonStateSubscriptions};
 use reth_blockchain_tree_api::{BlockchainTreeEngine, BlockchainTreeViewer};
-use reth_chain_state::CanonStateSubscriptions;
 
 /// Helper trait to combine all the traits we need for the `BlockchainProvider`
 ///

@@ -85,7 +85,7 @@ where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
-    Engine: EngineTypes,
+    Engine: EngineTypes + 'static,
     Executor: BlockExecutorProvider,
 {
     type Output = ();

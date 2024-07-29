@@ -22,7 +22,7 @@ pub use database::DatabaseArgs;
 
 /// LogArgs struct for configuring the logger
 mod log;
-pub use log::{ColorMode, LogArgs, Verbosity};
+pub use log::{ColorMode, LogArgs};
 
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;

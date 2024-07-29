@@ -1,18 +1,18 @@
 //! An engine API handler for the chain.
 
 use crate::{
-    backfill::BackfillAction,
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
+    tree::TreeEvent,
 };
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::HashSet,
     sync::mpsc::Sender,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -27,8 +27,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// received from the CL to the handler.
 ///
 /// It is responsible for handling the following:
-/// - Delegating incoming requests to the [`EngineRequestHandler`].
-/// - Advancing the [`EngineRequestHandler`] by polling it and emitting events.
 /// - Downloading blocks on demand from the network if requested by the [`EngineApiRequestHandler`].
 ///
 /// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
@@ -73,18 +71,18 @@ where
             // drain the handler first
             while let Poll::Ready(ev) = self.handler.poll(cx) {
                 match ev {
+                    RequestHandlerEvent::Idle => break,
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
-                            HandlerEvent::BackfillAction(target) => {
+                            HandlerEvent::BackfillSync(target) => {
                                 // bubble up backfill sync request request
                                 self.downloader.on_action(DownloadAction::Clear);
-                                Poll::Ready(HandlerEvent::BackfillAction(target))
+                                Poll::Ready(HandlerEvent::BackfillSync(target))
                             }
                             HandlerEvent::Event(ev) => {
                                 // bubble up the event
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
-                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
                         }
                     }
                     RequestHandlerEvent::Download(req) => {
@@ -114,14 +112,7 @@ where
     }
 }
 
-/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API,
-/// such as newPayload).
-///
-/// ## Control flow
-///
-/// Requests and certain updates, such as a change in backfill sync status, are delegated to this
-/// type via [`EngineRequestHandler::on_event`]. This type is responsible for processing the
-/// incoming requests and advancing the chain and emit events when it is polled.
+/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API)
 pub trait EngineRequestHandler: Send + Sync {
     /// Even type this handler can emit
     type Event: Send;
@@ -178,7 +169,7 @@ impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
     T: EngineTypes,
 {
-    type Event = BeaconConsensusEngineEvent;
+    type Event = EngineApiEvent;
     type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
@@ -187,39 +178,15 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
-            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
-        };
-
-        let ev = match ev {
-            EngineApiEvent::BeaconConsensus(ev) => {
-                RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
-            }
-            EngineApiEvent::BackfillAction(action) => {
-                RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
-            }
-            EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
-        };
-        Poll::Ready(ev)
+        todo!("poll tree")
     }
 }
 
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
 pub enum EngineApiEvent {
-    /// Event from the consensus engine.
-    // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
-    BeaconConsensus(BeaconConsensusEngineEvent),
-    /// Backfill action is needed.
-    BackfillAction(BackfillAction),
-    /// Block download is needed.
-    Download(DownloadRequest),
-}
-
-impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
-    fn from(event: BeaconConsensusEngineEvent) -> Self {
-        Self::BeaconConsensus(event)
-    }
+    /// Bubbled from tree.
+    FromTree(TreeEvent),
 }
 
 #[derive(Debug)]
@@ -241,6 +208,8 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
 /// Requests produced by a [`EngineRequestHandler`].
 #[derive(Debug)]
 pub enum RequestHandlerEvent<T> {
+    /// The handler is idle.
+    Idle,
     /// An event emitted by the handler.
     HandlerEvent(HandlerEvent<T>),
     /// Request to download blocks.
@@ -254,11 +223,4 @@ pub enum DownloadRequest {
     BlockSet(HashSet<B256>),
     /// Download the given range of blocks.
     BlockRange(B256, u64),
-}
-
-impl DownloadRequest {
-    /// Returns a [`DownloadRequest`] for a single block.
-    pub fn single_block(hash: B256) -> Self {
-        Self::BlockSet(HashSet::from([hash]))
-    }
 }

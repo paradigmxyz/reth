@@ -11,17 +11,15 @@ use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
+    bundle_state::{BundleStateInit, RevertsInit},
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    writer::StorageWriter,
-    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
-    ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    TrieWriter,
+    BlockHashReader, BlockNumReader, ChainSpecProvider, DatabaseProviderRW, ExecutionOutcome,
+    HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
-use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -66,7 +64,7 @@ pub enum InitDatabaseError {
     #[error(
         "state root mismatch, state dump: {expected_state_root}, computed: {computed_state_root}"
     )]
-    StateRootMismatch {
+    SateRootMismatch {
         /// Expected state root.
         expected_state_root: B256,
         /// Actual state root.
@@ -203,8 +201,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    let mut storage_writer = StorageWriter::new(Some(provider), None);
-    storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
+    execution_outcome.write_to_storage(provider, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -285,7 +282,7 @@ pub fn insert_genesis_header<DB: Database>(
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(&header, difficulty, &hash)?;
+            writer.append_header(header, difficulty, hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -336,7 +333,7 @@ pub fn init_from_state_dump<DB: Database>(
             "Computed state root does not match state root in state dump"
         );
 
-        Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
+        Err(InitDatabaseError::SateRootMismatch { expected_state_root, computed_state_root })?
     } else {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -464,7 +461,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = updates.write_to_database(tx)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -484,7 +481,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = updates.write_to_database(tx)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",

@@ -25,5 +25,8 @@ rand.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -23,10 +23,10 @@ pub enum BlockSource {
     #[default]
     Any,
     /// The block was fetched from the pending block source, the blockchain tree that buffers
-    /// blocks that are not yet part of the canonical chain.
+    /// blocks that are not yet finalized.
     Pending,
-    /// The block must be part of the canonical chain.
-    Canonical,
+    /// The block was fetched from the database.
+    Database,
 }
 
 impl BlockSource {
@@ -35,9 +35,9 @@ impl BlockSource {
         matches!(self, Self::Pending | Self::Any)
     }
 
-    /// Returns `true` if the block source is `Canonical` or `Any`.
-    pub const fn is_canonical(&self) -> bool {
-        matches!(self, Self::Canonical | Self::Any)
+    /// Returns `true` if the block source is `Database` or `Any`.
+    pub const fn is_database(&self) -> bool {
+        matches!(self, Self::Database | Self::Any)
     }
 }
 
