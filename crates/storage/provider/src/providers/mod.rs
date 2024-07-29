@@ -12,7 +12,7 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ChainInfoTracker};
+use reth_chain_state::ChainInfoTracker;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -88,17 +88,6 @@ impl<DB> Clone for BlockchainProvider<DB> {
 }
 
 impl<DB> BlockchainProvider<DB> {
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
-    pub fn with_block_information(
-        database: ProviderFactory<DB>,
-        tree: Arc<dyn TreeViewer>,
-        latest: SealedHeader,
-        finalized: SealedHeader,
-    ) -> Self {
-        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) }
-    }
-
     /// Sets the treeviewer for the provider.
     #[doc(hidden)]
     pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
@@ -111,6 +100,17 @@ impl<DB> BlockchainProvider<DB>
 where
     DB: Database,
 {
+    /// Create new provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker.
+    pub fn with_block_information(
+        database: ProviderFactory<DB>,
+        tree: Arc<dyn TreeViewer>,
+        latest: SealedHeader,
+        finalized: SealedHeader,
+    ) -> ProviderResult<Self> {
+        Ok(Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) })
+    }
+
     /// Create a new provider using only the database and the tree, fetching the latest header from
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<DB>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
@@ -126,12 +126,12 @@ where
             .ok_or(ProviderError::HeaderNotFound(finalized_block_number.into()))?;
 
         drop(provider);
-        Ok(Self::with_block_information(
+        Self::with_block_information(
             database,
             tree,
             latest_header.seal(best.best_hash),
             finalized_header,
-        ))
+        )
     }
 
     /// Ensures that the given block number is canonical (synced)

@@ -117,6 +117,7 @@ impl CanonicalInMemoryState {
         blocks: HashMap<B256, Arc<BlockState>>,
         numbers: HashMap<u64, B256>,
         pending: Option<BlockState>,
+        finalized: SealedHeader,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let head_state = in_memory_state.head_state();
@@ -124,7 +125,7 @@ impl CanonicalInMemoryState {
             Some(state) => state.block().block().header.clone(),
             None => SealedHeader::default(),
         };
-        let chain_info_tracker = ChainInfoTracker::new(header);
+        let chain_info_tracker = ChainInfoTracker::new(header, finalized);
         let (canon_state_notification_sender, _canon_state_notification_receiver) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -138,8 +139,8 @@ impl CanonicalInMemoryState {
     }
 
     /// Create a new in memory state with the given local head.
-    pub fn with_head(head: SealedHeader) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head);
+    pub fn with_head(head: SealedHeader, finalized: SealedHeader) -> Self {
+        let chain_info_tracker = ChainInfoTracker::new(head, finalized);
         let in_memory_state = InMemoryState::default();
         let (canon_state_notification_sender, _canon_state_notification_receiver) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
