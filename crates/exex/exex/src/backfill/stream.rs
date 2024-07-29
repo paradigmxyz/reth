@@ -42,7 +42,7 @@ pub struct StreamBackfillJob<E, P, T> {
 }
 
 impl<E, P, T> StreamBackfillJob<E, P, T> {
-    /// Configures the parallelism of the [`BackFillJobStream`] to handle active tasks.
+    /// Configures the parallelism of the [`StreamBackfillJob`] to handle active tasks.
     ///
     /// # Parameters
     /// - `parallelism`: The parallelism to handle active tasks.
