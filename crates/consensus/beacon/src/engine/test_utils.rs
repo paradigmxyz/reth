@@ -407,7 +407,8 @@ where
             tree,
             genesis_block,
             Some(finalized_block),
-        )?;
+        )
+        .expect("failed to create blockchain provider");
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
