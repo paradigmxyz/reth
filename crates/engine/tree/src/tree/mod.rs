@@ -185,6 +185,9 @@ impl TreeState {
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
+    ///
+    /// Note: This does not update the tracked state and instead returns the new chain based on the
+    /// given head.
     fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
         let mut new_chain = Vec::new();
         let mut current_hash = new_head;
@@ -630,19 +633,21 @@ where
     /// Attempts to make the given target canonical.
     ///
     /// This will update the tracked canonical in memory state and do the necessary housekeeping.
-    const fn make_canonical(&self, target: B256) {
-        // TODO: implement state updates and shift canonical state
+    fn make_canonical(&mut self, target: B256) {
+        if let Some(chain_update) = self.state.tree_state.on_new_head(target) {
+            self.on_canonical_chain_update(chain_update);
+        }
     }
 
     /// Convenience function to handle an optional tree event.
-    fn on_maybe_tree_event(&self, event: Option<TreeEvent>) {
+    fn on_maybe_tree_event(&mut self, event: Option<TreeEvent>) {
         if let Some(event) = event {
             self.on_tree_event(event);
         }
     }
 
     /// Handles a tree event.
-    fn on_tree_event(&self, event: TreeEvent) {
+    fn on_tree_event(&mut self, event: TreeEvent) {
         match event {
             TreeEvent::TreeAction(action) => match action {
                 TreeAction::MakeCanonical(target) => {
@@ -1004,6 +1009,25 @@ where
         }
 
         None
+    }
+
+    /// Invoked when we the canonical chain has been updated.
+    ///
+    /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
+    fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
+        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        // update the tracked canonical head
+        self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
+
+        let tip = chain_update.tip().header.clone();
+        let notification = chain_update.to_chain_notification();
+
+        // update the tracked in-memory state with the new chain
+        self.canonical_in_memory_state.update_chain(chain_update);
+        self.canonical_in_memory_state.set_canonical_head(tip);
+
+        // sends an event to all active listeners about the new canonical chain
+        self.canonical_in_memory_state.notify_canon_state(notification);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -1490,19 +1514,8 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.state.tree_state.on_new_head(state.head_block_hash) {
-            trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
-            // update the tracked canonical head
-            self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
-
             let tip = chain_update.tip().header.clone();
-            let notification = chain_update.to_chain_notification();
-
-            // update the tracked in-memory state with the new chain
-            self.canonical_in_memory_state.update_chain(chain_update);
-            self.canonical_in_memory_state.set_canonical_head(tip.clone());
-
-            // sends an event to all active listeners about the new canonical chain
-            self.canonical_in_memory_state.notify_canon_state(notification);
+            self.on_canonical_chain_update(chain_update);
 
             // update the safe and finalized blocks and ensure their values are valid, but only
             // after the head block is made canonical
