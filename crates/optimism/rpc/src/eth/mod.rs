@@ -97,18 +97,22 @@ impl<N> EthApiSpec for OpEthApi<N>
 where
     N: FullNodeComponents,
 {
+    #[inline]
     fn provider(&self) -> impl ChainSpecProvider + BlockNumReader {
         self.inner.provider()
     }
 
+    #[inline]
     fn network(&self) -> impl NetworkInfo {
         self.inner.network()
     }
 
+    #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
     }
 
+    #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn reth_rpc_eth_api::helpers::EthSigner>>> {
         self.inner.signers()
     }
@@ -140,18 +144,22 @@ where
     Self: LoadBlock,
     N: FullNodeComponents,
 {
+    #[inline]
     fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider {
         self.inner.provider()
     }
 
+    #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
 
+    #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<impl BlockReaderIdExt> {
         self.inner.gas_oracle()
     }
 
+    #[inline]
     fn fee_history_cache(&self) -> &FeeHistoryCache {
         self.inner.fee_history_cache()
     }
@@ -162,14 +170,17 @@ where
     Self: Send + Sync,
     N: FullNodeComponents,
 {
+    #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
         self.inner.provider()
     }
 
+    #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
 
+    #[inline]
     fn pool(&self) -> impl TransactionPool {
         self.inner.pool()
     }
@@ -180,6 +191,7 @@ where
     Self: LoadState + SpawnBlocking,
     N: FullNodeComponents,
 {
+    #[inline]
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
@@ -197,6 +209,7 @@ where
     Self: LoadState,
     N: FullNodeComponents,
 {
+    #[inline]
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }

@@ -26,10 +26,12 @@ where
     Self::Error: From<OpEthApiError>,
     N: FullNodeComponents,
 {
+    #[inline]
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap()
     }
 
+    #[inline]
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }

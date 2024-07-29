@@ -21,6 +21,7 @@ where
     Self::Error: From<OpEthApiError>,
     N: FullNodeComponents,
 {
+    #[inline]
     fn provider(&self) -> impl HeaderProvider {
         self.inner.provider()
     }
@@ -80,10 +81,12 @@ where
     Self: LoadPendingBlock + SpawnBlocking,
     N: FullNodeComponents,
 {
+    #[inline]
     fn provider(&self) -> impl BlockReaderIdExt {
         self.inner.provider()
     }
 
+    #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
