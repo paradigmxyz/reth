@@ -231,9 +231,6 @@ pub enum InsertBlockErrorKind {
     /// Canonical error.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),
-    /// `BlockchainTree` error.
-    #[error(transparent)]
-    BlockchainTree(BlockchainTreeError),
 }
 
 impl InsertBlockErrorKind {
@@ -326,7 +323,6 @@ impl InsertBlockErrorKind {
                 CanonicalError::Provider(_) => false,
                 CanonicalError::Validation(_) => true,
             },
-            Self::BlockchainTree(_) => false,
         }
     }
 
