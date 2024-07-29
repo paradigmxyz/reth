@@ -10,6 +10,8 @@ use reth_primitives::{hex, Address, Bytes, U256};
 
 use reth_primitives::B256;
 
+/// Helper for transaction operations
+#[derive(Debug)]
 pub struct TransactionTestContext;
 
 impl TransactionTestContext {
@@ -43,7 +45,7 @@ impl TransactionTestContext {
         Ok(signed)
     }
 
-    /// Signs an arbitrary TransactionRequest using the provided wallet
+    /// Signs an arbitrary [`TransactionRequest`] using the provided wallet
     pub async fn sign_tx(wallet: PrivateKeySigner, tx: TransactionRequest) -> TxEnvelope {
         let signer = EthereumWallet::from(wallet);
         tx.build(&signer).await.unwrap()
@@ -59,6 +61,7 @@ impl TransactionTestContext {
         Ok(signed.encoded_2718().into())
     }
 
+    /// Creates and encodes an Optimism L1 block information transaction.
     pub async fn optimism_l1_block_info_tx(
         chain_id: u64,
         wallet: PrivateKeySigner,
