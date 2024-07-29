@@ -1,5 +1,4 @@
 use crate::constants::MAINNET_DEPOSIT_CONTRACT;
-use once_cell::sync::Lazy;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
@@ -7,6 +6,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
+use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
