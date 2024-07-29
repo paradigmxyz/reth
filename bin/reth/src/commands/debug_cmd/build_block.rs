@@ -1,5 +1,4 @@
 //! Command for debugging block building.
-use crate::macros::block_executor;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -19,6 +18,7 @@ use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
@@ -120,7 +120,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // configure blockchain tree
         let tree_externals =
@@ -221,17 +221,6 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            #[cfg(feature = "optimism")]
-            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
-                best_block.hash(),
-                reth_rpc_types::engine::OptimismPayloadAttributes {
-                    payload_attributes: payload_attrs,
-                    transactions: None,
-                    no_tx_pool: None,
-                    gas_limit: None,
-                },
-            )?,
-            #[cfg(not(feature = "optimism"))]
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -248,13 +237,6 @@ impl Command {
             None,
         );
 
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        )
-        .compute_pending_block();
-
-        #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         match payload_builder.try_build(args)? {
@@ -271,7 +253,8 @@ impl Command {
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
-                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+                let executor =
+                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
                 let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
