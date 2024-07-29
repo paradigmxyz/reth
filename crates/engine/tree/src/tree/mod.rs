@@ -124,7 +124,7 @@ impl TreeState {
         }
     }
 
-    /// Remove blocks before specified block number.
+    /// Remove blocks before specified block number (exclusive).
     pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
         let mut numbers_to_remove = Vec::new();
         for (&number, _) in self.blocks_by_number.range(..block_number) {
@@ -574,10 +574,14 @@ where
 
     /// Invoked if the backfill sync has finished to target.
     ///
-    /// Checks the tracked finalized block against the block on disk and restarts backfill if
-    /// needed.
+    /// At this point we consider the block synced to the backfill target.
     ///
-    /// This will also try to connect the buffered blocks.
+    /// Checks the tracked finalized block against the block on disk and requests another backfill
+    /// run if the distance to the tip exceeds the threshold for another backfill run.
+    ///
+    /// This will also do the necessary housekeeping of the tree state, this includes:
+    ///  - removing all blocks below the backfill height
+    ///  - resetting the canonical in-memory state
     fn on_backfill_sync_finished(&mut self, ctrl: ControlFlow) {
         debug!(target: "consensus::engine", "received backfill sync finished event");
         self.backfill_sync_state = BackfillSyncState::Idle;
@@ -590,12 +594,27 @@ where
             return
         }
 
+        // backfill height is the block number that the backfill finished at
+        let Some(backfill_height) = ctrl.block_number() else { return };
+
+        // state house keeping after backfill sync
+        // remove all executed blocks below the backfill height
+        self.state.tree_state.remove_before(backfill_height + 1);
+        // remove all buffered blocks below the backfill height
+        self.state.buffer.remove_old_blocks(backfill_height);
+        // we remove all entries because now we're synced to the backfill target and consider this
+        // the canonical chain
+        self.canonical_in_memory_state.clear_state();
+
+        // check if we need to run backfill again by comparing the most recent finalized height to
+        // the backfill height
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
             return
         };
 
         if sync_target_state.finalized_block_hash.is_zero() {
+            // no finalized block, can't check distance
             return
         }
 
@@ -606,28 +625,23 @@ where
             .block(&sync_target_state.finalized_block_hash)
             .map(|block| block.number);
 
-        // TODO(mattsse): state housekeeping, this needs to update the tracked canonical state and
-        // attempt to make the current target canonical if we have all the blocks buffered
-
         // The block number that the backfill finished at - if the progress or newest
         // finalized is None then we can't check the distance anyways.
         //
         // If both are Some, we perform another distance check and return the desired
         // backfill target
-        let Some(backfill_target) =
+        if let Some(backfill_target) =
             ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
                 // Determines whether or not we should run backfill again, in case
                 // the new gap is still large enough and requires running backfill again
                 self.backfill_sync_target(progress, finalized_number, None)
             })
-        else {
-            return
+        {
+            // request another backfill run
+            self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
+                backfill_target.into(),
+            )));
         };
-
-        // request another backfill run
-        self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
-            backfill_target.into(),
-        )));
     }
 
     /// Attempts to make the given target canonical.
@@ -1105,6 +1119,8 @@ where
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
+                    // we just inserted the current sync target block, we can try to make it
+                    // canonical
                     return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
                         block_num_hash.hash,
                     )))
