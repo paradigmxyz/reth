@@ -8,6 +8,7 @@ use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
 
 /// Helper for network operations
+#[derive(Debug)]
 pub struct NetworkTestContext {
     network_events: EventStream<NetworkEvent>,
     network: NetworkHandle,
