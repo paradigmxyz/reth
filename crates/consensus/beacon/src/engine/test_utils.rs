@@ -406,7 +406,7 @@ where
             provider_factory.clone(),
             tree,
             genesis_block,
-            finalized_block,
+            Some(finalized_block),
         );
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(

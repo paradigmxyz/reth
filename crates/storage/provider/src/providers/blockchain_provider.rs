@@ -82,8 +82,7 @@ where
         let provider = database.provider()?;
         let finalized_block_number = provider.last_finalized_block_number()?;
         let finalized_header = provider
-            .sealed_header(finalized_block_number)?
-            .ok_or(ProviderError::HeaderNotFound(finalized_block_number.into()))?;
+            .sealed_header(finalized_block_number)?;
         Ok(Self {
             database,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),

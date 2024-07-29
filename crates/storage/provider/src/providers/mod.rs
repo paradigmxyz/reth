@@ -106,7 +106,7 @@ where
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
         latest: SealedHeader,
-        finalized: SealedHeader,
+        finalized: Option<SealedHeader>,
     ) -> ProviderResult<Self> {
         Ok(Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) })
     }
@@ -121,9 +121,7 @@ where
             .ok_or(ProviderError::HeaderNotFound(best.best_number.into()))?;
 
         let finalized_block_number = provider.last_finalized_block_number()?;
-        let finalized_header = provider
-            .sealed_header(finalized_block_number)?
-            .ok_or(ProviderError::HeaderNotFound(finalized_block_number.into()))?;
+        let finalized_header = provider.sealed_header(finalized_block_number)?;
 
         drop(provider);
         Self::with_block_information(
