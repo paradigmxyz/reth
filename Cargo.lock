@@ -7000,11 +7000,9 @@ name = "reth-engine-tree"
 version = "1.0.3"
 dependencies = [
  "alloy-rlp",
- "aquamarine",
  "assert_matches",
  "futures",
  "metrics",
- "parking_lot 0.12.3",
  "rand 0.8.5",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -7016,7 +7014,6 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
- "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-exex-types",
@@ -7037,12 +7034,9 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
- "reth-tokio-util",
  "reth-tracing",
  "reth-trie",
- "revm",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 

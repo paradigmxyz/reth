@@ -112,15 +112,14 @@ libc = "0.2"
 [dev-dependencies]
 reth-discv4.workspace = true
 
-
 [features]
 default = ["jemalloc"]
 
 dev = ["reth-cli-commands/dev"]
 
-asm-keccak = ["reth-primitives/asm-keccak"]
+asm-keccak = ["reth-node-core/asm-keccak", "reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:tikv-jemallocator", "reth-node-metrics/jemalloc"]
+jemalloc = ["dep:tikv-jemallocator", "reth-node-core/jemalloc", "reth-node-metrics/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
 min-error-logs = ["tracing/release_max_level_error"]

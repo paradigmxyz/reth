@@ -1,12 +1,11 @@
 use crate::{
-    providers::{BundleStateProvider, StaticFileProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderRO, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::CanonicalInMemoryState;
@@ -646,16 +645,6 @@ where
         }
         Ok(None)
     }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.pending()?;
-
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
-    }
 }
 
 impl<DB> CanonChainTracker for BlockchainProvider2<DB>
@@ -778,19 +767,6 @@ where
                 self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
             }
         }
-    }
-}
-
-impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn find_pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullExecutionDataProvider>> {
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
-        None
     }
 }
 
