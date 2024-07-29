@@ -6,11 +6,14 @@ use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, writer::StorageWriter,
+    TrieWriter,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
+    HashedPostState, HashedStorage, StateRoot,
 };
+use reth_trie_db::DatabaseStateRoot;
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 
@@ -30,7 +33,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             storage_writer.write_hashed_state(&db_state.into_sorted()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.write_to_database(provider_rw.tx_ref()).unwrap();
+            provider_rw.write_trie_updates(&updates).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -46,11 +49,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
                     (provider, sorted_state, prefix_sets)
                 },
                 |(provider, sorted_state, prefix_sets)| async move {
+                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                        &sorted_state,
+                    );
                     StateRoot::from_tx(provider.tx_ref())
-                        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                            provider.tx_ref(),
-                            &sorted_state,
-                        ))
+                        .with_hashed_cursor_factory(hashed_cursor_factory)
                         .with_prefix_sets(prefix_sets)
                         .root()
                 },

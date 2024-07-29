@@ -1,12 +1,14 @@
 //! Helper for handling execution of multiple blocks.
 
-use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
+use crate::{
+    precompile::{Address, HashSet},
+    primitives::alloy_primitives::BlockNumber,
+};
 use core::time::Duration;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-use std::collections::HashSet;
 use tracing::debug;
 
 #[cfg(not(feature = "std"))]
@@ -216,7 +218,12 @@ mod tests {
     use super::*;
     use reth_primitives::{Address, Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    #[cfg(feature = "std")]
     use std::collections::BTreeMap;
+    #[cfg(not(feature = "std"))]
+    extern crate alloc;
+    #[cfg(not(feature = "std"))]
+    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_save_receipts_empty() {

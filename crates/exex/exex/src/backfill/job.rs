@@ -1,7 +1,12 @@
+use crate::BackFillJobStream;
+use std::{
+    ops::RangeInclusive,
+    time::{Duration, Instant},
+};
+
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
@@ -11,68 +16,6 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
-use std::{
-    ops::RangeInclusive,
-    time::{Duration, Instant},
-};
-
-/// Factory for creating new backfill jobs.
-#[derive(Debug, Clone)]
-pub struct BackfillJobFactory<E, P> {
-    executor: E,
-    provider: P,
-    prune_modes: PruneModes,
-    thresholds: ExecutionStageThresholds,
-}
-
-impl<E, P> BackfillJobFactory<E, P> {
-    /// Creates a new [`BackfillJobFactory`].
-    pub fn new(executor: E, provider: P) -> Self {
-        Self {
-            executor,
-            provider,
-            prune_modes: PruneModes::none(),
-            thresholds: ExecutionStageThresholds::default(),
-        }
-    }
-
-    /// Sets the prune modes
-    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
-        self.prune_modes = prune_modes;
-        self
-    }
-
-    /// Sets the thresholds
-    pub const fn with_thresholds(mut self, thresholds: ExecutionStageThresholds) -> Self {
-        self.thresholds = thresholds;
-        self
-    }
-}
-
-impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
-    /// Creates a new backfill job for the given range.
-    pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, P> {
-        BackfillJob {
-            executor: self.executor.clone(),
-            provider: self.provider.clone(),
-            prune_modes: self.prune_modes.clone(),
-            range,
-            thresholds: self.thresholds.clone(),
-        }
-    }
-}
-
-impl BackfillJobFactory<(), ()> {
-    /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
-    pub fn new_from_components<Node: FullNodeComponents>(
-        components: Node,
-    ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
-        BackfillJobFactory::<_, _>::new(
-            components.block_executor().clone(),
-            components.provider().clone(),
-        )
-    }
-}
 
 /// Backfill job started for a specific range.
 ///
@@ -80,11 +23,12 @@ impl BackfillJobFactory<(), ()> {
 /// and yields [`Chain`]
 #[derive(Debug)]
 pub struct BackfillJob<E, P> {
-    executor: E,
-    provider: P,
-    prune_modes: PruneModes,
-    thresholds: ExecutionStageThresholds,
-    range: RangeInclusive<BlockNumber>,
+    pub(crate) executor: E,
+    pub(crate) provider: P,
+    pub(crate) prune_modes: PruneModes,
+    pub(crate) thresholds: ExecutionStageThresholds,
+    pub(crate) range: RangeInclusive<BlockNumber>,
+    pub(crate) stream_parallelism: usize,
 }
 
 impl<E, P> Iterator for BackfillJob<E, P>
@@ -198,11 +142,15 @@ impl<E, P> BackfillJob<E, P> {
     pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
         self.into()
     }
-}
 
-impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
-    fn from(value: BackfillJob<E, P>) -> Self {
-        Self { executor: value.executor, provider: value.provider, range: value.range }
+    /// Converts the backfill job into a backfill job stream.
+    pub fn into_stream(self) -> BackFillJobStream<E, P>
+    where
+        E: BlockExecutorProvider + Clone + 'static,
+        P: HeaderProvider + BlockReader + StateProviderFactory + Clone + 'static,
+    {
+        let parallelism = self.stream_parallelism;
+        BackFillJobStream::new(self.into_single_blocks()).with_parallelism(parallelism)
     }
 }
 
@@ -210,11 +158,11 @@ impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
 ///
 /// It implements [`Iterator`] which executes a block each time the
 /// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
     executor: E,
     provider: P,
-    range: RangeInclusive<BlockNumber>,
+    pub(crate) range: RangeInclusive<BlockNumber>,
 }
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
@@ -234,7 +182,7 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
-    fn execute_block(
+    pub(crate) fn execute_block(
         &self,
         block_number: u64,
     ) -> Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError> {
@@ -262,176 +210,29 @@ where
     }
 }
 
+impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
+    fn from(value: BackfillJob<E, P>) -> Self {
+        Self { executor: value.executor, provider: value.provider, range: value.range }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::BackfillJobFactory;
-    use eyre::OptionExt;
-    use reth_blockchain_tree::noop::NoopBlockchainTree;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
-    use reth_db_common::init::init_genesis;
-    use reth_evm::execute::{
-        BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
-    };
-    use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{
-        b256, constants::ETH_TO_WEI, public_key_to_address, Address, Block, BlockWithSenders,
-        Genesis, GenesisAccount, Header, Receipt, Requests, SealedBlockWithSenders, Transaction,
-        TxEip2930, TxKind, U256,
-    };
-    use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        BlockWriter, ExecutionOutcome, LatestStateProviderRef, ProviderFactory,
-    };
-    use reth_revm::database::StateProviderDatabase;
-    use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use secp256k1::Keypair;
     use std::sync::Arc;
 
-    fn to_execution_outcome(
-        block_number: u64,
-        block_execution_output: &BlockExecutionOutput<Receipt>,
-    ) -> ExecutionOutcome {
-        ExecutionOutcome {
-            bundle: block_execution_output.state.clone(),
-            receipts: block_execution_output.receipts.clone().into(),
-            first_block: block_number,
-            requests: vec![Requests(block_execution_output.requests.clone())],
-        }
-    }
-
-    fn chain_spec(address: Address) -> Arc<ChainSpec> {
-        // Create a chain spec with a genesis state that contains the
-        // provided sender
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(Genesis {
-                    alloc: [(
-                        address,
-                        GenesisAccount { balance: U256::from(ETH_TO_WEI), ..Default::default() },
-                    )]
-                    .into(),
-                    ..MAINNET.genesis.clone()
-                })
-                .paris_activated()
-                .build(),
-        )
-    }
-
-    fn execute_block_and_commit_to_database<DB>(
-        provider_factory: &ProviderFactory<DB>,
-        chain_spec: Arc<ChainSpec>,
-        block: &BlockWithSenders,
-    ) -> eyre::Result<BlockExecutionOutput<Receipt>>
-    where
-        DB: reth_db_api::database::Database,
-    {
-        let provider = provider_factory.provider()?;
-
-        // Execute the block to produce a block execution output
-        let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
-            .executor(StateProviderDatabase::new(LatestStateProviderRef::new(
-                provider.tx_ref(),
-                provider.static_file_provider().clone(),
-            )))
-            .execute(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
-        block_execution_output.state.reverts.sort();
-
-        // Convert the block execution output to an execution outcome for committing to the database
-        let execution_outcome = to_execution_outcome(block.number, &block_execution_output);
-
-        // Commit the block's execution outcome to the database
-        let provider_rw = provider_factory.provider_rw()?;
-        let block = block.clone().seal_slow();
-        provider_rw.append_blocks_with_state(
-            vec![block],
-            execution_outcome,
-            Default::default(),
-            Default::default(),
-        )?;
-        provider_rw.commit()?;
-
-        Ok(block_execution_output)
-    }
-
-    fn blocks_and_execution_outputs<DB>(
-        provider_factory: ProviderFactory<DB>,
-        chain_spec: Arc<ChainSpec>,
-        key_pair: Keypair,
-    ) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
-    where
-        DB: reth_db_api::database::Database,
-    {
-        // First block has a transaction that transfers some ETH to zero address
-        let block1 = Block {
-            header: Header {
-                parent_hash: chain_spec.genesis_hash(),
-                receipts_root: b256!(
-                    "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
-                ),
-                difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
-                number: 1,
-                gas_limit: 21000,
-                gas_used: 21000,
-                ..Default::default()
-            },
-            body: vec![sign_tx_with_key_pair(
-                key_pair,
-                Transaction::Eip2930(TxEip2930 {
-                    chain_id: chain_spec.chain.id(),
-                    nonce: 0,
-                    gas_limit: 21000,
-                    gas_price: 1_500_000_000,
-                    to: TxKind::Call(Address::ZERO),
-                    value: U256::from(0.1 * ETH_TO_WEI as f64),
-                    ..Default::default()
-                }),
-            )],
-            ..Default::default()
-        }
-        .with_recovered_senders()
-        .ok_or_eyre("failed to recover senders")?;
-
-        // Second block resends the same transaction with increased nonce
-        let block2 = Block {
-            header: Header {
-                parent_hash: block1.header.hash_slow(),
-                receipts_root: b256!(
-                    "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
-                ),
-                difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
-                number: 2,
-                gas_limit: 21000,
-                gas_used: 21000,
-                ..Default::default()
-            },
-            body: vec![sign_tx_with_key_pair(
-                key_pair,
-                Transaction::Eip2930(TxEip2930 {
-                    chain_id: chain_spec.chain.id(),
-                    nonce: 1,
-                    gas_limit: 21000,
-                    gas_price: 1_500_000_000,
-                    to: TxKind::Call(Address::ZERO),
-                    value: U256::from(0.1 * ETH_TO_WEI as f64),
-                    ..Default::default()
-                }),
-            )],
-            ..Default::default()
-        }
-        .with_recovered_senders()
-        .ok_or_eyre("failed to recover senders")?;
-
-        let block_output1 =
-            execute_block_and_commit_to_database(&provider_factory, chain_spec.clone(), &block1)?;
-        let block_output2 =
-            execute_block_and_commit_to_database(&provider_factory, chain_spec, &block2)?;
-
-        let block1 = block1.seal_slow();
-        let block2 = block2.seal_slow();
-
-        Ok(vec![(block1, block_output1), (block2, block_output2)])
-    }
+    use crate::{
+        backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
+        BackfillJobFactory,
+    };
+    use reth_blockchain_tree::noop::NoopBlockchainTree;
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_primitives::public_key_to_address;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::generators;
+    use secp256k1::Keypair;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {
