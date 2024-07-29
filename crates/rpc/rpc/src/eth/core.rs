@@ -19,7 +19,7 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
-use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
+use tokio::sync::Mutex;
 
 /// `Eth` API implementation.
 ///
