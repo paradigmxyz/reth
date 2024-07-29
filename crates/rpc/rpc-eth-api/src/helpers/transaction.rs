@@ -147,14 +147,12 @@ pub trait EthTransactions: LoadTransaction {
         Self: LoadReceipt + 'static,
     {
         async move {
-            let result = self.load_transaction_and_receipt(hash).await?;
-
-            let (tx, meta, receipt) = match result {
-                Some((tx, meta, receipt)) => (tx, meta, receipt),
-                None => return Ok(None),
-            };
-
-            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            match self.load_transaction_and_receipt(hash).await? {
+                Some((tx, meta, receipt)) => {
+                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                }
+                None => Ok(None),
+            }
         }
     }
 
@@ -630,32 +628,12 @@ pub trait LoadTransaction: SpawnBlocking {
     ) -> impl Future<Output = Result<Option<(TransactionSource, BlockId)>, Self::Error>> + Send
     {
         async move {
-            match self.transaction_by_hash(transaction_hash).await? {
-                None => Ok(None),
-                Some(tx) => {
-                    let res = match tx {
-                        tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                        TransactionSource::Block {
-                            transaction,
-                            index,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                        } => {
-                            let at = BlockId::Hash(block_hash.into());
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee,
-                            };
-                            (tx, at)
-                        }
-                    };
-                    Ok(Some(res))
+            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
+                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                tx @ TransactionSource::Block { block_hash, .. } => {
+                    (tx, BlockId::Hash(block_hash.into()))
                 }
-            }
+            }))
         }
     }
 

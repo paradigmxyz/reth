@@ -247,7 +247,7 @@ impl Command {
                 }
             }
 
-            // Stoarge trie
+            // Storage trie
             let mut first_mismatched_storage = None;
             let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
             let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();

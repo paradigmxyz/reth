@@ -1,9 +1,9 @@
 use crate::{
-    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, BlockchainTreePendingStateProvider,
-    CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider,
-    FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
+    providers::{BundleStateProvider, StaticFileProvider},
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
+    ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO,
+    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -768,19 +768,6 @@ where
                 self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
             }
         }
-    }
-}
-
-impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn find_pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullExecutionDataProvider>> {
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
-        None
     }
 }
 
