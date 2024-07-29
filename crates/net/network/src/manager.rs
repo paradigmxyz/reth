@@ -202,11 +202,8 @@ impl NetworkManager {
         let listener_addr = incoming.local_address();
 
         // resolve boot nodes
-        let mut resolved_boot_nodes = vec![];
-        for record in &boot_nodes {
-            let resolved = record.resolve().await?;
-            resolved_boot_nodes.push(resolved);
-        }
+        let resolved_boot_nodes =
+            futures::future::try_join_all(boot_nodes.iter().map(|record| record.resolve())).await?;
 
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
