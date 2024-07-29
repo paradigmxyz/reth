@@ -70,8 +70,7 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 
 [features] 
- optimism = [ 
+default = [ 
     "reth-primitives/optimism",
-    "reth-evm-optimism/optimism",
     "reth-provider/optimism",
  ] 

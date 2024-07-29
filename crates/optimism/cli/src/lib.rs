@@ -5,7 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Optimism chain specification parser.
@@ -45,14 +45,7 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_tracing::FileWorkerGuard;
-use std::{ffi::OsString, fmt, sync::Arc};
 use tracing::info;
-
-/// Optimism chain specification parser.
-pub mod chainspec;
-/// Optimism CLI commands.
-pub mod commands;
-pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
 /// The main reth cli interface.
 ///

@@ -69,17 +69,14 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 
 [features]
-optimism = [
+default = [
     "reth-chainspec/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc/optimism",
-    "reth-evm-optimism/optimism",
-    "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
-    "reth-optimism-rpc/optimism"
 ]
 test-utils = ["reth-node-builder/test-utils"]

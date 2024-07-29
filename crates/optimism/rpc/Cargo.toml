@@ -54,9 +54,8 @@ client = [
     "reth-rpc-eth-api/client"
 ]
 
-optimism = [
+default = [
     "reth-chainspec/optimism",
-    "reth-evm-optimism/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",

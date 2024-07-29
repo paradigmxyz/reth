@@ -37,9 +37,8 @@ tracing.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
 
 [features]
-optimism = [
+default = [
     "reth-primitives/optimism",
     "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
     "reth-revm/optimism",
 ]
