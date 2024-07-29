@@ -664,10 +664,22 @@ where
     }
 
     /// Emits an outgoing event to the engine.
-    fn emit_event(&self, event: impl Into<EngineApiEvent>) {
+    fn emit_event(&mut self, event: impl Into<EngineApiEvent>) {
+        let event = event.into();
+
+        if event.is_backfill_action() {
+            debug_assert_eq!(
+                self.backfill_sync_state,
+                BackfillSyncState::Idle,
+                "backfill action should only be emitted when backfill is idle"
+            );
+            self.backfill_sync_state = BackfillSyncState::Pending;
+            debug!(target: "engine", "emitting backfill action event");
+        }
+
         let _ = self
             .outgoing
-            .send(event.into())
+            .send(event)
             .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
     }
 
