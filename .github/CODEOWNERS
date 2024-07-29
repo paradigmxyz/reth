@@ -3,6 +3,7 @@ bin/                        @onbjerg
 crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
 crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
 crates/chainspec/           @Rjected @joshieDo @mattsse
+crates/chain-state/         @fgimenez @mattsse @rkrasiuk
 crates/cli/                 @onbjerg @mattsse
 crates/config/              @onbjerg
 crates/consensus/           @rkrasiuk @mattsse @Rjected

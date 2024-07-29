@@ -3,21 +3,23 @@ set -eo pipefail
 
 # TODO
 no_std_packages=(
-#   reth-codecs
-#   reth-consensus
+# The following were confirmed not working in the past, but could be enabled if issues have been resolved
 #   reth-db
-#   reth-errors
-#   reth-ethereum-forks
+#   reth-primitives
+#   reth-revm
 #   reth-evm
 #   reth-evm-ethereum
-#   reth-network-peers
-#   reth-primitives
-#   reth-primitives-traits
-#   reth-revm
+#   reth-consensus
+# the following are confirmed working
+    reth-errors
+    reth-ethereum-forks
+    reth-network-peers
+    reth-primitives-traits
+    reth-codecs
 )
 
 for package in "${no_std_packages[@]}"; do
-  cmd="cargo +stable build -p $package --target riscv32imac-unknown-none-elf --no-default-features"
+  cmd="cargo +stable build -p $package --target wasm32-wasip1 --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"

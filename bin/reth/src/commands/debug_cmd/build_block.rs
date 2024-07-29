@@ -1,5 +1,4 @@
 //! Command for debugging block building.
-use crate::macros::block_executor;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -19,6 +18,7 @@ use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
@@ -37,6 +37,8 @@ use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
 };
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
@@ -118,7 +120,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // configure blockchain tree
         let tree_externals =
@@ -170,13 +172,13 @@ impl Command {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
                 .into_ecrecovered()
-                .ok_or(eyre::eyre!("failed to recover tx"))?;
+                .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
 
             let encoded_length = match &transaction.transaction {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                    ))?;
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
+                        eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
+                    })?;
 
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
@@ -219,17 +221,6 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            #[cfg(feature = "optimism")]
-            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
-                best_block.hash(),
-                reth_rpc_types::engine::OptimismPayloadAttributes {
-                    payload_attributes: payload_attrs,
-                    transactions: None,
-                    no_tx_pool: None,
-                    gas_limit: None,
-                },
-            )?,
-            #[cfg(not(feature = "optimism"))]
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -246,13 +237,6 @@ impl Command {
             None,
         );
 
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        )
-        .compute_pending_block();
-
-        #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         match payload_builder.try_build(args)? {
@@ -269,7 +253,8 @@ impl Command {
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
-                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+                let executor =
+                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
                 let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
@@ -283,8 +268,11 @@ impl Command {
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
                 let hashed_post_state = execution_outcome.hash_state_slow();
-                let (state_root, trie_updates) = hashed_post_state
-                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
+                let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
+                    provider_factory.provider()?.tx_ref(),
+                    hashed_post_state.clone(),
+                    Default::default(),
+                )?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(

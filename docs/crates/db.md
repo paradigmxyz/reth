@@ -122,7 +122,7 @@ pub trait Database: Send + Sync {
 
 Any type that implements the `Database` trait can create a database transaction, as well as view or update existing transactions. As an example, let's revisit the `Transaction` struct from the `stages` crate. This struct contains a field named `db` which is a reference to a generic type `DB` that implements the `Database` trait. The `Transaction` struct can use the `db` field to store new headers, bodies and senders in the database. In the code snippet below, you can see the `Transaction::open()` method, which uses the `Database::tx_mut()` function to create a mutable transaction.
 
-[File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/db.rs#L95-L98)
+[File: crates/stages/src/db.rs](https://github.com/paradigmxyz/reth/blob/00a49f5ee78b0a88fea409283e6bb9c96d4bb31e/crates/stages/src/db.rs#L28)
 
 ```rust ignore
 pub struct Transaction<'this, DB: Database> {

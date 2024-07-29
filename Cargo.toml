@@ -14,6 +14,7 @@ members = [
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
     "crates/chainspec/",
+    "crates/chain-state/",
     "crates/cli/cli/",
     "crates/cli/commands/",
     "crates/cli/runner/",
@@ -65,6 +66,8 @@ members = [
     "crates/node/api/",
     "crates/node/builder/",
     "crates/node/events/",
+    "crates/node/metrics",
+    "crates/optimism/bin",
     "crates/optimism/cli",
     "crates/optimism/consensus",
     "crates/optimism/evm/",
@@ -114,6 +117,7 @@ members = [
     "crates/tracing/",
     "crates/transaction-pool/",
     "crates/trie/common",
+    "crates/trie/db",
     "crates/trie/parallel/",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
@@ -272,6 +276,7 @@ reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-chainspec = { path = "crates/chainspec" }
+reth-chain-state = { path = "crates/chain-state" }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
@@ -331,7 +336,9 @@ reth-node-builder = { path = "crates/node/builder" }
 reth-node-core = { path = "crates/node/core" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
+reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-optimism-bin = { path = "crates/optimism/bin" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
@@ -434,7 +441,7 @@ bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
-dashmap = "5.5"
+dashmap = "6.0"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
@@ -450,9 +457,9 @@ serde_with = "3.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
 rand = "0.8.5"
-rustc-hash = {  version = "2.0", default-features = false }
+rustc-hash = { version = "2.0", default-features = false }
 schnellru = "0.2"
-strum = {  version = "0.26", default-features = false }
+strum = { version = "0.26", default-features = false }
 rayon = "1.7"
 itertools = "0.13"
 parking_lot = "0.12"
@@ -539,3 +546,5 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
 iai-callgrind = "0.11"
+
+tikv-jemallocator = { version = "0.5.0" }

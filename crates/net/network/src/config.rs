@@ -505,7 +505,7 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        let head = head.unwrap_or(Head {
+        let head = head.unwrap_or_else(|| Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
             timestamp: chain_spec.genesis.timestamp,

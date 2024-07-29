@@ -1,6 +1,4 @@
 //! This exposes reth's version information over prometheus.
-
-use crate::version::{BUILD_PROFILE_NAME, VERGEN_GIT_SHA};
 use metrics::gauge;
 
 /// Contains version information for the application.
@@ -18,19 +16,6 @@ pub struct VersionInfo {
     pub target_triple: &'static str,
     /// The build profile (e.g., debug or release).
     pub build_profile: &'static str,
-}
-
-impl Default for VersionInfo {
-    fn default() -> Self {
-        Self {
-            version: env!("CARGO_PKG_VERSION"),
-            build_timestamp: env!("VERGEN_BUILD_TIMESTAMP"),
-            cargo_features: env!("VERGEN_CARGO_FEATURES"),
-            git_sha: VERGEN_GIT_SHA,
-            target_triple: env!("VERGEN_CARGO_TARGET_TRIPLE"),
-            build_profile: BUILD_PROFILE_NAME,
-        }
-    }
 }
 
 impl VersionInfo {
