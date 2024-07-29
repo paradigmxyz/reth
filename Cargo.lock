@@ -6652,6 +6652,7 @@ version = "1.0.3"
 dependencies = [
  "confy",
  "humantime-serde",
+ "reth-network-peers",
  "reth-network-types",
  "reth-prune-types",
  "reth-stages-types",
