@@ -117,15 +117,14 @@ libc = "0.2"
 [dev-dependencies]
 reth-discv4.workspace = true
 
-
 [features]
 default = ["jemalloc"]
 
 dev = ["reth-cli-commands/dev"]
 
-asm-keccak = ["reth-primitives/asm-keccak"]
+asm-keccak = ["reth-node-core/asm-keccak", "reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:tikv-jemallocator", "reth-node-metrics/jemalloc"]
+jemalloc = ["dep:tikv-jemallocator", "reth-node-core/jemalloc", "reth-node-metrics/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
 min-error-logs = ["tracing/release_max_level_error"]
@@ -135,15 +134,15 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
+    "dep:reth-node-optimism",
     "dep:reth-optimism-cli",
-    "reth-optimism-cli?/optimism",
-    "reth-primitives/optimism",
-    "reth-rpc/optimism",
-    "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
     "reth-blockchain-tree/optimism",
-    "dep:reth-node-optimism",
     "reth-node-core/optimism",
+    "reth-optimism-cli?/optimism",
+    "reth-primitives/optimism",
+    "reth-provider/optimism",
+    "reth-rpc/optimism",
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
