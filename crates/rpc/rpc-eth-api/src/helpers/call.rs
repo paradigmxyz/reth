@@ -243,7 +243,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
         let error = match result.result {
-            ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason.to_string())),
+            ExecutionResult::Halt { reason, .. } => Some(format!("{:?}", reason).to_string()),
             ExecutionResult::Revert { output, .. } => Some(RevertError::new(output).to_string()),
             ExecutionResult::Success { .. } => None,
         };
