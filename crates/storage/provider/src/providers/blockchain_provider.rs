@@ -1,9 +1,8 @@
 use crate::{
-    providers::{BundleStateProvider, StaticFileProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
-    ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO,
-    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
+    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderRO, EvmEnvProvider, HeaderProvider, ProviderError, ProviderFactory,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
