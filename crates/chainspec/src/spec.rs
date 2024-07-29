@@ -23,7 +23,6 @@ use reth_trie_common::root::state_root_ref_unhashed;
 #[cfg(feature = "std")]
 use std::sync::Arc;
 
-
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::OptimismHardfork;
