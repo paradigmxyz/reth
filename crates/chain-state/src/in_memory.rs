@@ -112,7 +112,8 @@ pub struct CanonicalInMemoryState {
 }
 
 impl CanonicalInMemoryState {
-    /// Create a new in memory state with the given blocks, numbers, and pending state.
+    /// Create a new in memory state with the given blocks, numbers, pending state and finalized
+    /// header if it exists.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
         numbers: HashMap<u64, B256>,
@@ -138,7 +139,8 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Create a new in memory state with the given local head.
+    /// Create a new in memory state with the given local head and finalized header
+    /// if it exists.
     pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head, finalized);
         let in_memory_state = InMemoryState::default();

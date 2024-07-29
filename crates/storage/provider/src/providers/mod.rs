@@ -101,7 +101,8 @@ where
     DB: Database,
 {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
+    /// provided latest header to initialize the chain info tracker, alongside the finalized header
+    /// if it exists.
     pub fn with_block_information(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
