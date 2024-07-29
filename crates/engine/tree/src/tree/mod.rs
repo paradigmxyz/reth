@@ -606,6 +606,10 @@ where
         // the canonical chain
         self.canonical_in_memory_state.clear_state();
 
+        if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
+            self.state.tree_state.set_canonical_head(new_head.num_hash());
+        }
+
         // check if we need to run backfill again by comparing the most recent finalized height to
         // the backfill height
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
