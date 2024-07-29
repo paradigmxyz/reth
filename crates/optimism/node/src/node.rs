@@ -300,10 +300,16 @@ where
                 let rlpx_socket = (args.addr, args.port).into();
 
                 if !args.discovery.disable_discovery {
-                    builder = builder.discovery_v5(args.discovery.discovery_v5_builder(
-                        rlpx_socket,
-                        ctx.chain_spec().bootnodes().unwrap_or_default(),
-                    ));
+                    builder = builder.discovery_v5(
+                        args.discovery.discovery_v5_builder(
+                            rlpx_socket,
+                            ctx.config()
+                                .network
+                                .resolved_bootnodes()
+                                .or_else(|| ctx.chain_spec().bootnodes())
+                                .unwrap_or_default(),
+                        ),
+                    );
                 }
 
                 builder
