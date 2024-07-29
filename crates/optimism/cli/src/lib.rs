@@ -45,14 +45,7 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_tracing::FileWorkerGuard;
-use std::{ffi::OsString, fmt, sync::Arc};
 use tracing::info;
-
-/// Optimism chain specification parser.
-pub mod chainspec;
-/// Optimism CLI commands.
-pub mod commands;
-pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
 /// The main reth cli interface.
 ///

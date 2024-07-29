@@ -34,4 +34,7 @@ default = ["jemalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
-
+optimism = [
+    "reth-optimism-cli/optimism",
+    "reth-node-optimism/optimism",
+]
