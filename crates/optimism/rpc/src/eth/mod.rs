@@ -10,10 +10,11 @@ mod pending_block;
 use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
+use derive_more::Deref;
 use reth_evm::ConfigureEvm;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
     StateProviderFactory,
@@ -22,11 +23,11 @@ use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
         AddDevSigners, EthApiSpec, EthFees, EthState, LoadBlock, LoadFee, LoadState, SpawnBlocking,
-        Trace, UpdateRawTxForwarder,
+        Trace,
     },
-    EthApiTypes, RawTransactionForwarder,
+    EthApiTypes,
 };
-use reth_rpc_eth_types::{EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner,
@@ -34,6 +35,24 @@ use reth_tasks::{
 use reth_transaction_pool::TransactionPool;
 
 use crate::OpEthApiError;
+
+/// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
+pub type EthApiHandles<N> = EthApiInner<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    NetworkHandle,
+    <N as FullNodeComponents>::Evm,
+>;
+
+/// Adapter for [`EthApiBuilderCtx`].
+pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Evm,
+    NetworkHandle,
+    TaskExecutor,
+    <N as FullNodeTypes>::Provider,
+>;
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -45,23 +64,15 @@ use crate::OpEthApiError;
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone)]
+#[derive(Clone, Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
-    inner: Arc<EthApiInner<N::Provider, N::Pool, NetworkHandle, N::Evm>>,
+    inner: Arc<EthApiHandles<N>>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
     /// Creates a new instance for given context.
-    pub fn with_spawner(
-        ctx: &EthApiBuilderCtx<
-            N::Provider,
-            N::Pool,
-            N::Evm,
-            NetworkHandle,
-            TaskExecutor,
-            N::Provider,
-        >,
-    ) -> Self {
+    #[allow(clippy::type_complexity)]
+    pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
@@ -199,7 +210,7 @@ where
 
 impl<N> EthFees for OpEthApi<N>
 where
-    Self: EthFees,
+    Self: LoadFee,
     N: FullNodeComponents,
 {
 }
@@ -221,28 +232,11 @@ impl<N: FullNodeComponents> AddDevSigners for OpEthApi<N> {
     }
 }
 
-impl<N> UpdateRawTxForwarder for OpEthApi<N>
-where
-    Self: UpdateRawTxForwarder,
-    N: FullNodeComponents,
-{
-    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.set_eth_raw_transaction_forwarder(forwarder);
-    }
-}
-
 impl<N> BuilderProvider<N> for OpEthApi<N>
 where
     N: FullNodeComponents,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<
-        N::Provider,
-        N::Pool,
-        N::Evm,
-        NetworkHandle,
-        TaskExecutor,
-        N::Provider,
-    >;
+    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(|ctx| Self::with_spawner(ctx))
