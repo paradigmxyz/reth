@@ -79,6 +79,7 @@ rand.workspace = true
 test-utils = [
   "reth-db/test-utils",
   "reth-chain-state/test-utils",
+  "reth-chainspec",
   "reth-network-p2p/test-utils",
   "reth-prune-types",
   "reth-stages/test-utils",
