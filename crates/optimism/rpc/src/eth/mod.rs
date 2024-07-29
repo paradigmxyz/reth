@@ -7,25 +7,33 @@ mod block;
 mod call;
 mod pending_block;
 
-use std::{future::Future, sync::Arc};
+use std::{fmt, future::Future, sync::Arc};
 
-use alloy_primitives::{Address, U64};
+use alloy_primitives::{Address, U256, U64};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
+use reth_network::NetworkHandle;
+use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc::eth::DevSigner;
+use reth_provider::{
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
+    StateProviderFactory,
+};
+use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadFee, LoadState, SpawnBlocking,
-        Trace, UpdateRawTxForwarder,
+        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
+        SpawnBlocking, Trace, UpdateRawTxForwarder,
     },
     EthApiTypes, RawTransactionForwarder,
 };
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_types::{EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_rpc_types::SyncStatus;
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskExecutor, TaskSpawner,
+};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -41,148 +49,199 @@ use crate::OpEthApiError;
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Debug, Clone)]
-pub struct OpEthApi<Eth> {
-    inner: Eth,
+#[derive(Clone)]
+pub struct OpEthApi<N: FullNodeComponents> {
+    inner: Arc<EthApiInner<N::Provider, N::Pool, NetworkHandle, N::Evm>>,
 }
 
-impl<Eth> OpEthApi<Eth> {
-    /// Creates a new `OpEthApi` from the provided `Eth` implementation.
-    pub const fn new(inner: Eth) -> Self {
-        Self { inner }
+impl<N: FullNodeComponents> OpEthApi<N> {
+    /// Creates a new instance for given context.
+    pub fn with_spawner(
+        ctx: &EthApiBuilderCtx<
+            N::Provider,
+            N::Pool,
+            N::Evm,
+            NetworkHandle,
+            TaskExecutor,
+            N::Provider,
+        >,
+    ) -> Self {
+        let blocking_task_pool =
+            BlockingTaskPool::build().expect("failed to build blocking task pool");
+
+        let inner = EthApiInner::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            ctx.new_gas_price_oracle(),
+            ctx.config.rpc_gas_cap,
+            ctx.config.eth_proof_window,
+            blocking_task_pool,
+            ctx.new_fee_history_cache(),
+            ctx.evm_config.clone(),
+            ctx.executor.clone(),
+            None,
+            ctx.config.proof_permits,
+        );
+
+        Self { inner: Arc::new(inner) }
     }
 }
 
-impl<Eth> EthApiTypes for OpEthApi<Eth>
+impl<N> EthApiTypes for OpEthApi<N>
 where
-    Eth: Send + Sync,
+    Self: Send + Sync,
+    N: FullNodeComponents,
 {
     type Error = OpEthApiError;
 }
 
-impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
-    fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {
-        self.inner.protocol_version()
+impl<N> EthApiSpec for OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
+    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader {
+        self.inner.provider()
     }
 
-    fn chain_id(&self) -> U64 {
-        self.inner.chain_id()
+    fn network(&self) -> impl NetworkInfo {
+        self.inner.network()
     }
 
-    fn chain_info(&self) -> RethResult<ChainInfo> {
-        self.inner.chain_info()
+    fn starting_block(&self) -> U256 {
+        self.inner.starting_block()
     }
 
-    fn accounts(&self) -> Vec<Address> {
-        self.inner.accounts()
-    }
-
-    fn is_syncing(&self) -> bool {
-        self.inner.is_syncing()
-    }
-
-    fn sync_status(&self) -> RethResult<SyncStatus> {
-        self.inner.sync_status()
-    }
-
-    fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.inner.chain_spec()
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn reth_rpc_eth_api::helpers::EthSigner>>> {
+        self.inner.signers()
     }
 }
 
-impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
+impl<N> SpawnBlocking for OpEthApi<N>
+where
+    Self: Send + Sync + Clone + 'static,
+    N: FullNodeComponents,
+{
+    #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.io_task_spawner()
+        self.inner.task_spawner()
     }
 
+    #[inline]
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.tracing_task_pool()
+        self.inner.blocking_task_pool()
     }
 
-    fn acquire_owned(
-        &self,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
-        self.inner.acquire_owned()
-    }
-
-    fn acquire_many_owned(
-        &self,
-        n: u32,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
-        self.inner.acquire_many_owned(n)
+    #[inline]
+    fn tracing_task_guard(&self) -> &BlockingTaskGuard {
+        self.inner.blocking_task_guard()
     }
 }
 
-impl<Eth: LoadFee> LoadFee for OpEthApi<Eth> {
-    fn provider(&self) -> impl reth_provider::BlockIdReader + HeaderProvider + ChainSpecProvider {
-        LoadFee::provider(&self.inner)
+impl<N> LoadFee for OpEthApi<N>
+where
+    Self: LoadBlock,
+    N: FullNodeComponents,
+{
+    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider {
+        self.inner.provider()
     }
 
     fn cache(&self) -> &EthStateCache {
-        LoadFee::cache(&self.inner)
+        self.inner.cache()
     }
 
-    fn gas_oracle(&self) -> &reth_rpc_eth_types::GasPriceOracle<impl BlockReaderIdExt> {
+    fn gas_oracle(&self) -> &GasPriceOracle<impl BlockReaderIdExt> {
         self.inner.gas_oracle()
     }
 
-    fn fee_history_cache(&self) -> &reth_rpc_eth_types::FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache {
         self.inner.fee_history_cache()
     }
 }
 
-impl<Eth: LoadState> LoadState for OpEthApi<Eth> {
+impl<N> LoadState for OpEthApi<N>
+where
+    Self: Send + Sync,
+    N: FullNodeComponents,
+{
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
-        LoadState::provider(&self.inner)
+        self.inner.provider()
     }
 
     fn cache(&self) -> &EthStateCache {
-        LoadState::cache(&self.inner)
+        self.inner.cache()
     }
 
     fn pool(&self) -> impl TransactionPool {
-        LoadState::pool(&self.inner)
+        self.inner.pool()
     }
 }
 
-impl<Eth: EthState> EthState for OpEthApi<Eth> {
+impl<N> EthState for OpEthApi<N>
+where
+    Self: LoadState + SpawnBlocking,
+    N: FullNodeComponents,
+{
     fn max_proof_window(&self) -> u64 {
-        self.inner.max_proof_window()
+        self.inner.eth_proof_window()
     }
 }
 
-impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
+impl<N> EthFees for OpEthApi<N>
+where
+    Self: EthFees,
+    N: FullNodeComponents,
+{
+}
 
-impl<Eth: Trace> Trace for OpEthApi<Eth> {
+impl<N> Trace for OpEthApi<N>
+where
+    Self: LoadState,
+    N: FullNodeComponents,
+{
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }
 }
 
-impl<Eth: AddDevSigners> AddDevSigners for OpEthApi<Eth> {
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
-    }
-
+impl<N: FullNodeComponents> AddDevSigners for OpEthApi<N> {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }
 }
 
-impl<Eth: UpdateRawTxForwarder> UpdateRawTxForwarder for OpEthApi<Eth> {
+impl<N> UpdateRawTxForwarder for OpEthApi<N>
+where
+    Self: UpdateRawTxForwarder,
+    N: FullNodeComponents,
+{
     fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
         self.inner.set_eth_raw_transaction_forwarder(forwarder);
     }
 }
 
-impl<N, Eth> BuilderProvider<N> for OpEthApi<Eth>
+impl<N> BuilderProvider<N> for OpEthApi<N>
 where
-    Eth: BuilderProvider<N>,
     N: FullNodeComponents,
 {
-    type Ctx<'a> = <Eth as BuilderProvider<N>>::Ctx<'a>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<
+        N::Provider,
+        N::Pool,
+        N::Evm,
+        NetworkHandle,
+        TaskExecutor,
+        N::Provider,
+    >;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self { inner: Eth::builder()(ctx) })
+        Box::new(|ctx| Self::with_spawner(ctx))
+    }
+}
+
+impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
 }

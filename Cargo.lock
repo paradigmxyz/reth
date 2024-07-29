@@ -8001,6 +8001,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-evm-optimism",
+ "reth-network",
  "reth-network-api",
  "reth-node-api",
  "reth-primitives",
