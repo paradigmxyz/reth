@@ -177,12 +177,9 @@ use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
 
-use crate::{
-    auth::AuthRpcModule,
-    cors::CorsDomainError,
-    error::WsHttpSamePortError,
-    metrics::{RpcRequestMetrics, RpcRequestMetricsService},
-};
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+
+pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
@@ -210,6 +207,7 @@ pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;
+pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]

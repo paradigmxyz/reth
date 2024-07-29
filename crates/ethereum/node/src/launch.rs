@@ -5,6 +5,8 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
+use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
@@ -19,16 +21,17 @@ use reth_node_builder::{
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    primitives::Head,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -49,7 +52,7 @@ impl EthNodeLauncher {
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EthNodeLauncher
 where
     T: FullNodeTypes<
-        Provider = BlockchainProvider<<T as FullNodeTypes>::DB>,
+        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
         Engine = EthEngineTypes,
     >,
     CB: NodeComponentsBuilder<T>,
@@ -71,6 +74,15 @@ where
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+
+        // TODO: move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
         // setup the launch context
         let ctx = ctx
@@ -99,7 +111,9 @@ where
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>()?
+            .with_blockchain_db::<T, _>(move |provider_factory| {
+                Ok(BlockchainProvider2::new(provider_factory)?)
+            }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs
@@ -158,6 +172,8 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
+        let tree_config = TreeConfig::default().with_persistence_threshold(120);
+
         // Configure the consensus engine
         let mut eth_service = EthService::new(
             ctx.chain_spec(),
@@ -169,6 +185,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder().clone(),
+            tree_config,
         );
 
         let event_sender = EventSender::default();
@@ -235,13 +252,16 @@ where
 
         // Run consensus engine to completion
         let network_handle = ctx.components().network().clone();
-        let (tx, rx) = oneshot::channel();
+        let chainspec = ctx.chain_spec();
+        let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 eth_service.orchestrator_mut().start_backfill_sync(initial_target);
             }
+
+            let mut res = Ok(());
 
             // advance the chain and handle events
             while let Some(event) = eth_service.next().await {
@@ -253,13 +273,30 @@ where
                     ChainEvent::BackfillSyncStarted => {
                         network_handle.update_sync_state(SyncState::Syncing);
                     }
-                    ChainEvent::FatalError => break,
+                    ChainEvent::FatalError => {
+                        error!(target: "reth::cli", "Fatal error in consensus engine");
+                        res = Err(eyre::eyre!("Fatal error in consensus engine"));
+                        break
+                    }
                     ChainEvent::Handler(ev) => {
+                        if let Some(head) = ev.canonical_header() {
+                            let head_block = Head {
+                                number: head.number,
+                                hash: head.hash(),
+                                difficulty: head.difficulty,
+                                timestamp: head.timestamp,
+                                total_difficulty: chainspec
+                                    .final_paris_total_difficulty(head.number)
+                                    .unwrap_or_default(),
+                            };
+                            network_handle.update_status(head_block);
+                        }
                         event_sender.notify(ev);
                     }
                 }
             }
-            let _ = tx.send(());
+
+            let _ = exit.send(res);
         });
 
         let full_node = FullNode {
@@ -280,7 +317,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { Ok(rx.await?) },
+                async { rx.await? },
                 full_node.config.debug.terminate,
             ),
             node: full_node,

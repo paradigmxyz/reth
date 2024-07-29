@@ -15,8 +15,8 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -257,20 +257,20 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(hashed_state.clone());
-        StateRoot::overlay_root(self.tx, revert_state)
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root(self.tx, revert_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(hashed_state.clone());
-        StateRoot::overlay_root_with_updates(self.tx, revert_state)
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root_with_updates(self.tx, revert_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -279,15 +279,14 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
     fn hashed_proof(
         &self,
-        hashed_state: &HashedPostState,
+        hashed_state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(hashed_state.clone());
-        revert_state
-            .account_proof(self.tx, address, slots)
-            .map_err(|err| ProviderError::Database(err.into()))
+        revert_state.extend(hashed_state);
+        Proof::overlay_account_proof(self.tx, revert_state, address, slots)
+            .map_err(Into::<ProviderError>::into)
     }
 }
 

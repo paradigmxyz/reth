@@ -2,7 +2,6 @@
 
 use crate::{
     args::NetworkArgs,
-    macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
@@ -17,11 +16,12 @@ use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
-    StaticFileProviderFactory, StorageReader,
+    writer::StorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -130,7 +130,7 @@ impl Command {
             provider_factory.static_file_provider(),
         ));
 
-        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
@@ -152,6 +152,7 @@ impl Command {
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             execution_outcome.hash_state_slow(),
+            Default::default(),
         )?;
 
         if in_memory_state_root == block.state_root {
@@ -168,7 +169,8 @@ impl Command {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
+        let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;

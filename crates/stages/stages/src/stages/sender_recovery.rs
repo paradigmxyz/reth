@@ -90,7 +90,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
-        let batch = (tx_range.start..tx_range.end)
+        let batch = tx_range
+            .clone()
             .step_by(BATCH_SIZE)
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
@@ -140,7 +141,8 @@ where
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
 
     // Preallocate channels
-    let (chunks, receivers): (Vec<_>, Vec<_>) = (tx_range.start..tx_range.end)
+    let (chunks, receivers): (Vec<_>, Vec<_>) = tx_range
+        .clone()
         .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
             let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);

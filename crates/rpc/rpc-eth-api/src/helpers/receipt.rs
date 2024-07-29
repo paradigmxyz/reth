@@ -3,14 +3,15 @@
 
 use futures::Future;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_types::{EthApiError, EthResult, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::AnyTransactionReceipt;
+
+use crate::{EthApiTypes, FromEthApiError};
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait LoadReceipt: Send + Sync {
+pub trait LoadReceipt: EthApiTypes + Send + Sync {
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -22,12 +23,17 @@ pub trait LoadReceipt: Send + Sync {
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> impl Future<Output = EthResult<AnyTransactionReceipt>> + Send {
+    ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send {
         async move {
             // get all receipts for the block
-            let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
+            let all_receipts = match self
+                .cache()
+                .get_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+            {
                 Some(recpts) => recpts,
-                None => return Err(EthApiError::UnknownBlockNumber),
+                None => return Err(EthApiError::UnknownBlockNumber.into()),
             };
 
             Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())

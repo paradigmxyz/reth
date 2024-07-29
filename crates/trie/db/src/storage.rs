@@ -1,6 +1,8 @@
 use reth_db_api::transaction::DbTx;
 use reth_primitives::{Address, B256};
-use reth_trie::{hashed_cursor::DatabaseHashedCursorFactory, StorageRoot};
+use reth_trie::{
+    hashed_cursor::DatabaseHashedCursorFactory, trie_cursor::DatabaseTrieCursorFactory, StorageRoot,
+};
 
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::{TrieRootMetrics, TrieType};
@@ -15,11 +17,11 @@ pub trait DatabaseStorageRoot<'a, TX> {
 }
 
 impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<&'a TX, DatabaseHashedCursorFactory<'a, TX>>
+    for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
-            tx,
+            DatabaseTrieCursorFactory::new(tx),
             DatabaseHashedCursorFactory::new(tx),
             address,
             #[cfg(feature = "metrics")]
@@ -29,7 +31,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
 
     fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
         Self::new_hashed(
-            tx,
+            DatabaseTrieCursorFactory::new(tx),
             DatabaseHashedCursorFactory::new(tx),
             hashed_address,
             #[cfg(feature = "metrics")]

@@ -18,14 +18,14 @@ pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_state_root(
         &self,
-        hashed_state: &reth_trie::HashedPostState,
+        hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<B256> {
         self.0.hashed_state_root(hashed_state)
     }
 
     fn hashed_state_root_with_updates(
         &self,
-        hashed_state: &reth_trie::HashedPostState,
+        hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.hashed_state_root_with_updates(hashed_state)
     }
@@ -34,7 +34,7 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
 impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_proof(
         &self,
-        hashed_state: &reth_trie::HashedPostState,
+        hashed_state: reth_trie::HashedPostState,
         address: revm_primitives::Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {

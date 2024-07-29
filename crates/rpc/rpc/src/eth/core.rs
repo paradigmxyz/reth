@@ -10,10 +10,11 @@ use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
-    RawTransactionForwarder,
+    EthApiTypes, RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
+    PendingBlock,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -114,6 +115,13 @@ where
     }
 }
 
+impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync,
+{
+    type Error = EthApiError;
+}
+
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
@@ -131,7 +139,7 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
 impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Clone + Send + Sync + 'static,
+    Self: EthApiTypes + Clone + Send + Sync + 'static,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl reth_tasks::TaskSpawner {

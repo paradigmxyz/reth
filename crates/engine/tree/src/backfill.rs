@@ -15,6 +15,37 @@ use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
 
+/// Represents the state of the backfill synchronization process.
+#[derive(Debug, PartialEq, Eq, Default)]
+pub enum BackfillSyncState {
+    /// The node is not performing any backfill synchronization.
+    /// This is the initial or default state.
+    #[default]
+    Idle,
+    /// A backfill synchronization has been requested or planned, but processing has not started
+    /// yet.
+    Pending,
+    /// The node is actively engaged in backfill synchronization.
+    Active,
+}
+
+impl BackfillSyncState {
+    /// Returns true if the state is idle.
+    pub const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// Returns true if the state is pending.
+    pub const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    /// Returns true if the state is active.
+    pub const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
 /// Backfill sync mode functionality.
 pub trait BackfillSync: Send + Sync {
     /// Performs a backfill action.
@@ -139,7 +170,10 @@ where
             }
         };
         let ev = match res {
-            Ok((_, result)) => BackfillEvent::Finished(result),
+            Ok((pipeline, result)) => {
+                self.pipeline_state = PipelineState::Idle(Some(pipeline));
+                BackfillEvent::Finished(result)
+            }
             Err(why) => {
                 // failed to receive the pipeline
                 BackfillEvent::TaskDropped(why.to_string())

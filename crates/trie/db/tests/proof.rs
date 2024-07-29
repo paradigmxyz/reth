@@ -4,11 +4,13 @@ use reth_db_api::database::Database;
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH, keccak256, Account, Address, Bytes, StorageEntry, B256, U256,
 };
-use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
+use reth_provider::{
+    test_utils::create_test_provider_factory, HashingWriter, ProviderFactory, TrieWriter,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{proof::Proof, Nibbles, StateRoot};
 use reth_trie_common::{AccountProof, StorageProof};
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
 use std::{str::FromStr, sync::Arc};
 
 /*
@@ -40,7 +42,7 @@ fn insert_genesis<DB: Database>(
     provider_factory: &ProviderFactory<DB>,
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderResult<B256> {
-    let mut provider = provider_factory.provider_rw()?;
+    let provider = provider_factory.provider_rw()?;
 
     // Hash accounts and insert them into hashing table.
     let genesis = chain_spec.genesis();
@@ -64,7 +66,7 @@ fn insert_genesis<DB: Database>(
     let (root, updates) = StateRoot::from_tx(provider.tx_ref())
         .root_with_updates()
         .map_err(Into::<reth_db::DatabaseError>::into)?;
-    updates.write_to_database(provider.tx_mut())?;
+    provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;
 

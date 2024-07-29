@@ -5,6 +5,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use tracing::*;
 
 /// The type that drives the chain forward.
 ///
@@ -121,6 +122,10 @@ where
                             // bubble up the event
                             return Poll::Ready(ChainEvent::Handler(ev));
                         }
+                        HandlerEvent::FatalError => {
+                            error!(target: "engine::tree", "Fatal error");
+                            return Poll::Ready(ChainEvent::FatalError)
+                        }
                     }
                 }
                 Poll::Pending => {
@@ -190,6 +195,8 @@ pub enum HandlerEvent<T> {
     BackfillAction(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
+    // Fatal error
+    FatalError,
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].

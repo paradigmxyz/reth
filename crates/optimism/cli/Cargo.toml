@@ -36,6 +36,10 @@ reth-errors.workspace = true
 reth-config.workspace = true
 reth-evm-optimism.workspace = true
 reth-cli.workspace = true
+reth-cli-runner.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+
 
 # eth
 alloy-genesis.workspace = true
@@ -60,8 +64,14 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
+
 [features] 
  optimism = [ 
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
+    "reth-provider/optimism",
  ] 

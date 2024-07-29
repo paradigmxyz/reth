@@ -1,4 +1,4 @@
-use crate::{args::NetworkArgs, macros::block_executor};
+use crate::args::NetworkArgs;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -16,6 +16,7 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -78,7 +79,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Configure blockchain tree
         let tree_externals =
@@ -107,14 +108,7 @@ impl Command {
             .await?;
 
         // Set up payload builder
-        #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
-
-        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
@@ -125,13 +119,6 @@ impl Command {
             payload_builder,
         );
 
-        #[cfg(feature = "optimism")]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
-
-        #[cfg(not(feature = "optimism"))]
         let (payload_service, payload_builder): (
             _,
             PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
