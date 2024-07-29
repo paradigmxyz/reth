@@ -2,6 +2,7 @@
 
 use crate::{
     args::NetworkArgs,
+    macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
@@ -16,7 +17,6 @@ use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::StorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider,
@@ -130,7 +130,7 @@ impl Command {
             provider_factory.static_file_provider(),
         ));
 
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
+        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
