@@ -34,6 +34,20 @@ use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 
+
+struct EvmBlockExecutor<EvmConfig, DB> {
+
+    state: State<DB>,
+}
+
+
+trait EvmExecutor<DB> {
+
+
+
+}
+
+
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 #[cfg(feature = "std")]
