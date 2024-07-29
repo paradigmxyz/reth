@@ -67,6 +67,7 @@ members = [
     "crates/node/builder/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/optimism/bin",
     "crates/optimism/cli",
     "crates/optimism/consensus",
     "crates/optimism/evm/",
@@ -140,7 +141,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/custom-rlpx-subprotocol",
     "testing/ef-tests/",
-    "testing/testing-utils", "crates/optimism/bin",
+    "testing/testing-utils",
 ]
 default-members = ["bin/reth"]
 
