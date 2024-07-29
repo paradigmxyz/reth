@@ -1600,7 +1600,7 @@ mod tests {
         test_utils::{get_executed_block_with_number, get_executed_blocks},
         BlockState,
     };
-    use reth_chainspec::{ChainSpecBuilder, HOLESKY, MAINNET};
+    use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
@@ -1619,14 +1619,14 @@ mod tests {
         blocks: Vec<ExecutedBlock>,
         action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
+        chain_spec: Arc<ChainSpec>,
     }
 
     impl TestHarness {
-        fn holesky() -> Self {
+        fn new(chain_spec: Arc<ChainSpec>) -> Self {
             let (action_tx, action_rx) = channel();
             let persistence_handle = PersistenceHandle::new(action_tx);
 
-            let chain_spec = HOLESKY.clone();
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
             let provider = MockEthProvider::default();
@@ -1643,6 +1643,7 @@ mod tests {
 
             let (to_payload_service, payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
+
             let tree = EngineApiTreeHandlerImpl::new(
                 provider,
                 executor_factory,
@@ -1658,106 +1659,70 @@ mod tests {
                 TreeConfig::default(),
             );
 
-            Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx }
+            Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx, chain_spec }
         }
-    }
 
-    fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
-        let blocks: Vec<_> = get_executed_blocks(0..number_of_blocks).collect();
+        fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
+            let mut blocks_by_hash = HashMap::new();
+            let mut blocks_by_number = BTreeMap::new();
+            let mut state_by_hash = HashMap::new();
+            let mut hash_by_number = HashMap::new();
+            let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
+            let mut parent_hash = B256::ZERO;
 
-        let mut blocks_by_hash = HashMap::new();
-        let mut blocks_by_number = BTreeMap::new();
-        let mut state_by_hash = HashMap::new();
-        let mut hash_by_number = HashMap::new();
-        for block in &blocks {
-            let sealed_block = block.block();
-            let hash = sealed_block.hash();
-            let number = sealed_block.number;
-            blocks_by_hash.insert(hash, block.clone());
-            blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
-            hash_by_number.insert(number, hash);
+            for block in &blocks {
+                let sealed_block = block.block();
+                let hash = sealed_block.hash();
+                let number = sealed_block.number;
+                blocks_by_hash.insert(hash, block.clone());
+                blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
+                state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
+                hash_by_number.insert(number, hash);
+                parent_to_child.entry(parent_hash).or_default().insert(hash);
+                parent_hash = hash;
+            }
+
+            self.tree.state.tree_state = TreeState {
+                blocks_by_hash,
+                blocks_by_number,
+                current_canonical_head: blocks.last().unwrap().block().num_hash(),
+                parent_to_child,
+            };
+
+            let last_executed_block = blocks.last().unwrap().clone();
+            let pending = Some(BlockState::new(last_executed_block));
+            self.tree.canonical_in_memory_state =
+                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
+
+            self.blocks = blocks;
+            self
         }
-        let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
 
-        let (action_tx, action_rx) = channel();
-        let persistence_handle = PersistenceHandle::new(action_tx);
-
-        let chain_spec = Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(MAINNET.genesis.clone())
-                .paris_activated()
-                .build(),
-        );
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-
-        let provider = MockEthProvider::default();
-        let executor_factory = MockExecutorProvider::default();
-        executor_factory.extend(vec![ExecutionOutcome::default()]);
-
-        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
-
-        let (to_tree_tx, to_tree_rx) = channel();
-        let (from_tree_tx, from_tree_rx) = unbounded_channel();
-
-        let engine_api_tree_state = EngineApiTreeState {
-            invalid_headers: InvalidHeaderCache::new(10),
-            buffer: BlockBuffer::new(10),
-            tree_state,
-            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
-        };
-
-        let header = blocks.first().unwrap().block().header.clone();
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
-        let last_executed_block = blocks.last().unwrap().clone();
-        let last_header = last_executed_block.block().header();
-
-        // we expect the persistence state to be "at zero" - in practice there will be a genesis
-        // header hash
-        let persistence_state = PersistenceState {
-            last_persisted_block_number: 0,
-            last_persisted_block_hash: B256::ZERO,
-            rx: None,
-        };
-
-        let (to_payload_service, payload_command_rx) = unbounded_channel();
-        let payload_builder = PayloadBuilderHandle::new(to_payload_service);
-        let mut tree = EngineApiTreeHandlerImpl::new(
-            provider,
-            executor_factory,
-            consensus,
-            payload_validator,
-            to_tree_rx,
-            from_tree_tx,
-            engine_api_tree_state,
-            canonical_in_memory_state,
-            persistence_handle,
-            persistence_state,
-            payload_builder,
-            TreeConfig::default(),
-        );
-        let pending = Some(BlockState::new(last_executed_block));
-        tree.canonical_in_memory_state =
-            CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
-
-        TestHarness { tree, to_tree_tx, blocks, action_rx, payload_command_rx }
+        const fn with_backfill_state(mut self, state: BackfillSyncState) -> Self {
+            self.tree.backfill_sync_state = state;
+            self
+        }
     }
 
     #[tokio::test]
     async fn test_tree_persist_blocks() {
-        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
-        // persistence task.
         let tree_config = TreeConfig::default();
 
-        let TestHarness { tree, to_tree_tx, action_rx, mut blocks, payload_command_rx } =
-            get_default_test_harness(tree_config.persistence_threshold() + 1);
-        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
+        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
+        // persistence task.
+        let mut blocks: Vec<_> =
+            get_executed_blocks(0..tree_config.persistence_threshold() + 1).collect();
+        let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        std::thread::Builder::new()
+            .name("Tree Task".to_string())
+            .spawn(|| test_harness.tree.run())
+            .unwrap();
 
         // send a message to the tree to enter the main loop.
-        to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+        test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
-        let received_action = action_rx.recv().expect("Failed to receive saved blocks");
+        let received_action =
+            test_harness.action_rx.recv().expect("Failed to receive saved blocks");
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
@@ -1770,23 +1735,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let TestHarness { tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            get_default_test_harness(10);
+        let tree_config = TreeConfig::default();
 
+        let blocks: Vec<_> = get_executed_blocks(0..10).collect();
         let head_block = blocks.last().unwrap().block();
         let first_block = blocks.first().unwrap().block();
+
+        let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
 
         for executed_block in blocks {
             let sealed_block = executed_block.block();
 
             let expected_state = BlockState::new(executed_block.clone());
 
-            let actual_state_by_hash =
-                tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
+            let actual_state_by_hash = test_harness
+                .tree
+                .canonical_in_memory_state
+                .state_by_hash(sealed_block.hash())
+                .unwrap();
             assert_eq!(expected_state, *actual_state_by_hash);
 
-            let actual_state_by_number =
-                tree.canonical_in_memory_state.state_by_number(sealed_block.number).unwrap();
+            let actual_state_by_number = test_harness
+                .tree
+                .canonical_in_memory_state
+                .state_by_number(sealed_block.number)
+                .unwrap();
             assert_eq!(expected_state, *actual_state_by_number);
         }
     }
@@ -1795,22 +1768,23 @@ mod tests {
     async fn test_engine_request_during_backfill() {
         let tree_config = TreeConfig::default();
 
-        let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            get_default_test_harness(tree_config.persistence_threshold());
-
-        // set backfill active
-        tree.backfill_sync_state = BackfillSyncState::Active;
+        let blocks: Vec<_> = get_executed_blocks(0..tree_config.persistence_threshold()).collect();
+        let mut test_harness = TestHarness::new(MAINNET.clone())
+            .with_blocks(blocks)
+            .with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::ForkchoiceUpdated {
-            state: ForkchoiceState {
-                head_block_hash: B256::random(),
-                safe_block_hash: B256::random(),
-                finalized_block_hash: B256::random(),
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: ForkchoiceState {
+                    head_block_hash: B256::random(),
+                    safe_block_hash: B256::random(),
+                    finalized_block_hash: B256::random(),
+                },
+                payload_attrs: None,
+                tx,
             },
-            payload_attrs: None,
-            tx,
-        }));
+        ));
 
         let resp = rx.await.unwrap().unwrap().await.unwrap();
         assert!(resp.payload_status.is_syncing());
@@ -1824,14 +1798,11 @@ mod tests {
         let sealed = block.seal_slow();
         let payload = block_to_payload_v1(sealed);
 
-        let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
-            TestHarness::holesky();
-
-        // set backfill active
-        tree.backfill_sync_state = BackfillSyncState::Active;
+        let mut test_harness =
+            TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {
+        test_harness.tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::NewPayload {
             payload: payload.clone().into(),
             cancun_fields: None,
             tx,
