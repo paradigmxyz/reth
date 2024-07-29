@@ -635,14 +635,14 @@ where
     }
 
     /// Convenience function to handle an optional tree event.
-    fn on_maybe_tree_event(&self, event: Option<TreeEvent>) {
+    fn on_maybe_tree_event(&mut self, event: Option<TreeEvent>) {
         if let Some(event) = event {
             self.on_tree_event(event);
         }
     }
 
     /// Handles a tree event.
-    fn on_tree_event(&self, event: TreeEvent) {
+    fn on_tree_event(&mut self, event: TreeEvent) {
         match event {
             TreeEvent::TreeAction(action) => match action {
                 TreeAction::MakeCanonical(target) => {
@@ -659,10 +659,22 @@ where
     }
 
     /// Emits an outgoing event to the engine.
-    fn emit_event(&self, event: impl Into<EngineApiEvent>) {
+    fn emit_event(&mut self, event: impl Into<EngineApiEvent>) {
+        let event = event.into();
+
+        if event.is_backfill_action() {
+            debug_assert_eq!(
+                self.backfill_sync_state,
+                BackfillSyncState::Idle,
+                "backfill action should only be emitted when backfill is idle"
+            );
+            self.backfill_sync_state = BackfillSyncState::Pending;
+            debug!(target: "engine", "emitting backfill action event");
+        }
+
         let _ = self
             .outgoing
-            .send(event.into())
+            .send(event)
             .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
     }
 
