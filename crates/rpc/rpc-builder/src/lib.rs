@@ -167,7 +167,7 @@ use reth_rpc_eth_api::{
     helpers::{
         Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt, UpdateRawTxForwarder,
     },
-    EthApiServer, FullEthApiServer, RawTransactionForwarder,
+    EthApiServer, EthApiTypes, EthApiTypesCompat, FullEthApiServer, RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
@@ -488,7 +488,7 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
-        EthApi: 'static,
+        EthApi: EthApiTypesCompat + 'static,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
         RpcRegistryInner::new(provider, pool, network, executor, events, config, evm_config, eth)
@@ -608,7 +608,7 @@ impl RpcModuleConfigBuilder {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
-pub struct RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi> {
+pub struct RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi: EthApiTypesCompat> {
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -632,7 +632,7 @@ where
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: 'static,
+    EthApi: EthApiTypesCompat + 'static,
 {
     /// Creates a new, empty instance.
     #[allow(clippy::too_many_arguments)]
@@ -686,6 +686,8 @@ where
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+where
+    EthApi: EthApiTypesCompat,
 {
     /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
     pub const fn eth_api(&self) -> &EthApi {
@@ -743,7 +745,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi>
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    EthApi: UpdateRawTxForwarder,
+    EthApi: EthApiTypesCompat + UpdateRawTxForwarder,
 {
     /// Sets a forwarder for `eth_sendRawTransaction`
     ///
@@ -758,6 +760,7 @@ impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Network: NetworkInfo + Clone + 'static,
+    EthApi: EthApiTypesCompat,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network>
@@ -796,7 +799,7 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: Clone,
+    EthApi: EthApiTypesCompat,
 {
     /// Register Eth Namespace
     ///
@@ -805,7 +808,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer,
+        EthApi: EthApiTypesCompat + EthApiServer<EthApi>,
     {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -819,7 +822,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer + TraceExt,
+        EthApi: EthApiServer<EthApi> + TraceExt,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -919,7 +922,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
     where
-        EthApi: EthApiServer,
+        EthApi: EthApiServer<EthApi> + EthApiTypes,
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)

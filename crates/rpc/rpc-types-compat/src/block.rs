@@ -1,8 +1,8 @@
 //! Compatibility functions for rpc `Block` type.
 
+use std::fmt;
+
 use alloy_rlp::Encodable;
-use auto_impl::auto_impl;
-use derive_more::Constructor;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
@@ -11,31 +11,26 @@ use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind
 use crate::TransactionBuilder;
 
 /// Builds RPC block w.r.t. network.
-#[auto_impl(&, Arc)]
-pub trait BlockBuilder {
-    /// RPC transaction type of network.
-    type Transaction: Send;
-
-    /// Returns handle to transaction builder.
-    fn tx_builder(&self) -> impl TransactionBuilder<Transaction = Self::Transaction>;
+pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
+    /// RPC transaction type builder of network.
+    type TxBuilder: TransactionBuilder;
 
     /// Converts the given primitive block into a [Block] response with the given
     /// [`BlockTransactionsKind`]
     ///
     /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
     fn from_block(
-        &self,
         block: BlockWithSenders,
         total_difficulty: U256,
         kind: BlockTransactionsKind,
         block_hash: Option<B256>,
-    ) -> Result<Block<Self::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
         match kind {
             BlockTransactionsKind::Hashes => {
-                Ok(self.from_block_with_tx_hashes(block, total_difficulty, block_hash))
+                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
             }
             BlockTransactionsKind::Full => {
-                self.from_block_full(block, total_difficulty, block_hash)
+                Self::from_block_full(block, total_difficulty, block_hash)
             }
         }
     }
@@ -46,11 +41,10 @@ pub trait BlockBuilder {
     /// This will populate the `transactions` field with the _full_
     /// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
     fn from_block_full(
-        &self,
         mut block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Result<Block<Self::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
         let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
         let block_number = block.block.number;
         let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -65,7 +59,7 @@ pub trait BlockBuilder {
             .map(|(idx, (tx, sender))| {
                 let signed_tx_ec_recovered = tx.with_signer(sender);
 
-                self.tx_builder().from_recovered_with_block_context(
+                Self::TxBuilder::from_recovered_with_block_context(
                     signed_tx_ec_recovered,
                     block_hash,
                     block_number,
@@ -75,7 +69,7 @@ pub trait BlockBuilder {
             })
             .collect::<Vec<_>>();
 
-        Ok(from_block_with_transactions::<Self::Transaction>(
+        Ok(from_block_with_transactions::<<Self::TxBuilder as TransactionBuilder>::Transaction>(
             block_length,
             block_hash,
             block.block,
@@ -90,15 +84,14 @@ pub trait BlockBuilder {
     /// This will populate the `transactions` field with only the hashes of the transactions in the
     /// block: [`BlockTransactions::Hashes`]
     fn from_block_with_tx_hashes(
-        &self,
         block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Block<Self::Transaction> {
+    ) -> Block<<Self::TxBuilder as TransactionBuilder>::Transaction> {
         let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-        from_block_with_transactions::<Self::Transaction>(
+        from_block_with_transactions::<<Self::TxBuilder as TransactionBuilder>::Transaction>(
             block.length(),
             block_hash,
             block.block,
@@ -208,19 +201,5 @@ pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
         withdrawals: Some(vec![]),
         size,
         other: Default::default(),
-    }
-}
-
-/// Builds a RPC block response for l1.
-#[derive(Debug, Clone, Copy, Constructor)]
-pub struct EthBlockBuilder<TxB> {
-    tx_builder: TxB,
-}
-
-impl<TxB: TransactionBuilder> BlockBuilder for EthBlockBuilder<TxB> {
-    type Transaction = TxB::Transaction;
-
-    fn tx_builder(&self) -> impl TransactionBuilder<Transaction = Self::Transaction> {
-        &self.tx_builder
     }
 }

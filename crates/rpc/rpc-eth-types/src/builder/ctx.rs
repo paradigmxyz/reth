@@ -1,6 +1,9 @@
 //! Context required for building `eth` namespace APIs.
 
+use std::marker::PhantomData;
+
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
+use reth_rpc_types_compat::{ResponseTypeBuilders, TransactionBuilder};
 use reth_tasks::TaskSpawner;
 
 use crate::{
@@ -10,7 +13,15 @@ use crate::{
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
-pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
+pub struct EthApiBuilderCtx<
+    Provider,
+    Pool,
+    EvmConfig,
+    Network,
+    Tasks,
+    Events,
+    Eth: TransactionBuilder,
+> {
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -27,12 +38,15 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     pub events: Events,
     /// RPC cache handle.
     pub cache: EthStateCache,
+    /// RPC type builders.
+    pub _rpc_ty_builders: PhantomData<Eth>,
 }
 
-impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>
+impl<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
+    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
 where
     Provider: BlockReaderIdExt + Clone,
+    Eth: ResponseTypeBuilders,
 {
     /// Returns a new [`FeeHistoryCache`] for the context.
     pub fn new_fee_history_cache(&self) -> FeeHistoryCache
@@ -56,11 +70,12 @@ pub struct GasPriceOracleBuilder;
 
 impl GasPriceOracleBuilder {
     /// Builds a [`GasPriceOracle`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
     ) -> GasPriceOracle<Provider>
     where
         Provider: BlockReaderIdExt + Clone,
+        Eth: ResponseTypeBuilders,
     {
         GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle, ctx.cache.clone())
     }
@@ -72,13 +87,14 @@ pub struct FeeHistoryCacheBuilder;
 
 impl FeeHistoryCacheBuilder {
     /// Builds a [`FeeHistoryCache`], for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
     ) -> FeeHistoryCache
     where
         Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
         Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
+        Eth: ResponseTypeBuilders,
     {
         let fee_history_cache =
             FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache);

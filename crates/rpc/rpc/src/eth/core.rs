@@ -17,12 +17,14 @@ use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
 };
-use reth_rpc_types_compat::{EthBlockBuilder, EthTxBuilder, NetworkTypeBuilders};
+use reth_rpc_types_compat::ResponseTypeBuilders;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
+
+use crate::eth::{EthBlockBuilder, EthTxBuilder};
 
 /// `Eth` API implementation.
 ///
@@ -33,13 +35,26 @@ use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
-#[derive(Clone, Deref)]
+#[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-    /// Builds network specific response types.
-    pub compat: NetworkTypeBuilders<EthTxBuilder, EthBlockBuilder<EthTxBuilder>>,
+}
+
+unsafe impl<Provider, Pool, Network, EvmConfig> Send
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+}
+unsafe impl<Provider, Pool, Network, EvmConfig> Sync
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+}
+
+impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -78,10 +93,7 @@ where
             proof_permits,
         );
 
-        Self {
-            inner: Arc::new(inner),
-            compat: NetworkTypeBuilders::new(EthTxBuilder, EthBlockBuilder::new(EthTxBuilder)),
-        }
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -94,7 +106,7 @@ where
 {
     /// Creates a new, shareable instance.
     pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Self>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
@@ -119,7 +131,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), compat: EthTxBuilder }
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -129,6 +141,13 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
+}
+
+impl<Provider, Pool, Network, EvmConfig> ResponseTypeBuilders
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+    type TransactionBuilder = EthTxBuilder;
+    type BlockBuilder = EthBlockBuilder<EthTxBuilder>;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -173,8 +192,15 @@ where
     N: FullNodeComponents,
     Network: Send + Sync + Clone + 'static,
 {
-    type Ctx<'a> =
-        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<
+        N::Provider,
+        N::Pool,
+        N::Evm,
+        Network,
+        TaskExecutor,
+        N::Provider,
+        Self,
+    >;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(|ctx| Self::with_spawner(ctx))

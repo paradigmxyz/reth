@@ -209,7 +209,7 @@ pub trait EthTransactions:
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
-                    return Ok(Some(self.from_recovered_with_block_context(
+                    return Ok(Some(Self::from_recovered_with_block_context(
                         tx,
                         block_hash,
                         block_number,

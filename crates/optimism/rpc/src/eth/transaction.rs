@@ -1,6 +1,6 @@
 //! Loads and formats OP transaction RPC response.  
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 use op_alloy_network::Optimism;
 use reth_evm_optimism::RethL1BlockInfo;
@@ -111,13 +111,13 @@ where
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpTxBuilder<Eth> {
-    l1_resp_builder: Eth,
+    _l1_builders: PhantomData<Eth>,
 }
 
 impl<Eth: TransactionBuilder<Transaction = Optimism::TransactionResponse>> TransactionBuilder
     for OpTxBuilder
 {
-    type Transaction = Optimism::TransactionResponse; // todo: own tx type for op, wrapper of l1 tx
+    type Transaction = Optimism::TransactionResponse;
 
     fn fill(
         &self,
@@ -127,14 +127,7 @@ impl<Eth: TransactionBuilder<Transaction = Optimism::TransactionResponse>> Trans
         base_fee: Option<u64>,
         transaction_index: Option<usize>,
     ) -> Self::Transaction {
-        let mut resp = self.l1_resp_builder.fill(
-            self,
-            tx,
-            block_hash,
-            block_number,
-            base_fee,
-            transaction_index,
-        );
+        let mut resp = Eth::fill(self, tx, block_hash, block_number, base_fee, transaction_index);
 
         resp.other = OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),

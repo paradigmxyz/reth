@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
@@ -19,13 +19,13 @@ use tracing::trace;
 pub struct TxPoolApi<Pool, Eth> {
     /// An interface to interact with the pool
     pool: Pool,
-    resp_builder: Eth,
+    _tx_resp_builder: PhantomData<Eth>,
 }
 
 impl<Pool, Eth> TxPoolApi<Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
-    pub const fn new(pool: Pool, resp_builder: Eth) -> Self {
-        Self { pool, resp_builder }
+    pub const fn new(pool: Pool) -> Self {
+        Self { pool, _tx_resp_builder: PhantomData }
     }
 }
 
@@ -40,25 +40,24 @@ where
         fn insert<Tx, Eth>(
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
-            resp_builder: &Eth,
         ) where
             Tx: PoolTransaction,
             Eth: TransactionBuilder<Transaction = Transaction>,
         {
-            content.entry(tx.sender()).or_default().insert(
-                tx.nonce().to_string(),
-                resp_builder.from_recovered(tx.to_recovered_transaction()),
-            );
+            content
+                .entry(tx.sender())
+                .or_default()
+                .insert(tx.nonce().to_string(), Eth::from_recovered(tx.to_recovered_transaction()));
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
         let mut content = TxpoolContent::default();
         for pending in pending {
-            insert(&pending.transaction, &mut content.pending, &self.resp_builder);
+            insert::<_, Eth>(&pending.transaction, &mut content.pending);
         }
         for queued in queued {
-            insert(&queued.transaction, &mut content.queued, &self.resp_builder);
+            insert::<_, Eth>(&queued.transaction, &mut content.queued);
         }
 
         content

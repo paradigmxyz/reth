@@ -463,7 +463,7 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await?
-            .map(|tx| tx.into_transaction(self)))
+            .map(|tx| tx.into_transaction::<T>()))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`

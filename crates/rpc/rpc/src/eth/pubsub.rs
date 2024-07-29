@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 use futures::StreamExt;
 use jsonrpsee::{
@@ -37,8 +37,7 @@ pub struct EthPubSub<Provider, Pool, Events, Network, Eth> {
     inner: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
-    /// Assembles network specific response data.
-    resp_builder: Eth,
+    _tx_resp_builder: PhantomData<Eth>,
 }
 
 // === impl EthPubSub ===
@@ -47,20 +46,13 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSub<Provider, Pool, Events, Net
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [`tokio::task::spawn`]
-    pub fn new(
-        provider: Provider,
-        pool: Pool,
-        chain_events: Events,
-        network: Network,
-        resp_builder: Eth,
-    ) -> Self {
+    pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
         Self::with_spawner(
             provider,
             pool,
             chain_events,
             network,
             Box::<TokioTaskExecutor>::default(),
-            resp_builder,
         )
     }
 
@@ -71,10 +63,9 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSub<Provider, Pool, Events, Net
         chain_events: Events,
         network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
-        resp_builder: Eth,
     ) -> Self {
         let inner = EthPubSubInner { provider, pool, chain_events, network };
-        Self { inner: Arc::new(inner), subscription_task_spawner, resp_builder }
+        Self { inner: Arc::new(inner), subscription_task_spawner, _tx_resp_builder: PhantomData }
     }
 }
 
@@ -97,9 +88,8 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
-        let resp_builder = self.resp_builder.clone();
         self.subscription_task_spawner.spawn(Box::pin(async move {
-            let _ = handle_accepted(pubsub, sink, kind, params, resp_builder).await;
+            let _ = handle_accepted::<_, _, _, _, Eth>(pubsub, sink, kind, params).await;
         }));
 
         Ok(())
@@ -107,12 +97,11 @@ where
 }
 
 /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Provider, Pool, Events, Network, TxB>(
+async fn handle_accepted<Provider, Pool, Events, Network, Eth>(
     pubsub: Arc<EthPubSubInner<Provider, Pool, Events, Network>>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
-    tx_builder: TxB,
 ) -> Result<(), ErrorObject<'static>>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
@@ -120,7 +109,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
     // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
-    TxB: TransactionBuilder<Transaction = Transaction>,
+    Eth: TransactionBuilder<Transaction = Transaction>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -148,10 +137,9 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(
-                                tx_builder
-                                    .from_recovered(tx.transaction.to_recovered_transaction()),
-                            ))
+                            EthSubscriptionResult::FullTransaction(Box::new(Eth::from_recovered(
+                                tx.transaction.to_recovered_transaction(),
+                            )))
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }

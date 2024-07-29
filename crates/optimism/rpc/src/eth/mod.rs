@@ -48,13 +48,14 @@ use crate::OpEthApiError;
 #[derive(Debug, Clone)]
 pub struct OpEthApi<Eth, EthTxB> {
     inner: Eth,
-    compat: NetworkTypeBuilders<OpTxBuilder<EthTxB>, EthBlockBuilder<OpTxBuilder<EthTxBuilder>>>,
+    /// L1 RPC type builders.
+    _eth_ty_builders: PhantomData<EthTxB>,
 }
 
 impl<Eth> OpEthApi<Eth> {
     /// Creates a new `OpEthApi` from the provided `Eth` implementation.
     pub const fn new(inner: Eth) -> Self {
-        Self { inner, resp_builder: OpTxBuilder }
+        Self { inner, _rpc_ty_builders: PhantomData }
     }
 }
 
@@ -64,6 +65,11 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
+}
+
+impl<Eth, EthTxB> EthApiTypesCompat for OpEthApi<Eth, EthTxB> {
+    type TxBuilder = OpTxBuilder<EthTxB>;
+    type BlockBuilder = EthBlockBuilder<OpTxBuilder<Eth>>;
 }
 
 impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {

@@ -1,11 +1,14 @@
+use alloy_network::Network;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
+use reth_rpc_eth_api::{Block, EthApiTypes};
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Filter, Log, SyncStatus, TransactionRequest,
+    state::StateOverride, BlockOverrides, Filter, Log, SyncStatus, Transaction, TransactionRequest,
 };
+use reth_rpc_types_compat::TransactionBuilder;
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -32,7 +35,8 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 #[async_trait::async_trait]
 impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<Eth>,
+    Eth: EthApiServer<Eth> + EthApiTypes + TransactionBuilder<Transaction = Transaction>,
+    Eth::NetworkTypes: Network<TransactionResponse = Transaction>,
     EthFilter: EthFilterApiServer<Eth>,
 {
     /// Handler for: `eth_syncing`

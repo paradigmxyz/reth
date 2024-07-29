@@ -4,6 +4,7 @@ use std::error::Error;
 
 use alloy_network::Network;
 use reth_rpc_types::Rich;
+use reth_rpc_types_compat::ResponseTypeBuilders;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -26,3 +27,6 @@ pub type Transaction<T> = <<T as EthApiTypes>::NetworkTypes as Network>::Transac
 
 /// Adapter for network specific block type.
 pub type Block<T> = Rich<reth_rpc_types::Block<Transaction<T>>>;
+
+/// Helper trait that unifies [`EthApiTypes`] with type conversions.
+pub trait EthApiTypesCompat: EthApiTypes + ResponseTypeBuilders {}

@@ -5,9 +5,10 @@ use std::sync::Arc;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    RawTransactionForwarder,
+    RawTransactionForwarder, Transaction,
 };
 use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_transaction_pool::TransactionPool;
 
 use crate::EthApi;
@@ -15,7 +16,7 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction,
+    Self: LoadTransaction + TransactionBuilder<Transaction = Transaction<Self>>,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt,
 {

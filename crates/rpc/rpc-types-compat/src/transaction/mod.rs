@@ -8,21 +8,16 @@ mod typed;
 
 use std::fmt;
 
-use alloy_network::{Ethereum, Network};
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use auto_impl::auto_impl;
-use reth_primitives::{
-    Address, BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxKind, TxType, B256,
-};
+use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxType, B256};
 
 /// Builds RPC transaction w.r.t. network.
-#[auto_impl(&, Arc)]
-pub trait TransactionBuilder: Send + Sync + Unpin + fmt::Debug {
+pub trait TransactionBuilder: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
-    type Transaction: Send;
+    type Transaction: Send + Clone + Default + fmt::Debug;
 
     /// Returns gas price and max fee per gas w.r.t. network specific transaction type.
-    fn gas_price(&self, signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
+    fn gas_price(signed_tx: &TransactionSigned, base_fee: Option<u64>) -> GasPrice {
         match signed_tx.tx_type() {
             TxType::Legacy | TxType::Eip2930 => {
                 GasPrice { gas_price: Some(signed_tx.max_fee_per_gas()), max_fee_per_gas: None }
@@ -50,7 +45,6 @@ pub trait TransactionBuilder: Send + Sync + Unpin + fmt::Debug {
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
     fn fill(
-        &self,
         tx: TransactionSignedEcRecovered,
         block_hash: Option<B256>,
         block_number: Option<BlockNumber>,
@@ -60,8 +54,8 @@ pub trait TransactionBuilder: Send + Sync + Unpin + fmt::Debug {
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn from_recovered(&self, tx: TransactionSignedEcRecovered) -> Self::Transaction {
-        self.fill(tx, None, None, None, None)
+    fn from_recovered(tx: TransactionSignedEcRecovered) -> Self::Transaction {
+        Self::fill(tx, None, None, None, None)
     }
 
     /// Create a new rpc transaction result for a mined transaction, using the given block hash,
@@ -70,14 +64,13 @@ pub trait TransactionBuilder: Send + Sync + Unpin + fmt::Debug {
     /// The block hash, number, and tx index fields should be from the original block where the
     /// transaction was mined.
     fn from_recovered_with_block_context(
-        &self,
         tx: TransactionSignedEcRecovered,
         block_hash: B256,
         block_number: BlockNumber,
         base_fee: Option<u64>,
         tx_index: usize,
     ) -> Self::Transaction {
-        self.fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+        Self::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
     }
 }
 
@@ -129,72 +122,5 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
-    }
-}
-
-/// Builds RPC transaction response for l1.
-#[derive(Debug, Clone, Copy)]
-pub struct EthTxBuilder;
-
-impl TransactionBuilder for EthTxBuilder
-where
-    Self: Send + Sync,
-{
-    type Transaction = <Ethereum as Network>::TransactionResponse;
-
-    fn fill(
-        &self,
-        tx: TransactionSignedEcRecovered,
-        block_hash: Option<B256>,
-        block_number: Option<BlockNumber>,
-        base_fee: Option<u64>,
-        transaction_index: Option<usize>,
-    ) -> Self::Transaction {
-        let signer = tx.signer();
-        let signed_tx = tx.into_signed();
-
-        let to: Option<Address> = match signed_tx.kind() {
-            TxKind::Create => None,
-            TxKind::Call(to) => Some(Address(*to)),
-        };
-
-        let GasPrice { gas_price, max_fee_per_gas } = self.gas_price(&signed_tx, base_fee);
-
-        let chain_id = signed_tx.chain_id();
-        let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
-        let access_list = signed_tx.access_list().cloned();
-        let authorization_list = signed_tx.authorization_list().map(|l| l.to_vec());
-
-        let signature = from_primitive_signature(
-            *signed_tx.signature(),
-            signed_tx.tx_type(),
-            signed_tx.chain_id(),
-        );
-
-        Self::Transaction {
-            hash: signed_tx.hash(),
-            nonce: signed_tx.nonce(),
-            from: signer,
-            to,
-            value: signed_tx.value(),
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
-            signature: Some(signature),
-            gas: signed_tx.gas_limit() as u128,
-            input: signed_tx.input().clone(),
-            chain_id,
-            access_list,
-            transaction_type: Some(signed_tx.tx_type() as u8),
-            // These fields are set to None because they are not stored as part of the transaction
-            block_hash,
-            block_number,
-            transaction_index: transaction_index.map(|idx| idx as u64),
-            // EIP-4844 fields
-            max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
-            blob_versioned_hashes,
-            authorization_list,
-            other: Default::default(),
-        }
     }
 }

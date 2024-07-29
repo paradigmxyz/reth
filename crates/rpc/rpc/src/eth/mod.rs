@@ -12,6 +12,9 @@ pub use core::EthApi;
 pub use filter::EthFilter;
 pub use pubsub::EthPubSub;
 
-pub use helpers::signer::DevSigner;
+pub use helpers::{
+    signer::DevSigner,
+    types::{EthBlockBuilder, EthTxBuilder},
+};
 
 pub use reth_rpc_eth_api::{EthApiServer, RawTransactionForwarder};

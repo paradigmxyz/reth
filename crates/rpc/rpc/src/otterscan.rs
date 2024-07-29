@@ -1,3 +1,4 @@
+use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -14,7 +15,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, RichBlock,
+    AnyTransactionReceipt, BlockTransactions, Header, RichBlock, Transaction,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -60,6 +61,7 @@ impl<Eth> OtterscanApi<Eth> {
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
     Eth: EthApiServer<Eth> + TraceExt + 'static,
+    Eth::NetworkTypes: Network<TransactionResponse = Transaction>,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
