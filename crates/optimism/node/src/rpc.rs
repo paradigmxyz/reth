@@ -91,6 +91,13 @@ impl SequencerClient {
             .body(body)
             .send()
             .await
+            .inspect_err(|err| {
+                tracing::warn!(
+                    target = "rpc::eth",
+                    %err,
+                    "Failed to forward transaction to sequencer",
+                );
+            })
             .map_err(SequencerRpcError::HttpError)?;
 
         Ok(())
