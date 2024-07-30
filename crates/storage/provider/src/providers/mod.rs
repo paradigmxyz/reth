@@ -103,7 +103,7 @@ where
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker, alongside the finalized header
     /// if it exists.
-    pub fn with_block_information(
+    pub fn with_blocks(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
         latest: SealedHeader,
@@ -125,12 +125,7 @@ where
         let finalized_header = provider.sealed_header(finalized_block_number)?;
 
         drop(provider);
-        Self::with_block_information(
-            database,
-            tree,
-            latest_header.seal(best.best_hash),
-            finalized_header,
-        )
+        Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header)
     }
 
     /// Ensures that the given block number is canonical (synced)

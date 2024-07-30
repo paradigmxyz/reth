@@ -402,7 +402,7 @@ where
         let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
         let finalized_block = genesis_block.clone();
 
-        let blockchain_provider = BlockchainProvider::with_block_information(
+        let blockchain_provider = BlockchainProvider::with_blocks(
             provider_factory.clone(),
             tree,
             genesis_block,
