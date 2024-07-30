@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
 pub trait DatabaseTrieWitness<'a, TX> {
-    /// Create a new [TrieWitness] from database transaction.
+    /// Create a new [`TrieWitness`] from database transaction.
     fn from_tx(tx: &'a TX) -> Self;
 
     /// Generates trie witness for target state on top of this [`HashedPostState`].
