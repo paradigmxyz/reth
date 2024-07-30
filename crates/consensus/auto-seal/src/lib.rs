@@ -19,7 +19,9 @@ use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
-use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHash, BlockHashOrNumber,
@@ -377,7 +379,7 @@ impl StorageInner {
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
         let mut db = StateProviderDatabase::new(
-            provider.latest().map_err(BlockExecutionError::LatestBlock)?,
+            provider.latest().map_err(InternalBlockExecutionError::LatestBlock)?,
         );
 
         // execute the block

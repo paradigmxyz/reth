@@ -116,6 +116,8 @@ impl ConfigureEvm for EthEvmConfig {
     ) -> reth_revm::Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         EvmBuilder::default().with_db(db).build()
     }
+
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 #[cfg(test)]

@@ -14,9 +14,10 @@ extern crate alloc;
 
 use core::ops::Deref;
 
+use crate::builder::RethEvmBuilder;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
-use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
@@ -76,10 +77,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         DB: Database,
         I: GetInspector<DB>,
     {
-        let mut evm = self.evm_with_inspector(db, inspector);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        evm
+        RethEvmBuilder::new(db, self.default_external_context())
+            .with_env(env.into())
+            .build_with_inspector(inspector)
     }
 
     /// Returns a new EVM with the given inspector.
@@ -92,12 +92,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         DB: Database,
         I: GetInspector<DB>,
     {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .append_handler_register(inspector_handle_register)
-            .build()
+        RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
     }
+
+    /// Provides the default external context.
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
 /// This represents the set of methods used to configure the EVM's environment before block
