@@ -90,7 +90,7 @@ pub struct BlockTimeData {
 
 #[derive(Debug)]
 pub struct WallTimeExEx<Node: FullNodeComponents> {
-    /// The context of the ExEx
+    /// The context of the `ExEx`
     ctx: ExExContext<Node>,
     /// Incoming RPC requests.
     rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<BlockTimeData>>,
