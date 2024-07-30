@@ -626,6 +626,9 @@ where
             // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
             self.persistence_state.finish(new_head.hash(), new_head.number);
+
+            // update the tracked canonical head
+            self.canonical_in_memory_state.set_canonical_head(new_head);
         }
 
         // check if we need to run backfill again by comparing the most recent finalized height to
