@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 /// State transition witness for the trie.
 #[derive(Debug)]
 pub struct TrieWitness<T, H> {
-    /// Creates cursor for traversing trie nodes.
+    /// The cursor factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
@@ -25,7 +25,7 @@ pub struct TrieWitness<T, H> {
 }
 
 impl<T, H> TrieWitness<T, H> {
-    /// Creates a new proof generator.
+    /// Creates a new witness generator.
     pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
         Self {
             trie_cursor_factory,

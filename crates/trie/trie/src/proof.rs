@@ -21,10 +21,10 @@ use std::collections::HashMap;
 /// See `StateRoot::root` for more info.
 #[derive(Debug)]
 pub struct Proof<T, H> {
+    /// The factory for traversing trie nodes.
+    trie_cursor_factory: T,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
-    /// Creates cursor for traversing trie entities.
-    trie_cursor_factory: T,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
     /// Proof targets.
