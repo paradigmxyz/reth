@@ -202,8 +202,8 @@ impl<DB: Database> PersistenceService<DB> {
             storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
         }
 
-        provider_rw.commit()?;
         provider.commit()?;
+        provider_rw.commit()?;
 
         Ok(())
     }
