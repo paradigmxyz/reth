@@ -277,6 +277,10 @@ where
                         todo!("return error or something");
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
+                    for block in &blocks {
+                        // first write transactions
+                        self.write_transactions(block.block.clone()).expect("todo: handle errors");
+                    }
                     // first write to static files
                     self.write_execution_data(&blocks).expect("todo: handle errors");
                     // then write to db
