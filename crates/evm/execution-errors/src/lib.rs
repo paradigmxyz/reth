@@ -140,7 +140,8 @@ impl From<PruneSegmentError> for BlockExecutionError {
 }
 
 impl BlockExecutionError {
-    /// Create a new `BlockExecutionError::Other` variant.
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error.
     #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
@@ -149,7 +150,8 @@ impl BlockExecutionError {
         Self::Internal(InternalBlockExecutionError::other(error))
     }
 
-    /// Create a new [`BlockExecutionError::Other`] from a given message.
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error with the given message.
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Internal(InternalBlockExecutionError::msg(msg))
