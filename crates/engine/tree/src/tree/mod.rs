@@ -734,7 +734,8 @@ where
         let start = self.persistence_state.last_persisted_block_number;
         let end = start + self.config.persistence_threshold();
 
-        // the range of blocks starts with the next highest block and takes up to the configured threshold
+        // the range of blocks starts with the next highest block and takes up to the configured
+        // threshold
         let range = (Bound::Excluded(start), Bound::Included(end));
 
         self.state
