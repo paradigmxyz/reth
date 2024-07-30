@@ -186,7 +186,7 @@ impl<DB: Database> PersistenceService<DB> {
         let current_block = first_block.number;
         debug!(target: "tree::persistence", len=blocks.len(), ?current_block, "Writing execution data to static files");
 
-        let receipts_writer =
+        let mut receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
 
         let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
@@ -196,6 +196,9 @@ impl<DB: Database> PersistenceService<DB> {
             receipts.first().unwrap().clone()
         });
         storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+
+        provider.commit()?;
+        receipts_writer.commit()?;
 
         Ok(())
     }
