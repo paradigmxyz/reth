@@ -154,13 +154,23 @@ impl TreeState {
     }
 
     /// Returns the maximum block number stored.
+    ///
+    /// If no blocks are currently buffered this returns the block number of the canonical head.
     pub(crate) fn max_block_number(&self) -> BlockNumber {
-        self.blocks_by_number.last_key_value().map(|e| *e.0).unwrap_or_default()
+        self.blocks_by_number
+            .last_key_value()
+            .map(|e| *e.0)
+            .unwrap_or_else(|| self.canonical_block_number())
     }
 
     /// Returns the minimum block number stored.
+    ///
+    /// If no blocks are currently buffered this returns the block number of the canonical head.
     pub(crate) fn min_block_number(&self) -> BlockNumber {
-        self.blocks_by_number.first_key_value().map(|e| *e.0).unwrap_or_default()
+        self.blocks_by_number
+            .first_key_value()
+            .map(|e| *e.0)
+            .unwrap_or_else(|| self.canonical_block_number())
     }
 
     /// Returns the block number of the pending block: `head + 1`
@@ -181,6 +191,10 @@ impl TreeState {
     /// Returns the block hash of the canonical head.
     const fn canonical_block_hash(&self) -> B256 {
         self.canonical_head().hash
+    }
+    /// Returns the block number of the canonical head.
+    const fn canonical_block_number(&self) -> BlockNumber {
+        self.canonical_head().number
     }
 
     /// Returns the new chain for the given head.
@@ -710,8 +724,8 @@ where
     /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
         let min_block = self.persistence_state.last_persisted_block_number;
-
-        self.state.tree_state.max_block_number() - min_block >= self.config.persistence_threshold()
+        self.state.tree_state.max_block_number().saturating_sub(min_block) >=
+            self.config.persistence_threshold()
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
