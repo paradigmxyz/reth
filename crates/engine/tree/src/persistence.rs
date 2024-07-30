@@ -47,14 +47,13 @@ impl<DB: Database> PersistenceService<DB> {
 
     /// Writes the cloned tree state to database
     fn write(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
-        debug!(target: "tree::persistence", "Writing blocks to database");
-        let provider_rw = self.provider.provider_rw()?;
-
         if blocks.is_empty() {
             debug!(target: "tree::persistence", "Attempted to write empty block range");
             return Ok(())
         }
 
+        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks to database");
+        let provider_rw = self.provider.provider_rw()?;
         let first_number = blocks.first().unwrap().block().number;
 
         let last = blocks.last().unwrap().block();
@@ -96,6 +95,8 @@ impl<DB: Database> PersistenceService<DB> {
             provider_rw.update_pipeline_stages(last_block_number, false)?;
         }
 
+        provider_rw.commit()?;
+
         debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
 
         Ok(())
@@ -111,6 +112,7 @@ impl<DB: Database> PersistenceService<DB> {
         let provider_rw = self.provider.provider_rw()?;
         let highest_block = self.provider.last_block_number()?;
         provider_rw.remove_block_and_execution_range(block_number..=highest_block)?;
+        provider_rw.commit()?;
 
         Ok(())
     }
@@ -142,23 +144,28 @@ impl<DB: Database> PersistenceService<DB> {
         debug!(target: "tree::persistence", "Writing transactions");
         let provider = self.provider.static_file_provider();
 
-        let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-        let provider_ro = self.provider.provider()?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
-        storage_writer.append_headers_from_blocks(
-            block.header().number,
-            std::iter::once(&(block.header(), block.hash())),
-        )?;
+        {
+            let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
+            let provider_ro = self.provider.provider()?;
+            let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
+            storage_writer.append_headers_from_blocks(
+                block.header().number,
+                std::iter::once(&(block.header(), block.hash())),
+            )?;
 
-        let transactions_writer =
-            provider.get_writer(block.number, StaticFileSegment::Transactions)?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
-        let no_hash_transactions =
-            block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
-        storage_writer.append_transactions_from_blocks(
-            block.header().number,
-            std::iter::once(&no_hash_transactions),
-        )?;
+            let transactions_writer =
+                provider.get_writer(block.number, StaticFileSegment::Transactions)?;
+            let mut storage_writer =
+                StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
+            let no_hash_transactions =
+                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            storage_writer.append_transactions_from_blocks(
+                block.header().number,
+                std::iter::once(&no_hash_transactions),
+            )?;
+        }
+
+        provider.commit()?;
 
         Ok(block.number)
     }
@@ -185,13 +192,18 @@ impl<DB: Database> PersistenceService<DB> {
         let receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
 
-        let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
-        let receipts_iter = blocks.iter().map(|block| {
-            let receipts = block.execution_outcome().receipts().receipt_vec.clone();
-            debug_assert!(receipts.len() == 1);
-            receipts.first().unwrap().clone()
-        });
-        storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+        {
+            let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
+            let receipts_iter = blocks.iter().map(|block| {
+                let receipts = block.execution_outcome().receipts().receipt_vec.clone();
+                debug_assert!(receipts.len() == 1);
+                receipts.first().unwrap().clone()
+            });
+            storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+        }
+
+        provider.commit()?;
+        provider_rw.commit()?;
 
         Ok(())
     }
