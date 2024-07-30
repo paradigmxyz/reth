@@ -144,23 +144,26 @@ impl<DB: Database> PersistenceService<DB> {
         debug!(target: "tree::persistence", "Writing transactions");
         let provider = self.provider.static_file_provider();
 
-        let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-        let provider_ro = self.provider.provider()?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
-        storage_writer.append_headers_from_blocks(
-            block.header().number,
-            std::iter::once(&(block.header(), block.hash())),
-        )?;
+        {
+            let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
+            let provider_ro = self.provider.provider()?;
+            let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
+            storage_writer.append_headers_from_blocks(
+                block.header().number,
+                std::iter::once(&(block.header(), block.hash())),
+            )?;
 
-        let transactions_writer =
-            provider.get_writer(block.number, StaticFileSegment::Transactions)?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
-        let no_hash_transactions =
-            block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
-        storage_writer.append_transactions_from_blocks(
-            block.header().number,
-            std::iter::once(&no_hash_transactions),
-        )?;
+            let transactions_writer =
+                provider.get_writer(block.number, StaticFileSegment::Transactions)?;
+            let mut storage_writer =
+                StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
+            let no_hash_transactions =
+                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            storage_writer.append_transactions_from_blocks(
+                block.header().number,
+                std::iter::once(&no_hash_transactions),
+            )?;
+        }
 
         provider.commit()?;
 
@@ -186,19 +189,21 @@ impl<DB: Database> PersistenceService<DB> {
         let current_block = first_block.number;
         debug!(target: "tree::persistence", len=blocks.len(), ?current_block, "Writing execution data to static files");
 
-        let mut receipts_writer =
+        let receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
 
-        let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
-        let receipts_iter = blocks.iter().map(|block| {
-            let receipts = block.execution_outcome().receipts().receipt_vec.clone();
-            debug_assert!(receipts.len() == 1);
-            receipts.first().unwrap().clone()
-        });
-        storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+        {
+            let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
+            let receipts_iter = blocks.iter().map(|block| {
+                let receipts = block.execution_outcome().receipts().receipt_vec.clone();
+                debug_assert!(receipts.len() == 1);
+                receipts.first().unwrap().clone()
+            });
+            storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+        }
 
+        provider_rw.commit()?;
         provider.commit()?;
-        receipts_writer.commit()?;
 
         Ok(())
     }
