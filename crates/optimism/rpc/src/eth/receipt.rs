@@ -1,5 +1,6 @@
 //! Loads and formats OP receipt RPC response.   
 
+use reth_node_api::FullNodeComponents;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, LoadReceipt, LoadTransaction},
@@ -8,15 +9,17 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 
-use crate::{OpEthApi, OptimismTxMeta};
+use crate::{OpEthApi, OpEthApiError, OptimismTxMeta};
 
-impl<Eth> LoadReceipt for OpEthApi<Eth>
+impl<N> LoadReceipt for OpEthApi<N>
 where
-    Eth: LoadReceipt + EthApiSpec + LoadTransaction,
+    Self: EthApiSpec + LoadTransaction,
+    Self::Error: From<OpEthApiError>,
+    N: FullNodeComponents,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        LoadReceipt::cache(&self.inner)
+        self.inner.cache()
     }
 
     async fn build_transaction_receipt(

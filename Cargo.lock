@@ -7558,6 +7558,7 @@ version = "1.0.3"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-admin",
+ "auto_impl",
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
@@ -7980,13 +7981,14 @@ name = "reth-optimism-rpc"
 version = "1.0.3"
 dependencies = [
  "alloy-primitives",
+ "derive_more",
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot 0.12.3",
- "reth-chainspec",
- "reth-errors",
  "reth-evm",
  "reth-evm-optimism",
+ "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-primitives",
  "reth-provider",
@@ -8407,6 +8409,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

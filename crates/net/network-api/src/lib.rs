@@ -32,6 +32,7 @@ pub mod reputation;
 pub mod noop;
 
 /// Provides general purpose information about the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
