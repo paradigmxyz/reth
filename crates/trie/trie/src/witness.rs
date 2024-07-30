@@ -1,13 +1,10 @@
 use crate::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedCursorFactory},
-    prefix_set::TriePrefixSetsMut,
-    proof::Proof,
-    HashedPostState,
+    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
+    trie_cursor::TrieCursorFactory, HashedPostState,
 };
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::Either;
-use reth_db::transaction::DbTx;
-use reth_execution_errors::StateProofError;
+use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
@@ -16,9 +13,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// State transition witness for the trie.
 #[derive(Debug)]
-pub struct Witness<'a, TX, H> {
-    /// A reference to the database transaction.
-    tx: &'a TX,
+pub struct TrieWitness<T, H> {
+    /// Creates cursor for traversing trie nodes.
+    trie_cursor_factory: T,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
@@ -27,11 +24,11 @@ pub struct Witness<'a, TX, H> {
     witness: HashMap<B256, Bytes>,
 }
 
-impl<'a, TX, H> Witness<'a, TX, H> {
+impl<T, H> TrieWitness<T, H> {
     /// Creates a new proof generator.
-    pub fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
         Self {
-            tx,
+            trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: TriePrefixSetsMut::default(),
             witness: HashMap::default(),
@@ -39,9 +36,9 @@ impl<'a, TX, H> Witness<'a, TX, H> {
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Witness<'a, TX, HF> {
-        Witness {
-            tx: self.tx,
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
+        TrieWitness {
+            trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             witness: self.witness,
@@ -55,19 +52,13 @@ impl<'a, TX, H> Witness<'a, TX, H> {
     }
 }
 
-impl<'a, TX> Witness<'a, TX, DatabaseHashedCursorFactory<'a, TX>> {
-    /// Create a new [Proof] instance from database transaction.
-    pub fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
-    }
-}
-
-impl<'a, TX, H> Witness<'a, TX, H>
+impl<T, H> TrieWitness<T, H>
 where
-    TX: DbTx,
+    T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
 {
-    /// TODO:
+    /// Compute the state transition witness for the trie. Gather all required nodes
+    /// to apply `state` on top of the current trie state.
     ///
     /// # Arguments
     ///
@@ -75,7 +66,7 @@ where
     pub fn compute(
         mut self,
         state: HashedPostState,
-    ) -> Result<HashMap<B256, Bytes>, StateProofError> {
+    ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
         let proof_targets = HashMap::from_iter(
             state.accounts.keys().map(|hashed_address| (*hashed_address, Vec::new())).chain(
                 state.storages.iter().map(|(hashed_address, storage)| {
@@ -83,10 +74,11 @@ where
                 }),
             ),
         );
-        let account_multiproof = Proof::new(self.tx, self.hashed_cursor_factory.clone())
-            .with_prefix_sets_mut(self.prefix_sets.clone())
-            .with_targets(proof_targets.clone())
-            .multiproof()?;
+        let account_multiproof =
+            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .with_targets(proof_targets.clone())
+                .multiproof()?;
 
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
@@ -94,10 +86,16 @@ where
         let mut account_trie_nodes = BTreeMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
             let key = Nibbles::unpack(hashed_address);
-            let storage_multiproof = account_multiproof.storages.get(&hashed_address).unwrap();
+            let storage_multiproof = account_multiproof
+                .storages
+                .get(&hashed_address)
+                .ok_or(TrieWitnessError::MissingStorageMultiProof(hashed_address))?;
 
             // Gather and record account trie nodes.
-            let account = state.accounts.get(&hashed_address).unwrap();
+            let account = state
+                .accounts
+                .get(&hashed_address)
+                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
             let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
                 account_rlp.clear();
                 TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
@@ -128,16 +126,19 @@ where
 
             let root = Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
                 // Right pad the target with 0s.
-                let mut key = key.pack();
-                key.resize(32, 0);
-                let target = B256::from_slice(&key);
-                let mut proof = Proof::new(self.tx, self.hashed_cursor_factory.clone())
-                    .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .with_targets(HashMap::from([(target, Vec::new())]))
-                    .storage_multiproof(hashed_address)?;
+                let mut padded_key = key.pack();
+                padded_key.resize(32, 0);
+                let mut proof = Proof::new(
+                    self.trie_cursor_factory.clone(),
+                    self.hashed_cursor_factory.clone(),
+                )
+                .with_prefix_sets_mut(self.prefix_sets.clone())
+                .with_targets(HashMap::from([(B256::from_slice(&padded_key), Vec::new())]))
+                .storage_multiproof(hashed_address)?;
 
                 // The subtree only contains the proof for a single target.
-                let node = proof.subtree.remove(&Nibbles::unpack(key)).unwrap();
+                let node =
+                    proof.subtree.remove(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
                 self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
                 Ok(node)
             })?;
@@ -146,16 +147,19 @@ where
 
         Self::next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
             // Right pad the target with 0s.
-            let mut key = key.pack();
-            key.resize(32, 0);
-            let target = B256::from_slice(&key);
-            let mut proof = Proof::new(self.tx, self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_targets(HashMap::from([(target, Vec::new())]))
-                .multiproof()?;
+            let mut padded_key = key.pack();
+            padded_key.resize(32, 0);
+            let mut proof =
+                Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                    .with_prefix_sets_mut(self.prefix_sets.clone())
+                    .with_targets(HashMap::from([(B256::from_slice(&padded_key), Vec::new())]))
+                    .multiproof()?;
 
             // The subtree only contains the proof for a single target.
-            let node = proof.account_subtree.remove(&Nibbles::unpack(key)).unwrap();
+            let node = proof
+                .account_subtree
+                .remove(&key)
+                .ok_or(TrieWitnessError::MissingTargetNode(key))?;
             self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
             Ok(node)
         })?;
@@ -206,10 +210,10 @@ where
         Ok(trie_nodes)
     }
 
-    fn next_root_from_proofs<P: TrieNodeProvider>(
+    fn next_root_from_proofs(
         trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
-        mut trie_node_provider: P,
-    ) -> Result<B256, StateProofError> {
+        mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
+    ) -> Result<B256, TrieWitnessError> {
         // Ignore branch child hashes in the path of leaves or lower child hashes.
         let mut keys = trie_nodes.keys().peekable();
         let mut ignored = HashSet::<Nibbles>::default();
@@ -235,7 +239,7 @@ where
                         // Parent is a branch node that needs to be turned into an extension node.
                         let mut path = path.clone();
                         loop {
-                            let node = trie_node_provider.get_node(path.clone())?;
+                            let node = trie_node_provider(path.clone())?;
                             match TrieNode::decode(&mut &node[..])? {
                                 TrieNode::Branch(branch) => {
                                     let children = branch_node_children(path, &branch);
@@ -263,19 +267,6 @@ where
             }
         }
         Ok(hash_builder.root())
-    }
-}
-
-trait TrieNodeProvider {
-    fn get_node(&mut self, path: Nibbles) -> Result<Bytes, StateProofError>;
-}
-
-impl<F> TrieNodeProvider for F
-where
-    F: FnMut(Nibbles) -> Result<Bytes, StateProofError>,
-{
-    fn get_node(&mut self, path: Nibbles) -> Result<Bytes, StateProofError> {
-        self(path)
     }
 }
 
