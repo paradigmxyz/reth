@@ -696,6 +696,14 @@ where
                 BackfillSyncState::Idle,
                 "backfill action should only be emitted when backfill is idle"
             );
+
+            if self.persistence_state.in_progress() {
+                // backfill sync and persisting data are mutually exclusive, so we can't start
+                // backfill while we're still persisting
+                debug!(target: "engine", "skipping backfill file while persistence task is active");
+                return
+            }
+
             self.backfill_sync_state = BackfillSyncState::Pending;
             debug!(target: "engine", "emitting backfill action event");
         }
@@ -709,6 +717,11 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
+        if !self.backfill_sync_state.is_idle() {
+            // can't persist if backfill is running
+            return false
+        }
+
         let min_block = self.persistence_state.last_persisted_block_number;
 
         self.state.tree_state.max_block_number() - min_block >= self.config.persistence_threshold()
