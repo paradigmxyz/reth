@@ -209,6 +209,9 @@ pub use eth::EthHandlers;
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 
+// Concurrency limit
+mod layer;
+
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
 pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
