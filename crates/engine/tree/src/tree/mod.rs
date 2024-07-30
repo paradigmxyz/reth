@@ -1617,14 +1617,14 @@ mod tests {
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{
-        test_utils::{get_executed_block_with_number, get_executed_blocks},
+        test_utils::{generate_random_block, get_executed_block_with_number, get_executed_blocks},
         BlockState,
     };
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
-    use reth_primitives::Bytes;
+    use reth_primitives::{Address, Bytes};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
@@ -1636,6 +1636,7 @@ mod tests {
     struct TestHarness {
         tree: EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
         to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
+        from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
         action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
@@ -1679,7 +1680,15 @@ mod tests {
                 TreeConfig::default(),
             );
 
-            Self { tree, to_tree_tx, blocks: vec![], action_rx, payload_command_rx, chain_spec }
+            Self {
+                tree,
+                to_tree_tx,
+                from_tree_rx,
+                blocks: vec![],
+                action_rx,
+                payload_command_rx,
+                chain_spec,
+            }
         }
 
         fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
@@ -1973,6 +1982,62 @@ mod tests {
 
             assert_eq!(old.len(), 1);
             assert_eq!(old[0].block.hash(), blocks[2].block.hash());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_fcu_missing_head() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let blocks: Vec<_> = get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(blocks);
+
+        let missing_block = generate_random_block(
+            6,
+            test_harness.blocks.last().unwrap().block().hash(),
+            &chain_spec,
+            Address::random(),
+            &mut U256::from(1_000_000_000_000_000_000u64),
+            &mut 0,
+        );
+
+        let fcu_state = ForkchoiceState {
+            head_block_hash: missing_block.hash(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated { state: fcu_state, payload_attrs: None, tx },
+        ));
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+
+        assert!(response.payload_status.is_syncing());
+
+        // we receive first an EngineApiEvent::BeaconConsensus event mirroring the FCU.
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                state,
+                status,
+            )) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, PayloadStatusEnum::Syncing.into());
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // then we receive an EngineApiEvent::Download event to get the missing block.
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::Download(DownloadRequest::BlockSet(actual_block_set)) => {
+                let expected_block_set = HashSet::from([missing_block.hash()]);
+                assert_eq!(actual_block_set, expected_block_set);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
         }
     }
 }
