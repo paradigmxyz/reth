@@ -292,8 +292,6 @@ where
 
         let network_builder = ctx
             .network_config_builder()?
-            // purposefully disable discv4
-            .disable_discv4_discovery()
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
