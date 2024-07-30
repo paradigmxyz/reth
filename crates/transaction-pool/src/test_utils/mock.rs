@@ -5,7 +5,7 @@ use crate::{
     pool::txpool::TxPool,
     traits::TransactionOrigin,
     CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
-    ValidPoolTransaction,
+    PooledTransaction, ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -557,6 +557,14 @@ impl MockTransaction {
     }
 }
 
+impl PooledTransaction for MockTransaction {
+    type PooledTx = Self;
+
+    type RecoveredTx = TransactionSignedEcRecovered;
+
+    type RecoveredPooledTx = PooledTransactionsElementEcRecovered;
+}
+
 impl PoolTransaction for MockTransaction {
     fn hash(&self) -> &TxHash {
         match self {
@@ -869,8 +877,129 @@ impl TryFromRecoveredTransaction for MockTransaction {
     }
 }
 
+impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+        let sender = tx.signer();
+        let transaction = tx.into_signed();
+        let hash = transaction.hash();
+        let size = transaction.size();
+
+        #[allow(unreachable_patterns)]
+        match transaction.transaction {
+            Transaction::Legacy(TxLegacy {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+            }) => Ok(Self::Legacy {
+                chain_id,
+                hash,
+                sender,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                size,
+            }),
+            Transaction::Eip2930(TxEip2930 {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+            }) => Ok(Self::Eip2930 {
+                chain_id,
+                hash,
+                sender,
+                nonce,
+                gas_price,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+                size,
+            }),
+            Transaction::Eip1559(TxEip1559 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                input,
+                access_list,
+            }) => Ok(Self::Eip1559 {
+                chain_id,
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+                size,
+            }),
+            Transaction::Eip4844(TxEip4844 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                placeholder,
+                to,
+                value,
+                input,
+                access_list,
+                blob_versioned_hashes: _,
+                max_fee_per_blob_gas,
+            }) => Ok(Self::Eip4844 {
+                chain_id,
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                max_fee_per_blob_gas,
+                gas_limit,
+                placeholder,
+                to,
+                value,
+                input,
+                access_list,
+                sidecar: BlobTransactionSidecar::default(),
+                size,
+            }),
+            _ => unreachable!("Invalid transaction type"),
+        }
+    }
+}
+
 impl FromRecoveredPooledTransaction for MockTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        TryFromRecoveredTransaction::try_from_recovered_transaction(
+            tx.into_ecrecovered_transaction(),
+        )
+        .expect("Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction")
+    }
+}
+
+impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
+    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
         TryFromRecoveredTransaction::try_from_recovered_transaction(
             tx.into_ecrecovered_transaction(),
         )
@@ -889,6 +1018,18 @@ impl IntoRecoveredTransaction for MockTransaction {
         };
 
         TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
+    }
+}
+
+impl From<MockTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: MockTransaction) -> Self {
+        let signed_tx = TransactionSigned {
+            hash: *tx.hash(),
+            signature: Signature::default(),
+            transaction: tx.clone().into(),
+        };
+
+        Self::from_signed_transaction(signed_tx, tx.sender())
     }
 }
 

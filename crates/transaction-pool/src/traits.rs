@@ -753,6 +753,43 @@ impl BestTransactionsAttributes {
     }
 }
 
+// pub trait PooledTransaction {
+//     /// Associated type representing the pooled variant of the transaction.
+//     type PooledTx;
+
+//     /// Associated type representing the recovered variant of the transaction.
+//     type RecoveredTx;
+
+//     /// Associated type representing the recovered pooled variant of the transaction.
+//     type RecoveredPooledTx;
+
+//     /// Associated type representing the error type.
+//     type Error;
+
+//     /// Converts to the pooled transaction type.
+//     fn into_recovered_tx(self) -> Self::RecoveredTx;
+
+//     /// Converts to the recovered transaction type.
+//     fn try_from_recovered_tx(tx: Self::RecoveredTx) -> Result<Self, Self::Error>
+//     where
+//         Self: Sized;
+
+//     /// Converts from the recovered pooled transaction type.
+//     fn from_recovered_pooled_tx(tx: Self::RecoveredPooledTx) -> Self::PooledTx;
+// }
+
+/// A trait for converting a transaction into a pooled transaction.
+pub trait PooledTransaction {
+    /// Associated type representing the pooled variant of the transaction.
+    type PooledTx: From<Self::RecoveredPooledTx> + TryFrom<Self::RecoveredTx>;
+
+    /// Associated type representing the recovered variant of the transaction.
+    type RecoveredTx: From<Self::PooledTx>;
+
+    /// Associated type representing the recovered pooled variant of the transaction.
+    type RecoveredPooledTx;
+}
+
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
     fmt::Debug
@@ -761,6 +798,7 @@ pub trait PoolTransaction:
     + FromRecoveredPooledTransaction
     + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
+    + PooledTransaction
 {
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -992,6 +1030,14 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     }
 }
 
+impl PooledTransaction for EthPooledTransaction {
+    type PooledTx = Self;
+
+    type RecoveredTx = TransactionSignedEcRecovered;
+
+    type RecoveredPooledTx = PooledTransactionsElementEcRecovered;
+}
+
 impl PoolTransaction for EthPooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
@@ -1171,6 +1217,33 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
     }
 }
 
+impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+        // ensure we can handle the transaction type and its format
+        match tx.tx_type() as u8 {
+            0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
+                // supported
+            }
+            EIP4844_TX_TYPE_ID => {
+                // doesn't have a blob sidecar
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+            }
+            unsupported => {
+                // unsupported transaction type
+                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    unsupported,
+                ))
+            }
+        };
+
+        let encoded_length = tx.length_without_header();
+        let transaction = Self::new(tx, encoded_length);
+        Ok(transaction)
+    }
+}
+
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         Self::from(tx)
@@ -1180,6 +1253,12 @@ impl FromRecoveredPooledTransaction for EthPooledTransaction {
 impl IntoRecoveredTransaction for EthPooledTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone()
+    }
+}
+
+impl From<EthPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: EthPooledTransaction) -> Self {
+        tx.transaction
     }
 }
 
