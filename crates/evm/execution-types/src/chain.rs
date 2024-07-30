@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use reth_execution_errors::BlockExecutionError;
+use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
@@ -261,10 +261,11 @@ impl Chain {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(BlockExecutionError::AppendChainDoesntConnect {
+            return Err(InternalBlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
-            })
+            }
+            .into())
         }
 
         // Insert blocks from other chain

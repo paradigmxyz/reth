@@ -93,7 +93,7 @@ where
         }
 
         match ready!(this.tasks.poll_next_unpin(cx)) {
-            Some(res) => Poll::Ready(Some(res.map_err(|e| BlockExecutionError::Other(e.into()))?)),
+            Some(res) => Poll::Ready(Some(res.map_err(BlockExecutionError::other)?)),
             None => Poll::Ready(None),
         }
     }
