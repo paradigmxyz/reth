@@ -108,8 +108,8 @@ where
         tree: Arc<dyn TreeViewer>,
         latest: SealedHeader,
         finalized: Option<SealedHeader>,
-    ) -> ProviderResult<Self> {
-        Ok(Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) })
+    ) -> Self {
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) }
     }
 
     /// Create a new provider using only the database and the tree, fetching the latest header from
@@ -124,8 +124,7 @@ where
         let finalized_block_number = provider.last_finalized_block_number()?;
         let finalized_header = provider.sealed_header(finalized_block_number)?;
 
-        drop(provider);
-        Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header)
+        Ok(Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header))
     }
 
     /// Ensures that the given block number is canonical (synced)
