@@ -127,6 +127,18 @@ pub enum BlockExecutionError {
     Internal(#[from] InternalBlockExecutionError),
 }
 
+impl From<ProviderError> for BlockExecutionError {
+    fn from(value: ProviderError) -> Self {
+        InternalBlockExecutionError::from(value).into()
+    }
+}
+
+impl From<PruneSegmentError> for BlockExecutionError {
+    fn from(value: PruneSegmentError) -> Self {
+        InternalBlockExecutionError::from(value).into()
+    }
+}
+
 impl BlockExecutionError {
     /// Create a new `BlockExecutionError::Other` variant.
     #[cfg(feature = "std")]

@@ -264,7 +264,8 @@ impl Chain {
             return Err(InternalBlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
-            }.into())
+            }
+            .into())
         }
 
         // Insert blocks from other chain
