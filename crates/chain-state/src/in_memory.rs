@@ -112,11 +112,13 @@ pub struct CanonicalInMemoryState {
 }
 
 impl CanonicalInMemoryState {
-    /// Create a new in memory state with the given blocks, numbers, and pending state.
+    /// Create a new in memory state with the given blocks, numbers, pending state and finalized
+    /// header if it exists.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
         numbers: HashMap<u64, B256>,
         pending: Option<BlockState>,
+        finalized: Option<SealedHeader>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let head_state = in_memory_state.head_state();
@@ -124,7 +126,7 @@ impl CanonicalInMemoryState {
             Some(state) => state.block().block().header.clone(),
             None => SealedHeader::default(),
         };
-        let chain_info_tracker = ChainInfoTracker::new(header);
+        let chain_info_tracker = ChainInfoTracker::new(header, finalized);
         let (canon_state_notification_sender, _canon_state_notification_receiver) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -137,9 +139,10 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Create a new in memory state with the given local head.
-    pub fn with_head(head: SealedHeader) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head);
+    /// Create a new in memory state with the given local head and finalized header
+    /// if it exists.
+    pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
+        let chain_info_tracker = ChainInfoTracker::new(head, finalized);
         let in_memory_state = InMemoryState::default();
         let (canon_state_notification_sender, _canon_state_notification_receiver) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -889,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_chain_update() {
-        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None);
+        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None, None);
         let block1 = get_executed_block_with_number(0, B256::random());
         let block2 = get_executed_block_with_number(0, B256::random());
         let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
@@ -925,7 +928,7 @@ mod tests {
         numbers.insert(2, block2.block().hash());
         numbers.insert(3, block3.block().hash());
 
-        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None);
+        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None);
 
         let historical: StateProviderBox = Box::new(MockStateProvider);
 
