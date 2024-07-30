@@ -2,6 +2,7 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use bytes::Buf;
 use reth_codecs::{reth_codec, Compact};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
+use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 
 use super::StageId;
@@ -32,7 +33,7 @@ impl MerkleCheckpoint {
 }
 
 impl Compact for MerkleCheckpoint {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -46,7 +47,7 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
-        for item in self.walker_stack {
+        for item in &self.walker_stack {
             len += item.to_compact(buf);
         }
 
@@ -75,7 +76,7 @@ impl Compact for MerkleCheckpoint {
 
 /// Saves the progress of AccountHashing stage.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountHashingCheckpoint {
     /// The next account to start hashing from.
     pub address: Option<Address>,
@@ -87,7 +88,7 @@ pub struct AccountHashingCheckpoint {
 
 /// Saves the progress of StorageHashing stage.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageHashingCheckpoint {
     /// The next account to start hashing from.
     pub address: Option<Address>,
@@ -101,7 +102,7 @@ pub struct StorageHashingCheckpoint {
 
 /// Saves the progress of Execution stage.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionCheckpoint {
     /// Block range which this checkpoint is valid for.
     pub block_range: CheckpointBlockRange,
@@ -111,7 +112,7 @@ pub struct ExecutionCheckpoint {
 
 /// Saves the progress of Headers stage.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeadersCheckpoint {
     /// Block range which this checkpoint is valid for.
     pub block_range: CheckpointBlockRange,
@@ -121,7 +122,7 @@ pub struct HeadersCheckpoint {
 
 /// Saves the progress of Index History stages.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexHistoryCheckpoint {
     /// Block range which this checkpoint is valid for.
     pub block_range: CheckpointBlockRange,
@@ -131,7 +132,7 @@ pub struct IndexHistoryCheckpoint {
 
 /// Saves the progress of abstract stage iterating over or downloading entities.
 #[reth_codec]
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct EntitiesCheckpoint {
     /// Number of entities already processed.
     pub processed: u64,
@@ -159,7 +160,7 @@ impl EntitiesCheckpoint {
 /// Saves the block range. Usually, it's used to check the validity of some stage checkpoint across
 /// multiple executions.
 #[reth_codec]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckpointBlockRange {
     /// The first block of the range, inclusive.
     pub from: BlockNumber,
@@ -181,7 +182,7 @@ impl From<&RangeInclusive<BlockNumber>> for CheckpointBlockRange {
 
 /// Saves the progress of a stage.
 #[reth_codec]
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct StageCheckpoint {
     /// The maximum block processed by the stage.
     pub block_number: BlockNumber,
@@ -247,7 +248,7 @@ impl StageCheckpoint {
 //  is not a Copy type.
 /// Stage-specific checkpoint metrics.
 #[reth_codec]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum StageUnitCheckpoint {
     /// Saves the progress of AccountHashing stage.
     Account(AccountHashingCheckpoint),
@@ -392,7 +393,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        let encoded = checkpoint.clone().to_compact(&mut buf);
+        let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
     }

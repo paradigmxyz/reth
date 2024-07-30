@@ -1,25 +1,33 @@
-use futures::{ready, StreamExt};
+use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconEngineMessage, EthBeaconConsensus};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EthBeaconConsensus};
 use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_engine_tree::{
     backfill::PipelineSync,
-    chain::ChainOrchestrator,
     download::BasicBlockDownloader,
-    engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler, FromEngine},
+    engine::{EngineApiRequestHandler, EngineHandler},
+    persistence::PersistenceHandle,
+    tree::{EngineApiTreeHandlerImpl, TreeConfig},
+};
+pub use reth_engine_tree::{
+    chain::{ChainEvent, ChainOrchestrator},
+    engine::EngineApiEvent,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_validator::ExecutionPayloadValidator;
+use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
+use reth_prune::Pruner;
 use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
-    future::Future,
     pin::Pin,
-    sync::{mpsc::Sender, Arc},
+    sync::{mpsc::channel, Arc},
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Alias for Ethereum chain orchestrator.
@@ -49,48 +57,72 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Constructor for `EthService`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
-        to_tree: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
-        from_tree: UnboundedReceiver<EngineApiEvent>,
         incoming_requests: UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
+        provider: ProviderFactory<DB>,
+        blockchain_db: BlockchainProvider2<DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
+        payload_builder: PayloadBuilderHandle<EthEngineTypes>,
+        tree_config: TreeConfig,
     ) -> Self {
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
-        let downloader = BasicBlockDownloader::new(client, consensus);
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+        let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let engine_handler = EngineApiRequestHandler::new(to_tree, from_tree);
+        let (to_tree_tx, to_tree_rx) = channel();
+
+        let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
+        let executor_factory = EthExecutorProvider::ethereum(chain_spec);
+
+        let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
+
+        let from_tree = EngineApiTreeHandlerImpl::spawn_new(
+            blockchain_db,
+            executor_factory,
+            consensus,
+            payload_validator,
+            to_tree_rx,
+            persistence_handle,
+            payload_builder,
+            canonical_in_memory_state,
+            tree_config,
+        );
+
+        let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
         Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
     }
+
+    /// Returns a mutable reference to the orchestrator.
+    pub fn orchestrator_mut(&mut self) -> &mut EthServiceType<DB, Client> {
+        &mut self.orchestrator
+    }
 }
 
-impl<DB, Client> Future for EthService<DB, Client>
+impl<DB, Client> Stream for EthService<DB, Client>
 where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    type Output = Result<(), EthServiceError>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Call poll on the inner orchestrator.
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;
-        loop {
-            match ready!(StreamExt::poll_next_unpin(&mut orchestrator, cx)) {
-                Some(_event) => continue,
-                None => return Poll::Ready(Ok(())),
-            }
-        }
+        StreamExt::poll_next_unpin(&mut orchestrator, cx)
     }
 }
 
 /// Potential error returned by `EthService`.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Eth service error.")]
 pub struct EthServiceError {}
 
 #[cfg(test)]
@@ -99,10 +131,13 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_tree::test_utils::TestPipelineBuilder;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
+    use reth_primitives::SealedHeader;
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use reth_tasks::TokioTaskExecutor;
-    use std::sync::{mpsc::channel, Arc};
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::Arc;
+    use tokio::sync::{mpsc::unbounded_channel, watch};
 
     #[test]
     fn eth_chain_orchestrator_build() {
@@ -121,18 +156,27 @@ mod tests {
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
         let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
-        let (to_tree_tx, _to_tree_rx) = channel();
-        let (_from_tree_tx, from_tree_rx) = unbounded_channel();
+        let blockchain_db =
+            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default());
 
-        let _eth_chain_orchestrator = EthService::new(
+        let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
+
+        let (tx, _rx) = unbounded_channel();
+        let _eth_service = EthService::new(
             chain_spec,
             client,
-            to_tree_tx,
-            from_tree_rx,
             incoming_requests,
             pipeline,
             pipeline_task_spawner,
+            provider_factory,
+            blockchain_db,
+            pruner,
+            PayloadBuilderHandle::new(tx),
+            TreeConfig::default(),
         );
     }
 }

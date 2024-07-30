@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
 #[reth_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
@@ -61,13 +61,17 @@ impl Bytecode {
     /// Create new bytecode from raw bytes.
     ///
     /// No analysis will be performed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if bytecode is EOF and has incorrect format.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
     }
 }
 
 impl Compact for Bytecode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -87,10 +91,10 @@ impl Compact for Bytecode {
                 buf.put_slice(map);
                 1 + 8 + map.len()
             }
-            RevmBytecode::Eof(_) => {
-                // buf.put_u8(3);
-                // TODO(EOF)
-                todo!("EOF")
+            RevmBytecode::Eof(eof) => {
+                buf.put_u8(3);
+                buf.put_slice(eof.raw().as_ref());
+                1 + eof.raw().as_ref().len()
             }
         };
         len + bytecode.len() + 4
@@ -114,8 +118,10 @@ impl Compact for Bytecode {
                     JumpTable::from_slice(buf),
                 )
             }),
-            // TODO(EOF)
-            3 => todo!("EOF"),
+            3 => {
+                // EOF bytecode object will be decoded from the raw bytecode
+                Self(RevmBytecode::new_raw(bytes))
+            }
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])
@@ -209,7 +215,7 @@ mod tests {
             2,
             JumpTable::from_slice(&[0]),
         )));
-        let len = bytecode.clone().to_compact(&mut buf);
+        let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);

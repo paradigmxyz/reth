@@ -18,7 +18,6 @@ pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
 use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
-use serde::{Deserialize, Serialize};
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 /// The `PeerId` type.
@@ -246,7 +245,8 @@ impl std::fmt::Display for Direction {
 }
 
 /// The status of the network being ran by the local node.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NetworkStatus {
     /// The local node client version.
     pub client_version: String,

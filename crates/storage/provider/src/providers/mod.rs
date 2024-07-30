@@ -1,17 +1,18 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, ChainSpecProvider,
+    ChangeSetReader, DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider,
+    HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
+    WithdrawalsProvider,
 };
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ChainInfoTracker};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -54,12 +55,12 @@ pub use state::{
 mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
 
-mod chain_info;
-use chain_info::ChainInfoTracker;
-
 mod consistent_view;
 use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
+
+mod blockchain_provider;
+pub use blockchain_provider::BlockchainProvider2;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -74,8 +75,6 @@ pub struct BlockchainProvider<DB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
-    // TODO: In-memory state for recent blocks and pending state.
-    //in_memory_state: Arc<dyn InMemoryState>,
 }
 
 impl<DB> Clone for BlockchainProvider<DB> {
@@ -84,8 +83,6 @@ impl<DB> Clone for BlockchainProvider<DB> {
             database: self.database.clone(),
             tree: self.tree.clone(),
             chain_info: self.chain_info.clone(),
-            // TODO: add in_memory_state
-            // in_memory_state: self.in_memory_state.clone(),
         }
     }
 }
@@ -96,17 +93,9 @@ impl<DB> BlockchainProvider<DB> {
     pub fn with_latest(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
-        // TODO: add in_memory_state
-        // in_memory_state: Arc<dyn InMemoryState>,
         latest: SealedHeader,
     ) -> Self {
-        Self {
-            database,
-            tree,
-            // TODO: add in_memory_state
-            // in_memory_state,
-            chain_info: ChainInfoTracker::new(latest),
-        }
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
 
     /// Sets the treeviewer for the provider.
@@ -134,12 +123,7 @@ where
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
-}
 
-impl<DB> BlockchainProvider<DB>
-where
-    DB: Database,
-{
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
@@ -156,6 +140,26 @@ where
         } else {
             Ok(())
         }
+    }
+}
+
+impl<DB> BlockchainProvider<DB>
+where
+    Self: StateProviderFactory,
+    DB: Database,
+{
+    /// Return a [`StateProviderBox`] that contains bundle state data provider.
+    /// Used to inspect or execute transaction on the pending state.
+    fn pending_with_provider(
+        &self,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
+    ) -> ProviderResult<StateProviderBox> {
+        let canonical_fork = bundle_state_data.canonical_fork();
+        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
+
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        Ok(Box::new(bundle_state_provider))
     }
 }
 
@@ -290,7 +294,7 @@ where
                 block
             }
             BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
-            BlockSource::Database => self.database.block_by_hash(hash)?,
+            BlockSource::Canonical => self.database.block_by_hash(hash)?,
         };
 
         Ok(block)
@@ -526,6 +530,10 @@ where
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.database.provider()?.get_stage_checkpoint_progress(id)
     }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.database.provider()?.get_all_checkpoints()
+    }
 }
 
 impl<DB> EvmEnvProvider for BlockchainProvider<DB>
@@ -670,18 +678,6 @@ where
         }
         Ok(None)
     }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let canonical_fork = bundle_state_data.canonical_fork();
-        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
-
-        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
-    }
 }
 
 impl<DB> BlockchainTreeEngine for BlockchainProvider<DB>
@@ -820,7 +816,7 @@ where
                 // trait impl
                 if Some(true) == hash.require_canonical {
                     // check the database, canonical blocks are only stored in the database
-                    self.find_block_by_hash(hash.block_hash, BlockSource::Database)
+                    self.find_block_by_hash(hash.block_hash, BlockSource::Canonical)
                 } else {
                     self.block_by_hash(hash.block_hash)
                 }

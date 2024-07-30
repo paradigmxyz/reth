@@ -1,4 +1,7 @@
-use std::time::Duration;
+use core::time::Duration;
+
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
 
 /// Represents one Kilogas, or `1_000` gas.
 pub const KILOGAS: u64 = 1_000;

@@ -65,7 +65,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
 impl<Provider, EngineT> EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    EngineT: EngineTypes + 'static,
+    EngineT: EngineTypes,
 {
     /// Create new instance of [`EngineApi`].
     pub fn new(
@@ -612,7 +612,7 @@ where
 impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
-    EngineT: EngineTypes + 'static,
+    EngineT: EngineTypes,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>

@@ -118,6 +118,13 @@ pub struct NetworkArgs {
 }
 
 impl NetworkArgs {
+    /// Returns the resolved bootnodes if any are provided.
+    pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.bootnodes.clone().map(|bootnodes| {
+            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+        })
+    }
+
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
     /// values in this option struct.
     ///
@@ -137,14 +144,7 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = self
-            .bootnodes
-            .clone()
-            .map(|bootnodes| {
-                bootnodes
-                    .into_iter()
-                    .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
-                    .collect()
-            })
+            .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 

@@ -186,7 +186,7 @@ where
     Ok(())
 }
 
-/// Shard and insert the indice list according to [`LoadMode`] and its length.
+/// Shard and insert the indices list according to [`LoadMode`] and its length.
 pub(crate) fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,

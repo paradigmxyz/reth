@@ -173,30 +173,10 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
-            EngineApiError::NewPayload(ref err) => match err {
-                BeaconOnNewPayloadError::Internal(_) => jsonrpsee_types::error::ErrorObject::owned(
-                    INTERNAL_ERROR_CODE,
-                    SERVER_ERROR_MSG,
-                    Some(ErrorData::new(error)),
-                ),
-                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INVALID_PARAMS_CODE,
-                        INVALID_PARAMS_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-                BeaconOnNewPayloadError::EngineUnavailable => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INTERNAL_ERROR_CODE,
-                        SERVER_ERROR_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-            },
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
+            EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |
             EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
                 INTERNAL_ERROR_CODE,

@@ -38,17 +38,27 @@ tokio.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
 
 # misc
 thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [features]
+client = [
+    "jsonrpsee/client",
+    "jsonrpsee/async-client",
+    "reth-rpc-eth-api/client"
+]
+
 optimism = [
     "reth-chainspec/optimism",
     "reth-evm-optimism/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism",
     "revm/optimism"
 ]

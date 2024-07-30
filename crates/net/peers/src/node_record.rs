@@ -33,10 +33,10 @@ use enr::Enr;
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
-    /// TCP port of the port that accepts connections.
-    pub tcp_port: u16,
     /// UDP discovery port.
     pub udp_port: u16,
+    /// TCP port of the port that accepts connections.
+    pub tcp_port: u16,
     /// Public key of the discovery service
     pub id: PeerId,
 }

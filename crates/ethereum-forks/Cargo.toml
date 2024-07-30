@@ -25,7 +25,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 thiserror-no-std = { workspace = true, default-features = false }
 once_cell.workspace = true
 dyn-clone.workspace = true
-rustc-hash.workspace = true
+rustc-hash = { workspace = true, optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -36,11 +36,11 @@ auto_impl.workspace = true
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive.workspace = true
 
 [features]
-default = ["std", "serde"]
+default = ["std", "serde", "rustc-hash"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = []
 serde = ["dep:serde"]
-std = ["thiserror-no-std/std"]
+std = ["thiserror-no-std/std", "rustc-hash/std"]
+rustc-hash = ["dep:rustc-hash"]

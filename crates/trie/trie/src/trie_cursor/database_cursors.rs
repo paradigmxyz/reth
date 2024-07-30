@@ -1,20 +1,43 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
-use reth_db::{tables, DatabaseError};
+use crate::{
+    updates::StorageTrieUpdates, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
+};
+use reth_db::{
+    cursor::{DbCursorRW, DbDupCursorRW},
+    tables, DatabaseError,
+};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
 use reth_primitives::B256;
+use reth_trie_common::StorageTrieEntry;
+
+/// Wrapper struct for database transaction implementing trie cursor factory trait.
+#[derive(Debug)]
+pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+
+impl<'a, TX> Clone for DatabaseTrieCursorFactory<'a, TX> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
+
+impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
+    /// Create new [`DatabaseTrieCursorFactory`].
+    pub const fn new(tx: &'a TX) -> Self {
+        Self(tx)
+    }
+}
 
 /// Implementation of the trie cursor factory for a database transaction.
-impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
+impl<'a, TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'a, TX> {
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?))
+        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
@@ -22,7 +45,7 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
-            self.cursor_dup_read::<tables::StoragesTrie>()?,
+            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         ))
     }
@@ -48,7 +71,7 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
+        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
@@ -56,12 +79,12 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
+        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.next()?.map(|value| (value.0 .0, value.1 .0)))
+        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
@@ -83,6 +106,62 @@ impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
+    }
+}
+
+impl<C> DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrie>
+        + DbCursorRW<tables::StoragesTrie>
+        + DbDupCursorRO<tables::StoragesTrie>
+        + DbDupCursorRW<tables::StoragesTrie>,
+{
+    /// Writes storage updates
+    pub fn write_storage_trie_updates(
+        &mut self,
+        updates: &StorageTrieUpdates,
+    ) -> Result<usize, DatabaseError> {
+        // The storage trie for this account has to be deleted.
+        if updates.is_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+            self.cursor.delete_current_duplicates()?;
+        }
+
+        // Merge updated and removed nodes. Updated nodes must take precedence.
+        let mut storage_updates = updates
+            .removed_nodes
+            .iter()
+            .filter_map(|n| (!updates.storage_nodes.contains_key(n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        storage_updates
+            .extend(updates.storage_nodes.iter().map(|(nibbles, node)| (nibbles, Some(node))));
+
+        // Sort trie node updates.
+        storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        let mut num_entries = 0;
+        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+            num_entries += 1;
+            let nibbles = StoredNibblesSubKey(nibbles.clone());
+            // Delete the old entry if it exists.
+            if self
+                .cursor
+                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                .filter(|e| e.nibbles == nibbles)
+                .is_some()
+            {
+                self.cursor.delete_current()?;
+            }
+
+            // There is an updated version of this node, insert new entry.
+            if let Some(node) = maybe_updated {
+                self.cursor.upsert(
+                    self.hashed_address,
+                    StorageTrieEntry { nibbles, node: node.clone() },
+                )?;
+            }
+        }
+
+        Ok(num_entries)
     }
 }
 
@@ -127,7 +206,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StorageTrieEntry, StoredBranchNode};
+    use crate::StorageTrieEntry;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
@@ -149,13 +228,13 @@ mod tests {
             cursor
                 .upsert(
                     key.into(),
-                    StoredBranchNode(BranchNodeCompact::new(
+                    BranchNodeCompact::new(
                         0b0000_0010_0000_0001,
                         0b0000_0010_0000_0001,
                         0,
                         Vec::default(),
                         None,
-                    )),
+                    ),
                 )
                 .unwrap();
         }

@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(missing_docs, dead_code, missing_debug_implementations, unused_variables)] // TODO rm
 
 /// Re-export of the blockchain tree API.
@@ -20,18 +20,14 @@ pub use reth_blockchain_tree_api::*;
 pub mod backfill;
 /// The type that drives the chain forward.
 pub mod chain;
-/// The background writer service for batch db writes.
-pub mod database;
 /// Support for downloading blocks on demand for live sync.
 pub mod download;
 /// Engine Api chain handler support.
 pub mod engine;
 /// Metrics support.
 pub mod metrics;
-/// The background writer service, coordinating the static file and database services.
+/// The background writer service, coordinating write operations on static files and the database.
 pub mod persistence;
-/// The background writer service for static file writes.
-pub mod static_files;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
 

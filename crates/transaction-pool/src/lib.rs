@@ -35,7 +35,7 @@
 //! The pool itself does not validate incoming transactions, instead this should be provided by
 //! implementing `TransactionsValidator`. Only transactions that the validator returns as valid are
 //! included in the pool. It is assumed that transaction that are in the pool are either valid on
-//! the current state or could become valid after certain state changes. transaction that can never
+//! the current state or could become valid after certain state changes. Transactions that can never
 //! become valid (e.g. nonce lower than current on chain nonce) will never be added to the pool and
 //! instead are discarded right away.
 //!
@@ -232,7 +232,7 @@ where
         self.inner().config()
     }
 
-    /// Returns future that validates all transaction in the given iterator.
+    /// Returns future that validates all transactions in the given iterator.
     ///
     /// This returns the validated transactions in the iterator's order.
     async fn validate_all(
@@ -278,7 +278,7 @@ where
     Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
-    /// Returns a new [Pool] that uses the default [`TransactionValidationTaskExecutor`] when
+    /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
     /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
     ///
     /// # Example

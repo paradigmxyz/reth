@@ -1,11 +1,14 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use reth_codecs::{reth_codec, Compact};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
 #[reth_codec]
-#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(
+    Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+)]
 pub enum PruneSegment {
     /// Prune segment responsible for the `TransactionSenders` table.
     SenderRecovery,

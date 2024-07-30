@@ -218,7 +218,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
-                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
             ]
             .into(),
         ),
