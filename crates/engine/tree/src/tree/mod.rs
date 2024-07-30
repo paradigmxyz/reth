@@ -1594,7 +1594,7 @@ where
 
                     // if invalid block, we check the validation error. Otherwise return the fatal
                     // error.
-                    let validation_err = error.ensure_invalid_block()?;
+                    let validation_err = error.ensure_validation_error()?;
 
                     // If the error was due to an invalid payload, the payload is added to the
                     // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is

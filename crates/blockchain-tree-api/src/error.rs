@@ -342,7 +342,7 @@ impl InsertBlockErrorKindTwo {
     ///
     /// This is intended to be used to determine if we should respond `INVALID` as a response when
     /// processing a new block.
-    pub fn ensure_invalid_block(self) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
+    pub fn ensure_validation_error(self) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
         match self {
             Self::SenderRecovery => Ok(InsertBlockValidationError::SenderRecovery),
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
