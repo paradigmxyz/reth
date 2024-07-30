@@ -2,7 +2,7 @@
 
 use crate::{
     metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
-    state::{BlockchainId, TreeState},
+    state::{SidechainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
 };
 use reth_blockchain_tree_api::{
@@ -452,7 +452,7 @@ where
     fn try_insert_block_into_side_chain(
         &mut self,
         block: SealedBlockWithSenders,
-        chain_id: BlockchainId,
+        chain_id: SidechainId,
         block_validation_kind: BlockValidationKind,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         let block_num_hash = block.num_hash();
@@ -525,7 +525,7 @@ where
     /// # Note
     ///
     /// This is not cached in order to save memory.
-    fn all_chain_hashes(&self, chain_id: BlockchainId) -> BTreeMap<BlockNumber, BlockHash> {
+    fn all_chain_hashes(&self, chain_id: SidechainId) -> BTreeMap<BlockNumber, BlockHash> {
         let mut chain_id = chain_id;
         let mut hashes = BTreeMap::new();
         loop {
@@ -563,7 +563,7 @@ where
     /// the block on
     ///
     /// Returns `None` if the chain is unknown.
-    fn canonical_fork(&self, chain_id: BlockchainId) -> Option<ForkBlock> {
+    fn canonical_fork(&self, chain_id: SidechainId) -> Option<ForkBlock> {
         let mut chain_id = chain_id;
         let mut fork;
         loop {
@@ -582,13 +582,13 @@ where
     /// Insert a chain into the tree.
     ///
     /// Inserts a chain into the tree and builds the block indices.
-    fn insert_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
+    fn insert_chain(&mut self, chain: AppendableChain) -> Option<SidechainId> {
         self.state.insert_chain(chain)
     }
 
     /// Iterate over all child chains that depend on this block and return
     /// their ids.
-    fn find_all_dependent_chains(&self, block: &BlockHash) -> HashSet<BlockchainId> {
+    fn find_all_dependent_chains(&self, block: &BlockHash) -> HashSet<SidechainId> {
         // Find all forks of given block.
         let mut dependent_block =
             self.block_indices().fork_to_child().get(block).cloned().unwrap_or_default();
@@ -625,7 +625,7 @@ where
     /// plain state during the unwind.
     /// Returns the result of inserting the chain or None if any of the dependent chains is not
     /// in the tree.
-    fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
+    fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<SidechainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
         for (number, block) in chain.blocks() {
             let hash = block.hash();
@@ -945,7 +945,7 @@ where
     /// The pending part of the chain is reinserted back into the tree with the same `chain_id`.
     fn remove_and_split_chain(
         &mut self,
-        chain_id: BlockchainId,
+        chain_id: SidechainId,
         split_at: ChainSplitTarget,
     ) -> Option<Chain> {
         let chain = self.state.chains.remove(&chain_id)?;
@@ -1458,7 +1458,7 @@ mod tests {
         /// Number of chains
         chain_num: Option<usize>,
         /// Check block to chain index
-        block_to_chain: Option<HashMap<BlockHash, BlockchainId>>,
+        block_to_chain: Option<HashMap<BlockHash, SidechainId>>,
         /// Check fork to child index
         fork_to_child: Option<HashMap<BlockHash, HashSet<BlockHash>>>,
         /// Pending blocks
@@ -1473,7 +1473,7 @@ mod tests {
             self
         }
 
-        fn with_block_to_chain(mut self, block_to_chain: HashMap<BlockHash, BlockchainId>) -> Self {
+        fn with_block_to_chain(mut self, block_to_chain: HashMap<BlockHash, SidechainId>) -> Self {
             self.block_to_chain = Some(block_to_chain);
             self
         }
