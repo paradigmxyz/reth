@@ -16,6 +16,7 @@ workspace = true
 reth-eth-wire.workspace = true
 alloy-rpc-types-admin.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
