@@ -42,6 +42,7 @@ use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{mpsc::Receiver, Arc},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -645,7 +646,11 @@ where
             self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
                 backfill_target.into(),
             )));
+            return
         };
+
+        // try to close the gap by executing buffered blocks that are child blocks of the new head
+        self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
     }
 
     /// Attempts to make the given target canonical.
@@ -924,6 +929,33 @@ where
         }
 
         Ok(())
+    }
+
+    /// Attempts to connect any buffered blocks that are connected to the given parent hash.
+    #[instrument(level = "trace", skip(self), target = "engine")]
+    fn try_connect_buffered_blocks(&mut self, parent: BlockNumHash) {
+        let blocks = self.state.buffer.remove_block_with_children(&parent.hash);
+
+        if blocks.is_empty() {
+            // nothing to append
+            return
+        }
+
+        let now = Instant::now();
+        let block_count = blocks.len();
+        for child in blocks {
+            let child_num_hash = child.num_hash();
+            match self.insert_block(child) {
+                Ok(res) => {
+                    debug!(target: "engine", child =?child_num_hash, ?res, "connected buffered block");
+                }
+                Err(err) => {
+                    debug!(target: "engine", ?err, "failed to connect buffered block to tree");
+                }
+            }
+        }
+
+        debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
     }
 
     fn buffer_block_without_senders(&mut self, block: SealedBlock) -> Result<(), InsertBlockError> {
