@@ -35,16 +35,23 @@ use revm_primitives::{
 };
 
 
-struct EvmBlockExecutor<EvmConfig, DB> {
+// GOAL: make it more convenient to customize block execution logic, such as pre-execution changes, post-execution changes, and block execution itself. So that `EthBlockExecutor` and `EthBatchExecutor` can be reused easily.
 
-    state: State<DB>,
+pub struct EvmExecutionContext<'a, DB, Ext> {
+    // TODO do we need this or push to EvmExecutor trait?
+   pub chain_spec: Arc<ChainSpec>,
+   pub evm: Evm<'a, Ext, DB>,
 }
 
 
-trait EvmExecutor<DB> {
+/// A trait that just does execution of a block
+trait EvmExecutor<EvmConfig> {
+    type Output;
 
+    /// This is used to create a new evm instance use to execute a block
+    fn config(&self) -> &EvmConfig;
 
-
+    fn execute<DB, Ext>(mut self, ctx: EvmExecutionContext<'_, DB, Ext>) -> Result<Self::Output, BlockExecutionError>;
 }
 
 
