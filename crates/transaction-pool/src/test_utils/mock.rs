@@ -558,11 +558,9 @@ impl MockTransaction {
 }
 
 impl PooledTransaction for MockTransaction {
-    type PooledTx = Self;
+    type Consensus = TransactionSignedEcRecovered;
 
-    type RecoveredTx = TransactionSignedEcRecovered;
-
-    type RecoveredPooledTx = PooledTransactionsElementEcRecovered;
+    type Pooled = PooledTransactionsElementEcRecovered;
 }
 
 impl PoolTransaction for MockTransaction {

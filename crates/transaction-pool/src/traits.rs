@@ -753,16 +753,13 @@ impl BestTransactionsAttributes {
     }
 }
 
-/// A trait for converting a transaction into a pooled transaction.
-pub trait PooledTransaction {
-    /// Associated type representing the pooled variant of the transaction.
-    type PooledTx: From<Self::RecoveredPooledTx> + TryFrom<Self::RecoveredTx>;
-
-    /// Associated type representing the recovered variant of the transaction.
-    type RecoveredTx: From<Self::PooledTx>;
+/// A trait to operate conversions between different pooled transaction types.
+pub trait PooledTransaction: std::marker::Sized {
+    /// Associated type representing the raw consensus variant of the transaction.
+    type Consensus: From<Self> + TryInto<Self>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
-    type RecoveredPooledTx;
+    type Pooled: Into<Self>;
 }
 
 /// Trait for transaction types used inside the pool
@@ -1006,11 +1003,9 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PooledTransaction for EthPooledTransaction {
-    type PooledTx = Self;
+    type Consensus = TransactionSignedEcRecovered;
 
-    type RecoveredTx = TransactionSignedEcRecovered;
-
-    type RecoveredPooledTx = PooledTransactionsElementEcRecovered;
+    type Pooled = PooledTransactionsElementEcRecovered;
 }
 
 impl PoolTransaction for EthPooledTransaction {
