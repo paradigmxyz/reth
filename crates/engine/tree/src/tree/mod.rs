@@ -9,9 +9,10 @@ use reth_beacon_consensus::{
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
-    error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
+    error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo},
+    BlockAttachment, BlockBuffer, BlockStatus,
 };
-use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
+use reth_blockchain_tree_api::InsertPayloadOk;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
@@ -1016,16 +1017,19 @@ where
         debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
     }
 
-    fn buffer_block_without_senders(&mut self, block: SealedBlock) -> Result<(), InsertBlockError> {
+    fn buffer_block_without_senders(
+        &mut self,
+        block: SealedBlock,
+    ) -> Result<(), InsertBlockErrorTwo> {
         match block.try_seal_with_senders() {
             Ok(block) => self.buffer_block(block),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockErrorTwo::sender_recovery_error(block)),
         }
     }
 
-    fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
+    fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockErrorTwo> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockErrorTwo::consensus_error(err, block.block))
         }
         self.state.buffer.insert_block(block);
         Ok(())
@@ -1233,25 +1237,25 @@ where
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
-    ) -> Result<InsertPayloadOk, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockErrorTwo::sender_recovery_error(block)),
         }
     }
 
     fn insert_block(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<InsertPayloadOk, InsertBlockError> {
+    ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
         self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockError::new(block.block, kind))
+            .map_err(|kind| InsertBlockErrorTwo::new(block.block, kind))
     }
 
     fn insert_block_inner(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
+    ) -> Result<InsertPayloadOk, InsertBlockErrorKindTwo> {
         if self.block_by_hash(block.hash())?.is_some() {
             let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
@@ -1260,13 +1264,13 @@ where
         // validate block consensus rules
         self.validate_block(&block)?;
 
-        let state_provider = self.state_provider(block.parent_hash).unwrap();
+        let state_provider = self.state_provider(block.parent_hash)?;
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number;
         let block_hash = block.hash();
         let block = block.unseal();
-        let output = executor.execute((&block, U256::MAX).into()).unwrap();
+        let output = executor.execute((&block, U256::MAX).into())?;
         self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
