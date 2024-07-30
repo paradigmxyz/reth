@@ -75,6 +75,9 @@ where
 
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
+    ///
+    /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
+    /// `database`.
     pub fn with_latest(
         database: ProviderFactory<DB>,
         latest: SealedHeader,
