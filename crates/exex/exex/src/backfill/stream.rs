@@ -173,7 +173,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        backfill::test_utils::{blocks_and_execution_outputs, chain_spec},
+        backfill::test_utils::{
+            blocks_and_execution_outcome, blocks_and_execution_outputs, chain_spec,
+        },
         BackfillJobFactory,
     };
     use futures::StreamExt;
@@ -183,8 +185,8 @@ mod tests {
     use reth_primitives::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        ExecutionOutcome,
     };
+    use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::generators;
     use secp256k1::Keypair;
 
@@ -229,7 +231,6 @@ mod tests {
         Ok(())
     }
 
-    // TODO(alexey): execute more than one block
     #[tokio::test]
     async fn test_batch() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
@@ -249,26 +250,20 @@ mod tests {
         )?;
 
         // Create first 2 blocks
-        let blocks_and_execution_outcomes =
-            blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
+        let (blocks, execution_outcome) =
+            blocks_and_execution_outcome(provider_factory, chain_spec, key_pair)?;
 
-        // Backfill the first block
-        let factory = BackfillJobFactory::new(executor.clone(), blockchain_db.clone());
-        let mut backfill_stream = factory.backfill(1..=1).into_stream();
-
-        // execute first range
+        // Backfill the same range
+        let factory =
+            BackfillJobFactory::new(executor.clone(), blockchain_db.clone()).with_thresholds(
+                ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() },
+            );
+        let mut backfill_stream = factory.backfill(1..=2).into_stream();
         let mut chain = backfill_stream.next().await.unwrap().unwrap();
         chain.execution_outcome_mut().state_mut().reverts.sort();
-        let expected_block = blocks_and_execution_outcomes[0].0.clone();
-        let execution_outcome = blocks_and_execution_outcomes[0].1.clone();
-        let expected_output = ExecutionOutcome::new(
-            execution_outcome.state,
-            execution_outcome.receipts.into(),
-            expected_block.number,
-            vec![execution_outcome.requests.into()],
-        );
-        assert_eq!(chain.blocks_iter().next(), Some(&expected_block));
-        assert_eq!(chain.execution_outcome(), &expected_output);
+
+        assert!(chain.blocks_iter().eq(&blocks));
+        assert_eq!(chain.execution_outcome(), &execution_outcome);
 
         // expect no more blocks
         assert!(backfill_stream.next().await.is_none());
