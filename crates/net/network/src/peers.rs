@@ -34,7 +34,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -155,16 +155,18 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
-        let trusted_nodes: Vec<NodeRecord> = trusted_nodes
-            .into_iter()
-            .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
-            .collect();
-
-        for NodeRecord { address, tcp_port, udp_port, id } in trusted_nodes {
-            trusted_peer_ids.insert(id);
-            peers.entry(id).or_insert_with(|| {
-                Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
-            });
+        for trusted_peer in trusted_nodes {
+            match trusted_peer.resolve_blocking() {
+                Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
+                    trusted_peer_ids.insert(id);
+                    peers.entry(id).or_insert_with(|| {
+                        Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
+                    });
+                }
+                Err(err) => {
+                    warn!(target: "net::peers", ?err, "Failed to resolve trusted peer");
+                }
+            }
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
