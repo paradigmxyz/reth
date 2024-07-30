@@ -715,7 +715,8 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is greater than or equal to the persistence threshold.
+    /// block is greater than or equal to the persistence threshold and
+    /// backfill is not running.
     fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
