@@ -82,14 +82,10 @@ where
     Ok(block_execution_output)
 }
 
-pub(crate) fn blocks_and_execution_outputs<DB>(
-    provider_factory: ProviderFactory<DB>,
+fn blocks(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
-where
-    DB: reth_db_api::database::Database,
-{
+) -> eyre::Result<(BlockWithSenders, BlockWithSenders)> {
     // First block has a transaction that transfers some ETH to zero address
     let block1 = Block {
         header: Header {
@@ -149,6 +145,19 @@ where
     }
     .with_recovered_senders()
     .ok_or_eyre("failed to recover senders")?;
+
+    Ok((block1, block2))
+}
+
+pub(crate) fn blocks_and_execution_outputs<DB>(
+    provider_factory: ProviderFactory<DB>,
+    chain_spec: Arc<ChainSpec>,
+    key_pair: Keypair,
+) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
+where
+    DB: reth_db_api::database::Database,
+{
+    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
     let block_output1 =
         execute_block_and_commit_to_database(&provider_factory, chain_spec.clone(), &block1)?;
@@ -169,65 +178,7 @@ pub(crate) fn blocks_and_execution_outcome<DB>(
 where
     DB: reth_db_api::database::Database,
 {
-    // First block has a transaction that transfers some ETH to zero address
-    let block1 = Block {
-        header: Header {
-            parent_hash: chain_spec.genesis_hash(),
-            receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
-            ),
-            difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
-            number: 1,
-            gas_limit: 21000,
-            gas_used: 21000,
-            ..Default::default()
-        },
-        body: vec![sign_tx_with_key_pair(
-            key_pair,
-            Transaction::Eip2930(TxEip2930 {
-                chain_id: chain_spec.chain.id(),
-                nonce: 0,
-                gas_limit: 21000,
-                gas_price: 1_500_000_000,
-                to: TxKind::Call(Address::ZERO),
-                value: U256::from(0.1 * ETH_TO_WEI as f64),
-                ..Default::default()
-            }),
-        )],
-        ..Default::default()
-    }
-    .with_recovered_senders()
-    .ok_or_eyre("failed to recover senders")?;
-
-    // Second block resends the same transaction with increased nonce
-    let block2 = Block {
-        header: Header {
-            parent_hash: block1.header.hash_slow(),
-            receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
-            ),
-            difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
-            number: 2,
-            gas_limit: 21000,
-            gas_used: 21000,
-            ..Default::default()
-        },
-        body: vec![sign_tx_with_key_pair(
-            key_pair,
-            Transaction::Eip2930(TxEip2930 {
-                chain_id: chain_spec.chain.id(),
-                nonce: 1,
-                gas_limit: 21000,
-                gas_price: 1_500_000_000,
-                to: TxKind::Call(Address::ZERO),
-                value: U256::from(0.1 * ETH_TO_WEI as f64),
-                ..Default::default()
-            }),
-        )],
-        ..Default::default()
-    }
-    .with_recovered_senders()
-    .ok_or_eyre("failed to recover senders")?;
+    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
     let provider = provider_factory.provider()?;
 
