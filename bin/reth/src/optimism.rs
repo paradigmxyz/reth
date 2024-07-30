@@ -1,23 +1,23 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
-use clap::Parser;
-use reth::cli::Cli;
-use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
-use std::sync::Arc;
 use async_trait::async_trait;
+use clap::Parser;
 use futures::StreamExt;
 use jsonrpsee::{
     core::RpcResult,
     proc_macros::rpc,
     types::{error::INTERNAL_ERROR_CODE, ErrorObject, ErrorObjectOwned},
 };
+use reth::cli::Cli;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
+use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
 use reth_tracing::tracing::info;
 use serde::{Deserialize, Serialize};
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
@@ -56,15 +56,11 @@ fn main() {
                 Ok(())
             })
             .extend_rpc_modules(move |ctx| {
-                ctx.modules
-                    .merge_configured(WallTimeRpcExt { to_exex: rpc_tx }.into_rpc())?;
+                ctx.modules.merge_configured(WallTimeRpcExt { to_exex: rpc_tx }.into_rpc())?;
                 Ok(())
             })
             .install_exex("walltime", |ctx| async move {
-                Ok(WallTimeExEx::new(
-                    ctx,
-                    UnboundedReceiverStream::from(rpc_rx),
-                ))
+                Ok(WallTimeExEx::new(ctx, UnboundedReceiverStream::from(rpc_rx)))
             })
             .launch()
             .await?;
@@ -107,11 +103,7 @@ impl<Node: FullNodeComponents> WallTimeExEx<Node> {
         ctx: ExExContext<Node>,
         rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<BlockTimeData>>,
     ) -> Self {
-        Self {
-            ctx,
-            rpc_requests_stream,
-            last_block_timedata: BlockTimeData::default(),
-        }
+        Self { ctx, rpc_requests_stream, last_block_timedata: BlockTimeData::default() }
     }
 }
 
