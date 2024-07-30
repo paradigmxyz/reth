@@ -125,18 +125,6 @@ pub enum BlockExecutionError {
     /// Consensus error, transparently wrapping `ConsensusError`
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
-    /// Transaction error on revert with inner details
-    #[error("transaction error on revert: {inner}")]
-    CanonicalRevert {
-        /// The inner error message
-        inner: String,
-    },
-    /// Transaction error on commit with inner details
-    #[error("transaction error on commit: {inner}")]
-    CanonicalCommit {
-        /// The inner error message.
-        inner: String,
-    },
     /// Error when appending chain on fork is not possible
     #[error(
         "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
@@ -178,13 +166,6 @@ impl BlockExecutionError {
             Self::Validation(err) => Some(err),
             _ => None,
         }
-    }
-
-    /// Returns `true` if the error is fatal.
-    ///
-    /// This represents an unrecoverable database related error.
-    pub const fn is_fatal(&self) -> bool {
-        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
     }
 
     /// Returns `true` if the error is a state root error.
