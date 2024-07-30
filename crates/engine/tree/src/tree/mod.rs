@@ -1613,7 +1613,14 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 3. we don't have the block to perform the update
+        // 3. check if the head is already part of the canonical chain
+        if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
+            debug!(target: "engine", head = canonical_header.number, "fcu head block is already canonical");
+            // the head block is already canonical
+            return Ok(valid_outcome(state.head_block_hash))
+        }
+
+        // 4. we don't have the block to perform the update
         let target = self.lowest_buffered_ancestor_or(state.head_block_hash);
 
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
