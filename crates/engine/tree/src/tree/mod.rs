@@ -47,6 +47,7 @@ use std::{
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
+    oneshot::error::TryRecvError,
 };
 use tracing::*;
 
@@ -522,15 +523,23 @@ where
                 .rx
                 .as_mut()
                 .expect("if a persistence task is in progress Receiver must be Some");
+
             // Check if persistence has completed
-            if let Ok(last_persisted_block_hash) = rx.try_recv() {
-                if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_block_hash)
-                {
-                    self.persistence_state.finish(last_persisted_block_hash, block.number);
-                    self.on_new_persisted_block();
-                } else {
-                    error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+            match rx.try_recv() {
+                Ok(last_persisted_block_hash) => {
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
+                        self.on_new_persisted_block();
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                    }
                 }
+                Err(TryRecvError::Closed) => {
+                    panic!("persistence task has been terminated");
+                }
+                _ => {}
             }
         }
     }
