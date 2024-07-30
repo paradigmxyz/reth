@@ -728,15 +728,19 @@ where
             self.config.persistence_threshold()
     }
 
+    /// Returns a batch of consecutive blocks to persist.
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        use std::ops::Bound;
         let start = self.persistence_state.last_persisted_block_number;
         let end = start + self.config.persistence_threshold();
 
-        // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
+        // the range of blocks starts with the next highest block and takes up to the configured threshold
+        let range = (Bound::Excluded(start), Bound::Included(end));
+
         self.state
             .tree_state
             .blocks_by_number
-            .range(start..end)
+            .range(range)
             .flat_map(|(_, blocks)| blocks.iter().cloned())
             .collect()
     }
@@ -1785,8 +1789,8 @@ mod tests {
 
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let mut blocks: Vec<_> =
-            get_executed_blocks(0..tree_config.persistence_threshold() + 1).collect();
+        let blocks: Vec<_> =
+            get_executed_blocks(1..tree_config.persistence_threshold() + 1).collect();
         let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
         std::thread::Builder::new()
             .name("Tree Task".to_string())
@@ -1800,7 +1804,6 @@ mod tests {
             test_harness.action_rx.recv().expect("Failed to receive saved blocks");
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
-            blocks.pop();
             assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
             assert_eq!(saved_blocks, blocks);
         } else {
