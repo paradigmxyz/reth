@@ -133,7 +133,7 @@ where
         &mut self,
         initial_block_number: BlockNumber,
         headers: impl Iterator<Item = I>,
-    ) -> ProviderResult<()>
+    ) -> ProviderResult<U256>
     where
         I: Borrow<(H, B256)>,
         H: Borrow<Header>,
@@ -143,7 +143,7 @@ where
         let mut td_cursor =
             self.database_writer().tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
 
-        let first_td = if initial_block_number == 0 {
+        let mut first_td = if initial_block_number == 0 {
             U256::ZERO
         } else {
             td_cursor
@@ -155,11 +155,11 @@ where
         for pair in headers {
             let (header, hash) = pair.borrow();
             let header = header.borrow();
-            let td = first_td + header.difficulty;
-            self.static_file_writer().append_header(header, td, hash)?;
+            first_td += header.difficulty;
+            self.static_file_writer().append_header(header, first_td, hash)?;
         }
 
-        Ok(())
+        Ok(first_td)
     }
 
     /// Appends transactions to static files, using the
