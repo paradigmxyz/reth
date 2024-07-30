@@ -289,10 +289,7 @@ impl InsertBlockErrorKind {
                         true
                     }
                     // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::LatestBlock(_) |
-                    BlockExecutionError::Pruning(_) |
-                    BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::Other(_) => false,
+                    BlockExecutionError::Internal(_) => false,
                 }
             }
             Self::Tree(err) => {
