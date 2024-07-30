@@ -748,22 +748,32 @@ where
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive blocks to persist.
+    /// Returns a batch of consecutive blocks to persist. The expected order is
+    /// oldest -> newest.
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        use std::ops::Bound;
-        let start = self.persistence_state.last_persisted_block_number;
-        let end = start + self.config.persistence_threshold();
+        let mut blocks_to_persist = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
+        let last_persisted_number = self.persistence_state.last_persisted_block_number;
 
-        // the range of blocks starts with the next highest block and takes up to the configured
-        // threshold
-        let range = (Bound::Excluded(start), Bound::Included(end));
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            if block.block.number <= last_persisted_number {
+                break;
+            }
 
-        self.state
-            .tree_state
-            .blocks_by_number
-            .range(range)
-            .flat_map(|(_, blocks)| blocks.iter().cloned())
-            .collect()
+            blocks_to_persist.push(block.clone());
+            current_hash = block.block.parent_hash;
+        }
+
+        // reverse the order so that the oldest block comes first
+        blocks_to_persist.reverse();
+
+        // limit the number of blocks to persist if it exceeds the threshold
+        let threshold = self.config.persistence_threshold() as usize;
+        if blocks_to_persist.len() > threshold {
+            blocks_to_persist.truncate(threshold);
+        }
+
+        blocks_to_persist
     }
 
     /// This clears the blocks from the in-memory tree state that have been persisted to the
@@ -2061,6 +2071,48 @@ mod tests {
             assert_eq!(old.len(), 1);
             assert_eq!(old[0].block.hash(), blocks[2].block.hash());
         }
+    }
+
+    #[tokio::test]
+    async fn test_get_blocks_to_persist() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec);
+
+        let blocks: Vec<_> = get_executed_blocks(0..10).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        test_harness.tree.persistence_state.last_persisted_block_number = 3;
+
+        test_harness.tree.config = TreeConfig::default().with_persistence_threshold(5);
+
+        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+
+        assert_eq!(blocks_to_persist.len(), 5);
+        assert_eq!(blocks_to_persist[0].block.number, 4);
+        assert_eq!(blocks_to_persist[4].block.number, 8);
+
+        for i in 0..4 {
+            assert_eq!(
+                blocks_to_persist[i].block.hash(),
+                blocks_to_persist[i + 1].block.parent_hash
+            );
+        }
+
+        // make sure only canonical blocks are included
+        let fork_block = get_executed_block_with_number(7, B256::random());
+        let fork_block_hash = fork_block.block.hash();
+        test_harness.tree.state.tree_state.insert_executed(fork_block);
+
+        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+        assert_eq!(blocks_to_persist.len(), 5);
+
+        // check that the fork block is not included in the blocks to persist
+        assert!(!blocks_to_persist.iter().any(|b| b.block.hash() == fork_block_hash));
+
+        // check that the original block 7 is still included
+        assert!(blocks_to_persist
+            .iter()
+            .any(|b| b.block.number == 7 && b.block.hash() == blocks[7].block.hash()));
     }
 
     #[tokio::test]
