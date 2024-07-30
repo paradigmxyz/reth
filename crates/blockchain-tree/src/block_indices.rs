@@ -38,7 +38,7 @@ pub struct BlockIndices {
     /// Note: This is a bijection: at all times `blocks_to_chain` and this map contain the block
     /// hashes.
     block_number_to_block_hashes: BTreeMap<BlockNumber, HashSet<BlockHash>>,
-    /// Block hashes and side chain they belong
+    /// Block hashes to the sidechain IDs they belong to.
     blocks_to_chain: HashMap<BlockHash, SidechainId>,
 }
 
@@ -123,8 +123,8 @@ impl BlockIndices {
         self.fork_to_child.entry(first.parent_hash).or_default().insert_if_absent(first.hash());
     }
 
-    /// Get the [`SidechainId`] the given block belongs to if it exists.
-    pub(crate) fn get_block_chain_id(&self, block: &BlockHash) -> Option<SidechainId> {
+    /// Get the [`SidechainId`] for the given block hash if it exists.
+    pub(crate) fn get_side_chain_id(&self, block: &BlockHash) -> Option<SidechainId> {
         self.blocks_to_chain.get(block).cloned()
     }
 
