@@ -85,6 +85,7 @@ op-node \
     --rpc.port=7000 \
     --l1.beacon=<your-beacon-node-http-endpoint>
     --syncmode=execution-layer
+    --l2.enginekind=reth
 ```
 
 Consider adding the `--l1.trustrpc` flag to improve performance, if the connection to l1 is over localhost.
