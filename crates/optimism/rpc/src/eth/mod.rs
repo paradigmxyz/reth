@@ -37,7 +37,7 @@ use reth_transaction_pool::TransactionPool;
 use crate::OpEthApiError;
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
-pub type EthApiHandles<N> = EthApiInner<
+pub type EthApiNodeBackend<N> = EthApiInner<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     NetworkHandle,
@@ -66,7 +66,7 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
-    inner: Arc<EthApiHandles<N>>,
+    inner: Arc<EthApiNodeBackend<N>>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
