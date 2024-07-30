@@ -335,11 +335,14 @@ pub enum InsertBlockErrorKindTwo {
 }
 
 impl InsertBlockErrorKindTwo {
-    /// Returns true if the error is caused by an invalid block
+    /// Returns an [`InsertBlockValidationError`] if the error is caused by an invalid block.
     ///
-    /// This is intended to be used to determine if the block should be marked as invalid.
-    #[allow(clippy::match_same_arms)]
-    pub fn is_invalid_block(self) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
+    /// Returns an [`InsertBlockFatalError`] if the error is caused by an error that is not
+    /// validation related or is otherwise fatal.
+    ///
+    /// This is intended to be used to determine if we should respond `INVALID` as a response when
+    /// processing a new block.
+    pub fn ensure_invalid_block(self) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
         match self {
             Self::SenderRecovery => Ok(InsertBlockValidationError::SenderRecovery),
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
