@@ -47,14 +47,13 @@ impl<DB: Database> PersistenceService<DB> {
 
     /// Writes the cloned tree state to database
     fn write(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
-        debug!(target: "tree::persistence", "Writing blocks to database");
-        let provider_rw = self.provider.provider_rw()?;
-
         if blocks.is_empty() {
             debug!(target: "tree::persistence", "Attempted to write empty block range");
             return Ok(())
         }
 
+        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks to database");
+        let provider_rw = self.provider.provider_rw()?;
         let first_number = blocks.first().unwrap().block().number;
 
         let last = blocks.last().unwrap().block();
@@ -96,6 +95,8 @@ impl<DB: Database> PersistenceService<DB> {
             provider_rw.update_pipeline_stages(last_block_number, false)?;
         }
 
+        provider_rw.commit()?;
+
         debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
 
         Ok(())
@@ -111,6 +112,7 @@ impl<DB: Database> PersistenceService<DB> {
         let provider_rw = self.provider.provider_rw()?;
         let highest_block = self.provider.last_block_number()?;
         provider_rw.remove_block_and_execution_range(block_number..=highest_block)?;
+        provider_rw.commit()?;
 
         Ok(())
     }
@@ -159,6 +161,8 @@ impl<DB: Database> PersistenceService<DB> {
             block.header().number,
             std::iter::once(&no_hash_transactions),
         )?;
+
+        provider.commit()?;
 
         Ok(block.number)
     }
