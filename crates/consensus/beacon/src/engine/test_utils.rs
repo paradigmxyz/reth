@@ -399,6 +399,7 @@ where
             )
             .expect("failed to create tree"),
         ));
+        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
 
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
