@@ -753,31 +753,6 @@ impl BestTransactionsAttributes {
     }
 }
 
-// pub trait PooledTransaction {
-//     /// Associated type representing the pooled variant of the transaction.
-//     type PooledTx;
-
-//     /// Associated type representing the recovered variant of the transaction.
-//     type RecoveredTx;
-
-//     /// Associated type representing the recovered pooled variant of the transaction.
-//     type RecoveredPooledTx;
-
-//     /// Associated type representing the error type.
-//     type Error;
-
-//     /// Converts to the pooled transaction type.
-//     fn into_recovered_tx(self) -> Self::RecoveredTx;
-
-//     /// Converts to the recovered transaction type.
-//     fn try_from_recovered_tx(tx: Self::RecoveredTx) -> Result<Self, Self::Error>
-//     where
-//         Self: Sized;
-
-//     /// Converts from the recovered pooled transaction type.
-//     fn from_recovered_pooled_tx(tx: Self::RecoveredPooledTx) -> Self::PooledTx;
-// }
-
 /// A trait for converting a transaction into a pooled transaction.
 pub trait PooledTransaction {
     /// Associated type representing the pooled variant of the transaction.
