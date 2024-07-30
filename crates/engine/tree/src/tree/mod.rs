@@ -1736,7 +1736,7 @@ mod tests {
 
             let header = chain_spec.genesis_header().seal_slow();
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
-            let canonical_in_memory_state = CanonicalInMemoryState::with_head(header);
+            let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 
             let (to_payload_service, payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -1797,7 +1797,7 @@ mod tests {
             let last_executed_block = blocks.last().unwrap().clone();
             let pending = Some(BlockState::new(last_executed_block));
             self.tree.canonical_in_memory_state =
-                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
+                CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None);
 
             self.blocks = blocks;
             self
