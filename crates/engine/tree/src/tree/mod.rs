@@ -608,7 +608,10 @@ where
         self.canonical_in_memory_state.clear_state();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
+            // update the tracked chain height, after backfill sync both the canonical height and
+            // persisted height are the same
             self.state.tree_state.set_canonical_head(new_head.num_hash());
+            self.persistence_state.finish(new_head.hash(), new_head.number);
         }
 
         // check if we need to run backfill again by comparing the most recent finalized height to
@@ -1618,7 +1621,7 @@ pub struct PersistenceState {
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
     ///
-    /// A `None` value means no persistence task has been completed yet
+    /// This tracks the chain height that is persisted on disk
     last_persisted_block_number: u64,
 }
 
@@ -1636,6 +1639,7 @@ impl PersistenceState {
 
     /// Sets state for a finished persistence task.
     fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+        trace!(target: "engine", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
