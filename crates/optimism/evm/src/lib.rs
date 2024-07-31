@@ -129,6 +129,8 @@ impl ConfigureEvm for OptimismEvmConfig {
             .append_handler_register(inspector_handle_register)
             .build()
     }
+
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ use reth_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
     },
+    transaction::AccessListResult,
     Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
@@ -26,8 +27,7 @@ use reth_rpc_server_types::constants::gas_oracle::{
 };
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
-    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
-    TransactionRequest,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
@@ -179,13 +179,13 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`], or latest block.
     fn create_access_list_at(
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> impl Future<Output = Result<AccessListWithGasUsed, Self::Error>> + Send
+    ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
     {
@@ -200,7 +200,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
@@ -208,7 +208,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         block: BlockEnv,
         at: BlockId,
         mut request: TransactionRequest,
-    ) -> Result<AccessListWithGasUsed, Self::Error>
+    ) -> Result<AccessListResult, Self::Error>
     where
         Self: Trace,
     {
@@ -246,21 +246,22 @@ pub trait EthCall: Call + LoadPendingBlock {
 
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
+
         let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
+        let access_list = inspector.into_access_list();
 
         match result.result {
-            ExecutionResult::Halt { reason, .. } => Err(match reason {
-                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
-                halt => RpcInvalidTransactionError::EvmHalt(halt),
-            }),
-            ExecutionResult::Revert { output, .. } => {
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
+            ExecutionResult::Halt { reason, gas_used } => {
+                let error =
+                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
-            ExecutionResult::Success { .. } => Ok(()),
-        }
-        .map_err(Self::Error::from_eth_err)?;
-
-        let access_list = inspector.into_access_list();
+            ExecutionResult::Revert { output, gas_used } => {
+                let error = Some(RevertError::new(output).to_string());
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            }
+            ExecutionResult::Success { .. } => {}
+        };
 
         let cfg_with_spec_id =
             CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
@@ -270,7 +271,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         let gas_used =
             self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
 
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(AccessListResult { access_list, gas_used, error: None })
     }
 }
 

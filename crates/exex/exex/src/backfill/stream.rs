@@ -59,7 +59,7 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<T, BlockExecutionError>>> {
         match ready!(self.tasks.poll_next_unpin(cx)) {
-            Some(res) => Poll::Ready(Some(res.map_err(|e| BlockExecutionError::Other(e.into()))?)),
+            Some(res) => Poll::Ready(Some(res.map_err(BlockExecutionError::other)?)),
             None => Poll::Ready(None),
         }
     }

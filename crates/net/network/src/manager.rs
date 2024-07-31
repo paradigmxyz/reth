@@ -173,7 +173,7 @@ impl NetworkManager {
             secret_key,
             discovery_v4_addr,
             mut discovery_v4_config,
-            discovery_v5_config,
+            mut discovery_v5_config,
             listener_addr,
             peers_config,
             sessions_config,
@@ -202,18 +202,19 @@ impl NetworkManager {
         let listener_addr = incoming.local_address();
 
         // resolve boot nodes
-        let mut resolved_boot_nodes = vec![];
-        for record in &boot_nodes {
-            let resolved = record.resolve().await?;
-            resolved_boot_nodes.push(resolved);
-        }
+        let resolved_boot_nodes =
+            futures::future::try_join_all(boot_nodes.iter().map(|record| record.resolve())).await?;
 
-        discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
+        if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
-            disc_config
-        });
+        }
+
+        if let Some(discv5) = discovery_v5_config.as_mut() {
+            // merge configured boot nodes
+            discv5.extend_unsigned_boot_nodes(resolved_boot_nodes)
+        }
 
         let discovery = Discovery::new(
             listener_addr,

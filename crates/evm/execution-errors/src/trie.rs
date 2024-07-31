@@ -1,5 +1,7 @@
 //! Errors when computing the state root.
 
+use alloy_primitives::B256;
+use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror_no_std::Error;
 
@@ -21,6 +23,26 @@ impl From<StateProofError> for ProviderError {
             StateProofError::Rlp(error) => Self::Rlp(error),
         }
     }
+}
+
+/// Trie witness errors.
+#[derive(Error, Debug, PartialEq, Eq, Clone)]
+pub enum TrieWitnessError {
+    /// Error gather proofs.
+    #[error(transparent)]
+    Proof(#[from] StateProofError),
+    /// RLP decoding error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+    /// Missing storage multiproof.
+    #[error("missing storage multiproof for {0}")]
+    MissingStorageMultiProof(B256),
+    /// Missing account.
+    #[error("missing account {0}")]
+    MissingAccount(B256),
+    /// Missing target node.
+    #[error("target node missing from proof {0:?}")]
+    MissingTargetNode(Nibbles),
 }
 
 /// State root errors.

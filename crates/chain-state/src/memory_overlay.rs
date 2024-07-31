@@ -20,9 +20,15 @@ pub struct MemoryOverlayStateProvider {
 
 impl MemoryOverlayStateProvider {
     /// Create new memory overlay state provider.
+    ///
+    /// ## Arguments
+    ///
+    /// - `in_memory` - the collection of executed ancestor blocks in reverse.
+    /// - `historical` - a historical state provider for the latest ancestor block stored in the
+    ///   database.
     pub fn new(in_memory: Vec<ExecutedBlock>, historical: Box<dyn StateProvider>) -> Self {
         let mut hashed_post_state = HashedPostState::default();
-        for block in &in_memory {
+        for block in in_memory.iter().rev() {
             hashed_post_state.extend(block.hashed_state.as_ref().clone());
         }
         Self { in_memory, hashed_post_state, historical }

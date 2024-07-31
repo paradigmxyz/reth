@@ -299,6 +299,27 @@ impl Config {
         }
     }
 
+    /// Inserts a new boot node to the list of boot nodes.
+    pub fn insert_boot_node(&mut self, boot_node: BootNode) {
+        self.bootstrap_nodes.insert(boot_node);
+    }
+
+    /// Inserts a new unsigned enode boot node to the list of boot nodes if it can be parsed, see
+    /// also [`BootNode::from_unsigned`].
+    pub fn insert_unsigned_boot_node(&mut self, node_record: NodeRecord) {
+        let _ = BootNode::from_unsigned(node_record).map(|node| self.insert_boot_node(node));
+    }
+
+    /// Extends the list of boot nodes with a list of enode boot nodes if they can be parsed.
+    pub fn extend_unsigned_boot_nodes(
+        &mut self,
+        node_records: impl IntoIterator<Item = NodeRecord>,
+    ) {
+        for node_record in node_records {
+            self.insert_unsigned_boot_node(node_record);
+        }
+    }
+
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).

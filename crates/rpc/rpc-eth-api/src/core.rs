@@ -3,14 +3,17 @@
 
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
+use reth_primitives::{
+    transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
+    U256, U64,
+};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     state::{EvmOverrides, StateOverride},
-    AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionRequest, Work,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    TransactionRequest, Work,
 };
 use tracing::trace;
 
@@ -229,7 +232,7 @@ pub trait EthApi {
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> RpcResult<AccessListWithGasUsed>;
+    ) -> RpcResult<AccessListResult>;
 
     /// Generates and returns an estimate of how much gas is necessary to allow the transaction to
     /// complete.
@@ -594,7 +597,7 @@ where
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> RpcResult<AccessListWithGasUsed> {
+    ) -> RpcResult<AccessListResult> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
         Ok(EthCall::create_access_list_at(self, request, block_number).await?)
     }

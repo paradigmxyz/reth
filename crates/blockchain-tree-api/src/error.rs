@@ -1,7 +1,9 @@
 //! Error handling for the blockchain tree
 
 use reth_consensus::ConsensusError;
-use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 pub use reth_storage_errors::provider::ProviderError;
 
@@ -207,6 +209,197 @@ impl InsertBlockErrorData {
     }
 }
 
+struct InsertBlockErrorDataTwo {
+    block: SealedBlock,
+    kind: InsertBlockErrorKindTwo,
+}
+
+impl std::fmt::Display for InsertBlockErrorDataTwo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
+            self.block.hash(),
+            self.block.number,
+            self.block.parent_hash,
+            self.kind
+        )
+    }
+}
+
+impl std::fmt::Debug for InsertBlockErrorDataTwo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InsertBlockError")
+            .field("error", &self.kind)
+            .field("hash", &self.block.hash())
+            .field("number", &self.block.number)
+            .field("parent_hash", &self.block.parent_hash)
+            .field("num_txs", &self.block.body.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::error::Error for InsertBlockErrorDataTwo {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.kind)
+    }
+}
+
+impl InsertBlockErrorDataTwo {
+    const fn new(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Self {
+        Self { block, kind }
+    }
+
+    fn boxed(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Box<Self> {
+        Box::new(Self::new(block, kind))
+    }
+}
+
+/// Error thrown when inserting a block failed because the block is considered invalid.
+#[derive(thiserror::Error)]
+#[error(transparent)]
+pub struct InsertBlockErrorTwo {
+    inner: Box<InsertBlockErrorDataTwo>,
+}
+
+// === impl InsertBlockErrorTwo ===
+
+impl InsertBlockErrorTwo {
+    /// Create a new `InsertInvalidBlockErrorTwo`
+    pub fn new(block: SealedBlock, kind: InsertBlockErrorKindTwo) -> Self {
+        Self { inner: InsertBlockErrorDataTwo::boxed(block, kind) }
+    }
+
+    /// Create a new `InsertInvalidBlockError` from a consensus error
+    pub fn consensus_error(error: ConsensusError, block: SealedBlock) -> Self {
+        Self::new(block, InsertBlockErrorKindTwo::Consensus(error))
+    }
+
+    /// Create a new `InsertInvalidBlockError` from a consensus error
+    pub fn sender_recovery_error(block: SealedBlock) -> Self {
+        Self::new(block, InsertBlockErrorKindTwo::SenderRecovery)
+    }
+
+    /// Create a new `InsertInvalidBlockError` from an execution error
+    pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
+        Self::new(block, InsertBlockErrorKindTwo::Execution(error))
+    }
+
+    /// Consumes the error and returns the block that resulted in the error
+    #[inline]
+    pub fn into_block(self) -> SealedBlock {
+        self.inner.block
+    }
+
+    /// Returns the error kind
+    #[inline]
+    pub const fn kind(&self) -> &InsertBlockErrorKindTwo {
+        &self.inner.kind
+    }
+
+    /// Returns the block that resulted in the error
+    #[inline]
+    pub const fn block(&self) -> &SealedBlock {
+        &self.inner.block
+    }
+
+    /// Consumes the type and returns the block and error kind.
+    #[inline]
+    pub fn split(self) -> (SealedBlock, InsertBlockErrorKindTwo) {
+        let inner = *self.inner;
+        (inner.block, inner.kind)
+    }
+}
+
+impl std::fmt::Debug for InsertBlockErrorTwo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
+/// All error variants possible when inserting a block
+#[derive(Debug, thiserror::Error)]
+pub enum InsertBlockErrorKindTwo {
+    /// Failed to recover senders for the block
+    #[error("failed to recover senders for block")]
+    SenderRecovery,
+    /// Block violated consensus rules.
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    /// Block execution failed.
+    #[error(transparent)]
+    Execution(#[from] BlockExecutionError),
+    /// Provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
+impl InsertBlockErrorKindTwo {
+    /// Returns an [`InsertBlockValidationError`] if the error is caused by an invalid block.
+    ///
+    /// Returns an [`InsertBlockFatalError`] if the error is caused by an error that is not
+    /// validation related or is otherwise fatal.
+    ///
+    /// This is intended to be used to determine if we should respond `INVALID` as a response when
+    /// processing a new block.
+    pub fn ensure_validation_error(
+        self,
+    ) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
+        match self {
+            Self::SenderRecovery => Ok(InsertBlockValidationError::SenderRecovery),
+            Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
+            // other execution errors that are considered internal errors
+            Self::Execution(err) => {
+                match err {
+                    BlockExecutionError::Validation(err) => {
+                        Ok(InsertBlockValidationError::Validation(err))
+                    }
+                    BlockExecutionError::Consensus(err) => {
+                        Ok(InsertBlockValidationError::Consensus(err))
+                    }
+                    // these are internal errors, not caused by an invalid block
+                    BlockExecutionError::Internal(error) => {
+                        Err(InsertBlockFatalError::BlockExecutionError(error))
+                    }
+                }
+            }
+            Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
+        }
+    }
+}
+
+/// Error variants that are not caused by invalid blocks
+#[derive(Debug, thiserror::Error)]
+pub enum InsertBlockFatalError {
+    /// A provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    /// An internal / fatal block execution error
+    #[error(transparent)]
+    BlockExecutionError(#[from] InternalBlockExecutionError),
+}
+
+/// Error variants that are caused by invalid blocks
+#[derive(Debug, thiserror::Error)]
+pub enum InsertBlockValidationError {
+    /// Failed to recover senders for the block
+    #[error("failed to recover senders for block")]
+    SenderRecovery,
+    /// Block violated consensus rules.
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
+    /// Validation error, transparently wrapping [`BlockValidationError`]
+    #[error(transparent)]
+    Validation(#[from] BlockValidationError),
+}
+
+impl InsertBlockValidationError {
+    /// Returns true if this is a block pre merge error.
+    pub const fn is_block_pre_merge(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::BlockPreMerge { .. }))
+    }
+}
+
 /// All error variants possible when inserting a block
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockErrorKind {
@@ -231,9 +424,6 @@ pub enum InsertBlockErrorKind {
     /// Canonical error.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),
-    /// `BlockchainTree` error.
-    #[error(transparent)]
-    BlockchainTree(BlockchainTreeError),
 }
 
 impl InsertBlockErrorKind {
@@ -292,12 +482,7 @@ impl InsertBlockErrorKind {
                         true
                     }
                     // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::LatestBlock(_) |
-                    BlockExecutionError::Pruning(_) |
-                    BlockExecutionError::CanonicalRevert { .. } |
-                    BlockExecutionError::CanonicalCommit { .. } |
-                    BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::Other(_) => false,
+                    BlockExecutionError::Internal(_) => false,
                 }
             }
             Self::Tree(err) => {
@@ -326,7 +511,6 @@ impl InsertBlockErrorKind {
                 CanonicalError::Provider(_) => false,
                 CanonicalError::Validation(_) => true,
             },
-            Self::BlockchainTree(_) => false,
         }
     }
 

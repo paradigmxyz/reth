@@ -102,8 +102,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         let block_id = block_id.unwrap_or_default();
 
         // Check whether the distance to the block exceeds the maximum configured window.
-        let block_number = self
-            .provider()
+        let block_number = LoadState::provider(self)
             .block_number_for_id(block_id)
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::UnknownBlockNumber)?;

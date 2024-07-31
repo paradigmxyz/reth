@@ -19,7 +19,6 @@ use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
-use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
@@ -105,7 +104,7 @@ impl NodeTypes for OptimismNode {
 pub struct OptimismAddOns;
 
 impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
-    type EthApi = OpEthApi<EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>>;
+    type EthApi = OpEthApi<N>;
 }
 
 /// A regular optimism evm and executor builder.
@@ -293,17 +292,21 @@ where
 
         let network_builder = ctx
             .network_config_builder()?
-            // purposefully disable discv4
-            .disable_discv4_discovery()
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
 
                 if !args.discovery.disable_discovery {
-                    builder = builder.discovery_v5(args.discovery.discovery_v5_builder(
-                        rlpx_socket,
-                        ctx.chain_spec().bootnodes().unwrap_or_default(),
-                    ));
+                    builder = builder.discovery_v5(
+                        args.discovery.discovery_v5_builder(
+                            rlpx_socket,
+                            ctx.config()
+                                .network
+                                .resolved_bootnodes()
+                                .or_else(|| ctx.chain_spec().bootnodes())
+                                .unwrap_or_default(),
+                        ),
+                    );
                 }
 
                 builder

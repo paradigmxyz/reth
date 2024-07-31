@@ -6,6 +6,7 @@
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+#[cfg(not(feature = "optimism"))]
 fn main() {
     use reth::cli::Cli;
     use reth_node_ethereum::{launch::EthNodeLauncher, node::EthereumAddOns, EthereumNode};
