@@ -3,7 +3,7 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use reth_db::DatabaseError;
+use reth_db_api::DatabaseError;
 use reth_primitives::B256;
 use std::collections::HashSet;
 

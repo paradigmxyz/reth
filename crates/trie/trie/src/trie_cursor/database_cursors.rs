@@ -4,11 +4,12 @@ use crate::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
-    tables, DatabaseError,
+    tables,
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
+    DatabaseError,
 };
 use reth_primitives::B256;
 use reth_trie_common::StorageTrieEntry;

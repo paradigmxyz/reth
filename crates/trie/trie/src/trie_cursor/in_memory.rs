@@ -3,7 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use reth_db::DatabaseError;
+use reth_db_api::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;

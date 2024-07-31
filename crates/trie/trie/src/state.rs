@@ -4,11 +4,12 @@ use crate::{
 };
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::{tables, DatabaseError};
+use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::DbTx,
+    DatabaseError,
 };
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use revm::db::BundleAccount;

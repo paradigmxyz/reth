@@ -1,4 +1,4 @@
-use reth_db::DatabaseError;
+use reth_db_api::DatabaseError;
 use reth_errors::RethError;
 use reth_provider::ProviderError;
 use reth_prune_types::PruneSegmentError;
