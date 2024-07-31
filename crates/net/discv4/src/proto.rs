@@ -241,25 +241,6 @@ impl alloy_rlp::Decodable for PingNodeEndpoint {
     }
 }
 
-impl From<NodeRecord> for PingNodeEndpoint {
-    fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
-        Self(NodeEndpoint { address, tcp_port, udp_port })
-    }
-}
-
-impl From<NodeEndpoint> for PingNodeEndpoint {
-    fn from(value: NodeEndpoint) -> Self {
-        Self(value)
-    }
-}
-
-impl PingNodeEndpoint {
-    /// Creates a new [`PingNodeEndpoint`] from a given UDP address and TCP port.
-    pub const fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
-        Self(NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port })
-    }
-}
-
 /// Represents the `from`, `to` fields in the packets
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 pub struct NodeEndpoint {
