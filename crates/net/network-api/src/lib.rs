@@ -13,20 +13,20 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+
 pub use alloy_rpc_types_admin::EthProtocolInfo;
 pub use error::NetworkError;
-pub use reputation::{Reputation, ReputationChangeKind};
+
 use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+pub use reth_network_types::{Reputation, ReputationChangeKind};
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
 /// Network Error
 pub mod error;
-/// Reputation score
-pub mod reputation;
 
 /// Implementation of network traits for that does nothing.
 pub mod noop;
