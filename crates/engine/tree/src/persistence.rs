@@ -7,7 +7,7 @@ use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B
 use reth_provider::{
     writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, HistoryWriter,
     OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateChangeWriter, StateWriter,
-    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
+    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt, TrieWriter,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};

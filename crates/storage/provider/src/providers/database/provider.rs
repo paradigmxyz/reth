@@ -3571,7 +3571,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         Ok(block_indices)
     }
 
-    /// TODO(joshie): this fn should be moved to StorageWriter eventually
+    /// TODO(joshie): this fn should be moved to `StorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,

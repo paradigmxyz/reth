@@ -2,9 +2,8 @@ use crate::{
     providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
     DatabaseProviderRW, StateChangeWriter, StateWriter, TrieWriter,
 };
-use itertools::Itertools;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
     Database,
@@ -12,11 +11,11 @@ use reth_db::{
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, Header, StaticFileSegment, StorageEntry, TransactionSignedNoHash, B256, U256,
+    BlockNumber, Header, StaticFileSegment, TransactionSignedNoHash, B256, U256,
 };
 use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::writer::StorageWriterError;
-use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+use reth_trie::updates::TrieUpdates;
 use revm::db::OriginalValuesKnown;
 use static_file::StaticFileWriter;
 use std::borrow::Borrow;
@@ -338,7 +337,7 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, AccountReader, TrieWriter};
     use reth_db::tables;
     use reth_db_api::{
-        cursor::{DbCursorRO, DbDupCursorRO},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
