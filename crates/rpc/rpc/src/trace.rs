@@ -280,13 +280,15 @@ where
         // trace all blocks
         let mut block_traces = Vec::with_capacity(blocks.len());
         for block in &blocks {
+            let matcher = matcher.clone();
             let traces = self.inner.eth_api.trace_block_until(
                 block.number.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, res, _, _| {
-                    let traces =
+                move |tx_info, inspector, _, _, _| {
+                    let mut traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    traces.retain(|trace| matcher.matches(&trace.trace));
                     Ok(Some(traces))
                 },
             );
@@ -303,23 +305,16 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                all_traces.extend(self.extract_reward_traces(
-                    &block.header,
-                    &block.ommers,
-                    base_block_reward,
-                ));
+                let mut traces =
+                    self.extract_reward_traces(&block.header, &block.ommers, base_block_reward);
+                traces.retain(|trace| matcher.matches(&trace.trace));
+                all_traces.extend(traces);
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order
                 break
             }
         }
-
-        // filter out traces that don't match the filter
-        all_traces = all_traces
-            .into_iter()
-            .filter(|trace| matcher.matches(&trace.trace))
-            .collect::<Vec<_>>();
 
         // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
