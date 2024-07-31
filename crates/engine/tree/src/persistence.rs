@@ -6,10 +6,9 @@ use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256};
 use reth_provider::{
     writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, HistoryWriter,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateChangeWriter, StateWriter,
     StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
-use reth_provider::StateChangeWriter;
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
 use std::sync::{

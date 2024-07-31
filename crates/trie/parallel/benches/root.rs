@@ -6,7 +6,7 @@ use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, writer::StorageWriter,
-    TrieWriter, StateChangeWriter
+    StateChangeWriter, TrieWriter,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
