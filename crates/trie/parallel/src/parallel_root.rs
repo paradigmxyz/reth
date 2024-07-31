@@ -211,7 +211,7 @@ impl From<ParallelStateRootError> for ProviderError {
     fn from(error: ParallelStateRootError) -> Self {
         match error {
             ParallelStateRootError::Provider(error) => error,
-            ParallelStateRootError::StorageRoot(StorageRootError::Database(error)) => {
+            ParallelStateRootError::StorageRoot(StorageRootError::Cursor(error)) => {
                 Self::Database(error)
             }
         }

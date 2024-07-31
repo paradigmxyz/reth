@@ -8,9 +8,9 @@ use thiserror_no_std::Error;
 /// State root errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
 pub enum StateProofError {
-    /// Internal database error.
+    /// Internal cursor error.
     #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Cursor(#[from] DatabaseError),
     /// RLP decoding error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
@@ -19,7 +19,7 @@ pub enum StateProofError {
 impl From<StateProofError> for ProviderError {
     fn from(value: StateProofError) -> Self {
         match value {
-            StateProofError::Database(error) => Self::Database(error),
+            StateProofError::Cursor(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
         }
     }
@@ -60,7 +60,7 @@ impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
             StateRootError::Database(err) |
-            StateRootError::StorageRootError(StorageRootError::Database(err)) => err,
+            StateRootError::StorageRootError(StorageRootError::Cursor(err)) => err,
         }
     }
 }
@@ -68,7 +68,7 @@ impl From<StateRootError> for DatabaseError {
 /// Storage root error.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
-    /// Internal database error.
+    /// Internal cursor error.
     #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Cursor(#[from] DatabaseError),
 }

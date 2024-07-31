@@ -69,7 +69,7 @@ impl<T, H> Proof<T, H> {
 impl<T, H> Proof<T, H>
 where
     T: TrieCursorFactory<Error = DatabaseError>,
-    H: HashedCursorFactory + Clone,
+    H: HashedCursorFactory<Error = T::Error> + Clone,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(
@@ -130,8 +130,10 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<StorageMultiProof, StateProofError> {
-        let mut hashed_storage_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
+        let mut hashed_storage_cursor = self
+            .hashed_cursor_factory
+            .hashed_storage_cursor(hashed_address)
+            .map_err(StateProofError::Cursor)?;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {

@@ -69,7 +69,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
 impl<C, H> TrieNodeIter<C, H>
 where
     C: TrieCursor<Error = DatabaseError>,
-    H: HashedCursor,
+    H: HashedCursor<Error = C::Error>,
 {
     /// Return the next trie node to be added to the hash builder.
     ///

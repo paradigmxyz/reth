@@ -56,7 +56,7 @@ impl<T, H> TrieWitness<T, H> {
 impl<T, H> TrieWitness<T, H>
 where
     T: TrieCursorFactory<Error = DatabaseError> + Clone,
-    H: HashedCursorFactory + Clone,
+    H: HashedCursorFactory<Error = T::Error> + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.

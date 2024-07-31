@@ -108,7 +108,7 @@ impl<T, H> StateRoot<T, H> {
 impl<T, H> StateRoot<T, H>
 where
     T: TrieCursorFactory<Error = DatabaseError> + Clone,
-    H: HashedCursorFactory + Clone,
+    H: HashedCursorFactory<Error = T::Error> + Clone,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -366,7 +366,7 @@ impl<T, H> StorageRoot<T, H> {
 impl<T, H> StorageRoot<T, H>
 where
     T: TrieCursorFactory<Error = DatabaseError>,
-    H: HashedCursorFactory,
+    H: HashedCursorFactory<Error = T::Error>,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
     ///
