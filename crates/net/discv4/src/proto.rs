@@ -155,13 +155,10 @@ impl Message {
             return Err(DecodePacketError::HashMismatch)
         }
 
-        println!("past header check");
-
         let signature = &packet[32..96];
         let recovery_id = RecoveryId::from_i32(packet[96] as i32)?;
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
-        println!("past signature");
         // recover the public key
         let msg = secp256k1::Message::from_digest(keccak256(&packet[97..]).0);
 
@@ -171,10 +168,6 @@ impl Message {
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
-        println!(
-            "got msg_type: {msg_type} for payload {payload:x?} {:?}",
-            MessageId::from_u8(msg_type)
-        );
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
             MessageId::Ping => Self::Ping(Ping::decode(payload).unwrap()),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
