@@ -3,8 +3,7 @@ use rand::Rng;
 use reth_chainspec::MAINNET;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
-    TransactionSigned, TryFromRecoveredTransaction, TxEip1559, TxEip4844, TxKind, TxLegacy, B256,
-    U256,
+    TransactionSigned, TxEip1559, TxEip4844, TxKind, TxLegacy, B256, U256,
 };
 
 /// A generator for transactions for testing purposes.
@@ -99,10 +98,7 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        EthPooledTransaction::try_from_recovered_transaction(
-            self.gen_eip1559().into_ecrecovered().unwrap(),
-        )
-        .unwrap()
+        self.gen_eip1559().into_ecrecovered().unwrap().try_into().unwrap()
     }
 
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.

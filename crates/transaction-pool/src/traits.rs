@@ -13,8 +13,8 @@ use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, IntoRecoveredTransaction,
     PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash, TxKind, B256,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    TransactionSignedEcRecovered, TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -764,7 +764,6 @@ pub trait PoolTransaction:
     fmt::Debug
     + Send
     + Sync
-    + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
     + std::marker::Sized
     + From<PooledTransactionsElementEcRecovered>
@@ -1157,35 +1156,6 @@ impl EthPoolTransaction for EthPooledTransaction {
             Transaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }
-    }
-}
-
-impl TryFromRecoveredTransaction for EthPooledTransaction {
-    type Error = TryFromRecoveredTransactionError;
-
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
-        // ensure we can handle the transaction type and its format
-        match tx.tx_type() as u8 {
-            0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
-                // supported
-            }
-            EIP4844_TX_TYPE_ID => {
-                // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
-            }
-            unsupported => {
-                // unsupported transaction type
-                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
-                    unsupported,
-                ))
-            }
-        };
-
-        let encoded_length = tx.length_without_header();
-        let transaction = Self::new(tx, encoded_length);
-        Ok(transaction)
     }
 }
 

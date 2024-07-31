@@ -15,7 +15,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned, TryFromRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, TransactionSigned,
 };
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
@@ -334,8 +334,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                 })
                                 .map(Into::into)
                         } else {
-                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx)
-                                .ok()
+                            tx.try_into().ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -589,7 +588,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+            tx.try_into().ok()
         })
         .collect::<Vec<_>>();
 
