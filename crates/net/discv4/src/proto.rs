@@ -510,7 +510,6 @@ impl Decodable for Ping {
 
         // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
-            println!("decoding enr seq");
             this.enr_sq = Some(Decodable::decode(b)?);
         }
 
