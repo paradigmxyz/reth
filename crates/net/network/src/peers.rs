@@ -34,7 +34,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -155,11 +155,18 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
-        for NodeRecord { address, tcp_port, udp_port, id } in trusted_nodes {
-            trusted_peer_ids.insert(id);
-            peers.entry(id).or_insert_with(|| {
-                Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
-            });
+        for trusted_peer in trusted_nodes {
+            match trusted_peer.resolve_blocking() {
+                Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
+                    trusted_peer_ids.insert(id);
+                    peers.entry(id).or_insert_with(|| {
+                        Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
+                    });
+                }
+                Err(err) => {
+                    warn!(target: "net::peers", ?err, "Failed to resolve trusted peer");
+                }
+            }
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
@@ -1341,6 +1348,7 @@ mod tests {
         peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
     };
     use reth_primitives::B512;
+    use url::Host;
 
     use super::PeersManager;
     use crate::{
@@ -2294,12 +2302,12 @@ mod tests {
     async fn test_trusted_peers_are_prioritized() {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::test().with_trusted_nodes(HashSet::from([NodeRecord {
-            address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+        let config = PeersConfig::test().with_trusted_nodes(vec![TrustedPeer {
+            host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
             tcp_port: 8008,
             udp_port: 8008,
             id: trusted_peer,
-        }]));
+        }]);
         let mut peers = PeersManager::new(config);
 
         let basic_peer = PeerId::random();
@@ -2333,12 +2341,12 @@ mod tests {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2370,12 +2378,12 @@ mod tests {
     async fn test_incoming_with_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2403,12 +2411,12 @@ mod tests {
     async fn test_incoming_without_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(false);
         let mut peers = PeersManager::new(config);
 
