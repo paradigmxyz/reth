@@ -427,7 +427,7 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chain_state::test_utils::{get_executed_block_with_number, get_executed_blocks};
+    use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
@@ -470,7 +470,9 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
         let block_number = 0;
-        let executed = get_executed_block_with_number(block_number, B256::random());
+        let mut test_block_builder = TestBlockBuilder::default();
+        let executed =
+            test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.block().hash();
 
         let blocks = vec![executed];
@@ -487,7 +489,8 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
-        let blocks = get_executed_blocks(0..5).collect::<Vec<_>>();
+        let mut test_block_builder = TestBlockBuilder::default();
+        let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().block().hash();
         let (tx, rx) = oneshot::channel();
 
@@ -503,8 +506,9 @@ mod tests {
         let persistence_handle = default_persistence_handle();
 
         let ranges = [0..1, 1..2, 2..4, 4..5];
+        let mut test_block_builder = TestBlockBuilder::default();
         for range in ranges {
-            let blocks = get_executed_blocks(range).collect::<Vec<_>>();
+            let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().block().hash();
             let (tx, rx) = oneshot::channel();
 

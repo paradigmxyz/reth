@@ -1749,15 +1749,12 @@ mod tests {
     use crate::persistence::PersistenceAction;
     use alloy_rlp::Decodable;
     use reth_beacon_consensus::EthBeaconConsensus;
-    use reth_chain_state::{
-        test_utils::{generate_random_block, get_executed_block_with_number, get_executed_blocks},
-        BlockState,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
-    use reth_primitives::{Address, Bytes};
+    use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
@@ -1869,12 +1866,16 @@ mod tests {
     #[tokio::test]
     async fn test_tree_persist_blocks() {
         let tree_config = TreeConfig::default();
+        let chain_spec = MAINNET.clone();
+        let mut test_block_builder =
+            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
 
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let blocks: Vec<_> =
-            get_executed_blocks(1..tree_config.persistence_threshold() + 1).collect();
-        let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        let blocks: Vec<_> = test_block_builder
+            .get_executed_blocks(1..tree_config.persistence_threshold() + 1)
+            .collect();
+        let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
         std::thread::Builder::new()
             .name("Tree Task".to_string())
             .spawn(|| test_harness.tree.run())
@@ -1898,7 +1899,7 @@ mod tests {
     async fn test_in_memory_state_trait_impl() {
         let tree_config = TreeConfig::default();
 
-        let blocks: Vec<_> = get_executed_blocks(0..10).collect();
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(0..10).collect();
         let head_block = blocks.last().unwrap().block();
         let first_block = blocks.first().unwrap().block();
 
@@ -1928,8 +1929,9 @@ mod tests {
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
         let tree_config = TreeConfig::default();
-
-        let blocks: Vec<_> = get_executed_blocks(0..tree_config.persistence_threshold()).collect();
+        let blocks: Vec<_> = TestBlockBuilder::default()
+            .get_executed_blocks(0..tree_config.persistence_threshold())
+            .collect();
         let mut test_harness = TestHarness::new(MAINNET.clone())
             .with_blocks(blocks)
             .with_backfill_state(BackfillSyncState::Active);
@@ -1976,7 +1978,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = get_executed_blocks(1..4).collect();
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
         tree_state.insert_executed(blocks[1].clone());
@@ -2002,16 +2004,20 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+        let mut test_block_builder = TestBlockBuilder::default();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
         assert_eq!(tree_state.blocks_by_hash.len(), 5);
 
-        let fork_block_3 = get_executed_block_with_number(3, blocks[1].block.hash());
-        let fork_block_4 = get_executed_block_with_number(4, fork_block_3.block.hash());
-        let fork_block_5 = get_executed_block_with_number(5, fork_block_4.block.hash());
+        let fork_block_3 =
+            test_block_builder.get_executed_block_with_number(3, blocks[1].block.hash());
+        let fork_block_4 =
+            test_block_builder.get_executed_block_with_number(4, fork_block_3.block.hash());
+        let fork_block_5 =
+            test_block_builder.get_executed_block_with_number(5, fork_block_4.block.hash());
 
         tree_state.insert_executed(fork_block_3.clone());
         tree_state.insert_executed(fork_block_4.clone());
@@ -2037,7 +2043,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -2076,7 +2082,9 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_on_new_head() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = get_executed_blocks(1..6).collect();
+        let mut test_block_builder = TestBlockBuilder::default();
+
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -2086,9 +2094,12 @@ mod tests {
         tree_state.set_canonical_head(blocks[2].block.num_hash());
 
         // create a fork from block 2
-        let fork_block_3 = get_executed_block_with_number(3, blocks[1].block.hash());
-        let fork_block_4 = get_executed_block_with_number(4, fork_block_3.block.hash());
-        let fork_block_5 = get_executed_block_with_number(5, fork_block_4.block.hash());
+        let fork_block_3 =
+            test_block_builder.get_executed_block_with_number(3, blocks[1].block.hash());
+        let fork_block_4 =
+            test_block_builder.get_executed_block_with_number(4, fork_block_3.block.hash());
+        let fork_block_5 =
+            test_block_builder.get_executed_block_with_number(5, fork_block_4.block.hash());
 
         tree_state.insert_executed(fork_block_3.clone());
         tree_state.insert_executed(fork_block_4.clone());
@@ -2121,8 +2132,9 @@ mod tests {
     async fn test_get_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
+        let mut test_block_builder = TestBlockBuilder::default();
 
-        let blocks: Vec<_> = get_executed_blocks(0..10).collect();
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..10).collect();
         test_harness = test_harness.with_blocks(blocks.clone());
 
         test_harness.tree.persistence_state.last_persisted_block_number = 3;
@@ -2143,7 +2155,7 @@ mod tests {
         }
 
         // make sure only canonical blocks are included
-        let fork_block = get_executed_block_with_number(7, B256::random());
+        let fork_block = test_block_builder.get_executed_block_with_number(7, B256::random());
         let fork_block_hash = fork_block.block.hash();
         test_harness.tree.state.tree_state.insert_executed(fork_block);
 
@@ -2166,17 +2178,14 @@ mod tests {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
-        let blocks: Vec<_> = get_executed_blocks(0..5).collect();
+        let mut test_block_builder =
+            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
         test_harness = test_harness.with_blocks(blocks);
 
-        let missing_block = generate_random_block(
-            6,
-            test_harness.blocks.last().unwrap().block().hash(),
-            &chain_spec,
-            Address::random(),
-            &mut U256::from(1_000_000_000_000_000_000u64),
-            &mut 0,
-        );
+        let missing_block = test_block_builder
+            .generate_random_block(6, test_harness.blocks.last().unwrap().block().hash());
 
         let fcu_state = ForkchoiceState {
             head_block_hash: missing_block.hash(),
