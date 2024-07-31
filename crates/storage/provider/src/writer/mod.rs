@@ -1,6 +1,6 @@
 use crate::{
     providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
-    DatabaseProviderRW, StateChangeWriter, StateWriter, TrieWriter,
+    DatabaseProviderRW, StateChangeWriter, StateWriter,
 };
 use reth_db::{
     cursor::DbCursorRO,
@@ -15,7 +15,6 @@ use reth_primitives::{
 };
 use reth_storage_api::{HeaderProvider, ReceiptWriter};
 use reth_storage_errors::writer::StorageWriterError;
-use reth_trie::updates::TrieUpdates;
 use revm::db::OriginalValuesKnown;
 use static_file::StaticFileWriter;
 use std::borrow::Borrow;
@@ -288,12 +287,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Writes trie updates. Returns the number of entries modified.
-    pub fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
-        self.ensure_database_writer()?;
-        self.database_writer().write_trie_updates(trie_updates)
     }
 }
 
