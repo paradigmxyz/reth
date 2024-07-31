@@ -512,7 +512,7 @@ where
         self.on_engine_message(msg);
 
         if self.should_persist() && !self.persistence_state.in_progress() {
-            let blocks_to_persist = self.get_blocks_to_persist();
+            let blocks_to_persist = self.get_canonical_blocks_to_persist();
             let (tx, rx) = oneshot::channel();
             self.persistence.save_blocks(blocks_to_persist, tx);
             self.persistence_state.start(rx);
@@ -752,20 +752,20 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold and
     /// backfill is not running.
-    fn should_persist(&self) -> bool {
+    const fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
         }
 
         let min_block = self.persistence_state.last_persisted_block_number;
-        self.state.tree_state.max_block_number().saturating_sub(min_block) >=
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >=
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive blocks to persist. The expected order is
+    /// Returns a batch of consecutive canonical blocks to persist. The expected order is
     /// oldest -> newest.
-    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block_number;
@@ -2181,7 +2181,7 @@ mod tests {
 
         test_harness.tree.config = TreeConfig::default().with_persistence_threshold(5);
 
-        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
         assert_eq!(blocks_to_persist.len(), 5);
         assert_eq!(blocks_to_persist[0].block.number, 4);
@@ -2201,7 +2201,7 @@ mod tests {
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
-        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
         assert_eq!(blocks_to_persist.len(), 5);
 
         // check that the fork block is not included in the blocks to persist
