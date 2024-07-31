@@ -1,5 +1,4 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
-use reth_db::DatabaseError;
 use reth_primitives::B256;
 
 /// Represents a branch node in the trie.
@@ -68,7 +67,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
 
 impl<C, H> TrieNodeIter<C, H>
 where
-    C: TrieCursor<Error = DatabaseError>,
+    C: TrieCursor,
     H: HashedCursor<Error = C::Error>,
 {
     /// Return the next trie node to be added to the hash builder.
@@ -84,7 +83,7 @@ where
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
     pub fn try_next(
         &mut self,
-    ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
+    ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, C::Error> {
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {
