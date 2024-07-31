@@ -7,15 +7,17 @@
 //! ```
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
+
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use reth::builder::NodeHandle;
 use reth_network::{
     config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
-    NetworkProtocols,
+    NetworkProtocols, PeersHandleProvider,
 };
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::test_utils::NoopProvider;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use subprotocol::{
     connection::CustomCommand,
     protocol::{

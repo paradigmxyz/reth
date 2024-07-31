@@ -15,6 +15,10 @@ workspace = true
 # reth
 reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
+reth-ethereum-forks.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync"] }
 
 # io
 serde = { workspace = true, optional = true }
@@ -23,6 +27,7 @@ serde_json = { workspace = true }
 
 # misc 
 tracing.workspace = true
+derive_more.workspace = true
 
 [features]
 serde = ["dep:serde", "dep:humantime-serde"]

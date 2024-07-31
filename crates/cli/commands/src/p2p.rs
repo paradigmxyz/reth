@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
-use reth_network::NetworkConfigBuilder;
+use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
     args::{
