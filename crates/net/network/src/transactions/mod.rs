@@ -27,9 +27,7 @@ use reth_network_p2p::{
     sync::SyncStateProvider,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
-};
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, TxHash, B256};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1002,7 +1000,7 @@ where
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
+                            let pool_transaction: Pool::Transaction = tx.into();
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));

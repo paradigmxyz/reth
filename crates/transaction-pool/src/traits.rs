@@ -11,10 +11,10 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
-    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
-    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    BlobTransactionSidecar, BlobTransactionValidationError, IntoRecoveredTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
+    TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash, TxKind, B256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -753,25 +753,29 @@ impl BestTransactionsAttributes {
     }
 }
 
-/// A trait to operate conversions between different pooled transaction types.
-pub trait PooledTransaction: std::marker::Sized {
-    /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self> + TryInto<Self>;
-
-    /// Associated type representing the recovered pooled variant of the transaction.
-    type Pooled: Into<Self>;
-}
+// impl From<PooledTransactionsElementEcRecovered> for PoolTransaction::Pooled {
+//     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+//         tx
+//     }
+// }
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
     fmt::Debug
     + Send
     + Sync
-    + FromRecoveredPooledTransaction
     + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
-    + PooledTransaction
+    + std::marker::Sized
+    + From<PooledTransactionsElementEcRecovered>
+    + TryFrom<TransactionSignedEcRecovered>
 {
+    /// Associated type representing the raw consensus variant of the transaction.
+    type Consensus: From<Self> + TryInto<Self>;
+
+    /// Associated type representing the recovered pooled variant of the transaction.
+    type Pooled: Into<Self>;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -1002,13 +1006,11 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     }
 }
 
-impl PooledTransaction for EthPooledTransaction {
+impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
-}
 
-impl PoolTransaction for EthPooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -1211,12 +1213,6 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
         let encoded_length = tx.length_without_header();
         let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
-    }
-}
-
-impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        Self::from(tx)
     }
 }
 

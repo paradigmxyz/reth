@@ -5,7 +5,7 @@ use crate::{
     pool::txpool::TxPool,
     traits::TransactionOrigin,
     CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
-    PooledTransaction, ValidPoolTransaction,
+    ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -16,10 +16,10 @@ use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-    TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType,
-    B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip1559,
+    TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
@@ -557,13 +557,11 @@ impl MockTransaction {
     }
 }
 
-impl PooledTransaction for MockTransaction {
+impl PoolTransaction for MockTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
-}
 
-impl PoolTransaction for MockTransaction {
     fn hash(&self) -> &TxHash {
         match self {
             Self::Legacy { hash, .. } |
@@ -984,15 +982,6 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
             }),
             _ => unreachable!("Invalid transaction type"),
         }
-    }
-}
-
-impl FromRecoveredPooledTransaction for MockTransaction {
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        TryFromRecoveredTransaction::try_from_recovered_transaction(
-            tx.into_ecrecovered_transaction(),
-        )
-        .expect("Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction")
     }
 }
 

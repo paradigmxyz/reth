@@ -1611,16 +1611,6 @@ impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
-/// transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait FromRecoveredPooledTransaction {
-    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
-}
-
 /// The inverse of [`TryFromRecoveredTransaction`] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {

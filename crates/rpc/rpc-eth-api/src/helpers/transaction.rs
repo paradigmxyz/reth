@@ -6,8 +6,8 @@ use std::{fmt, ops::Deref, sync::Arc};
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
+    Address, BlockId, Bytes, IntoRecoveredTransaction, Receipt, SealedBlockWithSenders,
+    TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -257,10 +257,7 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             let recovered = recover_raw_transaction(tx)?;
-            let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
-                    recovered,
-                );
+            let pool_transaction: <Self::Pool as TransactionPool>::Transaction = recovered.into();
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -472,7 +469,7 @@ pub trait EthTransactions: LoadTransaction {
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
             let pool_transaction = match recovered.try_into() {
-                Ok(converted) => <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(converted),
+                Ok(converted) => converted,
                 Err(_) => return Err(EthApiError::TransactionConversionError.into()),
             };
 
