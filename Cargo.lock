@@ -6990,11 +6990,9 @@ name = "reth-engine-tree"
 version = "1.0.3"
 dependencies = [
  "alloy-rlp",
- "aquamarine",
  "assert_matches",
  "futures",
  "metrics",
- "parking_lot 0.12.3",
  "rand 0.8.5",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -7006,7 +7004,6 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
- "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-exex-types",
@@ -7027,12 +7024,9 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
- "reth-tokio-util",
  "reth-tracing",
  "reth-trie",
- "revm",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -7303,6 +7297,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "nybbles",
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
@@ -7564,6 +7559,7 @@ version = "1.0.3"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-admin",
+ "auto_impl",
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
@@ -7986,13 +7982,14 @@ name = "reth-optimism-rpc"
 version = "1.0.3"
 dependencies = [
  "alloy-primitives",
+ "derive_more",
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot 0.12.3",
- "reth-chainspec",
- "reth-errors",
  "reth-evm",
  "reth-evm-optimism",
+ "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-primitives",
  "reth-provider",
@@ -8413,6 +8410,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

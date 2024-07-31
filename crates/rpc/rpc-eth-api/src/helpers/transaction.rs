@@ -22,7 +22,7 @@ use reth_rpc_types::{
     AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError};
 
@@ -249,15 +249,20 @@ pub trait EthTransactions: LoadTransaction {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
+            let recovered = recover_raw_transaction(tx.clone())?;
+            let pool_transaction =
+                <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
+                    recovered,
+                );
+
             // On optimism, transactions are forwarded directly to the sequencer to be included in
             // blocks that it builds.
             if let Some(client) = self.raw_tx_forwarder().as_ref() {
                 tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
-                client.forward_raw_transaction(&tx).await?;
+                let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                });
             }
-
-            let recovered = recover_raw_transaction(tx)?;
-            let pool_transaction: <Self::Pool as TransactionPool>::Transaction = recovered.into();
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self

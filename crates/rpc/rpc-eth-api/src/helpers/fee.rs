@@ -50,7 +50,7 @@ pub trait EthFees: LoadFee {
     fn fee_history(
         &self,
         mut block_count: u64,
-        newest_block: BlockNumberOrTag,
+        mut newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> impl Future<Output = Result<FeeHistory, Self::Error>> + Send {
         async move {
@@ -72,6 +72,13 @@ pub trait EthFees: LoadFee {
                     "Sanitizing fee history block count"
                 );
                 block_count = max_fee_history
+            }
+
+            if newest_block.is_pending() {
+                // cap the target block since we don't have fee history for the pending block
+                newest_block = BlockNumberOrTag::Latest;
+                // account for missing pending block
+                block_count = block_count.saturating_sub(1);
             }
 
             let Some(end_block) = LoadFee::provider(self)
