@@ -80,7 +80,7 @@ impl<DB: Database> PersistenceService<DB> {
             // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
             // TODO: do we provide a static file producer here?
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+            let mut storage_writer = StorageWriter::new(Some(provider_rw), None);
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
@@ -149,7 +149,7 @@ impl<DB: Database> PersistenceService<DB> {
     ///
     /// The [`update_transaction_meta`](Self::update_transaction_meta) method should be called
     /// after this, to update the checkpoints for headers and block bodies.
-    #[instrument(level = "trace", skip(self), target = "engine")]
+    #[instrument(level = "trace", skip(self, provider_rw), target = "engine")]
     fn write_transactions(
         &self,
         block: Arc<SealedBlock>,
@@ -160,7 +160,7 @@ impl<DB: Database> PersistenceService<DB> {
 
         let new_td = {
             let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(header_writer));
+            let mut storage_writer = StorageWriter::new(Some(provider_rw), Some(header_writer));
             let new_td = storage_writer.append_headers_from_blocks(
                 block.header().number,
                 std::iter::once(&(block.header(), block.hash())),
@@ -169,7 +169,7 @@ impl<DB: Database> PersistenceService<DB> {
             let transactions_writer =
                 provider.get_writer(block.number, StaticFileSegment::Transactions)?;
             let mut storage_writer =
-                StorageWriter::new(Some(&provider_rw), Some(transactions_writer));
+                StorageWriter::new(Some(provider_rw), Some(transactions_writer));
             let no_hash_transactions =
                 block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
             storage_writer.append_transactions_from_blocks(
@@ -206,7 +206,7 @@ impl<DB: Database> PersistenceService<DB> {
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
 
         {
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
+            let mut storage_writer = StorageWriter::new(Some(provider_rw), Some(receipts_writer));
             let receipts_iter = blocks.iter().map(|block| {
                 let receipts = block.execution_outcome().receipts().receipt_vec.clone();
                 debug_assert!(receipts.len() == 1);
