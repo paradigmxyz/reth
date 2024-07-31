@@ -5,7 +5,10 @@ use alloy_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     keccak256, B256,
 };
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
+use alloy_rlp::{
+    Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
+    RlpEncodableWrapper,
+};
 use enr::Enr;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{pk2id, NodeRecord, PeerId};
@@ -198,18 +201,11 @@ pub struct Packet {
     pub hash: B256,
 }
 
-/// Represents the `from`, `to` fields in the packets
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable)]
-pub struct NodeEndpoint {
-    /// The IP address of the network endpoint. It can be either IPv4 or IPv6.
-    pub address: IpAddr,
-    /// The UDP port used for communication in the discovery protocol.
-    pub udp_port: u16,
-    /// The TCP port used for communication in the `RLPx` protocol.
-    pub tcp_port: u16,
-}
+/// Represents the `from` field in the `Ping` packet
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodableWrapper)]
+pub struct PingNodeEndpoint(pub NodeEndpoint);
 
-impl alloy_rlp::Decodable for NodeEndpoint {
+impl alloy_rlp::Decodable for PingNodeEndpoint {
     #[inline]
     fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(b)?;
@@ -236,7 +232,7 @@ impl alloy_rlp::Decodable for NodeEndpoint {
                 alloy_rlp::Decodable::decode(b)?
             };
 
-        let this = Self {
+        let this = NodeEndpoint {
             address,
             udp_port: alloy_rlp::Decodable::decode(b)?,
             tcp_port: alloy_rlp::Decodable::decode(b)?,
@@ -248,8 +244,38 @@ impl alloy_rlp::Decodable for NodeEndpoint {
                 got: consumed,
             });
         }
-        Ok(this)
+        Ok(Self(this))
     }
+}
+
+impl From<NodeRecord> for PingNodeEndpoint {
+    fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
+        Self(NodeEndpoint { address, tcp_port, udp_port })
+    }
+}
+
+impl From<NodeEndpoint> for PingNodeEndpoint {
+    fn from(value: NodeEndpoint) -> Self {
+        Self(value)
+    }
+}
+
+impl PingNodeEndpoint {
+    /// Creates a new [`PingNodeEndpoint`] from a given UDP address and TCP port.
+    pub const fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
+        Self(NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port })
+    }
+}
+
+/// Represents the `from`, `to` fields in the packets
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
+pub struct NodeEndpoint {
+    /// The IP address of the network endpoint. It can be either IPv4 or IPv6.
+    pub address: IpAddr,
+    /// The UDP port used for communication in the discovery protocol.
+    pub udp_port: u16,
+    /// The TCP port used for communication in the `RLPx` protocol.
+    pub tcp_port: u16,
 }
 
 impl From<NodeRecord> for NodeEndpoint {
@@ -479,23 +505,15 @@ impl Decodable for Ping {
         }
         let started_len = b.len();
 
-        println!("got past first ping header");
         // > Implementations should ignore any mismatches in version:
         // <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>
         let _version = u32::decode(b)?;
 
-        println!("version: {_version}");
-        println!("buf: {b:?}");
-        let from = Decodable::decode(b).unwrap();
-        println!("from: {from:?}");
-        let to = Decodable::decode(b)?;
-        println!("to: {to:?}");
-        let expire = Decodable::decode(b)?;
-        println!("expire: {expire:?}");
+        // see `Decodable` implementation in `PingNodeEndpoint` for why this is needed
+        let from = PingNodeEndpoint::decode(b)?.0;
 
-        let mut this = Self { from, to, expire, enr_sq: None };
-
-        println!("this: {this:?}");
+        let mut this =
+            Self { from, to: Decodable::decode(b)?, expire: Decodable::decode(b)?, enr_sq: None };
 
         // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
