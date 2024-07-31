@@ -66,7 +66,7 @@ impl TestBlockBuilder {
         U256::from(EIP1559_INITIAL_BASE_FEE * 21_000)
     }
 
-    /// Generates a random `SealedBlockWithSenders`.
+    /// Generates a random [`SealedBlockWithSenders`].
     pub fn generate_random_block(
         &mut self,
         number: BlockNumber,
@@ -170,6 +170,7 @@ impl TestBlockBuilder {
         fork
     }
 
+    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], [`Receipts`] and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
@@ -192,7 +193,7 @@ impl TestBlockBuilder {
         )
     }
 
-    /// Generates an `ExecutedBlock` that includes the given `Receipts`.
+    /// Generates an [`ExecutedBlock`] that includes the given [`Receipts`].
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Receipts,
@@ -202,7 +203,7 @@ impl TestBlockBuilder {
         self.get_executed_block(number, receipts, parent_hash)
     }
 
-    /// Generates an `ExecutedBlock` with the given `BlockNumber`.
+    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`].
     pub fn get_executed_block_with_number(
         &mut self,
         block_number: BlockNumber,
@@ -248,6 +249,7 @@ impl TestCanonStateSubscriptions {
 }
 
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);
         self.canon_notif_tx.lock().as_mut().unwrap().push(canon_notif_tx);
