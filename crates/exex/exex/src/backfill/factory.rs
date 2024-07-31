@@ -44,7 +44,7 @@ impl<E, P> BackfillJobFactory<E, P> {
 
     /// Sets the stream parallelism.
     ///
-    /// Configures the [`BackFillJobStream`](super::stream::BackFillJobStream) created via
+    /// Configures the [`StreamBackfillJob`](super::stream::StreamBackfillJob) created via
     /// [`BackfillJob::into_stream`].
     pub const fn with_stream_parallelism(mut self, stream_parallelism: usize) -> Self {
         self.stream_parallelism = stream_parallelism;
