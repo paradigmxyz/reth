@@ -5,9 +5,7 @@ use reth_db::{models::CompactU256, tables, transaction::DbTxMut, Database};
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{
-    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, HistoryWriter,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
+    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, DatabaseProviderRW, HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -46,14 +44,13 @@ impl<DB: Database> PersistenceService<DB> {
     }
 
     /// Writes the cloned tree state to database
-    fn write(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+    fn write(&self, blocks: &[ExecutedBlock], provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "tree::persistence", "Attempted to write empty block range");
             return Ok(())
         }
 
         debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks to database");
-        let provider_rw = self.provider.provider_rw()?;
         let first_number = blocks.first().unwrap().block().number;
 
         let last = blocks.last().unwrap().block();
@@ -94,8 +91,6 @@ impl<DB: Database> PersistenceService<DB> {
             // Update pipeline progress
             provider_rw.update_pipeline_stages(last_block_number, false)?;
         }
-
-        provider_rw.commit()?;
 
         debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
 
@@ -146,14 +141,13 @@ impl<DB: Database> PersistenceService<DB> {
     /// The [`update_transaction_meta`](Self::update_transaction_meta) method should be called
     /// after this, to update the checkpoints for headers and block bodies.
     #[instrument(level = "trace", skip(self), target = "engine")]
-    fn write_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<(u64, U256)> {
+    fn write_transactions(&self, block: Arc<SealedBlock>, provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<(u64, U256)> {
         debug!(target: "tree::persistence", "Writing transactions");
         let provider = self.provider.static_file_provider();
 
         let new_td = {
             let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-            let provider_ro = self.provider.provider()?;
-            let mut storage_writer = StorageWriter::new(Some(&provider_ro), Some(header_writer));
+            let mut storage_writer = StorageWriter::new(Some(&provider_rw), Some(header_writer));
             let new_td = storage_writer.append_headers_from_blocks(
                 block.header().number,
                 std::iter::once(&(block.header(), block.hash())),
@@ -162,7 +156,7 @@ impl<DB: Database> PersistenceService<DB> {
             let transactions_writer =
                 provider.get_writer(block.number, StaticFileSegment::Transactions)?;
             let mut storage_writer =
-                StorageWriter::new(Some(&provider_ro), Some(transactions_writer));
+                StorageWriter::new(Some(&provider_rw), Some(transactions_writer));
             let no_hash_transactions =
                 block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
             storage_writer.append_transactions_from_blocks(
@@ -173,16 +167,11 @@ impl<DB: Database> PersistenceService<DB> {
             new_td
         };
 
-        provider.commit()?;
-
         Ok((block.number, new_td))
     }
 
-    /// Write execution-related block data to static files.
-    ///
-    /// This will then send a command to the db service, that it should write new data, and update
-    /// the checkpoints for execution and beyond.
-    fn write_execution_data(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+    /// Write execution-related block data to database and/or static files.
+    fn write_execution_data(&self, blocks: &[ExecutedBlock], provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
         if blocks.is_empty() {
             return Ok(())
         }
@@ -209,9 +198,6 @@ impl<DB: Database> PersistenceService<DB> {
             });
             storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
         }
-
-        provider.commit()?;
-        provider_rw.commit()?;
 
         Ok(())
     }
@@ -285,17 +271,21 @@ where
                         todo!("return error or something");
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
-                    // first write to static files
-                    self.write_execution_data(&blocks).expect("todo: handle errors");
-                    // then write to db
-                    self.write(&blocks).expect("todo: handle errors");
+
+                    let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
+                    self.write_execution_data(&blocks, &provider_rw).expect("todo: handle errors");
+                    self.write(&blocks, &provider_rw).expect("todo: handle errors");
+
                     for block in &blocks {
                         // first write transactions
                         let (block_num, td) = self
-                            .write_transactions(block.block.clone())
+                            .write_transactions(block.block.clone(), &provider_rw)
                             .expect("todo: handle errors");
                         self.update_transaction_meta(block_num, td).expect("todo: handle errors");
                     }
+
+                    self.provider.static_file_provider().commit().expect("todo: handle errors");
+                    provider_rw.commit().expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(last_block_hash);
@@ -307,12 +297,13 @@ where
                     let _ = sender.send(res);
                 }
                 PersistenceAction::WriteTransactions((block, sender)) => {
-                    let (block_num, td) =
-                        self.write_transactions(block).expect("todo: handle errors");
-                    self.update_transaction_meta(block_num, td).expect("todo: handle errors");
+                    unimplemented!()
+                    // let (block_num, td) =
+                    //     self.write_transactions(block).expect("todo: handle errors");
+                    // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
 
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    // // we ignore the error because the caller may or may not care about the result
+                    // let _ = sender.send(());
                 }
             }
         }
