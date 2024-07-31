@@ -32,18 +32,19 @@ impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'a, TX> {
+    type Error = DatabaseError;
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, Self::Error> {
         Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor, Self::Error> {
         Ok(DatabaseStorageTrieCursor::new(
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
@@ -66,29 +67,28 @@ impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
+    type Error = DatabaseError;
+
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Error> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
     }
 }
@@ -169,11 +169,13 @@ impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
     C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
 {
+    type Error = DatabaseError;
+
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key.clone()))?
@@ -182,10 +184,7 @@ where
     }
 
     /// Seeks the given key in the storage trie.
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
@@ -193,12 +192,12 @@ where
     }
 
     /// Move the cursor to the next entry and return it.
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
     }
 
     /// Retrieves the current value in the storage trie cursor.
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Error> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
     }
 }

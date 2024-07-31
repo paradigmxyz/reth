@@ -10,6 +10,7 @@ use crate::{
     HashBuilder, Nibbles, TrieAccount,
 };
 use alloy_rlp::{BufMut, Encodable};
+use reth_db::DatabaseError;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use tracing::trace;
@@ -106,7 +107,7 @@ impl<T, H> StateRoot<T, H> {
 
 impl<T, H> StateRoot<T, H>
 where
-    T: TrieCursorFactory + Clone,
+    T: TrieCursorFactory<Error = DatabaseError> + Clone,
     H: HashedCursorFactory + Clone,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
@@ -364,7 +365,7 @@ impl<T, H> StorageRoot<T, H> {
 
 impl<T, H> StorageRoot<T, H>
 where
-    T: TrieCursorFactory,
+    T: TrieCursorFactory<Error = DatabaseError>,
     H: HashedCursorFactory,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.

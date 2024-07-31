@@ -3,7 +3,6 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use reth_db::DatabaseError;
 use reth_primitives::B256;
 use std::collections::HashSet;
 
@@ -130,7 +129,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// # Returns
     ///
     /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    pub fn advance(&mut self) -> Result<Option<Nibbles>, C::Error> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
@@ -153,7 +152,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, C::Error> {
         let key = self.key().expect("key must exist").clone();
         let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
 
@@ -165,7 +164,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Consumes the next node in the trie, updating the stack.
-    fn consume_node(&mut self) -> Result<(), DatabaseError> {
+    fn consume_node(&mut self) -> Result<(), C::Error> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
@@ -197,10 +196,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    fn move_to_next_sibling(
-        &mut self,
-        allow_root_to_child_nibble: bool,
-    ) -> Result<(), DatabaseError> {
+    fn move_to_next_sibling(&mut self, allow_root_to_child_nibble: bool) -> Result<(), C::Error> {
         let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its

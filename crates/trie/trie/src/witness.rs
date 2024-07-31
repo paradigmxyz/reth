@@ -4,6 +4,7 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::Either;
+use reth_db::DatabaseError;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
 use reth_trie_common::{
@@ -54,7 +55,7 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone,
+    T: TrieCursorFactory<Error = DatabaseError> + Clone,
     H: HashedCursorFactory + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes

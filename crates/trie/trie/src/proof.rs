@@ -7,6 +7,7 @@ use crate::{
     HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
+use reth_db::DatabaseError;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives::{keccak256, Address, B256};
 use reth_trie_common::{
@@ -67,7 +68,7 @@ impl<T, H> Proof<T, H> {
 
 impl<T, H> Proof<T, H>
 where
-    T: TrieCursorFactory,
+    T: TrieCursorFactory<Error = DatabaseError>,
     H: HashedCursorFactory + Clone,
 {
     /// Generate an account proof from intermediate nodes.

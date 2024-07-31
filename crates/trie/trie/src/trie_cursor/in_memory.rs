@@ -3,7 +3,6 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use reth_db::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;
@@ -25,10 +24,11 @@ impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
 }
 
 impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<'a, CF> {
+    type Error = CF::Error;
     type AccountTrieCursor = InMemoryAccountTrieCursor<'a, CF::AccountTrieCursor>;
     type StorageTrieCursor = InMemoryStorageTrieCursor<'a, CF::StorageTrieCursor>;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, Self::Error> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
         Ok(InMemoryAccountTrieCursor::new(cursor, self.trie_updates))
     }
@@ -36,7 +36,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor, Self::Error> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         Ok(InMemoryStorageTrieCursor::new(
             hashed_address,
@@ -76,7 +76,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
         exact: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, C::Error> {
         let in_memory = self.in_memory_cursor.seek(&key);
         if exact && in_memory.as_ref().map_or(false, |entry| entry.0 == key) {
             return Ok(in_memory)
@@ -97,7 +97,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     fn next_inner(
         &mut self,
         last: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, C::Error> {
         let in_memory = self.in_memory_cursor.first_after(&last);
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
@@ -115,25 +115,24 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
 }
 
 impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
+    type Error = C::Error;
+
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let entry = self.seek_inner(key, true)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let entry = self.seek_inner(key, false)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let next = match &self.last_key {
             Some(last) => {
                 let entry = self.next_inner(last.clone())?;
@@ -146,7 +145,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
         Ok(next)
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Error> {
         match &self.last_key {
             Some(key) => Ok(Some(key.clone())),
             None => self.cursor.current(),
@@ -194,7 +193,7 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
         exact: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, C::Error> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
         if self.storage_trie_cleared ||
             (exact && in_memory.as_ref().map_or(false, |entry| entry.0 == key))
@@ -219,7 +218,7 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
     fn next_inner(
         &mut self,
         last: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, C::Error> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.first_after(&last));
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
@@ -236,25 +235,24 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
 }
 
 impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
+    type Error = C::Error;
+
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let entry = self.seek_inner(key, true)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let entry = self.seek_inner(key, false)?;
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Error> {
         let next = match &self.last_key {
             Some(last) => {
                 let entry = self.next_inner(last.clone())?;
@@ -267,7 +265,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
         Ok(next)
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Error> {
         match &self.last_key {
             Some(key) => Ok(Some(key.clone())),
             None => self.cursor.current(),
