@@ -1832,9 +1832,8 @@ mod tests {
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
-    use reth_primitives::{constants::EIP1559_INITIAL_BASE_FEE, Address, Bytes, Receipt};
+    use reth_primitives::{Address, Bytes};
     use reth_provider::test_utils::MockEthProvider;
-    use reth_revm::{db::BundleState, primitives::AccountInfo};
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
         str::FromStr,
@@ -1959,43 +1958,8 @@ mod tests {
             &mut self,
             block: SealedBlockWithSenders,
         ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
-            let receipts = block
-                .body
-                .iter()
-                .enumerate()
-                .map(|(idx, tx)| Receipt {
-                    tx_type: tx.tx_type(),
-                    success: true,
-                    cumulative_gas_used: (idx as u64 + 1) * 21_000,
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>();
-
-            let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
-
-            let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * 21_000);
-
-            for tx in &block.body {
-                self.signer_balance -= single_tx_cost;
-                bundle_state_builder = bundle_state_builder.state_present_account_info(
-                    self.signer_address,
-                    AccountInfo {
-                        nonce: tx.nonce(),
-                        balance: self.signer_balance,
-                        ..Default::default()
-                    },
-                );
-            }
-
-            let execution_outcome = ExecutionOutcome::new(
-                bundle_state_builder.build(),
-                vec![vec![None]].into(),
-                block.number,
-                Vec::new(),
-            );
-            self.extend_execution_outcome([
-                execution_outcome.with_receipts(Receipts::from(receipts))
-            ]);
+            let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
+            self.extend_execution_outcome([execution_outcome]);
             self.tree.insert_block(block)
         }
     }
