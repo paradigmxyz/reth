@@ -31,7 +31,7 @@ pub struct RollupArgs {
     pub compute_pending_block: bool,
 
     /// Enable discv4 discovery protocol
-    #[arg(long = "discovery.v4")]
+    #[arg(long = "rollup.discovery.v4")]
     pub discovery_v4: bool,
 }
 
