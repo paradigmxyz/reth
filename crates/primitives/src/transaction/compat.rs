@@ -30,6 +30,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.access_list.clear();
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
             }
             Transaction::Eip2930(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
@@ -43,6 +44,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.access_list.clone_from(&tx.access_list.0);
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
             }
             Transaction::Eip1559(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
@@ -56,6 +58,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.access_list.clone_from(&tx.access_list.0);
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
             }
             Transaction::Eip4844(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
@@ -69,6 +72,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.access_list.clone_from(&tx.access_list.0);
                 tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
                 tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
+                tx_env.authorization_list = None;
             }
             Transaction::Eip7702(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
