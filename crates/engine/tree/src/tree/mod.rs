@@ -100,6 +100,21 @@ impl TreeState {
             .map(|executed_block| executed_block.block.clone())
     }
 
+    /// Returns all available blocks for the given hash that lead back to the canonical chain, from newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
+    ///
+    /// Returns `None` if the block for the given hash is not found.
+    fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock>)> {
+        let block = self.blocks_by_hash.get(&hash).cloned()?;
+        let mut parent_hash = block.block().parent_hash;
+        let mut blocks = vec![block];
+        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
+            parent_hash = executed.block.parent_hash;
+            blocks.push(executed.clone());
+        }
+
+        Some((parent_hash, blocks))
+    }
+
     /// Insert executed block into the state.
     fn insert_executed(&mut self, executed: ExecutedBlock) {
         let hash = executed.block.hash();
@@ -259,6 +274,7 @@ impl TreeState {
         }
     }
 }
+
 
 /// Tracks the state of the engine api internals.
 ///
@@ -846,9 +862,23 @@ where
     /// Return state provider with reference to in-memory blocks that overlay database state.
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    // TODO: return error if the chain has gaps
+    /// the head of. This includes all blocks that connect back to a canonical block on disk.
+    ///
     fn state_provider(&self, hash: B256) -> ProviderResult<MemoryOverlayStateProvider> {
+
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            // the block leads back to the canonical chain
+            let historical = self.provider.state_by_block_hash(historical)?;
+            return Ok(MemoryOverlayStateProvider::new(blocks, historical))
+        }
+
+        // the hash could belong to an unknown block or a persisted block
+        if let Some(_)  = self.provider.header(&hash)? {
+            // the block is known and persisted
+            let historical = self.provider.state_by_block_hash(hash)?;
+            return Ok(MemoryOverlayStateProvider::new(Vec::new(), historical))
+        }
+
         let mut in_memory = Vec::new();
         let mut parent_hash = hash;
         while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
