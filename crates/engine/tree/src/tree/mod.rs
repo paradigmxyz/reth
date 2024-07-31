@@ -1017,6 +1017,9 @@ where
         debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
     }
 
+    /// Attempts to recover the block's senders and then buffers it.
+    ///
+    /// Returns an error if sender recovery failed or inserting into the buffer failed.
     fn buffer_block_without_senders(
         &mut self,
         block: SealedBlock,
@@ -1027,6 +1030,7 @@ where
         }
     }
 
+    /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockErrorTwo> {
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockErrorTwo::consensus_error(err, block.block))
@@ -1305,6 +1309,40 @@ where
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
+    /// Handles an error that occurred while inserting a block.
+    ///
+    /// If this is a validation error this will mark the block as invalid.
+    ///
+    /// Returns the proper payload status response if the block is invalid.
+    fn on_insert_block_error(
+        &mut self,
+        error: InsertBlockErrorTwo,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let (block, error) = error.split();
+
+        // if invalid block, we check the validation error. Otherwise return the fatal
+        // error.
+        let validation_err = error.ensure_validation_error()?;
+
+        // If the error was due to an invalid payload, the payload is added to the
+        // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
+        // returned.
+        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number, %validation_err, "Invalid block error on new payload");
+        let latest_valid_hash = if validation_err.is_block_pre_merge() {
+            // zero hash must be returned if block is pre-merge
+            Some(B256::ZERO)
+        } else {
+            self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
+        };
+
+        // keep track of the invalid header
+        self.state.invalid_headers.insert(block.header);
+        Ok(PayloadStatus::new(
+            PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
+            latest_valid_hash,
+        ))
+    }
+
     /// Attempts to find the header for the given block hash if it is canonical.
     pub fn find_canonical_header(&self, hash: B256) -> Result<Option<SealedHeader>, ProviderError> {
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
@@ -1567,11 +1605,13 @@ where
         }
 
         let status = if !self.backfill_sync_state.is_idle() {
-            self.buffer_block_without_senders(block).unwrap();
-            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            if let Err(error) = self.buffer_block_without_senders(block) {
+                self.on_insert_block_error(error)?
+            } else {
+                PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            }
         } else {
             let mut latest_valid_hash = None;
-
             match self.insert_block_without_senders(block) {
                 Ok(status) => {
                     let status = match status {
@@ -1589,31 +1629,7 @@ where
 
                     PayloadStatus::new(status, latest_valid_hash)
                 }
-                Err(error) => {
-                    let (block, error) = error.split();
-
-                    // if invalid block, we check the validation error. Otherwise return the fatal
-                    // error.
-                    let validation_err = error.ensure_validation_error()?;
-
-                    // If the error was due to an invalid payload, the payload is added to the
-                    // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
-                    // returned.
-                    warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number, %validation_err, "Invalid block error on new payload");
-                    let latest_valid_hash = if validation_err.is_block_pre_merge() {
-                        // zero hash must be returned if block is pre-merge
-                        Some(B256::ZERO)
-                    } else {
-                        self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
-                    };
-
-                    // keep track of the invalid header
-                    self.state.invalid_headers.insert(block.header);
-                    PayloadStatus::new(
-                        PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
-                        latest_valid_hash,
-                    )
-                }
+                Err(error) => self.on_insert_block_error(error)?,
             }
         };
 
