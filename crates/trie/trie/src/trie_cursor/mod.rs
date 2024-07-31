@@ -10,11 +10,7 @@ mod subnode;
 /// Noop trie cursor implementations.
 pub mod noop;
 
-pub use self::{
-    database_cursors::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
-    in_memory::*,
-    subnode::CursorSubNode,
-};
+pub use self::{database_cursors::*, in_memory::*, subnode::CursorSubNode};
 
 use crate::{BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
