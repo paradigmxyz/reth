@@ -168,9 +168,9 @@ impl Message {
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
-        println!("got msg_type: {msg_type} for payload {payload:x?}");
+        println!("got msg_type: {msg_type} for payload {payload:x?} {:?}", MessageId::from_u8(msg_type));
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
-            MessageId::Ping => Self::Ping(Ping::decode(payload)?),
+            MessageId::Ping => Self::Ping(Ping::decode(payload).unwrap()),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Self::Neighbours(Neighbours::decode(payload)?),
@@ -196,7 +196,7 @@ pub struct Packet {
 }
 
 /// Represents the `from`, `to` fields in the packets
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable)]
 pub struct NodeEndpoint {
     /// The IP address of the network endpoint. It can be either IPv4 or IPv6.
     pub address: IpAddr,
@@ -205,6 +205,37 @@ pub struct NodeEndpoint {
     /// The TCP port used for communication in the `RLPx` protocol.
     pub tcp_port: u16,
 }
+
+impl alloy_rlp::Decodable for NodeEndpoint {
+    #[inline]
+    fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(
+            b,
+        )?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        println!("{b:?}");
+        let started_len = b.len();
+        if started_len < payload_length {
+            return Err(alloy_rlp::DecodeError::InputTooShort);
+        }
+        let this = Self {
+            address: alloy_rlp::Decodable::decode(b).unwrap(),
+            udp_port: alloy_rlp::Decodable::decode(b).unwrap(),
+            tcp_port: alloy_rlp::Decodable::decode(b).unwrap(),
+        };
+        let consumed = started_len - b.len();
+        if consumed != payload_length {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: consumed,
+            });
+        }
+        Ok(this)
+    }
+}
+
 
 impl From<NodeRecord> for NodeEndpoint {
     fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
@@ -439,7 +470,8 @@ impl Decodable for Ping {
         let _version = u32::decode(b)?;
 
         println!("version: {_version}");
-        let from = Decodable::decode(b)?;
+        println!("buf: {b:?}");
+        let from = Decodable::decode(b).unwrap();
         println!("from: {from:?}");
         let to = Decodable::decode(b)?;
         println!("to: {to:?}");
@@ -859,6 +891,14 @@ mod tests {
         let packet = hex!("2467ab56952aedf4cfb8bb7830ddc8922d0f992185229919dad9de3841fe95d9b3a7b52459398235f6d3805644666d908b45edb3670414ed97f357afba51f71f7d35c1f45878ba732c3868b04ca42ff0ed347c99efcf3a5768afed68eb21ef960001db04c3808080c9840a480e8f82765f808466a9a06386019106833efe");
 
         let _message = Message::decode(&packet[..]).unwrap();
+    }
+
+    // test for failing message decode
+    #[test]
+    fn decode_node() {
+
+        let packet = hex!("cb840000000082115c82115d");
+        let _message = NodeEndpoint::decode(&mut &packet[..]).unwrap();
     }
 
     // test vector from the enr library rlp encoding tests
