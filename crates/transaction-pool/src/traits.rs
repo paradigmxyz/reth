@@ -758,7 +758,6 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + Clone
-    + std::marker::Sized
     + From<PooledTransactionsElementEcRecovered>
     + TryFrom<TransactionSignedEcRecovered>
     + Into<TransactionSignedEcRecovered>
