@@ -8,7 +8,7 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_banlist::BanList;
-use reth_network_api::{PeerKind, ReputationChangeKind};
+use reth_network_api::PeerKind;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{
     peers::{
@@ -17,7 +17,7 @@ use reth_network_types::{
             is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
         },
     },
-    ConnectionsConfig, PeersConfig, ReputationChangeWeights,
+    ConnectionsConfig, PeersConfig, ReputationChangeKind, ReputationChangeWeights,
 };
 use reth_primitives::ForkId;
 use std::{
@@ -34,7 +34,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -155,11 +155,18 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
-        for NodeRecord { address, tcp_port, udp_port, id } in trusted_nodes {
-            trusted_peer_ids.insert(id);
-            peers.entry(id).or_insert_with(|| {
-                Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
-            });
+        for trusted_peer in trusted_nodes {
+            match trusted_peer.resolve_blocking() {
+                Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
+                    trusted_peer_ids.insert(id);
+                    peers.entry(id).or_insert_with(|| {
+                        Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
+                    });
+                }
+                Err(err) => {
+                    warn!(target: "net::peers", ?err, "Failed to resolve trusted peer");
+                }
+            }
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
@@ -1319,25 +1326,6 @@ impl Display for InboundConnectionError {
 
 #[cfg(test)]
 mod tests {
-    use super::PeersManager;
-    use crate::{
-        peers::{
-            ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
-            PeerConnectionState,
-        },
-        session::PendingSessionHandshakeError,
-        PeersConfig,
-    };
-    use reth_discv4::NodeRecord;
-    use reth_eth_wire::{
-        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
-        DisconnectReason,
-    };
-    use reth_net_banlist::BanList;
-    use reth_network_api::{Direction, ReputationChangeKind};
-    use reth_network_peers::PeerId;
-    use reth_network_types::{peers::reputation::DEFAULT_REPUTATION, BackoffKind};
-    use reth_primitives::B512;
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
@@ -1346,6 +1334,29 @@ mod tests {
         pin::Pin,
         task::{Context, Poll},
         time::Duration,
+    };
+
+    use reth_eth_wire::{
+        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
+        DisconnectReason,
+    };
+    use reth_net_banlist::BanList;
+    use reth_network_api::Direction;
+    use reth_network_peers::{PeerId, TrustedPeer};
+    use reth_network_types::{
+        peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
+    };
+    use reth_primitives::B512;
+    use url::Host;
+
+    use super::PeersManager;
+    use crate::{
+        peers::{
+            ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
+            PeerConnectionState,
+        },
+        session::PendingSessionHandshakeError,
+        PeersConfig,
     };
 
     struct PeerActionFuture<'a> {
@@ -2290,12 +2301,12 @@ mod tests {
     async fn test_trusted_peers_are_prioritized() {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let config = PeersConfig::test().with_trusted_nodes(HashSet::from([NodeRecord {
-            address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+        let config = PeersConfig::test().with_trusted_nodes(vec![TrustedPeer {
+            host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
             tcp_port: 8008,
             udp_port: 8008,
             id: trusted_peer,
-        }]));
+        }]);
         let mut peers = PeersManager::new(config);
 
         let basic_peer = PeerId::random();
@@ -2329,12 +2340,12 @@ mod tests {
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2366,12 +2377,12 @@ mod tests {
     async fn test_incoming_with_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
@@ -2399,12 +2410,12 @@ mod tests {
     async fn test_incoming_without_trusted_nodes_only() {
         let trusted_peer = PeerId::random();
         let config = PeersConfig::test()
-            .with_trusted_nodes(HashSet::from([NodeRecord {
-                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+            .with_trusted_nodes(vec![TrustedPeer {
+                host: Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
                 tcp_port: 8008,
                 udp_port: 8008,
                 id: trusted_peer,
-            }]))
+            }])
             .with_trusted_nodes_only(false);
         let mut peers = PeersManager::new(config);
 

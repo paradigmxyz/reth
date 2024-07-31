@@ -1,7 +1,7 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
-use reth_db::DatabaseError;
 use reth_primitives::B256;
+use reth_storage_errors::db::DatabaseError;
 
 /// Noop trie cursor factory.
 #[derive(Default, Debug)]

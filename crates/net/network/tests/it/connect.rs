@@ -15,12 +15,13 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
-use reth_network_peers::{mainnet_nodes, NodeRecord};
+use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
+use url::Host;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_establish_connections() {
@@ -594,13 +595,18 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_always_accept_incoming_connections_from_trusted_peers() {
     reth_tracing::init_test_tracing();
-    let peer1 = new_random_peer(10, HashSet::new()).await;
-    let peer2 = new_random_peer(0, HashSet::new()).await;
+    let peer1 = new_random_peer(10, vec![]).await;
+    let peer2 = new_random_peer(0, vec![]).await;
 
     //  setup the peer with max_inbound = 1, and add other_peer_3 as trust nodes
-    let peer =
-        new_random_peer(0, HashSet::from([NodeRecord::new(peer2.local_addr(), *peer2.peer_id())]))
-            .await;
+    let trusted_peer2 = TrustedPeer {
+        host: Host::Ipv4(peer2.local_addr().ip().to_string().parse().unwrap()),
+        tcp_port: peer2.local_addr().port(),
+        udp_port: peer2.local_addr().port(),
+        id: *peer2.peer_id(),
+    };
+
+    let peer = new_random_peer(0, vec![trusted_peer2.clone()]).await;
 
     let handle = peer.handle().clone();
     let peer1_handle = peer1.handle().clone();
@@ -634,11 +640,11 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_rejected_by_already_connect() {
     reth_tracing::init_test_tracing();
-    let other_peer1 = new_random_peer(10, HashSet::new()).await;
-    let other_peer2 = new_random_peer(10, HashSet::new()).await;
+    let other_peer1 = new_random_peer(10, vec![]).await;
+    let other_peer2 = new_random_peer(10, vec![]).await;
 
     //  setup the peer with max_inbound = 2
-    let peer = new_random_peer(2, HashSet::new()).await;
+    let peer = new_random_peer(2, vec![]).await;
 
     let handle = peer.handle().clone();
     let other_peer_handle1 = other_peer1.handle().clone();
@@ -671,10 +677,7 @@ async fn test_rejected_by_already_connect() {
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
-async fn new_random_peer(
-    max_in_bound: usize,
-    trusted_nodes: HashSet<NodeRecord>,
-) -> NetworkManager {
+async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -> NetworkManager {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);

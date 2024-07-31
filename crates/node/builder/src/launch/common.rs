@@ -5,7 +5,6 @@ use crate::{
     hooks::OnComponentInitializedHook,
     BuilderContext, NodeAdapter,
 };
-use backon::{ConstantBuilder, Retryable};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -168,9 +167,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
+        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system.
+        // If the system has less than 2 cores, it will use 1 core.
         let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(2));
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -238,17 +238,11 @@ impl LaunchContextWith<WithConfigs> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
 
-            // resolve trusted peers if they use a domain instead of dns
-            let resolved = futures::future::try_join_all(
-            self.attachment.config.network.trusted_peers.iter().map(|peer| async move {
-                let backoff = ConstantBuilder::default()
-                    .with_max_times(self.attachment.config.network.dns_retries);
-                (move || { peer.resolve() })
-                    .retry(&backoff)
-                    .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                    .await
-            })).await?;
-            self.attachment.toml_config.peers.trusted_nodes.extend(resolved);
+            self.attachment
+                .toml_config
+                .peers
+                .trusted_nodes
+                .extend(self.attachment.config.network.trusted_peers.clone());
         }
         Ok(self)
     }
