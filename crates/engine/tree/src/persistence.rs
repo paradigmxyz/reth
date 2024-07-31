@@ -6,8 +6,8 @@ use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{
     writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, DatabaseProviderRW,
-    HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
+    HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateChangeWriter,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt, TrieWriter,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -87,16 +87,16 @@ impl<DB: Database> PersistenceService<DB> {
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
-                storage_writer.write_hashed_state(&hashed_state.clone().into_sorted())?;
-                storage_writer.write_trie_updates(&trie_updates)?;
+                provider_rw.write_hashed_state(&hashed_state.clone().into_sorted())?;
+                provider_rw.write_trie_updates(&trie_updates)?;
             }
-
-            // update history indices
-            provider_rw.update_history_indices(first_number..=last_block_number)?;
-
-            // Update pipeline progress
-            provider_rw.update_pipeline_stages(last_block_number, false)?;
         }
+
+        // update history indices
+        provider_rw.update_history_indices(first_number..=last_block_number)?;
+
+        // Update pipeline progress
+        provider_rw.update_pipeline_stages(last_block_number, false)?;
 
         debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
 
@@ -435,7 +435,7 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chain_state::test_utils::{get_executed_block_with_number, get_executed_blocks};
+    use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
@@ -478,7 +478,9 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
         let block_number = 0;
-        let executed = get_executed_block_with_number(block_number, B256::random());
+        let mut test_block_builder = TestBlockBuilder::default();
+        let executed =
+            test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.block().hash();
 
         let blocks = vec![executed];
@@ -495,7 +497,8 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
-        let blocks = get_executed_blocks(0..5).collect::<Vec<_>>();
+        let mut test_block_builder = TestBlockBuilder::default();
+        let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().block().hash();
         let (tx, rx) = oneshot::channel();
 
@@ -511,8 +514,9 @@ mod tests {
         let persistence_handle = default_persistence_handle();
 
         let ranges = [0..1, 1..2, 2..4, 4..5];
+        let mut test_block_builder = TestBlockBuilder::default();
         for range in ranges {
-            let blocks = get_executed_blocks(range).collect::<Vec<_>>();
+            let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().block().hash();
             let (tx, rx) = oneshot::channel();
 

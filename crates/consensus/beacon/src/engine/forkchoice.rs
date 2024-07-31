@@ -81,7 +81,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns true if no forkchoice state has been received yet.
-    pub(crate) const fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.latest.is_none()
     }
 }

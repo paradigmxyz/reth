@@ -26,3 +26,4 @@ confy.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 toml.workspace = true
+reth-network-peers.workspace = true
