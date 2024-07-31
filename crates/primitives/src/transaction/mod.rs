@@ -1580,7 +1580,7 @@ impl Decodable for TransactionSignedEcRecovered {
     }
 }
 
-/// The inverse of [`TryFromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// Ensures the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].
