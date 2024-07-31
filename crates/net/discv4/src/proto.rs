@@ -152,10 +152,13 @@ impl Message {
             return Err(DecodePacketError::HashMismatch)
         }
 
+        println!("past header check");
+
         let signature = &packet[32..96];
         let recovery_id = RecoveryId::from_i32(packet[96] as i32)?;
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
+        println!("past signature");
         // recover the public key
         let msg = secp256k1::Message::from_digest(keccak256(&packet[97..]).0);
 
@@ -165,6 +168,7 @@ impl Message {
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
+        println!("got msg_type: {msg_type} for payload {payload:x?}");
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
             MessageId::Ping => Self::Ping(Ping::decode(payload)?),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
@@ -429,19 +433,31 @@ impl Decodable for Ping {
         }
         let started_len = b.len();
 
+        println!("got past first ping header");
         // > Implementations should ignore any mismatches in version:
         // <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>
         let _version = u32::decode(b)?;
 
+        println!("version: {_version}");
+        let from = Decodable::decode(b)?;
+        println!("from: {from:?}");
+        let to = Decodable::decode(b)?;
+        println!("to: {to:?}");
+        let expire = Decodable::decode(b)?;
+        println!("expire: {expire:?}");
+
         let mut this = Self {
-            from: Decodable::decode(b)?,
-            to: Decodable::decode(b)?,
-            expire: Decodable::decode(b)?,
+            from,
+            to,
+            expire,
             enr_sq: None,
         };
 
+        println!("this: {this:?}");
+
         // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
+            println!("decoding enr seq");
             this.enr_sq = Some(Decodable::decode(b)?);
         }
 
@@ -835,6 +851,14 @@ mod tests {
         assert_eq!(enr.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);
         assert!(enr.verify());
+    }
+
+    // test for failing message decode
+    #[test]
+    fn decode_failing_packet() {
+        let packet = hex!("2467ab56952aedf4cfb8bb7830ddc8922d0f992185229919dad9de3841fe95d9b3a7b52459398235f6d3805644666d908b45edb3670414ed97f357afba51f71f7d35c1f45878ba732c3868b04ca42ff0ed347c99efcf3a5768afed68eb21ef960001db04c3808080c9840a480e8f82765f808466a9a06386019106833efe");
+
+        let _message = Message::decode(&packet[..]).unwrap();
     }
 
     // test vector from the enr library rlp encoding tests
