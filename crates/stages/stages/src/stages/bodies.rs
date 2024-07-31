@@ -25,7 +25,6 @@ use reth_stages_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 
-// TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
 /// The body stage downloads block bodies for all block headers stored locally in storage.
