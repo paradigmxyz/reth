@@ -18,8 +18,7 @@ pub use self::{
 
 use crate::{BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
-use reth_primitives::{Account, Address, BlockNumber, B256, U256};
-use std::ops::RangeInclusive;
+use reth_primitives::B256;
 
 /// Factory for creating trie cursors.
 pub trait TrieCursorFactory {
@@ -41,9 +40,9 @@ pub trait TrieCursorFactory {
 /// Factory for creating mutable trie cursors.
 pub trait TrieCursorRwFactory {
     /// The account trie cursor type.
-    type AccountTrieCursor: TrieCursorRw;
+    type AccountTrieCursor: TrieCursor + TrieCursorMut;
     /// The storage trie cursor type.
-    type StorageTrieCursor: TrieDupCursorRw;
+    type StorageTrieCursor: TrieDupCursor + TrieDupCursorMut;
 
     /// Create an account trie cursor.
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError>;
@@ -81,14 +80,6 @@ pub trait TrieCursorMut: Send + Sync {
     /// Update existing entry or insert new one if it does not exist.
     fn upsert(&mut self, key: Nibbles, node: BranchNodeCompact) -> Result<(), DatabaseError>;
 }
-
-/// A readable and mutable cursor for Tables.
-#[auto_impl::auto_impl(&mut, Box, TrieCursor + TrieCursorMut)]
-pub trait TrieCursorRw: TrieCursor + TrieCursorMut {}
-
-/// A readable and mutable cursor for DubSort tables.
-#[auto_impl::auto_impl(&mut, Box, TrieDupCursor + TrieDupCursorMut)]
-pub trait TrieDupCursorRw: TrieDupCursor + TrieDupCursorMut {}
 
 /// A cursor for navigating a trie that works with DupSort tables.
 #[auto_impl::auto_impl(&mut, Box)]
