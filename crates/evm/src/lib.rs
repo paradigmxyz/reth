@@ -57,11 +57,6 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        // let mut evm = self.evm(db);
-        // evm.modify_spec_id(env.spec_id());
-        // evm.context.evm.env = env.env;
-        // evm
-
         RethEvmBuilder::new(db, self.default_external_context()).with_env(env.into()).build()
     }
 
