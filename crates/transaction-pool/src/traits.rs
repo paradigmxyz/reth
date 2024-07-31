@@ -753,12 +753,6 @@ impl BestTransactionsAttributes {
     }
 }
 
-// impl From<PooledTransactionsElementEcRecovered> for PoolTransaction::Pooled {
-//     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-//         tx
-//     }
-// }
-
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
     fmt::Debug
