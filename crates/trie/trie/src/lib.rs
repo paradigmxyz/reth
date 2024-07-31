@@ -56,6 +56,9 @@ pub use progress::{IntermediateStateRootState, StateRootProgress};
 /// Trie calculation stats.
 pub mod stats;
 
+/// Changesets cursor for iterating over changesets.
+pub mod changesets_cursor;
+
 // re-export for convenience
 pub use reth_trie_common::*;
 

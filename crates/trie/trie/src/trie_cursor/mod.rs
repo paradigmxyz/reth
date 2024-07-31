@@ -124,29 +124,3 @@ pub trait TrieDupCursorMut: Send + Sync {
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError>;
 }
-
-/// A trait for creating iterators walking over a range of block numbers.
-#[auto_impl::auto_impl(&mut, Box)]
-pub trait TrieRangeWalker<V>: Send + Sync {
-    /// Creates an iterator that walks over a range of block numbers.
-    fn walk_range(
-        &mut self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<impl Iterator<Item = Result<V, DatabaseError>>, DatabaseError>;
-}
-
-/// Factory for creating trie range walkers.
-#[auto_impl::auto_impl(&mut, Box)]
-pub trait TrieRangeWalkerFactory: Send + Sync {
-    /// Cursor that walks over account change sets.
-    type AccountCursor: TrieRangeWalker<(Address, Option<Account>)>;
-
-    /// Cursor that walks over storage change sets.
-    type StorageCursor: TrieRangeWalker<(Address, B256, U256)>;
-
-    /// Creates account changesets cursor.
-    fn account_changesets(&self) -> Result<Self::AccountCursor, DatabaseError>;
-
-    /// Creates storage changesets cursor.
-    fn storage_changesets(&self) -> Result<Self::StorageCursor, DatabaseError>;
-}
