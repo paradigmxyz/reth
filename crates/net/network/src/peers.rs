@@ -8,7 +8,7 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_banlist::BanList;
-use reth_network_api::{PeerKind, ReputationChangeKind};
+use reth_network_api::PeerKind;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{
     peers::{
@@ -17,7 +17,7 @@ use reth_network_types::{
             is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
         },
     },
-    ConnectionsConfig, PeersConfig, ReputationChangeWeights,
+    ConnectionsConfig, PeersConfig, ReputationChangeKind, ReputationChangeWeights,
 };
 use reth_primitives::ForkId;
 use std::{
@@ -1326,24 +1326,6 @@ impl Display for InboundConnectionError {
 
 #[cfg(test)]
 mod tests {
-    use super::PeersManager;
-    use crate::{
-        peers::{
-            ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
-            PeerConnectionState,
-        },
-        session::PendingSessionHandshakeError,
-        PeersConfig,
-    };
-    use reth_eth_wire::{
-        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
-        DisconnectReason,
-    };
-    use reth_net_banlist::BanList;
-    use reth_network_api::{Direction, ReputationChangeKind};
-    use reth_network_peers::{PeerId, TrustedPeer};
-    use reth_network_types::{peers::reputation::DEFAULT_REPUTATION, BackoffKind};
-    use reth_primitives::B512;
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},
@@ -1353,7 +1335,29 @@ mod tests {
         task::{Context, Poll},
         time::Duration,
     };
+
+    use reth_eth_wire::{
+        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
+        DisconnectReason,
+    };
+    use reth_net_banlist::BanList;
+    use reth_network_api::Direction;
+    use reth_network_peers::{PeerId, TrustedPeer};
+    use reth_network_types::{
+        peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
+    };
+    use reth_primitives::B512;
     use url::Host;
+
+    use super::PeersManager;
+    use crate::{
+        peers::{
+            ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
+            PeerConnectionState,
+        },
+        session::PendingSessionHandshakeError,
+        PeersConfig,
+    };
 
     struct PeerActionFuture<'a> {
         peers: &'a mut PeersManager,

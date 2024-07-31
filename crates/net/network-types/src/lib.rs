@@ -14,7 +14,10 @@
 
 /// Types related to peering.
 pub mod peers;
-pub use peers::{ConnectionsConfig, PeersConfig, ReputationChangeWeights};
+pub use peers::{
+    reputation::{Reputation, ReputationChangeKind, ReputationChangeWeights},
+    ConnectionsConfig, PeersConfig,
+};
 
 pub mod session;
 pub use session::{SessionLimits, SessionsConfig};
