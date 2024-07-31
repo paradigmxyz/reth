@@ -14,7 +14,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     BlockNumber, Header, StaticFileSegment, StorageEntry, TransactionSignedNoHash, B256, U256,
 };
-use reth_storage_api::ReceiptWriter;
+use reth_storage_api::{HeaderProvider, ReceiptWriter};
 use reth_storage_errors::writer::StorageWriterError;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use revm::db::OriginalValuesKnown;
@@ -140,26 +140,20 @@ where
     {
         self.ensure_database_writer()?;
         self.ensure_static_file_writer()?;
-        let mut td_cursor =
-            self.database_writer().tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
 
-        let mut first_td = if initial_block_number == 0 {
-            U256::ZERO
-        } else {
-            td_cursor
-                .seek_exact(initial_block_number - 1)?
-                .map(|(_, td)| td.0)
-                .ok_or_else(|| ProviderError::TotalDifficultyNotFound(initial_block_number))?
-        };
+        let mut td = self
+            .database_writer()
+            .header_td_by_number(initial_block_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(initial_block_number))?;
 
         for pair in headers {
             let (header, hash) = pair.borrow();
             let header = header.borrow();
-            first_td += header.difficulty;
-            self.static_file_writer().append_header(header, first_td, hash)?;
+            td += header.difficulty;
+            self.static_file_writer().append_header(header, td, hash)?;
         }
 
-        Ok(first_td)
+        Ok(td)
     }
 
     /// Appends transactions to static files, using the
