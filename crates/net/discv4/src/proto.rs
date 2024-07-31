@@ -196,7 +196,7 @@ pub struct Packet {
 
 /// Represents the `from` field in the `Ping` packet
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodableWrapper)]
-pub struct PingNodeEndpoint(pub NodeEndpoint);
+struct PingNodeEndpoint(NodeEndpoint);
 
 impl alloy_rlp::Decodable for PingNodeEndpoint {
     #[inline]
