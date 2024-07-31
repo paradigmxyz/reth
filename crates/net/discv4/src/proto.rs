@@ -13,7 +13,7 @@ use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
 };
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
@@ -168,7 +168,10 @@ impl Message {
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
-        println!("got msg_type: {msg_type} for payload {payload:x?} {:?}", MessageId::from_u8(msg_type));
+        println!(
+            "got msg_type: {msg_type} for payload {payload:x?} {:?}",
+            MessageId::from_u8(msg_type)
+        );
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
             MessageId::Ping => Self::Ping(Ping::decode(payload).unwrap()),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
@@ -209,21 +212,34 @@ pub struct NodeEndpoint {
 impl alloy_rlp::Decodable for NodeEndpoint {
     #[inline]
     fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(
-            b,
-        )?;
+        let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(b)?;
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
-        println!("{b:?}");
         let started_len = b.len();
         if started_len < payload_length {
-            return Err(alloy_rlp::DecodeError::InputTooShort);
+            return Err(alloy_rlp::Error::InputTooShort);
         }
+
+        // Geth allows the ipaddr to be possibly empty:
+        // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/discover/v4_udp.go#L206-L209>
+        // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/enode/node.go#L189-L189>
+        //
+        // Therefore, if we see an empty list instead of a properly formed `IpAddr`, we will
+        // instead use `IpV4Addr::UNSPECIFIED`
+        let address =
+            if *b.first().ok_or(alloy_rlp::Error::InputTooShort)? == alloy_rlp::EMPTY_STRING_CODE {
+                let addr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+                b.advance(1);
+                addr
+            } else {
+                alloy_rlp::Decodable::decode(b)?
+            };
+
         let this = Self {
-            address: alloy_rlp::Decodable::decode(b).unwrap(),
-            udp_port: alloy_rlp::Decodable::decode(b).unwrap(),
-            tcp_port: alloy_rlp::Decodable::decode(b).unwrap(),
+            address,
+            udp_port: alloy_rlp::Decodable::decode(b)?,
+            tcp_port: alloy_rlp::Decodable::decode(b)?,
         };
         let consumed = started_len - b.len();
         if consumed != payload_length {
@@ -235,7 +251,6 @@ impl alloy_rlp::Decodable for NodeEndpoint {
         Ok(this)
     }
 }
-
 
 impl From<NodeRecord> for NodeEndpoint {
     fn from(NodeRecord { address, tcp_port, udp_port, .. }: NodeRecord) -> Self {
@@ -478,12 +493,7 @@ impl Decodable for Ping {
         let expire = Decodable::decode(b)?;
         println!("expire: {expire:?}");
 
-        let mut this = Self {
-            from,
-            to,
-            expire,
-            enr_sq: None,
-        };
+        let mut this = Self { from, to, expire, enr_sq: None };
 
         println!("this: {this:?}");
 
@@ -896,7 +906,6 @@ mod tests {
     // test for failing message decode
     #[test]
     fn decode_node() {
-
         let packet = hex!("cb840000000082115c82115d");
         let _message = NodeEndpoint::decode(&mut &packet[..]).unwrap();
     }
