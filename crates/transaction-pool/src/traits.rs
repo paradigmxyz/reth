@@ -1180,12 +1180,6 @@ impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
     }
 }
 
-// impl IntoRecoveredTransaction for EthPooledTransaction {
-//     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-//         self.transaction.clone()
-//     }
-// }
-
 impl From<EthPooledTransaction> for TransactionSignedEcRecovered {
     fn from(tx: EthPooledTransaction) -> Self {
         tx.transaction

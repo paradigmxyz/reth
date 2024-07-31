@@ -879,20 +879,6 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     }
 }
 
-// impl IntoRecoveredTransaction for MockTransaction {
-//     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-//         let tx = self.clone().into();
-
-//         let signed_tx = TransactionSigned {
-//             hash: *self.hash(),
-//             signature: Signature::default(),
-//             transaction: tx,
-//         };
-
-//         TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
-//     }
-// }
-
 impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
