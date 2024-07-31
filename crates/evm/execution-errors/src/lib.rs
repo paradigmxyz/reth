@@ -23,7 +23,7 @@ use revm_primitives::EVMError;
 use alloc::{boxed::Box, string::String};
 
 pub mod trie;
-pub use trie::{StateRootError, StorageRootError};
+pub use trie::*;
 
 /// Transaction validation errors
 #[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
@@ -116,27 +116,67 @@ pub enum BlockValidationError {
 /// `BlockExecutor` Errors
 #[derive(thiserror_no_std::Error, Debug)]
 pub enum BlockExecutionError {
-    /// Validation error, transparently wrapping `BlockValidationError`
+    /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Pruning error, transparently wrapping `PruneSegmentError`
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
-    /// Consensus error, transparently wrapping `ConsensusError`
+    /// Consensus error, transparently wrapping [`ConsensusError`]
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
-    /// Transaction error on revert with inner details
-    #[error("transaction error on revert: {inner}")]
-    CanonicalRevert {
-        /// The inner error message
-        inner: String,
-    },
-    /// Transaction error on commit with inner details
-    #[error("transaction error on commit: {inner}")]
-    CanonicalCommit {
-        /// The inner error message.
-        inner: String,
-    },
+    /// Internal, i.e. non consensus or validation related Block Executor Errors
+    #[error(transparent)]
+    Internal(#[from] InternalBlockExecutionError),
+}
+
+impl From<ProviderError> for BlockExecutionError {
+    fn from(value: ProviderError) -> Self {
+        InternalBlockExecutionError::from(value).into()
+    }
+}
+
+impl From<PruneSegmentError> for BlockExecutionError {
+    fn from(value: PruneSegmentError) -> Self {
+        InternalBlockExecutionError::from(value).into()
+    }
+}
+
+impl BlockExecutionError {
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error.
+    #[cfg(feature = "std")]
+    pub fn other<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Internal(InternalBlockExecutionError::other(error))
+    }
+
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error with the given message.
+    #[cfg(feature = "std")]
+    pub fn msg(msg: impl std::fmt::Display) -> Self {
+        Self::Internal(InternalBlockExecutionError::msg(msg))
+    }
+
+    /// Returns the inner `BlockValidationError` if the error is a validation error.
+    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
+        match self {
+            Self::Validation(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if the error is a state root error.
+    pub const fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
+    }
+}
+
+/// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
+#[derive(thiserror_no_std::Error, Debug)]
+pub enum InternalBlockExecutionError {
+    /// Pruning error, transparently wrapping [`PruneSegmentError`]
+    #[error(transparent)]
+    Pruning(#[from] PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[error(
         "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
@@ -156,8 +196,8 @@ pub enum BlockExecutionError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl BlockExecutionError {
-    /// Create a new `BlockExecutionError::Other` variant.
+impl InternalBlockExecutionError {
+    /// Create a new [`InternalBlockExecutionError::Other`] variant.
     #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
@@ -166,29 +206,9 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
-    /// Create a new [`BlockExecutionError::Other`] from a given message.
+    /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-
-    /// Returns the inner `BlockValidationError` if the error is a validation error.
-    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
-        match self {
-            Self::Validation(err) => Some(err),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` if the error is fatal.
-    ///
-    /// This represents an unrecoverable database related error.
-    pub const fn is_fatal(&self) -> bool {
-        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
-    }
-
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 }

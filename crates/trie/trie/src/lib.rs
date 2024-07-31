@@ -39,6 +39,9 @@ pub use state::*;
 /// Merkle proof generation.
 pub mod proof;
 
+/// Trie witness generation.
+pub mod witness;
+
 /// The implementation of the Merkle Patricia Trie.
 mod trie;
 pub use trie::{StateRoot, StorageRoot};

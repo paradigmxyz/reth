@@ -4,22 +4,22 @@
 use std::sync::Arc;
 
 use derive_more::Deref;
-use futures::Future;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
-    RawTransactionForwarder,
+    EthApiTypes, RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
+    PendingBlock,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
-use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
+use tokio::sync::Mutex;
 
 /// `Eth` API implementation.
 ///
@@ -114,6 +114,13 @@ where
     }
 }
 
+impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync,
+{
+    type Error = EthApiError;
+}
+
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
@@ -134,26 +141,18 @@ where
     Self: Clone + Send + Sync + 'static,
 {
     #[inline]
-    fn io_task_spawner(&self) -> impl reth_tasks::TaskSpawner {
+    fn io_task_spawner(&self) -> impl TaskSpawner {
         self.inner.task_spawner()
     }
 
     #[inline]
-    fn tracing_task_pool(&self) -> &reth_tasks::pool::BlockingTaskPool {
+    fn tracing_task_pool(&self) -> &BlockingTaskPool {
         self.inner.blocking_task_pool()
     }
 
-    fn acquire_owned(
-        &self,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
-        self.blocking_task_guard.clone().acquire_owned()
-    }
-
-    fn acquire_many_owned(
-        &self,
-        n: u32,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
-        self.blocking_task_guard.clone().acquire_many_owned(n)
+    #[inline]
+    fn tracing_task_guard(&self) -> &BlockingTaskGuard {
+        self.inner.blocking_task_guard()
     }
 }
 
@@ -349,6 +348,12 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn eth_proof_window(&self) -> u64 {
         self.eth_proof_window
+    }
+
+    /// Returns reference to [`BlockingTaskGuard`].
+    #[inline]
+    pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
+        &self.blocking_task_guard
     }
 }
 

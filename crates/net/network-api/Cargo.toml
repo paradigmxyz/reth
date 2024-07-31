@@ -27,6 +27,7 @@ enr = { workspace = true, default-features = false, features = ["rust-secp256k1"
 thiserror.workspace = true
 serde = { workspace = true, features = ["derive"], optional = true }
 tokio = { workspace = true, features = ["sync"] }
+auto_impl.workspace = true
 
 [features]
 default = ["serde"]

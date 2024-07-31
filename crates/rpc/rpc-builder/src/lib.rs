@@ -93,7 +93,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
-//!     EngineT: EngineTypes + 'static,
+//!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
@@ -177,12 +177,9 @@ use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
 
-use crate::{
-    auth::AuthRpcModule,
-    cors::CorsDomainError,
-    error::WsHttpSamePortError,
-    metrics::{RpcRequestMetrics, RpcRequestMetricsService},
-};
+use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+
+pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
@@ -210,6 +207,7 @@ pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;
+pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
@@ -436,7 +434,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>,
     )
     where
-        EngineT: EngineTypes + 'static,
+        EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer,
     {
@@ -976,7 +974,7 @@ where
     /// Note: This does _not_ register the `engine_` in this registry.
     pub fn create_auth_module<EngineApi, EngineT>(&self, engine_api: EngineApi) -> AuthRpcModule
     where
-        EngineT: EngineTypes + 'static,
+        EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
     {
         let mut module = RpcModule::new(());

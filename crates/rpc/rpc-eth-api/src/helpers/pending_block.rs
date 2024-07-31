@@ -19,27 +19,29 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
+    StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{
-    pending_block::pre_block_blockhashes_update, EthApiError, EthResult, PendingBlock,
-    PendingBlockEnv, PendingBlockEnvOrigin,
+    pending_block::pre_block_blockhashes_update, EthApiError, PendingBlock, PendingBlockEnv,
+    PendingBlockEnvOrigin,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
 use tracing::debug;
 
+use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+
 use super::SpawnBlocking;
 
 /// Loads a pending block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait LoadPendingBlock {
+pub trait LoadPendingBlock: EthApiTypes {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -65,16 +67,19 @@ pub trait LoadPendingBlock {
     /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
-    fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
+    fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv, Self::Error> {
         let origin: PendingBlockEnvOrigin = if let Some(pending) =
-            self.provider().pending_block_with_senders()?
+            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
         {
             PendingBlockEnvOrigin::ActualPending(pending)
         } else {
             // no pending block from the CL yet, so we use the latest block and modify the env
             // values that we can
-            let latest =
-                self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            let latest = self
+                .provider()
+                .latest_header()
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
             let (mut latest_header, block_hash) = latest.split();
             // child block
@@ -102,12 +107,14 @@ pub trait LoadPendingBlock {
         let mut block_env = BlockEnv::default();
         // Note: for the PENDING block we assume it is past the known merge block and thus this will
         // not fail when looking up the total difficulty value for the blockenv.
-        self.provider().fill_env_with_header(
-            &mut cfg,
-            &mut block_env,
-            origin.header(),
-            self.evm_config().clone(),
-        )?;
+        self.provider()
+            .fill_env_with_header(
+                &mut cfg,
+                &mut block_env,
+                origin.header(),
+                self.evm_config().clone(),
+            )
+            .map_err(Self::Error::from_eth_err)?;
 
         Ok(PendingBlockEnv::new(cfg, block_env, origin))
     }
@@ -115,7 +122,7 @@ pub trait LoadPendingBlock {
     /// Returns the locally built pending block
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
+    ) -> impl Future<Output = Result<Option<SealedBlockWithSenders>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
@@ -197,11 +204,17 @@ pub trait LoadPendingBlock {
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
-    fn build_block(&self, env: PendingBlockEnv) -> EthResult<SealedBlockWithSenders> {
+    fn build_block(&self, env: PendingBlockEnv) -> Result<SealedBlockWithSenders, Self::Error>
+    where
+        EthApiError: From<ProviderError>,
+    {
         let PendingBlockEnv { cfg, block_env, origin } = env;
 
         let parent_hash = origin.build_target_hash();
-        let state_provider = self.provider().history_by_block_hash(parent_hash)?;
+        let state_provider = self
+            .provider()
+            .history_by_block_hash(parent_hash)
+            .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(state_provider);
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
@@ -316,7 +329,7 @@ pub trait LoadPendingBlock {
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into())
+                            return Err(Self::Error::from_evm_err(err))
                         }
                     }
                 }
@@ -359,7 +372,7 @@ pub trait LoadPendingBlock {
         );
 
         // increment account balances for withdrawals
-        db.increment_balances(balance_increments)?;
+        db.increment_balances(balance_increments).map_err(Self::Error::from_eth_err)?;
 
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
@@ -378,7 +391,9 @@ pub trait LoadPendingBlock {
 
         // calculate the state root
         let state_provider = &db.database;
-        let state_root = state_provider.state_root(execution_outcome.state())?;
+        let state_root = state_provider
+            .state_root(execution_outcome.state())
+            .map_err(Self::Error::from_eth_err)?;
 
         // create the block header
         let transactions_root = calculate_transaction_root(&executed_txs);

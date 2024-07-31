@@ -1,13 +1,13 @@
 //! Helper for handling execution of multiple blocks.
 
-use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
-use core::time::Duration;
-use reth_execution_errors::BlockExecutionError;
+use crate::{
+    precompile::{Address, HashSet},
+    primitives::alloy_primitives::BlockNumber,
+};
+use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-use std::collections::HashSet;
-use tracing::debug;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -118,7 +118,7 @@ impl BlockBatchRecord {
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
         let mut receipts = receipts.into_iter().map(Some).collect();
         // Prune receipts if necessary.
-        self.prune_receipts(&mut receipts)?;
+        self.prune_receipts(&mut receipts).map_err(InternalBlockExecutionError::from)?;
         // Save receipts.
         self.receipts.push(receipts);
         Ok(())
@@ -180,43 +180,17 @@ impl BlockBatchRecord {
     }
 }
 
-/// Block execution statistics. Contains duration of each step of block execution.
-#[derive(Clone, Debug, Default)]
-pub struct BlockExecutorStats {
-    /// Execution duration.
-    pub execution_duration: Duration,
-    /// Time needed to apply output of revm execution to revm cached state.
-    pub apply_state_duration: Duration,
-    /// Time needed to apply post execution state changes.
-    pub apply_post_execution_state_changes_duration: Duration,
-    /// Time needed to merge transitions and create reverts.
-    /// It this time transitions are applies to revm bundle state.
-    pub merge_transitions_duration: Duration,
-    /// Time needed to calculate receipt roots.
-    pub receipt_root_duration: Duration,
-}
-
-impl BlockExecutorStats {
-    /// Log duration to debug level log.
-    pub fn log_debug(&self) {
-        debug!(
-            target: "evm",
-            evm_transact = ?self.execution_duration,
-            apply_state = ?self.apply_state_duration,
-            apply_post_state = ?self.apply_post_execution_state_changes_duration,
-            merge_transitions = ?self.merge_transitions_duration,
-            receipt_root = ?self.receipt_root_duration,
-            "Execution time"
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use reth_primitives::{Address, Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    #[cfg(feature = "std")]
     use std::collections::BTreeMap;
+    #[cfg(not(feature = "std"))]
+    extern crate alloc;
+    #[cfg(not(feature = "std"))]
+    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_save_receipts_empty() {

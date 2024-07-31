@@ -9,7 +9,7 @@ mod loader;
 pub use loader::PrefixSetLoader;
 
 /// Collection of mutable prefix sets.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct TriePrefixSetsMut {
     /// A set of account prefixes that have changed.
     pub account_prefix_set: PrefixSetMut,
@@ -75,7 +75,7 @@ pub struct TriePrefixSets {
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Default, Debug)]
 pub struct PrefixSetMut {
     keys: Vec<Nibbles>,
     sorted: bool,

@@ -93,7 +93,7 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
 }
 
 #[cfg(test)]
-pub(super) mod test {
+pub(crate) mod test {
     use reth_primitives::{alloy_primitives::LogData, hex};
 
     use super::*;
