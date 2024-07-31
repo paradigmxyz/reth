@@ -124,6 +124,12 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
         provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
+    let segment = StaticFileSegment::Receipts;
+    static_file_provider.latest_writer(segment)?.increment_block(segment, 0)?;
+
+    let segment = StaticFileSegment::Transactions;
+    static_file_provider.latest_writer(segment)?.increment_block(segment, 0)?;
+
     provider_rw.commit()?;
     static_file_provider.commit()?;
 
