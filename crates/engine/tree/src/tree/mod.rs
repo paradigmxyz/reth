@@ -1709,7 +1709,7 @@ where
         // so we need to start syncing to it
         //
         // find the appropriate target to sync to, if we don't have the safe block hash then we
-        // start syncing to the safe block via pipeline first
+        // start syncing to the safe block via backfill first
         let target = if self.state.forkchoice_state_tracker.is_empty() &&
             // check that safe block is valid and missing
             !state.safe_block_hash.is_zero() &&
