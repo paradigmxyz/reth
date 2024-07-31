@@ -836,8 +836,6 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
-        // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
-        // is merged as it has similar framework
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
@@ -984,9 +982,6 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_execute_unwind() {
-        // TODO cleanup the setup after https://github.com/paradigmxyz/reth/issues/332
-        // is merged as it has similar framework
-
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
         let input = ExecInput { target: Some(1), checkpoint: None };
