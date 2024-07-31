@@ -20,7 +20,7 @@ pub use error::NetworkError;
 
 use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
-use reth_network_types::{Reputation, ReputationChangeKind};
+pub use reth_network_types::{Reputation, ReputationChangeKind};
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
