@@ -1,6 +1,7 @@
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::BlockNumber;
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedPostStateSorted;
 use revm::db::{
     states::{PlainStateReverts, StateChangeset},
     OriginalValuesKnown,
@@ -30,4 +31,7 @@ pub trait StateChangeWriter {
 
     /// Write state changes to the database.
     fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
+
+    /// Writes the hashed state changes to the database
+    fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
 }

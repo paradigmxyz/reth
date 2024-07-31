@@ -9,6 +9,7 @@ use reth_provider::{
     OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
     StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
+use reth_provider::StateChangeWriter;
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
 use std::sync::{
@@ -85,8 +86,8 @@ impl<DB: Database> PersistenceService<DB> {
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
-                storage_writer.write_hashed_state(&hashed_state.clone().into_sorted())?;
-                storage_writer.write_trie_updates(&trie_updates)?;
+                provider_rw.write_hashed_state(&hashed_state.clone().into_sorted())?;
+                provider_rw.write_trie_updates(&trie_updates)?;
             }
 
             // update history indices
