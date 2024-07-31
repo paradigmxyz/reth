@@ -1311,6 +1311,13 @@ where
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
+
+        if self.state.tree_state.canonical_block_hash() == executed.block().parent_hash {
+            debug!(target: "engine", pending = ?executed.block().num_hash() ,"updating pending block");
+            // if the parent is the canonical head, we can insert the block as the pending block
+            self.canonical_in_memory_state.set_pending_block(executed.clone());
+        }
+
         self.state.tree_state.insert_executed(executed);
 
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
