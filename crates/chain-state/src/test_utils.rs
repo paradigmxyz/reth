@@ -170,7 +170,7 @@ impl TestBlockBuilder {
         fork
     }
 
-    /// Gets an [`ExecutedBlock`] with [`BlockNumber`]
+    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], [`Receipts`] and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
