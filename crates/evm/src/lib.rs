@@ -44,7 +44,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB>;
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        RethEvmBuilder::new(db, self.default_external_context()).build()
+    }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
@@ -55,10 +57,12 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        evm
+        // let mut evm = self.evm(db);
+        // evm.modify_spec_id(env.spec_id());
+        // evm.context.evm.env = env.env;
+        // evm
+
+        RethEvmBuilder::new(db, self.default_external_context()).with_env(env.into()).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,

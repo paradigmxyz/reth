@@ -23,7 +23,7 @@ use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
-    revm_primitives::{SpecId, StatefulPrecompileMut},
+    revm_primitives::{EnvWithHandlerCfg, SpecId, StatefulPrecompileMut},
     Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -175,6 +175,17 @@ impl ConfigureEvm for MyEvmConfig {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .build()
+    }
+
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
     }
 
     fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
