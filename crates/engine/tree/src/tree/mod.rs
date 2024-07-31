@@ -9,7 +9,7 @@ use reth_beacon_consensus::{
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
-    error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo},
+    error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
     BlockAttachment, BlockBuffer, BlockStatus,
 };
 use reth_blockchain_tree_api::InsertPayloadOk;
@@ -315,7 +315,7 @@ pub trait EngineApiTreeHandler {
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> ProviderResult<TreeOutcome<PayloadStatus>>;
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError>;
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
@@ -1501,7 +1501,7 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> ProviderResult<TreeOutcome<PayloadStatus>> {
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine", "invoked new payload");
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -1571,19 +1571,50 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
             let mut latest_valid_hash = None;
-            let status = match self.insert_block_without_senders(block).unwrap() {
-                InsertPayloadOk::Inserted(BlockStatus::Valid(_)) |
-                InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
-                    latest_valid_hash = Some(block_hash);
-                    PayloadStatusEnum::Valid
+
+            match self.insert_block_without_senders(block) {
+                Ok(status) => {
+                    let status = match status {
+                        InsertPayloadOk::Inserted(BlockStatus::Valid(_)) |
+                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
+                            latest_valid_hash = Some(block_hash);
+                            PayloadStatusEnum::Valid
+                        }
+                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                            // not known to be invalid, but we don't know anything else
+                            PayloadStatusEnum::Syncing
+                        }
+                    };
+
+                    PayloadStatus::new(status, latest_valid_hash)
                 }
-                InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-                InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                    // not known to be invalid, but we don't know anything else
-                    PayloadStatusEnum::Syncing
+                Err(error) => {
+                    let (block, error) = error.split();
+
+                    // if invalid block, we check the validation error. Otherwise return the fatal
+                    // error.
+                    let validation_err = error.ensure_validation_error()?;
+
+                    // If the error was due to an invalid payload, the payload is added to the
+                    // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
+                    // returned.
+                    warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number, %validation_err, "Invalid block error on new payload");
+                    let latest_valid_hash = if validation_err.is_block_pre_merge() {
+                        // zero hash must be returned if block is pre-merge
+                        Some(B256::ZERO)
+                    } else {
+                        self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
+                    };
+
+                    // keep track of the invalid header
+                    self.state.invalid_headers.insert(block.header);
+                    PayloadStatus::new(
+                        PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
+                        latest_valid_hash,
+                    )
                 }
-            };
-            PayloadStatus::new(status, latest_valid_hash)
+            }
         };
 
         let mut outcome = TreeOutcome::new(status);
