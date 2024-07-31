@@ -562,6 +562,11 @@ where
                     let mut output = self.on_forkchoice_updated(state, payload_attrs);
 
                     if let Ok(res) = &mut output {
+                        // track last received forkchoice state
+                        self.state
+                            .forkchoice_state_tracker
+                            .set_latest(state, res.outcome.forkchoice_status());
+
                         // emit an event about the handled FCU
                         self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
                             state,
@@ -1104,7 +1109,7 @@ where
                 // if we have already canonicalized the finalized block, we should skip backfill
                 match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
-                        warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
+                        warn!(target: "engine", %err, "Failed to get finalized block header");
                     }
                     Ok(None) => {
                         // ensure the finalized block is known (not the zero hash)
@@ -1126,7 +1131,7 @@ where
                         //
                         // However, optimism chains will do this. The risk of a reorg is however
                         // low.
-                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                        debug!(target: "engine", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
                         return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {
@@ -1172,6 +1177,7 @@ where
         if let Some(target) =
             self.backfill_sync_target(head.number, missing_parent.number, Some(downloaded_block))
         {
+            trace!(target: "engine", %target, "triggering backfill on downloaded block");
             return Some(TreeEvent::BackfillAction(BackfillAction::Start(target.into())));
         }
 
@@ -1187,8 +1193,10 @@ where
         let request = if let Some(distance) =
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
+            trace!(target: "engine", %distance, missing=?missing_parent, "downloading missing parent block range");
             DownloadRequest::BlockRange(missing_parent.hash, distance)
         } else {
+            trace!(target: "engine", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
             // sidechain and we can only download the missing block itself
             DownloadRequest::single_block(missing_parent.hash)
@@ -1521,6 +1529,7 @@ where
     type Engine = T;
 
     fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        trace!(target: "engine", block_count = %blocks.len(), "received downloaded blocks");
         for block in blocks {
             if let Some(event) = self.on_downloaded_block(block) {
                 let needs_backfill = event.is_backfill_action();
@@ -1653,7 +1662,6 @@ where
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
-            self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
         }
 
@@ -1713,7 +1721,23 @@ where
         }
 
         // 4. we don't have the block to perform the update
-        let target = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        // we assume the FCU is valid and at least the head is missing,
+        // so we need to start syncing to it
+        //
+        // find the appropriate target to sync to, if we don't have the safe block hash then we
+        // start syncing to the safe block via backfill first
+        let target = if self.state.forkchoice_state_tracker.is_empty() &&
+            // check that safe block is valid and missing
+            !state.safe_block_hash.is_zero() &&
+            self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
+        {
+            debug!(target: "engine", "missing safe block on initial FCU, downloading safe block");
+            state.safe_block_hash
+        } else {
+            state.head_block_hash
+        };
+
+        let target = self.lowest_buffered_ancestor_or(target);
 
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
