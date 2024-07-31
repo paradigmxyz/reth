@@ -59,7 +59,7 @@ impl OptimismNode {
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
-        let RollupArgs { disable_txpool_gossip, compute_pending_block, .. } = args;
+        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
@@ -67,7 +67,7 @@ impl OptimismNode {
                 compute_pending_block,
                 OptimismEvmConfig::default(),
             ))
-            .network(OptimismNetworkBuilder { disable_txpool_gossip })
+            .network(OptimismNetworkBuilder { disable_txpool_gossip, discovery_v4 })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
