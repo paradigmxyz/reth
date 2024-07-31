@@ -29,6 +29,10 @@ pub struct RollupArgs {
     /// that this flag is not yet functional.
     #[arg(long = "rollup.compute-pending-block")]
     pub compute_pending_block: bool,
+
+    /// Enable discv4 discovery protocol
+    #[arg(long = "discovery.v4")]
+    pub discovery_v4: bool,
 }
 
 #[cfg(test)]
