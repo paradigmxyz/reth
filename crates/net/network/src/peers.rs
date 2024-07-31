@@ -1336,14 +1336,13 @@ mod tests {
         time::Duration,
     };
 
-    use reth_discv4::NodeRecord;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
     };
     use reth_net_banlist::BanList;
     use reth_network_api::Direction;
-    use reth_network_peers::PeerId;
+    use reth_network_peers::{PeerId, TrustedPeer};
     use reth_network_types::{
         peers::reputation::DEFAULT_REPUTATION, BackoffKind, ReputationChangeKind,
     };
