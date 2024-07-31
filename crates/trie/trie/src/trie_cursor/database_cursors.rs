@@ -1,4 +1,4 @@
-use super::{TrieCursor, TrieCursorFactory};
+use super::{ChangeSetWalker, ChangeSetWalkerFactory, TrieCursor, TrieCursorFactory};
 use crate::{
     updates::StorageTrieUpdates, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
 };
@@ -8,11 +8,13 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
+    models::BlockNumberAddress,
     transaction::DbTx,
 };
-use reth_primitives::B256;
+use reth_primitives::{Account, Address, BlockNumber, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::StorageTrieEntry;
+use std::ops::RangeBounds;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug)]
@@ -201,6 +203,75 @@ where
     /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
+    }
+}
+
+impl<'a, TX: DbTx> ChangeSetWalkerFactory for DatabaseTrieCursorFactory<'a, TX> {
+    type AccountCursor =
+        DatabaseAccountChangeSetsCursor<<TX as DbTx>::Cursor<tables::AccountChangeSets>>;
+    type StorageCursor =
+        DatabaseStorageChangeSetsCursor<<TX as DbTx>::Cursor<tables::StorageChangeSets>>;
+
+    fn account_change_sets(&self) -> Result<Self::AccountCursor, DatabaseError> {
+        Ok(DatabaseAccountChangeSetsCursor::new(self.0.cursor_read::<tables::AccountChangeSets>()?))
+    }
+
+    fn storage_change_sets(&self) -> Result<Self::StorageCursor, DatabaseError> {
+        Ok(DatabaseStorageChangeSetsCursor::new(self.0.cursor_read::<tables::StorageChangeSets>()?))
+    }
+}
+
+/// A cursor over the account change sets.
+#[derive(Debug)]
+pub struct DatabaseAccountChangeSetsCursor<C>(C);
+
+impl<C> DatabaseAccountChangeSetsCursor<C> {
+    /// Create a new account change sets trie cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self(cursor)
+    }
+}
+
+impl<C> ChangeSetWalker for DatabaseAccountChangeSetsCursor<C>
+where
+    C: DbCursorRO<tables::AccountChangeSets> + Send + Sync,
+{
+    type Value = (Address, Option<Account>);
+
+    fn walk_range(
+        &mut self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<impl Iterator<Item = Result<Self::Value, DatabaseError>>, DatabaseError> {
+        Ok(self.0.walk_range(range)?.map(|v| v.map(|v| (v.1.address, v.1.info))))
+    }
+}
+
+/// A cursor over the storage change sets.
+#[derive(Debug)]
+pub struct DatabaseStorageChangeSetsCursor<C>(C);
+
+impl<C> DatabaseStorageChangeSetsCursor<C> {
+    /// Create a new storage change sets trie cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self(cursor)
+    }
+}
+
+impl<C> ChangeSetWalker for DatabaseStorageChangeSetsCursor<C>
+where
+    C: DbCursorRO<tables::StorageChangeSets> + Send + Sync,
+{
+    type Value = (Address, B256, U256);
+
+    fn walk_range(
+        &mut self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<impl Iterator<Item = Result<Self::Value, DatabaseError>>, DatabaseError> {
+        let start = range.start_bound().map(|&num| BlockNumberAddress((num, Address::ZERO)));
+        let end = range.end_bound().map(|&num| BlockNumberAddress((num, Address::ZERO)));
+        let range = (start, end);
+
+        Ok(self.0.walk_range(range)?.map(|v| v.map(|v| (v.0 .0 .1, v.1.key, v.1.value))))
     }
 }
 
