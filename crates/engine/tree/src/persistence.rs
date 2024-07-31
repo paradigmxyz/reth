@@ -87,13 +87,13 @@ impl<DB: Database> PersistenceService<DB> {
                 provider_rw.write_hashed_state(&hashed_state.clone().into_sorted())?;
                 provider_rw.write_trie_updates(&trie_updates)?;
             }
-
-            // update history indices
-            provider_rw.update_history_indices(first_number..=last_block_number)?;
-
-            // Update pipeline progress
-            provider_rw.update_pipeline_stages(last_block_number, false)?;
         }
+
+        // update history indices
+        provider_rw.update_history_indices(first_number..=last_block_number)?;
+
+        // Update pipeline progress
+        provider_rw.update_pipeline_stages(last_block_number, false)?;
 
         provider_rw.commit()?;
 
