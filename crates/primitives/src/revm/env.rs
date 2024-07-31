@@ -212,7 +212,7 @@ fn fill_tx_env_with_system_contract_call(
             enveloped_tx: Some(Bytes::default()),
         },
         #[cfg(feature = "taiko")]
-        taiko: revm_primitives::TaikoFields { treasury: Address::default(), is_anchor: false },
+        taiko: revm_primitives::TaikoFields { treasury: Address::default(), is_anchor: false, basefee_ratio: 0u8 },
     };
 
     // ensure the block gas limit is >= the tx

@@ -2,11 +2,13 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    taiko::{check_anchor_tx, TaikoData}, EthEvmConfig,
+    taiko::{check_anchor_tx, check_anchor_tx_ontake, TaikoData},
+    EthEvmConfig,
 };
+use anyhow::Result;
 use reth_chainspec::{ChainSpec, MAINNET};
 pub use reth_consensus::Consensus;
-pub use reth_ethereum_consensus::{EthBeaconConsensus, validate_block_post_execution};
+pub use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -16,7 +18,8 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, Hardfork, Header, Receipt, Request, Withdrawals, U256,
+    revm::config::revm_spec, BlockNumber, BlockWithSenders, Hardfork, Head, Header, Receipt,
+    Request, Withdrawals, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -26,15 +29,14 @@ use reth_revm::{
         apply_beacon_root_contract_call, apply_blockhashes_update,
         apply_withdrawal_requests_contract_call, post_block_balance_increments,
     },
-    Evm, State,
-    JournaledState,
+    Evm, JournaledState, State,
 };
 use revm_primitives::{
-    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
-    EVMError, HashSet,
+    db::{Database, DatabaseCommit},
+    Address, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, HashSet, ResultAndState,
+    SpecId,
 };
 use std::sync::Arc;
-use anyhow::Result;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -176,8 +178,24 @@ where
 
             // verify the anchor tx
             if is_anchor {
-                check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
+                let spec_id = revm_spec(
+                    &self.chain_spec,
+                    Head { number: block.number, ..Default::default() },
+                );
+                if spec_id.is_enabled_in(SpecId::ONTAKE) {
+                    check_anchor_tx_ontake(
+                        transaction,
+                        sender,
+                        &block.block,
+                        taiko_data.clone().unwrap(),
+                    )
                     .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
+                } else {
+                    check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
+                        .map_err(|e| BlockExecutionError::CanonicalRevert {
+                            inner: e.to_string(),
+                        })?;
+                }
             }
 
             // If the signature was not valid, the sender address will have been set to zero
@@ -188,7 +206,9 @@ where
                     continue;
                 }
                 // In all other cases, the tx needs to have a valid signature
-                return Err(BlockExecutionError::CanonicalRevert { inner: "invalid tx".to_string() });
+                return Err(BlockExecutionError::CanonicalRevert {
+                    inner: "invalid tx".to_string(),
+                });
             }
 
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
@@ -202,7 +222,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -211,6 +231,7 @@ where
             evm.tx_mut().taiko.is_anchor = is_anchor;
             // set the treasury address
             evm.tx_mut().taiko.treasury = taiko_data.clone().unwrap().l2_contract;
+            evm.tx_mut().taiko.basefee_ratio = taiko_data.clone().unwrap().basefee_ratio;
 
             // Execute transaction.
             let res = evm.transact().map_err(move |err| {
@@ -222,7 +243,8 @@ where
             });
             if res.is_err() {
                 // Clear the state for the next tx
-                evm.context.evm.journaled_state = JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
+                evm.context.evm.journaled_state =
+                    JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
 
                 if optimistic {
                     continue;
@@ -239,11 +261,13 @@ where
                             println!("Invalid tx at {}: {:?}", idx, invalid_transaction);
                             // skip the tx
                             continue;
-                        },
+                        }
                         _ => {
                             // any other error is not allowed
-                            return Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error }));
-                        },
+                            return Err(BlockExecutionError::Validation(
+                                BlockValidationError::EVM { hash, error },
+                            ));
+                        }
                     },
                     _ => {
                         // Any other type of error is not allowed
@@ -289,7 +313,12 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used, valid_transaction_indices })
+        Ok(EthExecuteOutput {
+            receipts,
+            requests,
+            gas_used: cumulative_gas_used,
+            valid_transaction_indices,
+        })
     }
 }
 
@@ -313,7 +342,12 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, optimistic: false, taiko_data: None }
+        Self {
+            executor: EthEvmExecutor { chain_spec, evm_config },
+            state,
+            optimistic: false,
+            taiko_data: None,
+        }
     }
 
     /// Optimistic execution
@@ -382,7 +416,12 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm, self.optimistic, self.taiko_data.clone())
+            self.executor.execute_state_transitions(
+                block,
+                evm,
+                self.optimistic,
+                self.taiko_data.clone(),
+            )
         }?;
 
         // 3. apply post execution changes
@@ -462,7 +501,14 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used, db: self.state, valid_transaction_indices })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests,
+            gas_used,
+            db: self.state,
+            valid_transaction_indices,
+        })
     }
 }
 
