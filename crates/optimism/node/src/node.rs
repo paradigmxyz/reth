@@ -296,7 +296,7 @@ where
         let args = &ctx.config().network;
 
         let mut network_config_builder = ctx.network_config_builder()?;
-        if disable_discovery_v4 {
+        if disable_discovery_v4 || args.discovery.disable_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
         let network_builder = network_config_builder
