@@ -122,15 +122,13 @@ impl<DB: Database> PersistenceService<DB> {
 
     /// Updates checkpoints related to block headers and bodies. This should be called after new
     /// transactions have been successfully written to disk.
-    fn update_transaction_meta(&self, block_num: u64, td: U256) -> ProviderResult<()> {
+    fn update_transaction_meta(&self, block_num: u64, td: U256, provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
         debug!(target: "tree::persistence", ?block_num, "Updating transaction metadata after writing");
-        let provider_rw = self.provider.provider_rw()?;
         provider_rw
             .tx_ref()
             .put::<tables::HeaderTerminalDifficulties>(block_num, CompactU256(td))?;
         provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block_num))?;
         provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block_num))?;
-        provider_rw.commit()?;
         Ok(())
     }
 
@@ -175,7 +173,6 @@ impl<DB: Database> PersistenceService<DB> {
         if blocks.is_empty() {
             return Ok(())
         }
-        let provider_rw = self.provider.provider_rw()?;
         let provider = self.provider.static_file_provider();
 
         // NOTE: checked non-empty above
@@ -281,7 +278,7 @@ where
                         let (block_num, td) = self
                             .write_transactions(block.block.clone(), &provider_rw)
                             .expect("todo: handle errors");
-                        self.update_transaction_meta(block_num, td).expect("todo: handle errors");
+                        self.update_transaction_meta(block_num, td, &provider_rw).expect("todo: handle errors");
                     }
 
                     self.provider.static_file_provider().commit().expect("todo: handle errors");
