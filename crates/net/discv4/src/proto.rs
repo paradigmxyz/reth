@@ -5,7 +5,10 @@ use alloy_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     keccak256, B256,
 };
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
+use alloy_rlp::{
+    Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
+    RlpEncodableWrapper,
+};
 use enr::Enr;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{pk2id, NodeRecord, PeerId};
@@ -13,7 +16,7 @@ use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     SecretKey, SECP256K1,
 };
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 // Note: this is adapted from https://github.com/vorot93/discv4
 
@@ -189,6 +192,53 @@ pub struct Packet {
     pub node_id: PeerId,
     /// The hash of the packet.
     pub hash: B256,
+}
+
+/// Represents the `from` field in the `Ping` packet
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodableWrapper)]
+struct PingNodeEndpoint(NodeEndpoint);
+
+impl alloy_rlp::Decodable for PingNodeEndpoint {
+    #[inline]
+    fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let alloy_rlp::Header { list, payload_length } = alloy_rlp::Header::decode(b)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        let started_len = b.len();
+        if started_len < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort);
+        }
+
+        // Geth allows the ipaddr to be possibly empty:
+        // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/discover/v4_udp.go#L206-L209>
+        // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/enode/node.go#L189-L189>
+        //
+        // Therefore, if we see an empty list instead of a properly formed `IpAddr`, we will
+        // instead use `IpV4Addr::UNSPECIFIED`
+        let address =
+            if *b.first().ok_or(alloy_rlp::Error::InputTooShort)? == alloy_rlp::EMPTY_STRING_CODE {
+                let addr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+                b.advance(1);
+                addr
+            } else {
+                alloy_rlp::Decodable::decode(b)?
+            };
+
+        let this = NodeEndpoint {
+            address,
+            udp_port: alloy_rlp::Decodable::decode(b)?,
+            tcp_port: alloy_rlp::Decodable::decode(b)?,
+        };
+        let consumed = started_len - b.len();
+        if consumed != payload_length {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: consumed,
+            });
+        }
+        Ok(Self(this))
+    }
 }
 
 /// Represents the `from`, `to` fields in the packets
@@ -433,12 +483,11 @@ impl Decodable for Ping {
         // <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>
         let _version = u32::decode(b)?;
 
-        let mut this = Self {
-            from: Decodable::decode(b)?,
-            to: Decodable::decode(b)?,
-            expire: Decodable::decode(b)?,
-            enr_sq: None,
-        };
+        // see `Decodable` implementation in `PingNodeEndpoint` for why this is needed
+        let from = PingNodeEndpoint::decode(b)?.0;
+
+        let mut this =
+            Self { from, to: Decodable::decode(b)?, expire: Decodable::decode(b)?, enr_sq: None };
 
         // only decode the ENR sequence if there's more data in the datagram to decode else skip
         if b.has_remaining() {
@@ -835,6 +884,21 @@ mod tests {
         assert_eq!(enr.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);
         assert!(enr.verify());
+    }
+
+    // test for failing message decode
+    #[test]
+    fn decode_failing_packet() {
+        let packet = hex!("2467ab56952aedf4cfb8bb7830ddc8922d0f992185229919dad9de3841fe95d9b3a7b52459398235f6d3805644666d908b45edb3670414ed97f357afba51f71f7d35c1f45878ba732c3868b04ca42ff0ed347c99efcf3a5768afed68eb21ef960001db04c3808080c9840a480e8f82765f808466a9a06386019106833efe");
+
+        let _message = Message::decode(&packet[..]).unwrap();
+    }
+
+    // test for failing message decode
+    #[test]
+    fn decode_node() {
+        let packet = hex!("cb840000000082115c82115d");
+        let _message = NodeEndpoint::decode(&mut &packet[..]).unwrap();
     }
 
     // test vector from the enr library rlp encoding tests
