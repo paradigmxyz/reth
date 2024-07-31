@@ -2,9 +2,8 @@ use crate::{
     providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
     DatabaseProviderRW, StateChangeWriter, StateWriter, TrieWriter,
 };
-use itertools::Itertools;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
     Database,
@@ -12,11 +11,11 @@ use reth_db::{
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, Header, StaticFileSegment, StorageEntry, TransactionSignedNoHash, B256, U256,
+    BlockNumber, Header, StaticFileSegment, TransactionSignedNoHash, B256, U256,
 };
 use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::writer::StorageWriterError;
-use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+use reth_trie::updates::TrieUpdates;
 use revm::db::OriginalValuesKnown;
 use static_file::StaticFileWriter;
 use std::borrow::Borrow;
@@ -219,49 +218,6 @@ impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
 where
     TX: DbTxMut + DbTx,
 {
-    /// Writes the hashed state changes to the database
-    pub fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        self.ensure_database_writer()?;
-
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor =
-            self.database_writer().tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.database_writer().tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_storage_cursor.delete_current_duplicates()?;
-            }
-
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
-                {
-                    if db_entry.key == entry.key {
-                        hashed_storage_cursor.delete_current()?;
-                    }
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     /// Appends receipts block by block.
     ///
     /// ATTENTION: If called from [`StorageWriter`] without a static file producer, it will always
@@ -381,7 +337,7 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, AccountReader, TrieWriter};
     use reth_db::tables;
     use reth_db_api::{
-        cursor::{DbCursorRO, DbDupCursorRO},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
@@ -437,8 +393,7 @@ mod tests {
         hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
-        let storage_writer = StorageWriter::new(Some(&provider_rw), None);
-        assert_eq!(storage_writer.write_hashed_state(&hashed_state.into_sorted()), Ok(()));
+        assert_eq!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(()));
         provider_rw.commit().unwrap();
 
         let provider = provider_factory.provider().unwrap();
