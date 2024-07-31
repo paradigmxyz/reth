@@ -59,7 +59,7 @@ impl OptimismNode {
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     {
-        let RollupArgs { disable_txpool_gossip, compute_pending_block, .. } = args;
+        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
@@ -67,7 +67,10 @@ impl OptimismNode {
                 compute_pending_block,
                 OptimismEvmConfig::default(),
             ))
-            .network(OptimismNetworkBuilder { disable_txpool_gossip })
+            .network(OptimismNetworkBuilder {
+                disable_txpool_gossip,
+                disable_discovery_v4: !discovery_v4,
+            })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
@@ -274,6 +277,8 @@ where
 pub struct OptimismNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
+    /// Disable discovery v4
+    pub disable_discovery_v4: bool,
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
@@ -286,12 +291,15 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<NetworkHandle> {
-        let Self { disable_txpool_gossip } = self;
+        let Self { disable_txpool_gossip, disable_discovery_v4 } = self;
 
         let args = &ctx.config().network;
 
-        let network_builder = ctx
-            .network_config_builder()?
+        let mut network_config_builder = ctx.network_config_builder()?;
+        if disable_discovery_v4 {
+            network_config_builder = network_config_builder.disable_discv4_discovery();
+        }
+        let network_builder = network_config_builder
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
