@@ -16,6 +16,7 @@ use reth_primitives::{
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
+use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -111,6 +112,23 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
 
 impl ConfigureEvm for OptimismEvmConfig {
     type DefaultExternalContext<'a> = ();
+
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        EvmBuilder::default().with_db(db).optimism().build()
+    }
+
+    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    where
+        DB: Database,
+        I: GetInspector<DB>,
+    {
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .optimism()
+            .append_handler_register(inspector_handle_register)
+            .build()
+    }
 
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
