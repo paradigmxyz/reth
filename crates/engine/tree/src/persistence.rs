@@ -149,7 +149,7 @@ impl<DB: Database> PersistenceService<DB> {
     ///
     /// The [`update_transaction_meta`](Self::update_transaction_meta) method should be called
     /// after this, to update the checkpoints for headers and block bodies.
-    #[instrument(level = "trace", skip(self, provider_rw), target = "engine")]
+    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()) target = "engine")]
     fn write_transactions(
         &self,
         block: Arc<SealedBlock>,
