@@ -4,13 +4,14 @@ use crate::{
 };
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
-    tables, DatabaseError,
+    tables,
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
 use reth_primitives::B256;
+use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::StorageTrieEntry;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.

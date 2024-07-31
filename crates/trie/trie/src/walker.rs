@@ -3,8 +3,8 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use reth_db::DatabaseError;
 use reth_primitives::B256;
+use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
