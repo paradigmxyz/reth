@@ -43,14 +43,14 @@ pub struct StreamBackfillJob<E, P, T> {
 
 impl<E, P, T> StreamBackfillJob<E, P, T> {
     /// Configures the parallelism of the [`StreamBackfillJob`] to handle active tasks.
-    ///
-    /// # Parameters
-    /// - `parallelism`: The parallelism to handle active tasks.
-    ///
-    /// # Returns
-    /// The modified instance of [`StreamBackfillJob`] with the specified parallelism.
     pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
         self.parallelism = parallelism;
+        self
+    }
+
+    /// Configures the batch size for the [`StreamBackfillJob`].
+    pub const fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size;
         self
     }
 
@@ -68,7 +68,7 @@ impl<E, P, T> StreamBackfillJob<E, P, T> {
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + 'static + Unpin,
+    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
     type Item = Result<SingleBlockStreamItem, BlockExecutionError>;
 
@@ -100,7 +100,7 @@ where
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
 where
     E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + 'static + Unpin,
+    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
 {
     type Item = Result<BatchBlockStreamItem, BlockExecutionError>;
 
