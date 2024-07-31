@@ -6,8 +6,8 @@ use std::{fmt, ops::Deref, sync::Arc};
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, IntoRecoveredTransaction, Receipt, SealedBlockWithSenders,
-    TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
+    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
+    TxHash, TxKind, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -607,9 +607,7 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
-                {
+                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }

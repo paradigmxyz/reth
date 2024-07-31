@@ -1371,7 +1371,7 @@ impl PropagateTransaction {
     /// Create a new instance from a pooled transaction
     fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into().into_signed());
         Self { size, transaction }
     }
 }

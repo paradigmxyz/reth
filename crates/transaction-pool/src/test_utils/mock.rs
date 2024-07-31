@@ -16,10 +16,10 @@ use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
-    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
-    TxKind, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID, U256,
+    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy,
+    TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
@@ -879,19 +879,19 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     }
 }
 
-impl IntoRecoveredTransaction for MockTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        let tx = self.clone().into();
+// impl IntoRecoveredTransaction for MockTransaction {
+//     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+//         let tx = self.clone().into();
 
-        let signed_tx = TransactionSigned {
-            hash: *self.hash(),
-            signature: Signature::default(),
-            transaction: tx,
-        };
+//         let signed_tx = TransactionSigned {
+//             hash: *self.hash(),
+//             signature: Signature::default(),
+//             transaction: tx,
+//         };
 
-        TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
-    }
-}
+//         TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
+//     }
+// }
 
 impl From<MockTransaction> for TransactionSignedEcRecovered {
     fn from(tx: MockTransaction) -> Self {
