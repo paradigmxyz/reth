@@ -36,6 +36,8 @@ pub struct MockEthProvider {
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
     pub chain_spec: Arc<ChainSpec>,
+    /// Local state roots
+    pub state_roots: Arc<Mutex<Vec<B256>>>,
 }
 
 impl Default for MockEthProvider {
@@ -45,6 +47,7 @@ impl Default for MockEthProvider {
             headers: Default::default(),
             accounts: Default::default(),
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
+            state_roots: Default::default(),
         }
     }
 }
@@ -123,6 +126,11 @@ impl MockEthProvider {
         for (address, account) in iter {
             self.add_account(address, account)
         }
+    }
+
+    /// Add state root to local state root store
+    pub fn add_state_root(&self, state_root: B256) {
+        self.state_roots.lock().push(state_root);
     }
 }
 
@@ -540,14 +548,16 @@ impl AccountReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
-        Ok(B256::default())
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok(state_root)
     }
 
     fn hashed_state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        Ok((B256::default(), Default::default()))
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok((state_root, Default::default()))
     }
 }
 
