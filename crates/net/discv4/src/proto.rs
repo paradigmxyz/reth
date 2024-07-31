@@ -169,7 +169,7 @@ impl Message {
         let payload = &mut &packet[98..];
 
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
-            MessageId::Ping => Self::Ping(Ping::decode(payload).unwrap()),
+            MessageId::Ping => Self::Ping(Ping::decode(payload)?),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),
             MessageId::Neighbours => Self::Neighbours(Neighbours::decode(payload)?),
