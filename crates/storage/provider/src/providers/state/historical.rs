@@ -16,8 +16,8 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    StateRoot,
+    proof::Proof, trie_cursor::DatabaseTrieCursorFactory, updates::TrieUpdates,
+    witness::TrieWitness, AccountProof, HashedPostState, StateRoot,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
 use std::{collections::HashMap, fmt::Debug};
@@ -134,7 +134,10 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             );
         }
 
-        Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
+        Ok(HashedPostState::from_reverts(
+            &DatabaseTrieCursorFactory::new(self.tx),
+            self.block_number,
+        )?)
     }
 
     fn history_info<T, K>(

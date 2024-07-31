@@ -1,15 +1,10 @@
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    trie_cursor::{ChangeSetWalker, ChangeSetWalkerFactory},
     Nibbles,
 };
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::tables;
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress},
-    transaction::DbTx,
-};
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::BundleAccount;
@@ -57,12 +52,15 @@ impl HashedPostState {
 
     /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
     /// block up to the current tip and aggregates them into hashed state in reverse.
-    pub fn from_reverts<TX: DbTx>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
+    pub fn from_reverts<T: ChangeSetWalkerFactory>(
+        factory: &T,
+        from: BlockNumber,
+    ) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::<Address, Option<Account>>::default();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        let mut account_changesets_cursor = factory.account_change_sets()?;
         for entry in account_changesets_cursor.walk_range(from..)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
+            let (address, info) = entry?;
             if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
                 entry.insert(info);
             }
@@ -70,14 +68,12 @@ impl HashedPostState {
 
         // Iterate over storage changesets and record value before first occurring storage change.
         let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in
-            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
-        {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
+        let mut storage_changesets_cursor = factory.storage_change_sets()?;
+        for entry in storage_changesets_cursor.walk_range(from..)? {
+            let (address, key, value) = entry?;
             let account_storage = storages.entry(address).or_default();
-            if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
-                entry.insert(storage.value);
+            if let hash_map::Entry::Vacant(entry) = account_storage.entry(key) {
+                entry.insert(value);
             }
         }
 
