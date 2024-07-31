@@ -1276,10 +1276,10 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         )?;
 
-        // TODO: change StateRootProvider API to accept hashed post state
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
-        let (state_root, trie_output) = state_provider.state_root_with_updates(&output.state)?;
+        let (state_root, trie_output) =
+            state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
