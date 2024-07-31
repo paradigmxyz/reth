@@ -5,7 +5,9 @@ use reth_db::{models::CompactU256, tables, transaction::DbTxMut, Database};
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{
-    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, DatabaseProviderRW, HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt
+    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, DatabaseProviderRW,
+    HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -44,7 +46,11 @@ impl<DB: Database> PersistenceService<DB> {
     }
 
     /// Writes the cloned tree state to database
-    fn write(&self, blocks: &[ExecutedBlock], provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
+    fn write(
+        &self,
+        blocks: &[ExecutedBlock],
+        provider_rw: &DatabaseProviderRW<DB>,
+    ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "tree::persistence", "Attempted to write empty block range");
             return Ok(())
@@ -122,7 +128,12 @@ impl<DB: Database> PersistenceService<DB> {
 
     /// Updates checkpoints related to block headers and bodies. This should be called after new
     /// transactions have been successfully written to disk.
-    fn update_transaction_meta(&self, block_num: u64, td: U256, provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
+    fn update_transaction_meta(
+        &self,
+        block_num: u64,
+        td: U256,
+        provider_rw: &DatabaseProviderRW<DB>,
+    ) -> ProviderResult<()> {
         debug!(target: "tree::persistence", ?block_num, "Updating transaction metadata after writing");
         provider_rw
             .tx_ref()
@@ -139,7 +150,11 @@ impl<DB: Database> PersistenceService<DB> {
     /// The [`update_transaction_meta`](Self::update_transaction_meta) method should be called
     /// after this, to update the checkpoints for headers and block bodies.
     #[instrument(level = "trace", skip(self), target = "engine")]
-    fn write_transactions(&self, block: Arc<SealedBlock>, provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<(u64, U256)> {
+    fn write_transactions(
+        &self,
+        block: Arc<SealedBlock>,
+        provider_rw: &DatabaseProviderRW<DB>,
+    ) -> ProviderResult<(u64, U256)> {
         debug!(target: "tree::persistence", "Writing transactions");
         let provider = self.provider.static_file_provider();
 
@@ -169,7 +184,11 @@ impl<DB: Database> PersistenceService<DB> {
     }
 
     /// Write execution-related block data to database and/or static files.
-    fn write_execution_data(&self, blocks: &[ExecutedBlock], provider_rw: &DatabaseProviderRW<DB>) -> ProviderResult<()> {
+    fn write_execution_data(
+        &self,
+        blocks: &[ExecutedBlock],
+        provider_rw: &DatabaseProviderRW<DB>,
+    ) -> ProviderResult<()> {
         if blocks.is_empty() {
             return Ok(())
         }
@@ -278,7 +297,8 @@ where
                         let (block_num, td) = self
                             .write_transactions(block.block.clone(), &provider_rw)
                             .expect("todo: handle errors");
-                        self.update_transaction_meta(block_num, td, &provider_rw).expect("todo: handle errors");
+                        self.update_transaction_meta(block_num, td, &provider_rw)
+                            .expect("todo: handle errors");
                     }
 
                     self.provider.static_file_provider().commit().expect("todo: handle errors");
@@ -299,8 +319,8 @@ where
                     //     self.write_transactions(block).expect("todo: handle errors");
                     // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
 
-                    // // we ignore the error because the caller may or may not care about the result
-                    // let _ = sender.send(());
+                    // // we ignore the error because the caller may or may not care about the
+                    // result let _ = sender.send(());
                 }
             }
         }
