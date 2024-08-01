@@ -238,7 +238,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool, Eth> EthFilterApiServer<Eth> for EthFilter<Provider, Pool, Eth>
+impl<Provider, Pool, Eth> EthFilterApiServer<Eth::Transaction> for EthFilter<Provider, Pool, Eth>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
