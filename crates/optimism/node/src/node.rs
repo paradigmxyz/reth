@@ -67,7 +67,10 @@ impl OptimismNode {
                 compute_pending_block,
                 OptimismEvmConfig::default(),
             ))
-            .network(OptimismNetworkBuilder { disable_txpool_gossip, discovery_v4 })
+            .network(OptimismNetworkBuilder { 
+                disable_txpool_gossip, 
+                discovery_v4: !discovery_v4, 
+            })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
