@@ -147,6 +147,22 @@ impl TreeState {
         }
     }
 
+    /// Determines if the given block is part of a fork by walking back the
+    /// chain from the given hash and checking if the current canonical head
+    /// is part of it.
+    fn is_fork(&self, block_hash: B256) -> bool {
+        let target_hash = self.canonical_block_hash();
+        let mut current_hash = block_hash;
+
+        while let Some(current_block) = self.block_by_hash(current_hash) {
+            if current_block.hash() == target_hash {
+                return false
+            }
+            current_hash = current_block.header.parent_hash;
+        }
+        true
+    }
+
     /// Remove all blocks up to the given block number.
     pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
         let mut numbers_to_remove = Vec::new();
@@ -1163,6 +1179,8 @@ where
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
         trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        let start = Instant::now();
+
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
@@ -1171,10 +1189,16 @@ where
 
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
-        self.canonical_in_memory_state.set_canonical_head(tip);
+        self.canonical_in_memory_state.set_canonical_head(tip.clone());
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
+
+        // emit event
+        self.emit_event(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+            Box::new(tip),
+            start.elapsed(),
+        ));
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -1287,6 +1311,7 @@ where
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
         }
 
+        let start = Instant::now();
         // validate block consensus rules
         self.validate_block(&block)?;
 
@@ -1312,6 +1337,7 @@ where
 
         let block_number = block.number;
         let block_hash = block.hash();
+        let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
         let output = executor.execute((&block, U256::MAX).into())?;
         self.consensus.validate_block_post_execution(
@@ -1331,7 +1357,7 @@ where
         }
 
         let executed = ExecutedBlock {
-            block: Arc::new(block.block.seal(block_hash)),
+            block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
                 output.state,
@@ -1351,7 +1377,16 @@ where
 
         self.state.tree_state.insert_executed(executed);
 
+        // emit insert event
+        let engine_event = if self.state.tree_state.is_fork(block_hash) {
+            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block)
+        } else {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, start.elapsed())
+        };
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
+
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
@@ -1826,13 +1861,13 @@ mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
     use alloy_rlp::Decodable;
-    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
-    use reth_primitives::Bytes;
+    use reth_primitives::{Address, Bytes};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
@@ -1849,6 +1884,8 @@ mod tests {
         action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
         chain_spec: Arc<ChainSpec>,
+        executor_provider: MockExecutorProvider,
+        block_builder: TestBlockBuilder,
     }
 
     impl TestHarness {
@@ -1859,7 +1896,7 @@ mod tests {
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
             let provider = MockEthProvider::default();
-            let executor_factory = MockExecutorProvider::default();
+            let executor_provider = MockExecutorProvider::default();
 
             let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
 
@@ -1875,7 +1912,7 @@ mod tests {
 
             let tree = EngineApiTreeHandlerImpl::new(
                 provider,
-                executor_factory,
+                executor_provider.clone(),
                 consensus,
                 payload_validator,
                 to_tree_rx,
@@ -1888,6 +1925,9 @@ mod tests {
                 TreeConfig::default(),
             );
 
+            let block_builder = TestBlockBuilder::default()
+                .with_chain_spec((*chain_spec).clone())
+                .with_signer(Address::random());
             Self {
                 tree,
                 to_tree_tx,
@@ -1896,6 +1936,8 @@ mod tests {
                 action_rx,
                 payload_command_rx,
                 chain_spec,
+                executor_provider,
+                block_builder,
             }
         }
 
@@ -1938,6 +1980,23 @@ mod tests {
         const fn with_backfill_state(mut self, state: BackfillSyncState) -> Self {
             self.tree.backfill_sync_state = state;
             self
+        }
+
+        fn extend_execution_outcome(
+            &self,
+            execution_outcomes: impl IntoIterator<Item = impl Into<ExecutionOutcome>>,
+        ) {
+            self.executor_provider.extend(execution_outcomes);
+        }
+
+        fn insert_block(
+            &mut self,
+            block: SealedBlockWithSenders,
+        ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
+            let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
+            self.extend_execution_outcome([execution_outcome]);
+            self.tree.provider.add_state_root(block.state_root);
+            self.tree.insert_block(block)
         }
     }
 
@@ -2341,5 +2400,135 @@ mod tests {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_fcu_canon_chain_insertion() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        // create FCU for the tip of the base chain
+        let fcu_state = ForkchoiceState {
+            head_block_hash: base_chain.last().unwrap().block().hash(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated { state: fcu_state, payload_attrs: None, tx },
+        ));
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid());
+
+        // check for ForkchoiceUpdated event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                state,
+                status,
+            )) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, ForkchoiceStatus::Valid);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // extend main chain
+        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 3);
+
+        for (index, block) in main_chain.iter().enumerate() {
+            test_harness.insert_block(block.clone()).unwrap();
+        }
+
+        // check for CanonicalBlockAdded events, we expect main_chain.len() blocks added
+        for index in 0..main_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                ) => {
+                    assert!(main_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_fcu_reorg_with_all_blocks() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let main_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(main_chain.clone());
+
+        let fork_chain = test_harness.block_builder.create_fork(main_chain[2].block(), 3);
+        // add fork blocks to the tree
+        for (index, block) in fork_chain.iter().enumerate() {
+            test_harness.insert_block(block.clone()).unwrap();
+        }
+
+        // create FCU for the tip of the fork
+        let fcu_state = ForkchoiceState {
+            head_block_hash: fork_chain.last().unwrap().hash(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated { state: fcu_state, payload_attrs: None, tx },
+        ));
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid());
+
+        // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
+        for index in 0..fork_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
+                    block,
+                )) => {
+                    assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        // check for CanonicalChainCommitted event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(
+                BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
+            ) => {
+                assert_eq!(header.hash(), fork_chain.last().unwrap().hash());
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // check for ForkchoiceUpdated event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                state,
+                status,
+            )) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, ForkchoiceStatus::Valid);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // new head is the tip of the fork chain
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_head().hash,
+            fork_chain.last().unwrap().hash()
+        );
     }
 }
