@@ -13,7 +13,8 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, RichBlock,
+    SyncStatus, TransactionRequest,
 };
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
@@ -264,4 +265,14 @@ pub trait EngineEthApi {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns the account and storage values of the specified account including the Merkle-proof.
+    /// This call can be used to verify that the data you are pulling from is not tampered with.
+    #[method(name = "getProof")]
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<EIP1186AccountProofResponse>;
 }
