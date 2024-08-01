@@ -113,14 +113,7 @@ impl<DB: Database> PersistenceService<DB> {
         provider_rw: &DatabaseProviderRW<DB>,
         sf_provider: &StaticFileProvider,
     ) -> ProviderResult<()> {
-        let highest_block = self.provider.last_block_number()?;
-
-        debug!(target: "tree::persistence", ?block_number, "Removing blocks from database above block_number");
-        provider_rw.remove_block_and_execution_range(block_number..=highest_block)?;
-
-        debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
-
-        // get highest static file block for the total block range
+        // Get highest static file block for the total block range
         let highest_static_file_block = sf_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
             .expect("todo: error handling, headers should exist");
@@ -131,7 +124,11 @@ impl<DB: Database> PersistenceService<DB> {
             .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
         let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
-        // prune data (needs to be committed to take effect)
+        debug!(target: "tree::persistence", ?block_number, "Removing blocks from database above block_number");
+        provider_rw
+            .remove_block_and_execution_range(block_number..=provider_rw.last_block_number()?)?;
+
+        debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
         sf_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
             .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
