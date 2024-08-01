@@ -19,7 +19,9 @@ use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
     StateRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{
+    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness,
+};
 use std::{collections::HashMap, fmt::Debug};
 
 /// State provider for a given block number which takes a tx reference.
