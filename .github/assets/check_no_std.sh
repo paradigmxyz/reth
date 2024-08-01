@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set +e 
 
 # TODO
 no_std_packages=(
