@@ -2,13 +2,13 @@
 //! the `eth_` namespace.
 
 use alloy_dyn_abi::TypedData;
+use alloy_json_rpc::RpcObject;
 use alloy_network::Network;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
     U256, U64,
 };
-use alloy_json_rpc::RpcObject;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -28,9 +28,15 @@ use crate::{
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
-pub trait FullEthApiServer: EthApiServer<Transaction<Self>, Block<Self>> + FullEthApi + UpdateRawTxForwarder + Clone {}
+pub trait FullEthApiServer:
+    EthApiServer<Transaction<Self>, Block<Self>> + FullEthApi + UpdateRawTxForwarder + Clone
+{
+}
 
-impl<T> FullEthApiServer for T where T: EthApiServer<Transaction<T>, Block<T>> + FullEthApi + UpdateRawTxForwarder + Clone {}
+impl<T> FullEthApiServer for T where
+    T: EthApiServer<Transaction<T>, Block<T>> + FullEthApi + UpdateRawTxForwarder + Clone
+{
+}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -66,11 +72,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
-    async fn block_by_number(
-        &self,
-        number: BlockNumberOrTag,
-        full: bool,
-    ) -> RpcResult<Option<B>>;
+    async fn block_by_number(&self, number: BlockNumberOrTag, full: bool) -> RpcResult<Option<B>>;
 
     /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "getBlockTransactionCountByHash")]
@@ -103,11 +105,8 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
-    async fn uncle_by_block_hash_and_index(
-        &self,
-        hash: B256,
-        index: Index,
-    ) -> RpcResult<Option<B>>;
+    async fn uncle_by_block_hash_and_index(&self, hash: B256, index: Index)
+        -> RpcResult<Option<B>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockNumberAndIndex")]

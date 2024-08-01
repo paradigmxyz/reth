@@ -4,10 +4,12 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::helpers::{LoadReceipt, TraceExt};
+use reth_rpc_eth_api::{
+    helpers::{LoadReceipt, TraceExt},
+    Block, EthApiTypes, Transaction,
+};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
-use reth_rpc_eth_api::{Transaction, Block};
 use reth_rpc_types::{
     trace::{
         otterscan::{
@@ -61,7 +63,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer<Transaction<Eth>, Block<Eth>> + TraceExt + 'static,
+    Eth: EthApiServer<Transaction<Eth>, Block<Eth>> + EthApiTypes + TraceExt + 'static,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
