@@ -1,7 +1,7 @@
 use crate::{Address, Signature};
 use revm_primitives::B256;
 
-#[cfg(all(feature = "secp256k1", not(feature = "k256")))]
+#[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {
     use super::*;
     use crate::keccak256;
