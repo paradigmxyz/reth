@@ -20,6 +20,8 @@ no_std_packages=(
 
 # Dictionary to hold the results
 declare -A results
+# Flag to track if any command fails
+any_failed=0
 
 for package in "${no_std_packages[@]}"; do
   cmd="cargo +stable build -p $package --target wasm32-wasip1 --no-default-features"
@@ -36,9 +38,10 @@ for package in "${no_std_packages[@]}"; do
 
   # Store the result in the dictionary
   if [ $ret_code -eq 0 ]; then
-    results["$package"]="Success"
+    results["$package"]="✅"
   else
-    results["$package"]="Failed"
+    results["$package"]="❌"
+    any_failed=1
   fi
 
   if [ -n "$CI" ]; then
@@ -51,3 +54,6 @@ echo -e "\nSummary of build results:"
 for package in "${!results[@]}"; do
   echo "$package: ${results[$package]}"
 done
+
+# Exit with a non-zero status if any command fails
+exit $any_failed
