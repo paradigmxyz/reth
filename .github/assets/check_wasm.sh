@@ -2,7 +2,7 @@
 set +e  # Disable immediate exit on error
 
 # Array of crates 
-wasm_packages=(
+wasm_crates=(
   # The following were confirmed not working in the past, but could be enabled if issues have been resolved
   # reth-db
   # reth-primitives
@@ -18,18 +18,18 @@ wasm_packages=(
   reth-codecs
 )
 
-# Dictionary to hold the results
-declare -A results
+# Array to hold the results
+results=()
 # Flag to track if any command fails
 any_failed=0
 
-for package in "${wasm_packages[@]}"; do
-  cmd="cargo +stable build -p $package --target wasm32-wasip1 --no-default-features"
+for crate in "${wasm_crates[@]}"; do
+  cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
   else
-    printf "\n%s:\n  %s\n" "$package" "$cmd"
+    printf "\n%s:\n  %s\n" "$crate" "$cmd"
   fi
 
   # Run the command and capture the return code
@@ -38,9 +38,9 @@ for package in "${wasm_packages[@]}"; do
 
   # Store the result in the dictionary
   if [ $ret_code -eq 0 ]; then
-    results["$package"]="✅"
+    results+=("✅:$crate")
   else
-    results["$package"]="❌"
+    results+=("❌:$crate")
     any_failed=1
   fi
 
@@ -49,10 +49,16 @@ for package in "${wasm_packages[@]}"; do
   fi
 done
 
+# Sort the results by status and then by crate name
+IFS=$'\n' sorted_results=($(sort <<<"${results[*]}"))
+unset IFS
+
 # Print summary
 echo -e "\nSummary of build results:"
-for package in "${!results[@]}"; do
-  echo "$package: ${results[$package]}"
+for result in "${sorted_results[@]}"; do
+  status="${result%%:*}"
+  crate="${result##*:}"
+  echo "$status $crate"
 done
 
 # Exit with a non-zero status if any command fails
