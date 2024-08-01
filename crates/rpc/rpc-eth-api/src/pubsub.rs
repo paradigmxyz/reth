@@ -3,7 +3,6 @@
 use alloy_json_rpc::RpcObject;
 use jsonrpsee::proc_macros::rpc;
 use reth_rpc_types::pubsub::{Params, SubscriptionKind};
-use reth_rpc_types_compat::TransactionBuilder;
 
 /// Ethereum pub-sub rpc interface.
 #[rpc(server, namespace = "eth")]

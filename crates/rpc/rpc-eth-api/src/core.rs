@@ -3,7 +3,6 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
-use alloy_network::Network;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
@@ -23,7 +22,7 @@ use crate::{
         transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
         EthTransactions, FullEthApi,
     },
-    Block, EthApiTypes, Transaction,
+    Block, Transaction,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
