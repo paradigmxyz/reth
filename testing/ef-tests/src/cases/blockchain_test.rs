@@ -106,7 +106,7 @@ impl Case for BlockchainTestCase {
                         .static_file_provider()
                         .latest_writer(StaticFileSegment::Receipts)
                         .unwrap();
-                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    receipts_writer.increment_block(0).unwrap();
                     receipts_writer.commit_without_sync_all().unwrap();
                 }
 

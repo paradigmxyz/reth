@@ -270,9 +270,10 @@ impl StaticFileProviderRW {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn increment_block(
         &mut self,
-        segment: StaticFileSegment,
         expected_block_number: BlockNumber,
     ) -> ProviderResult<BlockNumber> {
+        let segment = self.writer.user_header().segment();
+
         self.check_next_block_number(expected_block_number, segment)?;
 
         let start = Instant::now();
@@ -476,7 +477,7 @@ impl StaticFileProviderRW {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
+        let block_number = self.increment_block(header.number)?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;
