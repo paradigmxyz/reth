@@ -8,6 +8,6 @@ mod witness;
 
 pub use prefix_set::PrefixSetLoader;
 pub use proof::DatabaseProof;
-pub use state::DatabaseStateRoot;
+pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::DatabaseStorageRoot;
 pub use witness::DatabaseTrieWitness;
