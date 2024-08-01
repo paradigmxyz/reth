@@ -225,6 +225,46 @@ impl TestBlockBuilder {
             block
         })
     }
+
+    /// Returns the execution outcome for a block created with this builder.
+    /// In order to properly include the bundle state, the signer balance is
+    /// updated.
+    pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
+        let receipts = block
+            .body
+            .iter()
+            .enumerate()
+            .map(|(idx, tx)| Receipt {
+                tx_type: tx.tx_type(),
+                success: true,
+                cumulative_gas_used: (idx as u64 + 1) * 21_000,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+
+        let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
+
+        for tx in &block.body {
+            self.signer_execute_account_info.balance -= Self::single_tx_cost();
+            bundle_state_builder = bundle_state_builder.state_present_account_info(
+                self.signer,
+                AccountInfo {
+                    nonce: tx.nonce(),
+                    balance: self.signer_execute_account_info.balance,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let execution_outcome = ExecutionOutcome::new(
+            bundle_state_builder.build(),
+            vec![vec![None]].into(),
+            block.number,
+            Vec::new(),
+        );
+
+        execution_outcome.with_receipts(Receipts::from(receipts))
+    }
 }
 /// A test `ChainEventSubscriptions`
 #[derive(Clone, Debug, Default)]
