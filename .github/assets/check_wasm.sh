@@ -2,7 +2,7 @@
 set +e  # Disable immediate exit on error
 
 # Array of crates 
-no_std_packages=(
+wasm_packages=(
   # The following were confirmed not working in the past, but could be enabled if issues have been resolved
   reth-db
   reth-primitives
@@ -23,7 +23,7 @@ declare -A results
 # Flag to track if any command fails
 any_failed=0
 
-for package in "${no_std_packages[@]}"; do
+for package in "${wasm_packages[@]}"; do
   cmd="cargo +stable build -p $package --target wasm32-wasip1 --no-default-features"
 
   if [ -n "$CI" ]; then
