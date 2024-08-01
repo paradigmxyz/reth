@@ -282,10 +282,10 @@ impl TestStageDB {
                         segment_header.expected_block_start() == 0
                     {
                         for block in 0..block.number {
-                            txs_writer.increment_block(StaticFileSegment::Transactions, block)?;
+                            txs_writer.increment_block(block)?;
                         }
                     }
-                    txs_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
+                    txs_writer.increment_block(block.number)?;
                 }
                 res
             })?;
@@ -349,7 +349,7 @@ impl TestStageDB {
                 let provider = self.factory.static_file_provider();
                 let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
                 let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
-                    writer.increment_block(StaticFileSegment::Receipts, block_num)?;
+                    writer.increment_block(block_num)?;
                     writer.append_receipts(receipts.into_iter().map(Ok))?;
                     Ok(())
                 });
