@@ -147,10 +147,9 @@ impl<DB: Database> PersistenceService<DB> {
         }
 
         debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks to database");
-        let first_number = blocks.first().unwrap().block().number;
+        let first_number = first_block.number;
 
-        let last = blocks.last().unwrap().block();
-        let last_block_number = last.number;
+        let last_block_number = last_block.number;
 
         // TODO: remove all the clones and do performant / batched writes for each type of object
         // instead of a loop over all blocks,
