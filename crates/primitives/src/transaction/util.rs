@@ -169,4 +169,52 @@ mod tests {
 
         assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
     }
+
+    #[cfg(all(feature = "k256", feature = "secp256k1"))]
+    #[test]
+    fn sanity_secp256k1_k256_compat() {
+        use super::{impl_k256, impl_secp256k1};
+        use revm_primitives::{keccak256, B256};
+
+        let (secp256k1_secret, secp256k1_public) =
+            secp256k1::generate_keypair(&mut rand::thread_rng());
+        let k256_secret = k256::ecdsa::SigningKey::from_slice(&secp256k1_secret.secret_bytes())
+            .expect("k256 secret");
+        let k256_public = *k256_secret.verifying_key();
+
+        let secp256k1_signer = impl_secp256k1::public_key_to_address(secp256k1_public);
+        let k256_signer = impl_k256::public_key_to_address(k256_public);
+        assert_eq!(secp256k1_signer, k256_signer);
+
+        let message = b"hello world";
+        let hash = keccak256(message);
+
+        let secp256k1_signature = impl_secp256k1::sign_message(
+            B256::from_slice(&secp256k1_secret.secret_bytes()[..]),
+            hash,
+        )
+        .expect("secp256k1 sign");
+        let k256_signature =
+            impl_k256::sign_message(B256::from_slice(&k256_secret.to_bytes()[..]), hash)
+                .expect("k256 sign");
+        assert_eq!(secp256k1_signature, k256_signature);
+
+        let mut sig: [u8; 65] = [0; 65];
+
+        sig[0..32].copy_from_slice(&secp256k1_signature.r.to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&secp256k1_signature.s.to_be_bytes::<32>());
+        sig[64] = secp256k1_signature.odd_y_parity as u8;
+        let secp256k1_recovered =
+            impl_secp256k1::recover_signer_unchecked(&sig, &hash).expect("secp256k1 recover");
+        assert_eq!(secp256k1_recovered, secp256k1_signer);
+
+        sig[0..32].copy_from_slice(&k256_signature.r.to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&k256_signature.s.to_be_bytes::<32>());
+        sig[64] = k256_signature.odd_y_parity as u8;
+        let k256_recovered =
+            impl_k256::recover_signer_unchecked(&sig, &hash).expect("k256 recover");
+        assert_eq!(k256_recovered, k256_signer);
+
+        assert_eq!(secp256k1_recovered, k256_recovered);
+    }
 }
