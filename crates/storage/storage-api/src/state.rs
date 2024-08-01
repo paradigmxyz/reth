@@ -172,13 +172,6 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     /// If the block couldn't be found, returns `None`.
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
-
-    /// Return a [StateProvider] that contains bundle state data provider.
-    /// Used to inspect or execute transaction on the pending state.
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Blockchain trait provider that gives access to the blockchain state that is not yet committed

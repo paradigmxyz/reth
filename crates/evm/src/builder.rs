@@ -1,7 +1,7 @@
 //! Builder for creating an EVM with a database and environment.
 
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{Env, EnvWithHandlerCfg};
+use revm_primitives::EnvWithHandlerCfg;
 
 /// Builder for creating an EVM with a database and environment.
 ///
@@ -14,7 +14,7 @@ pub struct RethEvmBuilder<DB: Database, EXT = ()> {
     /// The database to use for the EVM.
     db: DB,
     /// The environment to use for the EVM.
-    env: Option<Box<Env>>,
+    env: Option<Box<EnvWithHandlerCfg>>,
     /// The external context for the EVM.
     external_context: EXT,
 }
@@ -29,7 +29,7 @@ where
     }
 
     /// Set the environment for the EVM.
-    pub fn with_env(mut self, env: Box<Env>) -> Self {
+    pub fn with_env(mut self, env: Box<EnvWithHandlerCfg>) -> Self {
         self.env = Some(env);
         self
     }
@@ -44,7 +44,8 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
         if let Some(env) = self.env {
-            builder = builder.with_env(env);
+            builder = builder.with_spec_id(env.clone().spec_id());
+            builder = builder.with_env(env.env);
         }
 
         builder.build()
@@ -59,7 +60,8 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
         if let Some(env) = self.env {
-            builder = builder.with_env(env);
+            builder = builder.with_spec_id(env.clone().spec_id());
+            builder = builder.with_env(env.env);
         }
         builder
             .with_external_context(inspector)
@@ -103,7 +105,7 @@ pub trait EvmFactory {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
-        RethEvmBuilder::new(db, self.default_external_context()).with_env(env.env).build()
+        RethEvmBuilder::new(db, self.default_external_context()).with_env(env.into()).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -123,7 +125,7 @@ pub trait EvmFactory {
         I: GetInspector<DB>,
     {
         RethEvmBuilder::new(db, self.default_external_context())
-            .with_env(env.env)
+            .with_env(env.into())
             .build_with_inspector(inspector)
     }
 

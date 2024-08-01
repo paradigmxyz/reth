@@ -2,8 +2,8 @@
 
 use crate::{
     constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
-    TxType,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
+    TxEip4844, TxLegacy, TxType,
 };
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
@@ -293,6 +293,17 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
         };
 
         Ok(Self { r: signature.r, s: signature.s, odd_y_parity })
+    }
+}
+
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedNoHash {
+    type Error = alloy_rpc_types::ConversionError;
+
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        Ok(Self {
+            signature: tx.signature.ok_or(Self::Error::MissingSignature)?.try_into()?,
+            transaction: tx.try_into()?,
+        })
     }
 }
 

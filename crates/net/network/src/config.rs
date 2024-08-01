@@ -385,10 +385,15 @@ impl NetworkConfigBuilder {
         self.boot_nodes(sepolia_nodes())
     }
 
-    /// Sets the boot nodes.
+    /// Sets the boot nodes to use to bootstrap the configured discovery services (discv4 + discv5).
     pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
         self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Returns an iterator over all configured boot nodes.
+    pub fn boot_nodes_iter(&self) -> impl Iterator<Item = &TrustedPeer> + '_ {
+        self.boot_nodes.iter()
     }
 
     /// Disable the DNS discovery.
@@ -505,7 +510,7 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        let head = head.unwrap_or(Head {
+        let head = head.unwrap_or_else(|| Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
             timestamp: chain_spec.genesis.timestamp,

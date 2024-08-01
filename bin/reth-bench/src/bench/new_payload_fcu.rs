@@ -125,7 +125,8 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result = CombinedResult { new_payload_result, fcu_latency, total_latency };
+            let combined_result =
+                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
             // current duration since the start of the benchmark
             let current_duration = total_benchmark_duration.elapsed();

@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, B256};
+use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
@@ -111,6 +113,17 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
         self.state_provider.hashed_proof(state, address, slots)
+    }
+
+    fn witness(
+        &self,
+        overlay: HashedPostState,
+        target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        state.extend(overlay);
+        self.state_provider.witness(state, target)
     }
 }
 

@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
+    RequestsProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
@@ -36,6 +36,8 @@ pub struct MockEthProvider {
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
     pub chain_spec: Arc<ChainSpec>,
+    /// Local state roots
+    pub state_roots: Arc<Mutex<Vec<B256>>>,
 }
 
 impl Default for MockEthProvider {
@@ -45,6 +47,7 @@ impl Default for MockEthProvider {
             headers: Default::default(),
             accounts: Default::default(),
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
+            state_roots: Default::default(),
         }
     }
 }
@@ -123,6 +126,11 @@ impl MockEthProvider {
         for (address, account) in iter {
             self.add_account(address, account)
         }
+    }
+
+    /// Add state root to local state root store
+    pub fn add_state_root(&self, state_root: B256) {
+        self.state_roots.lock().push(state_root);
     }
 }
 
@@ -540,14 +548,16 @@ impl AccountReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
-        Ok(B256::default())
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok(state_root)
     }
 
     fn hashed_state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        Ok((B256::default(), Default::default()))
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok((state_root, Default::default()))
     }
 }
 
@@ -559,6 +569,14 @@ impl StateProofProvider for MockEthProvider {
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
+    }
+
+    fn witness(
+        &self,
+        _overlay: HashedPostState,
+        _target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        Ok(HashMap::default())
     }
 }
 
@@ -660,13 +678,6 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
-    }
-
-    fn pending_with_provider<'a>(
-        &'a self,
-        _bundle_state_data: Box<dyn FullExecutionDataProvider + 'a>,
-    ) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
     }
 }
 

@@ -399,9 +399,10 @@ where
             )
             .expect("failed to create tree"),
         ));
-        let latest = self.base_config.chain_spec.genesis_header().seal_slow();
+        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
+
         let blockchain_provider =
-            BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
+            BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),

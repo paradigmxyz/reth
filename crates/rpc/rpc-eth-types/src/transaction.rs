@@ -39,8 +39,8 @@ impl TransactionSource {
     /// Conversion into network specific transaction type.
     pub fn into_transaction<T: TransactionBuilder>(self) -> T::Transaction {
         match self {
-            TransactionSource::Pool(tx) => T::from_recovered(tx),
-            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
+            Self::Pool(tx) => T::from_recovered(tx),
+            Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 T::from_recovered_with_block_context(
                     transaction,
                     block_hash,

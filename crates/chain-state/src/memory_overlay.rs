@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+
 use super::ExecutedBlock;
 use reth_errors::ProviderResult;
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256};
+use reth_primitives::{
+    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
@@ -20,9 +24,15 @@ pub struct MemoryOverlayStateProvider {
 
 impl MemoryOverlayStateProvider {
     /// Create new memory overlay state provider.
+    ///
+    /// ## Arguments
+    ///
+    /// - `in_memory` - the collection of executed ancestor blocks in reverse.
+    /// - `historical` - a historical state provider for the latest ancestor block stored in the
+    ///   database.
     pub fn new(in_memory: Vec<ExecutedBlock>, historical: Box<dyn StateProvider>) -> Self {
         let mut hashed_post_state = HashedPostState::default();
-        for block in &in_memory {
+        for block in in_memory.iter().rev() {
             hashed_post_state.extend(block.hashed_state.as_ref().clone());
         }
         Self { in_memory, hashed_post_state, historical }
@@ -104,6 +114,17 @@ impl StateProofProvider for MemoryOverlayStateProvider {
         let mut state = self.hashed_post_state.clone();
         state.extend(hashed_state);
         self.historical.hashed_proof(state, address, slots)
+    }
+
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn witness(
+        &self,
+        overlay: HashedPostState,
+        target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        let mut state = self.hashed_post_state.clone();
+        state.extend(overlay);
+        self.historical.witness(state, target)
     }
 }
 

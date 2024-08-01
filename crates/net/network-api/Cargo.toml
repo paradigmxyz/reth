@@ -16,6 +16,7 @@ workspace = true
 reth-eth-wire.workspace = true
 alloy-rpc-types-admin.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -27,6 +28,7 @@ enr = { workspace = true, default-features = false, features = ["rust-secp256k1"
 thiserror.workspace = true
 serde = { workspace = true, features = ["derive"], optional = true }
 tokio = { workspace = true, features = ["sync"] }
+auto_impl.workspace = true
 
 [features]
 default = ["serde"]

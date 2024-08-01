@@ -54,7 +54,7 @@ where
             let block =
                 Self::from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
                     .map_err(Self::Error::from_eth_err)?;
-            Ok(Some(Rich { inner: block.into(), extra_info: Default::default() }))
+            Ok(Some(Rich { inner: block, extra_info: Default::default() }))
         }
     }
 

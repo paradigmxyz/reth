@@ -6,8 +6,8 @@ use std::{fmt, ops::Deref, sync::Arc};
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
+    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
+    TxHash, TxKind, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -22,7 +22,7 @@ use reth_rpc_types::{
     AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::TransactionBuilder;
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError, Transaction};
 
@@ -149,14 +149,12 @@ pub trait EthTransactions:
         Self: LoadReceipt + 'static,
     {
         async move {
-            let result = self.load_transaction_and_receipt(hash).await?;
-
-            let (tx, meta, receipt) = match result {
-                Some((tx, meta, receipt)) => (tx, meta, receipt),
-                None => return Ok(None),
-            };
-
-            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            match self.load_transaction_and_receipt(hash).await? {
+                Some((tx, meta, receipt)) => {
+                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                }
+                None => Ok(None),
+            }
         }
     }
 
@@ -253,18 +251,17 @@ pub trait EthTransactions:
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
+            let recovered = recover_raw_transaction(tx.clone())?;
+            let pool_transaction: <Self::Pool as TransactionPool>::Transaction = recovered.into();
+
             // On optimism, transactions are forwarded directly to the sequencer to be included in
             // blocks that it builds.
             if let Some(client) = self.raw_tx_forwarder().as_ref() {
                 tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
-                client.forward_raw_transaction(&tx).await?;
+                let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                });
             }
-
-            let recovered = recover_raw_transaction(tx)?;
-            let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
-                    recovered,
-                );
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -476,7 +473,7 @@ pub trait EthTransactions:
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
             let pool_transaction = match recovered.try_into() {
-                Ok(converted) => <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(converted),
+                Ok(converted) => converted,
                 Err(_) => return Err(EthApiError::TransactionConversionError.into()),
             };
 
@@ -612,9 +609,7 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
-                {
+                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }
@@ -632,32 +627,12 @@ pub trait LoadTransaction: SpawnBlocking {
     ) -> impl Future<Output = Result<Option<(TransactionSource, BlockId)>, Self::Error>> + Send
     {
         async move {
-            match self.transaction_by_hash(transaction_hash).await? {
-                None => Ok(None),
-                Some(tx) => {
-                    let res = match tx {
-                        tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                        TransactionSource::Block {
-                            transaction,
-                            index,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                        } => {
-                            let at = BlockId::Hash(block_hash.into());
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee,
-                            };
-                            (tx, at)
-                        }
-                    };
-                    Ok(Some(res))
+            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
+                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                tx @ TransactionSource::Block { block_hash, .. } => {
+                    (tx, BlockId::Hash(block_hash.into()))
                 }
-            }
+            }))
         }
     }
 

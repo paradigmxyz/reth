@@ -1,3 +1,5 @@
+//! Utilities for end-to-end tests.
+
 use std::sync::Arc;
 
 use node::NodeTestContext;
@@ -110,5 +112,5 @@ type Adapter<N> = NodeAdapter<
     >>::Components,
 >;
 
-/// Type alias for a type of NodeHelper
+/// Type alias for a type of `NodeHelper`
 pub type NodeHelperType<N, AO> = NodeTestContext<Adapter<N>, AO>;

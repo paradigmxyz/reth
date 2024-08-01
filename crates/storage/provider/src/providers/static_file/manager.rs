@@ -39,7 +39,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 use strum::IntoEnumIterator;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -329,9 +329,12 @@ impl StaticFileProvider {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
+        trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
         let mut provider: StaticFileJarProvider<'_> = if let Some(jar) = self.map.get(&key) {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let mut jar =
                 NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -1040,7 +1043,7 @@ impl StaticFileWriter for StaticFileProvider {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
-        tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
+        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
@@ -1249,7 +1252,8 @@ impl TransactionsProviderExt for StaticFileProvider {
         let mut channels = Vec::new();
 
         // iterator over the chunks
-        let chunks = (tx_range.start..tx_range.end)
+        let chunks = tx_range
+            .clone()
             .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 

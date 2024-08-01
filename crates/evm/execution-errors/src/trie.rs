@@ -1,27 +1,9 @@
 //! Errors when computing the state root.
 
+use alloy_primitives::B256;
+use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror_no_std::Error;
-
-/// State root errors.
-#[derive(Error, Debug, PartialEq, Eq, Clone)]
-pub enum StateProofError {
-    /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
-    /// RLP decoding error.
-    #[error(transparent)]
-    Rlp(#[from] alloy_rlp::Error),
-}
-
-impl From<StateProofError> for ProviderError {
-    fn from(value: StateProofError) -> Self {
-        match value {
-            StateProofError::Database(error) => Self::Database(error),
-            StateProofError::Rlp(error) => Self::Rlp(error),
-        }
-    }
-}
 
 /// State root errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
@@ -49,4 +31,50 @@ pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+}
+
+/// State proof errors.
+#[derive(Error, Debug, PartialEq, Eq, Clone)]
+pub enum StateProofError {
+    /// Internal database error.
+    #[error(transparent)]
+    Database(#[from] DatabaseError),
+    /// RLP decoding error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+}
+
+impl From<StateProofError> for ProviderError {
+    fn from(value: StateProofError) -> Self {
+        match value {
+            StateProofError::Database(error) => Self::Database(error),
+            StateProofError::Rlp(error) => Self::Rlp(error),
+        }
+    }
+}
+
+/// Trie witness errors.
+#[derive(Error, Debug, PartialEq, Eq, Clone)]
+pub enum TrieWitnessError {
+    /// Error gather proofs.
+    #[error(transparent)]
+    Proof(#[from] StateProofError),
+    /// RLP decoding error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
+    /// Missing storage multiproof.
+    #[error("missing storage multiproof for {0}")]
+    MissingStorageMultiProof(B256),
+    /// Missing account.
+    #[error("missing account {0}")]
+    MissingAccount(B256),
+    /// Missing target node.
+    #[error("target node missing from proof {0:?}")]
+    MissingTargetNode(Nibbles),
+}
+
+impl From<TrieWitnessError> for ProviderError {
+    fn from(value: TrieWitnessError) -> Self {
+        Self::TrieWitnessError(value.to_string())
+    }
 }

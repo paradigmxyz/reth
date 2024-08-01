@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
-pub use access_list::{AccessList, AccessListItem};
+pub use access_list::{AccessList, AccessListItem, AccessListResult};
 pub use eip1559::TxEip1559;
 pub use eip2930::TxEip2930;
 pub use eip4844::TxEip4844;
@@ -41,7 +41,7 @@ pub use tx_type::{
 };
 pub use variant::TransactionSignedVariant;
 
-mod access_list;
+pub(crate) mod access_list;
 mod compat;
 mod eip1559;
 mod eip2930;
@@ -1580,48 +1580,7 @@ impl Decodable for TransactionSignedEcRecovered {
     }
 }
 
-/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait TryFromRecoveredTransaction {
-    /// The error type returned by the transaction.
-    type Error;
-    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error>
-    where
-        Self: Sized;
-}
-
-// Noop conversion
-impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
-    type Error = TryFromRecoveredTransactionError;
-
-    #[inline]
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
-        if tx.is_eip4844() {
-            Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
-        } else {
-            Ok(tx)
-        }
-    }
-}
-
-/// A transaction type that can be created from a [`PooledTransactionsElementEcRecovered`]
-/// transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait FromRecoveredPooledTransaction {
-    /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
-}
-
-/// The inverse of [`TryFromRecoveredTransaction`] that ensure the transaction can be sent over the
+/// Ensures the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].

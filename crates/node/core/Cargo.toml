@@ -85,8 +85,9 @@ optimism = [
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
 ]
-
-
+# Features for vergen to generate correct env vars
+jemalloc = []
+asm-keccak = []
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
