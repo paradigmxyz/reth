@@ -785,12 +785,6 @@ where
         // reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
 
-        // limit the number of blocks to persist if it exceeds the threshold
-        let threshold = self.config.persistence_threshold() as usize;
-        if blocks_to_persist.len() > threshold {
-            blocks_to_persist.truncate(threshold);
-        }
-
         blocks_to_persist
     }
 
@@ -2173,7 +2167,7 @@ mod tests {
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
-        assert_eq!(blocks_to_persist.len(), 5);
+        assert_eq!(blocks_to_persist.len(), 6);
         assert_eq!(blocks_to_persist[0].block.number, 4);
         assert_eq!(blocks_to_persist[4].block.number, 8);
 
@@ -2192,7 +2186,7 @@ mod tests {
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
-        assert_eq!(blocks_to_persist.len(), 5);
+        assert_eq!(blocks_to_persist.len(), 6);
 
         // check that the fork block is not included in the blocks to persist
         assert!(!blocks_to_persist.iter().any(|b| b.block.hash() == fork_block_hash));
