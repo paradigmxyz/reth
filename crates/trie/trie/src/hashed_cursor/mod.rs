@@ -1,9 +1,5 @@
 use reth_primitives::{Account, B256, U256};
 
-/// Default implementation of the hashed state cursor traits.
-mod default;
-pub use default::*;
-
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
 pub use post_state::*;

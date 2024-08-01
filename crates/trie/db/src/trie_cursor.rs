@@ -1,7 +1,3 @@
-use super::{TrieCursor, TrieCursorFactory};
-use crate::{
-    updates::StorageTrieUpdates, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
-};
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
     tables,
@@ -12,6 +8,11 @@ use reth_db_api::{
 };
 use reth_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie::{
+    trie_cursor::{TrieCursor, TrieCursorFactory},
+    updates::StorageTrieUpdates,
+    BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
+};
 use reth_trie_common::StorageTrieEntry;
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
@@ -123,18 +124,19 @@ where
         updates: &StorageTrieUpdates,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
-        if updates.is_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+        if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
         }
 
         // Merge updated and removed nodes. Updated nodes must take precedence.
         let mut storage_updates = updates
-            .removed_nodes
+            .removed_nodes_ref()
             .iter()
-            .filter_map(|n| (!updates.storage_nodes.contains_key(n)).then_some((n, None)))
+            .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
             .collect::<Vec<_>>();
-        storage_updates
-            .extend(updates.storage_nodes.iter().map(|(nibbles, node)| (nibbles, Some(node))));
+        storage_updates.extend(
+            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
+        );
 
         // Sort trie node updates.
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
@@ -207,7 +209,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StorageTrieEntry;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
