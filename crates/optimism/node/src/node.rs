@@ -294,16 +294,14 @@ where
         let Self { disable_txpool_gossip, disable_discovery_v4 } = self;
 
         let args = &ctx.config().network;
-
-        let mut network_config_builder = ctx.network_config_builder()?;
-        if disable_discovery_v4 || args.discovery.disable_discovery {
-            network_config_builder = network_config_builder.disable_discv4_discovery();
-        }
-        let network_builder = network_config_builder
+        let network_builder = ctx
+            .network_config_builder()?
             // apply discovery settings
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-
+                if disable_discovery_v4 || args.discovery.disable_discovery {
+                    builder = builder.disable_discv4_discovery();
+                }
                 if !args.discovery.disable_discovery {
                     builder = builder.discovery_v5(
                         args.discovery.discovery_v5_builder(
