@@ -40,6 +40,14 @@ impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> 
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
         self.0.hashed_proof(hashed_state, address, slots)
     }
+
+    fn witness(
+        &self,
+        overlay: reth_trie::HashedPostState,
+        target: reth_trie::HashedPostState,
+    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, reth_primitives::Bytes>> {
+        self.0.witness(overlay, target)
+    }
 }
 
 impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
