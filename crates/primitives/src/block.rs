@@ -439,6 +439,12 @@ impl SealedBlock {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
 
+    /// Returns whether or not the block contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip_7702_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip7702())
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure

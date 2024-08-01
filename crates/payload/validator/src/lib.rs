@@ -33,6 +33,12 @@ impl ExecutionPayloadValidator {
         &self.chain_spec
     }
 
+    /// Returns true if the Prague hardfork is active at the given timestamp.
+    #[inline]
+    fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.chain_spec().is_prague_active_at_timestamp(timestamp)
+    }
+
     /// Returns true if the Cancun hardfork is active at the given timestamp.
     #[inline]
     fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {
@@ -119,6 +125,13 @@ impl ExecutionPayloadValidator {
                 execution: sealed_block.hash(),
                 consensus: expected_hash,
             })
+        }
+
+        // check if block contains any EIP 7702 transactions before Prague
+        if !self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
+            sealed_block.has_eip_7702_transactions()
+        {
+            return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
         }
 
         if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
