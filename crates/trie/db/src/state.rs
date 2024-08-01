@@ -1,9 +1,9 @@
+use crate::PrefixSetLoader;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateRootError;
 use reth_primitives::{BlockNumber, B256};
 use reth_trie::{
     hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    prefix_set::PrefixSetLoader,
     trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
     updates::TrieUpdates,
     HashedPostState, StateRoot, StateRootProgress,
