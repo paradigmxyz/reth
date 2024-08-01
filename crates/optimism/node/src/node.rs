@@ -321,7 +321,7 @@ where
                     );
                 }
 
-                builder
+                Ok(builder) 
             });
 
         let mut network_config = ctx.build_network_config(network_builder);
