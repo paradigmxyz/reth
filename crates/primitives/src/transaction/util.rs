@@ -2,6 +2,16 @@ use crate::{Address, Signature};
 use revm_primitives::B256;
 
 #[cfg(feature = "secp256k1")]
+pub(crate) mod secp256k1 {
+    pub use super::impl_secp256k1::*;
+}
+
+#[cfg(not(feature = "secp256k1"))]
+pub(crate) mod secp256k1 {
+    pub use super::impl_k256::*;
+}
+
+#[cfg(feature = "secp256k1")]
 mod impl_secp256k1 {
     use super::*;
     use crate::keccak256;
@@ -102,16 +112,6 @@ mod impl_k256 {
         let hash = keccak256(&public.to_encoded_point(/* compress = */ false).as_bytes()[1..]);
         Address::from_slice(&hash[12..])
     }
-}
-
-#[cfg(feature = "secp256k1")]
-pub(crate) mod secp256k1 {
-    pub use super::impl_secp256k1::*;
-}
-
-#[cfg(not(feature = "secp256k1"))]
-pub(crate) mod secp256k1 {
-    pub use super::impl_k256::*;
 }
 
 #[cfg(test)]
