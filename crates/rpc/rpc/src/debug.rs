@@ -8,8 +8,8 @@ use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -600,15 +600,11 @@ where
                 // Take the bundle state
                 let bundle_state = db.take_bundle();
 
-                // Destruct the cache database to retrieve the state provider.
-                let _state = db.database.into_inner();
-
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
                 // referenced accounts + storage slots.
                 let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
-
                 for (address, account) in db.cache.accounts {
                     let hashed_address = keccak256(address);
                     hashed_state.accounts.insert(
@@ -630,7 +626,11 @@ where
                     }
                 }
 
-                todo!()
+                // Generate an execution witness for the aggregated state of accessed accounts.
+                // Destruct the cache database to retrieve the state provider.
+                let state_provider = db.database.into_inner();
+                let witness = state_provider.witness(HashedPostState::default(), hashed_state)?;
+                Ok(witness)
             })
             .await
     }
