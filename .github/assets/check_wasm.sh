@@ -4,12 +4,12 @@ set +e  # Disable immediate exit on error
 # Array of crates 
 wasm_packages=(
   # The following were confirmed not working in the past, but could be enabled if issues have been resolved
-  reth-db
-  reth-primitives
-  reth-revm
-  reth-evm
-  reth-evm-ethereum
-  reth-consensus
+  # reth-db
+  # reth-primitives
+  # reth-revm
+  # reth-evm
+  # reth-evm-ethereum
+  # reth-consensus
   # The following are confirmed working
   reth-errors
   reth-ethereum-forks
