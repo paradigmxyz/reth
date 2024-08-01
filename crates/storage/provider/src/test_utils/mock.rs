@@ -560,6 +560,14 @@ impl StateProofProvider for MockEthProvider {
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
+
+    fn witness(
+        &self,
+        _overlay: HashedPostState,
+        _target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        Ok(HashMap::default())
+    }
 }
 
 impl StateProvider for MockEthProvider {

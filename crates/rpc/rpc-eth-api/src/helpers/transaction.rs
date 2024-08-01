@@ -6,8 +6,8 @@ use std::{fmt, ops::Deref, sync::Arc};
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
+    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
+    TxHash, TxKind, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -250,10 +250,7 @@ pub trait EthTransactions: LoadTransaction {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let recovered = recover_raw_transaction(tx.clone())?;
-            let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
-                    recovered,
-                );
+            let pool_transaction: <Self::Pool as TransactionPool>::Transaction = recovered.into();
 
             // On optimism, transactions are forwarded directly to the sequencer to be included in
             // blocks that it builds.
@@ -474,7 +471,7 @@ pub trait EthTransactions: LoadTransaction {
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
             let pool_transaction = match recovered.try_into() {
-                Ok(converted) => <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(converted),
+                Ok(converted) => converted,
                 Err(_) => return Err(EthApiError::TransactionConversionError.into()),
             };
 
@@ -610,9 +607,7 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
-                {
+                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }

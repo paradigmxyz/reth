@@ -7581,9 +7581,9 @@ dependencies = [
  "reth-consensus",
  "reth-eth-wire-types",
  "reth-network-peers",
- "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
+ "serde",
  "thiserror",
  "tokio",
  "tracing",
@@ -7611,6 +7611,7 @@ version = "1.0.3"
 dependencies = [
  "humantime-serde",
  "reth-net-banlist",
+ "reth-network-p2p",
  "reth-network-peers",
  "serde",
  "serde_json",
