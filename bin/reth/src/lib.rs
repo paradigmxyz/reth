@@ -127,7 +127,7 @@ pub mod tasks {
 /// Re-exported from `reth_network`.
 pub mod network {
     pub use reth_network::*;
-    pub use reth_network_api::{noop, reputation, NetworkInfo, PeerKind, Peers, PeersInfo};
+    pub use reth_network_api::{noop, NetworkInfo, PeerKind, Peers, PeersInfo};
 }
 
 /// Re-exported from `reth_transaction_pool`.

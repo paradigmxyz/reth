@@ -10,9 +10,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, Header, StaticFileSegment, TransactionSignedNoHash, B256, U256,
-};
+use reth_primitives::{BlockNumber, Header, TransactionSignedNoHash, B256, U256};
 use reth_storage_api::{HeaderProvider, ReceiptWriter};
 use reth_storage_errors::writer::StorageWriterError;
 use revm::db::OriginalValuesKnown;
@@ -197,8 +195,7 @@ where
                 tx_index += 1;
             }
 
-            self.static_file_writer()
-                .increment_block(StaticFileSegment::Transactions, block_number)?;
+            self.static_file_writer().increment_block(block_number)?;
 
             // update index
             last_tx_idx = Some(tx_index);

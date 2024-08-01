@@ -43,6 +43,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::Bound,
     sync::{mpsc::Receiver, Arc},
     time::Instant,
 };
@@ -64,18 +65,20 @@ pub use config::TreeConfig;
 /// - All executed blocks are valid and have been executed.
 #[derive(Debug, Default)]
 pub struct TreeState {
-    /// __All__ executed blocks by block hash.
+    /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
+    ///
+    /// Note: there can be multiple blocks at the same height due to forks.
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
-    /// Currently tracked canonical head of the chain.
-    current_canonical_head: BlockNumHash,
     /// Map of any parent block hash to its children.
     parent_to_child: HashMap<B256, HashSet<B256>>,
+    /// Currently tracked canonical head of the chain.
+    current_canonical_head: BlockNumHash,
 }
 
 impl TreeState {
@@ -144,10 +147,10 @@ impl TreeState {
         }
     }
 
-    /// Remove blocks before specified block number (exclusive).
-    pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
+    /// Remove all blocks up to the given block number.
+    pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
         let mut numbers_to_remove = Vec::new();
-        for (&number, _) in self.blocks_by_number.range(..block_number) {
+        for (&number, _) in self.blocks_by_number.range((Bound::Unbounded, upper_bound)) {
             numbers_to_remove.push(number);
         }
 
@@ -646,7 +649,7 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        self.state.tree_state.remove_before(backfill_height + 1);
+        self.state.tree_state.remove_before(Bound::Included(backfill_height));
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         // we remove all entries because now we're synced to the backfill target and consider this
@@ -816,31 +819,11 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
-        self.remove_persisted_blocks_from_tree_state();
+        self.state
+            .tree_state
+            .remove_before(Bound::Included(self.persistence_state.last_persisted_block_number));
         self.canonical_in_memory_state
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
-    }
-
-    /// Clears persisted blocks from the in-memory tree state.
-    ///
-    /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn remove_persisted_blocks_from_tree_state(&mut self) {
-        let keys_to_remove: Vec<BlockNumber> = self
-            .state
-            .tree_state
-            .blocks_by_number
-            .range(..=self.persistence_state.last_persisted_block_number)
-            .map(|(&k, _)| k)
-            .collect();
-
-        for key in keys_to_remove {
-            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
-                // Remove corresponding blocks from blocks_by_hash
-                for block in blocks {
-                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
-                }
-            }
-        }
     }
 
     /// Return block from database or in-memory state by hash.
@@ -1359,6 +1342,13 @@ where
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
+
+        if self.state.tree_state.canonical_block_hash() == executed.block().parent_hash {
+            debug!(target: "engine", pending = ?executed.block().num_hash() ,"updating pending block");
+            // if the parent is the canonical head, we can insert the block as the pending block
+            self.canonical_in_memory_state.set_pending_block(executed.clone());
+        }
+
         self.state.tree_state.insert_executed(executed);
 
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
@@ -2176,7 +2166,7 @@ mod tests {
             tree_state.insert_executed(block.clone());
         }
 
-        tree_state.remove_before(3);
+        tree_state.remove_before(Bound::Excluded(3));
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));

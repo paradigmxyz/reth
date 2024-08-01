@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
 

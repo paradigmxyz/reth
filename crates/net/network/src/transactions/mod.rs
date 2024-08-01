@@ -1,19 +1,5 @@
 //! Transactions management for the p2p network.
 
-use crate::{
-    budget::{
-        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
-        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
-        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-    },
-    cache::LruCache,
-    duration_metered_exec,
-    manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
-    metered_poll_nested_stream_with_budget,
-    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
-};
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -21,12 +7,13 @@ use reth_eth_wire::{
     PooledTransactions, RequestTxHashes, Transactions,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
-use reth_network_api::{Peers, ReputationChangeKind};
+use reth_network_api::Peers;
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
     sync::SyncStateProvider,
 };
 use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
@@ -49,6 +36,21 @@ use std::{
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
+
+use crate::{
+    budget::{
+        DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
+        DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
+        DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+    },
+    cache::LruCache,
+    duration_metered_exec,
+    manager::NetworkEvent,
+    message::{PeerRequest, PeerRequestSender},
+    metered_poll_nested_stream_with_budget,
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    NetworkEvents, NetworkHandle,
+};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
