@@ -523,6 +523,7 @@ secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 enr = { version = "0.12.1", default-features = false }
 
 # for eip-4844
