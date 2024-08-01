@@ -69,7 +69,7 @@ impl OptimismNode {
             ))
             .network(OptimismNetworkBuilder { 
                 disable_txpool_gossip, 
-                discovery_v4: !discovery_v4, 
+                disable_discovery_v4: !discovery_v4, 
             })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
