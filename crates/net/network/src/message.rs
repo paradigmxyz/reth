@@ -3,6 +3,12 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
+use std::{
+    fmt,
+    sync::Arc,
+    task::{ready, Context, Poll},
+};
+
 use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
@@ -14,11 +20,6 @@ use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives::{
     BlockBody, Bytes, Header, PooledTransactionsElement, ReceiptWithBloom, B256,
-};
-use std::{
-    fmt,
-    sync::Arc,
-    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 

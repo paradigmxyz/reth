@@ -1,6 +1,7 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
+use std::{path::PathBuf, sync::Arc};
+
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -16,7 +17,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkEvents, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
@@ -30,9 +31,10 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
+
+use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
 
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
