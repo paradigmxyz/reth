@@ -2,13 +2,8 @@
 
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
-use reth_errors::ProviderResult;
-use reth_primitives::{SealedBlock, StaticFileSegment, B256};
-use reth_provider::{
-    providers::StaticFileProvider, writer::StorageWriter, BlockExecutionWriter, BlockNumReader,
-    DatabaseProviderRW, ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
-    TransactionsProviderExt,
-};
+use reth_primitives::{SealedBlock, B256};
+use reth_provider::{writer::StorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerOutput};
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
@@ -44,48 +39,6 @@ impl<DB: Database> PersistenceService<DB> {
         Self { provider, incoming, pruner }
     }
 
-    /// Removes all block, transaction and receipt data above the given block number from the
-    /// database and static files. This is exclusive, i.e., it only removes blocks above
-    /// `block_number`, and does not remove `block_number`.
-    fn remove_blocks_above(
-        &self,
-        block_number: u64,
-        provider_rw: &DatabaseProviderRW<DB>,
-        sf_provider: &StaticFileProvider,
-    ) -> ProviderResult<()> {
-        // Get highest static file block for the total block range
-        let highest_static_file_block = sf_provider
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // Get the total txs for the block range, so we have the correct number of columns for
-        // receipts and transactions
-        let tx_range = provider_rw
-            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
-        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
-
-        debug!(target: "tree::persistence", ?block_number, "Removing blocks from database above block_number");
-        provider_rw
-            .remove_block_and_execution_range(block_number..=provider_rw.last_block_number()?)?;
-
-        debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
-        sf_provider
-            .get_writer(block_number, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        sf_provider
-            .get_writer(block_number, StaticFileSegment::Transactions)?
-            .prune_transactions(total_txs, block_number)?;
-
-        if !provider_rw.prune_modes_ref().has_receipts_pruning() {
-            sf_provider
-                .get_writer(block_number, StaticFileSegment::Receipts)?
-                .prune_receipts(total_txs, block_number)?;
-        }
-
-        Ok(())
-    }
-
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> PrunerOutput {
@@ -109,11 +62,11 @@ where
                     let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
                     let sf_provider = self.provider.static_file_provider();
 
-                    self.remove_blocks_above(new_tip_num, &provider_rw, &sf_provider)
+                    StorageWriter::from(&provider_rw, &sf_provider)
+                        .remove_blocks_above(new_tip_num)
                         .expect("todo: handle errors");
-
-                    provider_rw.commit().expect("todo: handle errors");
-                    sf_provider.commit().expect("todo: handle errors");
+                    StorageWriter::commit_unwind(provider_rw, sf_provider)
+                        .expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
