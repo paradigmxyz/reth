@@ -1292,7 +1292,7 @@ where
 
         let Some(state_provider) = self.state_provider(block.parent_hash)? else {
             // we don't have the state required to execute this block, buffering it and find the
-            // missing parent block that we're missing
+            // missing parent block
             let missing_ancestor = self
                 .state
                 .buffer
