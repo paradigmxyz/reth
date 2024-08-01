@@ -29,23 +29,23 @@ enum StorageType<C = (), S = ()> {
 /// [`StorageWriter`] is responsible for managing the writing to either database, static file or
 /// both.
 #[derive(Debug)]
-pub struct StorageWriter<'a, S, TX> {
+pub struct StorageWriter<'a, TX, SF> {
     database: Option<&'a DatabaseProvider<TX>>,
-    static_file: Option<S>,
+    static_file: Option<SF>,
 }
 
-impl<'a, S, TX> StorageWriter<'a, S, TX> {
+impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<S>) -> Self {
+    pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<SF>) -> Self {
         Self { database, static_file }
     }
 
     /// Creates a new instance of [`StorageWriter`] from a static file instance.
-    pub const fn from_static_file(static_file: S) -> Self {
+    pub const fn from_static_file(static_file: SF) -> Self {
         Self::new(None, Some(static_file))
     }
 
@@ -66,7 +66,7 @@ impl<'a, S, TX> StorageWriter<'a, S, TX> {
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file(&mut self) -> &mut S {
+    fn static_file(&mut self) -> &mut SF {
         self.static_file.as_mut().expect("should exist")
     }
 
@@ -96,7 +96,7 @@ impl<'a, S, TX> StorageWriter<'a, S, TX> {
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, StaticFileProviderRWRefMut<'b>, TX>
+impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTx,
 {
@@ -209,7 +209,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, StaticFileProviderRWRefMut<'b>, TX>
+impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
@@ -290,7 +290,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StateWriter for StorageWriter<'a, StaticFileProviderRWRefMut<'b>, TX>
+impl<'a, 'b, TX> StateWriter for StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
