@@ -2188,11 +2188,10 @@ mod tests {
                 .unwrap();
 
         assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
-        for i in 0..expected_blocks_to_persist_length {
-            assert_eq!(
-                blocks_to_persist[i].block.number,
-                last_persisted_block_number + i as u64 + 1
-            );
+        for (i, item) in
+            blocks_to_persist.iter().enumerate().take(expected_blocks_to_persist_length)
+        {
+            assert_eq!(item.block.number, last_persisted_block_number + i as u64 + 1);
         }
 
         // make sure only canonical blocks are included
