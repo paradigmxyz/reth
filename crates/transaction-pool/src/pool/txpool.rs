@@ -664,9 +664,25 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         match pool {
-            SubPool::Queued => self.queued_pool.remove_transaction(tx),
+            SubPool::Queued => {
+                let tx = self.queued_pool.remove_transaction(tx);
+
+                // We trace here instead of in the `ParkedPool` struct directly, because the type is
+                // generic and it would not be possible to distinguish whether a transaction is
+                // being removed from the `BaseFee` pool, or the `Queued` pool.
+                trace!(target: "txpool", hash=?tx.as_ref().map(|tx| tx.transaction.hash()), "Removed transaction from the basefee pool");
+                tx
+            }
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
-            SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
+            SubPool::BaseFee => {
+                let tx = self.basefee_pool.remove_transaction(tx);
+
+                // We trace here instead of in the `ParkedPool` struct directly, because the type is
+                // generic and it would not be possible to distinguish whether a transaction is
+                // being removed from the `BaseFee` pool, or the `Queued` pool.
+                trace!(target: "txpool", hash=?tx.as_ref().map(|tx| tx.transaction.hash()), "Removed transaction from the basefee pool");
+                tx
+            }
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
         }
     }
@@ -719,12 +735,20 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) {
         match pool {
             SubPool::Queued => {
+                // We trace here instead of in the `ParkedPool` struct directly, because the type is
+                // generic and it would not be possible to distinguish whether a transaction is
+                // being added to the `BaseFee` pool, or the `Queued` pool.
+                trace!(target: "txpool", hash=?tx.hash(), "Adding transaction to the queued pool");
                 self.queued_pool.add_transaction(tx);
             }
             SubPool::Pending => {
                 self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
             }
             SubPool::BaseFee => {
+                // We trace here instead of in the `ParkedPool` struct directly, because the type is
+                // generic and it would not be possible to distinguish whether a transaction is
+                // being added to the `BaseFee` pool, or the `Queued` pool.
+                trace!(target: "txpool", hash=?tx.hash(), "Adding transaction to the basefee pool");
                 self.basefee_pool.add_transaction(tx);
             }
             SubPool::Blob => {
