@@ -1907,10 +1907,10 @@ mod tests {
         let mut test_block_builder =
             TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
 
-        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
-        // persistence task.
+        // we need more than tree_config.persistence_threshold() +1 blocks to
+        // trigger the persistence task.
         let blocks: Vec<_> = test_block_builder
-            .get_executed_blocks(1..tree_config.persistence_threshold() + 1)
+            .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
             .collect();
         let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
         std::thread::Builder::new()
@@ -1922,11 +1922,13 @@ mod tests {
         test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
         let received_action =
-            test_harness.action_rx.recv().expect("Failed to receive saved blocks");
+            test_harness.action_rx.recv().expect("Failed to receive save blocks action");
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
-            // only PERSISTENCE_THRESHOLD will be persisted
-            assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
-            assert_eq!(saved_blocks, blocks);
+            // only blocks.len() - tree_config.persistence_threshold() will be
+            // persisted
+            let expected_persist_len = blocks.len() - tree_config.persistence_threshold() as usize;
+            assert_eq!(saved_blocks.len(), expected_persist_len);
+            assert_eq!(saved_blocks, blocks[..expected_persist_len]);
         } else {
             panic!("unexpected action received {received_action:?}");
         }
