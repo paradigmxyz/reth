@@ -766,30 +766,33 @@ where
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive canonical blocks to persist. The expected order is
-    /// oldest -> newest.
+    /// Returns a batch of consecutive canonical blocks to persist in the range
+    /// `(last_persisted_number .. canonical_head - threshold]` . The expected
+    /// order is oldest -> newest.
     fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block_number;
+
+        let canonical_head_number = self.state.tree_state.canonical_block_number();
+
+        let target_number =
+            canonical_head_number.saturating_sub(self.config.persistence_threshold());
 
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             if block.block.number <= last_persisted_number {
                 break;
             }
 
-            blocks_to_persist.push(block.clone());
+            if block.block.number <= target_number {
+                blocks_to_persist.push(block.clone());
+            }
+
             current_hash = block.block.parent_hash;
         }
 
         // reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
-
-        // limit the number of blocks to persist if it exceeds the threshold
-        let threshold = self.config.persistence_threshold() as usize;
-        if blocks_to_persist.len() > threshold {
-            blocks_to_persist.truncate(threshold);
-        }
 
         blocks_to_persist
     }
@@ -2159,48 +2162,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_blocks_to_persist() {
+    async fn test_get_canonical_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
         let mut test_block_builder = TestBlockBuilder::default();
 
-        let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..10).collect();
+        let canonical_head_number = 9;
+        let blocks: Vec<_> =
+            test_block_builder.get_executed_blocks(0..canonical_head_number + 1).collect();
         test_harness = test_harness.with_blocks(blocks.clone());
 
-        test_harness.tree.persistence_state.last_persisted_block_number = 3;
+        let last_persisted_block_number = 3;
+        test_harness.tree.persistence_state.last_persisted_block_number =
+            last_persisted_block_number;
 
-        test_harness.tree.config = TreeConfig::default().with_persistence_threshold(5);
+        let persistence_threshold = 4;
+        test_harness.tree.config =
+            TreeConfig::default().with_persistence_threshold(persistence_threshold);
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
-        assert_eq!(blocks_to_persist.len(), 5);
-        assert_eq!(blocks_to_persist[0].block.number, 4);
-        assert_eq!(blocks_to_persist[4].block.number, 8);
+        let expected_blocks_to_persist_length: usize =
+            (canonical_head_number - persistence_threshold - last_persisted_block_number)
+                .try_into()
+                .unwrap();
 
-        for i in 0..4 {
+        assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
+        for i in 0..expected_blocks_to_persist_length {
             assert_eq!(
-                blocks_to_persist[i].block.hash(),
-                blocks_to_persist[i + 1].block.parent_hash
+                blocks_to_persist[i].block.number,
+                last_persisted_block_number + i as u64 + 1
             );
         }
 
         // make sure only canonical blocks are included
-        let fork_block = test_block_builder.get_executed_block_with_number(7, B256::random());
+        let fork_block = test_block_builder.get_executed_block_with_number(4, B256::random());
         let fork_block_hash = fork_block.block.hash();
         test_harness.tree.state.tree_state.insert_executed(fork_block);
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
-        assert_eq!(blocks_to_persist.len(), 5);
+        assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
         // check that the fork block is not included in the blocks to persist
         assert!(!blocks_to_persist.iter().any(|b| b.block.hash() == fork_block_hash));
 
-        // check that the original block 7 is still included
+        // check that the original block 4 is still included
         assert!(blocks_to_persist
             .iter()
-            .any(|b| b.block.number == 7 && b.block.hash() == blocks[7].block.hash()));
+            .any(|b| b.block.number == 4 && b.block.hash() == blocks[4].block.hash()));
     }
 
     #[tokio::test]
