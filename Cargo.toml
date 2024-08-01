@@ -345,7 +345,7 @@ reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = ["std"] }
+reth-primitives = { path = "crates/primitives", default-features = false, features = ["std", "secp256k1"] }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
