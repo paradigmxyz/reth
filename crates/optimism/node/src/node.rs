@@ -277,6 +277,9 @@ where
 pub struct OptimismNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
+
+    /// Disable discovery v4
+    pub disable_discovery_v4: bool,
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
@@ -289,7 +292,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<NetworkHandle> {
-        let Self { disable_txpool_gossip } = self;
+        let Self { disable_txpool_gossip, disable_discovery_v4 } = self;
 
         let args = &ctx.config().network;
 
@@ -299,6 +302,12 @@ where
             .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
 
+                // Apply discovery v4 settings
+                if disable_discovery_v4 || args.discovery.disable_discovery {
+                    builder = builder.disable_discv4_discovery();
+                }
+
+                // Apply discovery v5 settings
                 if !args.discovery.disable_discovery {
                     builder = builder.discovery_v5(
                         args.discovery.discovery_v5_builder(
