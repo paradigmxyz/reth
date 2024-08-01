@@ -5,8 +5,8 @@ use reth_db::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, B256};
 use reth_provider::{
-    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, ProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter, TransactionsProviderExt,
+    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, ProviderFactory,
+    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use std::sync::{
