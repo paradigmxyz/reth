@@ -8681,7 +8681,6 @@ name = "reth-storage-errors"
 version = "1.0.3"
 dependencies = [
  "alloy-rlp",
- "nybbles",
  "reth-fs-util",
  "reth-primitives",
  "thiserror-no-std",
