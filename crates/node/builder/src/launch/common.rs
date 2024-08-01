@@ -763,7 +763,7 @@ where
     ///
     /// This returns the configured `debug.tip` if set, otherwise it will check if backfill was
     /// previously interrupted and returns the block hash of the last checkpoint, see also
-    /// [Self::check_pipeline_consistency]
+    /// [`Self::check_pipeline_consistency`]
     pub fn initial_backfill_target(&self) -> ProviderResult<Option<B256>> {
         let mut initial_target = self.node_config().debug.tip;
 
@@ -813,7 +813,7 @@ where
                     inconsistent_stage_checkpoint = stage_checkpoint,
                     "Pipeline sync progress is inconsistent"
                 );
-                return Ok(self.blockchain_db().block_hash(first_stage_checkpoint)?)
+                return self.blockchain_db().block_hash(first_stage_checkpoint)
             }
         }
 
