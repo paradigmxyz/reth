@@ -2,9 +2,6 @@ use crate::{BranchNodeCompact, Nibbles};
 use reth_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 
-/// Database implementations of trie cursors.
-mod database_cursors;
-
 /// In-memory implementations of trie cursors.
 mod in_memory;
 
@@ -14,7 +11,7 @@ mod subnode;
 /// Noop trie cursor implementations.
 pub mod noop;
 
-pub use self::{database_cursors::*, in_memory::*, subnode::CursorSubNode};
+pub use self::{in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.
 pub trait TrieCursorFactory {

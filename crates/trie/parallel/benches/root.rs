@@ -10,10 +10,9 @@ use reth_provider::{
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    HashedPostState, HashedStorage, StateRoot,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
 };
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 

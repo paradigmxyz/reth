@@ -1,4 +1,4 @@
-use crate::PrefixSetLoader;
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
 use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -9,10 +9,8 @@ use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
-    updates::TrieUpdates,
-    HashedPostState, HashedStorage, StateRoot, StateRootProgress,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress,
 };
 use std::{
     collections::{hash_map, HashMap},
