@@ -42,6 +42,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::Bound,
     sync::{mpsc::Receiver, Arc},
     time::Instant,
 };
@@ -63,18 +64,20 @@ pub use config::TreeConfig;
 /// - All executed blocks are valid and have been executed.
 #[derive(Debug, Default)]
 pub struct TreeState {
-    /// __All__ executed blocks by block hash.
+    /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
     /// This includes blocks of all forks.
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
+    ///
+    /// Note: there can be multiple blocks at the same height due to forks.
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
-    /// Currently tracked canonical head of the chain.
-    current_canonical_head: BlockNumHash,
     /// Map of any parent block hash to its children.
     parent_to_child: HashMap<B256, HashSet<B256>>,
+    /// Currently tracked canonical head of the chain.
+    current_canonical_head: BlockNumHash,
 }
 
 impl TreeState {
@@ -127,10 +130,10 @@ impl TreeState {
         }
     }
 
-    /// Remove blocks before specified block number (exclusive).
-    pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
+    /// Remove all blocks up to the given block number.
+    pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
         let mut numbers_to_remove = Vec::new();
-        for (&number, _) in self.blocks_by_number.range(..block_number) {
+        for (&number, _) in self.blocks_by_number.range((Bound::Unbounded, upper_bound)) {
             numbers_to_remove.push(number);
         }
 
@@ -512,7 +515,7 @@ where
         self.on_engine_message(msg);
 
         if self.should_persist() && !self.persistence_state.in_progress() {
-            let blocks_to_persist = self.get_blocks_to_persist();
+            let blocks_to_persist = self.get_canonical_blocks_to_persist();
             let (tx, rx) = oneshot::channel();
             self.persistence.save_blocks(blocks_to_persist, tx);
             self.persistence_state.start(rx);
@@ -562,6 +565,11 @@ where
                     let mut output = self.on_forkchoice_updated(state, payload_attrs);
 
                     if let Ok(res) = &mut output {
+                        // track last received forkchoice state
+                        self.state
+                            .forkchoice_state_tracker
+                            .set_latest(state, res.outcome.forkchoice_status());
+
                         // emit an event about the handled FCU
                         self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
                             state,
@@ -624,7 +632,7 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        self.state.tree_state.remove_before(backfill_height + 1);
+        self.state.tree_state.remove_before(Bound::Included(backfill_height));
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         // we remove all entries because now we're synced to the backfill target and consider this
@@ -747,20 +755,20 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold and
     /// backfill is not running.
-    fn should_persist(&self) -> bool {
+    const fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
         }
 
         let min_block = self.persistence_state.last_persisted_block_number;
-        self.state.tree_state.max_block_number().saturating_sub(min_block) >=
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >=
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive blocks to persist. The expected order is
+    /// Returns a batch of consecutive canonical blocks to persist. The expected order is
     /// oldest -> newest.
-    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block_number;
@@ -794,31 +802,11 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
-        self.remove_persisted_blocks_from_tree_state();
+        self.state
+            .tree_state
+            .remove_before(Bound::Included(self.persistence_state.last_persisted_block_number));
         self.canonical_in_memory_state
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
-    }
-
-    /// Clears persisted blocks from the in-memory tree state.
-    ///
-    /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn remove_persisted_blocks_from_tree_state(&mut self) {
-        let keys_to_remove: Vec<BlockNumber> = self
-            .state
-            .tree_state
-            .blocks_by_number
-            .range(..=self.persistence_state.last_persisted_block_number)
-            .map(|(&k, _)| k)
-            .collect();
-
-        for key in keys_to_remove {
-            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
-                // Remove corresponding blocks from blocks_by_hash
-                for block in blocks {
-                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
-                }
-            }
-        }
     }
 
     /// Return block from database or in-memory state by hash.
@@ -1017,6 +1005,9 @@ where
         debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
     }
 
+    /// Attempts to recover the block's senders and then buffers it.
+    ///
+    /// Returns an error if sender recovery failed or inserting into the buffer failed.
     fn buffer_block_without_senders(
         &mut self,
         block: SealedBlock,
@@ -1027,6 +1018,7 @@ where
         }
     }
 
+    /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockErrorTwo> {
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockErrorTwo::consensus_error(err, block.block))
@@ -1100,7 +1092,7 @@ where
                 // if we have already canonicalized the finalized block, we should skip backfill
                 match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
-                        warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
+                        warn!(target: "engine", %err, "Failed to get finalized block header");
                     }
                     Ok(None) => {
                         // ensure the finalized block is known (not the zero hash)
@@ -1122,7 +1114,7 @@ where
                         //
                         // However, optimism chains will do this. The risk of a reorg is however
                         // low.
-                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                        debug!(target: "engine", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
                         return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {
@@ -1168,6 +1160,7 @@ where
         if let Some(target) =
             self.backfill_sync_target(head.number, missing_parent.number, Some(downloaded_block))
         {
+            trace!(target: "engine", %target, "triggering backfill on downloaded block");
             return Some(TreeEvent::BackfillAction(BackfillAction::Start(target.into())));
         }
 
@@ -1183,8 +1176,10 @@ where
         let request = if let Some(distance) =
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
+            trace!(target: "engine", %distance, missing=?missing_parent, "downloading missing parent block range");
             DownloadRequest::BlockRange(missing_parent.hash, distance)
         } else {
+            trace!(target: "engine", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
             // sidechain and we can only download the missing block itself
             DownloadRequest::single_block(missing_parent.hash)
@@ -1299,10 +1294,51 @@ where
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
+
+        if self.state.tree_state.canonical_block_hash() == executed.block().parent_hash {
+            debug!(target: "engine", pending = ?executed.block().num_hash() ,"updating pending block");
+            // if the parent is the canonical head, we can insert the block as the pending block
+            self.canonical_in_memory_state.set_pending_block(executed.clone());
+        }
+
         self.state.tree_state.insert_executed(executed);
 
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
+    }
+
+    /// Handles an error that occurred while inserting a block.
+    ///
+    /// If this is a validation error this will mark the block as invalid.
+    ///
+    /// Returns the proper payload status response if the block is invalid.
+    fn on_insert_block_error(
+        &mut self,
+        error: InsertBlockErrorTwo,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let (block, error) = error.split();
+
+        // if invalid block, we check the validation error. Otherwise return the fatal
+        // error.
+        let validation_err = error.ensure_validation_error()?;
+
+        // If the error was due to an invalid payload, the payload is added to the
+        // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
+        // returned.
+        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number, %validation_err, "Invalid block error on new payload");
+        let latest_valid_hash = if validation_err.is_block_pre_merge() {
+            // zero hash must be returned if block is pre-merge
+            Some(B256::ZERO)
+        } else {
+            self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
+        };
+
+        // keep track of the invalid header
+        self.state.invalid_headers.insert(block.header);
+        Ok(PayloadStatus::new(
+            PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
+            latest_valid_hash,
+        ))
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
@@ -1483,6 +1519,7 @@ where
     type Engine = T;
 
     fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        trace!(target: "engine", block_count = %blocks.len(), "received downloaded blocks");
         for block in blocks {
             if let Some(event) = self.on_downloaded_block(block) {
                 let needs_backfill = event.is_backfill_action();
@@ -1567,11 +1604,13 @@ where
         }
 
         let status = if !self.backfill_sync_state.is_idle() {
-            self.buffer_block_without_senders(block).unwrap();
-            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            if let Err(error) = self.buffer_block_without_senders(block) {
+                self.on_insert_block_error(error)?
+            } else {
+                PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            }
         } else {
             let mut latest_valid_hash = None;
-
             match self.insert_block_without_senders(block) {
                 Ok(status) => {
                     let status = match status {
@@ -1589,31 +1628,7 @@ where
 
                     PayloadStatus::new(status, latest_valid_hash)
                 }
-                Err(error) => {
-                    let (block, error) = error.split();
-
-                    // if invalid block, we check the validation error. Otherwise return the fatal
-                    // error.
-                    let validation_err = error.ensure_validation_error()?;
-
-                    // If the error was due to an invalid payload, the payload is added to the
-                    // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
-                    // returned.
-                    warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number, %validation_err, "Invalid block error on new payload");
-                    let latest_valid_hash = if validation_err.is_block_pre_merge() {
-                        // zero hash must be returned if block is pre-merge
-                        Some(B256::ZERO)
-                    } else {
-                        self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
-                    };
-
-                    // keep track of the invalid header
-                    self.state.invalid_headers.insert(block.header);
-                    PayloadStatus::new(
-                        PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
-                        latest_valid_hash,
-                    )
-                }
+                Err(error) => self.on_insert_block_error(error)?,
             }
         };
 
@@ -1637,7 +1652,6 @@ where
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
-            self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
         }
 
@@ -1697,7 +1711,23 @@ where
         }
 
         // 4. we don't have the block to perform the update
-        let target = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        // we assume the FCU is valid and at least the head is missing,
+        // so we need to start syncing to it
+        //
+        // find the appropriate target to sync to, if we don't have the safe block hash then we
+        // start syncing to the safe block via backfill first
+        let target = if self.state.forkchoice_state_tracker.is_empty() &&
+            // check that safe block is valid and missing
+            !state.safe_block_hash.is_zero() &&
+            self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
+        {
+            debug!(target: "engine", "missing safe block on initial FCU, downloading safe block");
+            state.safe_block_hash
+        } else {
+            state.head_block_hash
+        };
+
+        let target = self.lowest_buffered_ancestor_or(target);
 
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
@@ -2049,7 +2079,7 @@ mod tests {
             tree_state.insert_executed(block.clone());
         }
 
-        tree_state.remove_before(3);
+        tree_state.remove_before(Bound::Excluded(3));
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -2141,7 +2171,7 @@ mod tests {
 
         test_harness.tree.config = TreeConfig::default().with_persistence_threshold(5);
 
-        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
         assert_eq!(blocks_to_persist.len(), 5);
         assert_eq!(blocks_to_persist[0].block.number, 4);
@@ -2161,7 +2191,7 @@ mod tests {
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
-        let blocks_to_persist = test_harness.tree.get_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
         assert_eq!(blocks_to_persist.len(), 5);
 
         // check that the fork block is not included in the blocks to persist

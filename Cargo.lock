@@ -6652,6 +6652,7 @@ version = "1.0.3"
 dependencies = [
  "confy",
  "humantime-serde",
+ "reth-network-peers",
  "reth-network-types",
  "reth-prune-types",
  "reth-stages-types",
@@ -7551,6 +7552,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7563,6 +7565,7 @@ dependencies = [
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
+ "reth-network-types",
  "serde",
  "thiserror",
  "tokio",
@@ -7577,8 +7580,8 @@ dependencies = [
  "parking_lot 0.12.3",
  "reth-consensus",
  "reth-eth-wire-types",
- "reth-network-api",
  "reth-network-peers",
+ "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
  "thiserror",
@@ -7608,7 +7611,6 @@ version = "1.0.3"
 dependencies = [
  "humantime-serde",
  "reth-net-banlist",
- "reth-network-api",
  "reth-network-peers",
  "serde",
  "serde_json",
@@ -7656,7 +7658,6 @@ name = "reth-node-builder"
 version = "1.0.3"
 dependencies = [
  "aquamarine",
- "backon",
  "confy",
  "eyre",
  "fdlimit",

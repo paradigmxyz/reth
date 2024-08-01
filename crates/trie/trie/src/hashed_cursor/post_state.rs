@@ -3,8 +3,8 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor, HashedAccountsSorted, HashedPostStateSorted,
     HashedStorageSorted,
 };
-use reth_db::DatabaseError;
 use reth_primitives::{Account, B256, U256};
+use reth_storage_errors::db::DatabaseError;
 use std::collections::HashSet;
 
 /// The hashed cursor factory for the post state.
