@@ -417,6 +417,16 @@ impl CanonicalInMemoryState {
 
         MemoryOverlayStateProvider::new(in_memory, historical)
     }
+
+    /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.
+    pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState>> {
+        let pending = self.pending_state();
+        let head = self.head_state();
+
+        pending.into_iter().chain(std::iter::successors(head, |state| {
+            state.parent.as_ref().map(|parent| Arc::new((**parent).clone()))
+        }))
+    }
 }
 
 /// State after applying the given block, this block is part of the canonical chain that partially
