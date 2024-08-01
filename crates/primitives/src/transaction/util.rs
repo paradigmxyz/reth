@@ -1,6 +1,12 @@
 use crate::{Address, Signature};
 use revm_primitives::B256;
 
+// Silence the `unused_imports` warning for the `k256` feature if both `secp256k1` and `k256` are
+// enabled.
+#[cfg(all(feature = "k256", feature = "secp256k1"))]
+use k256 as _;
+
+// Do not check `not(feature = "k256")` because then compilation with `--all-features` will fail.
 #[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {
     use super::*;
@@ -123,26 +129,23 @@ pub(crate) mod secp256k1 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{address, hex};
-
-    #[cfg(all(feature = "secp256k1", not(feature = "k256")))]
+    #[cfg(feature = "secp256k1")]
     #[test]
     fn sanity_ecrecover_call() {
-        let sig = hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
-        let hash = hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
-        let out = address!("c08b5542d177ac6686946920409741463a15dddb");
+        let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
+        let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
+        let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
 
-        assert_eq!(secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
+        assert_eq!(super::secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
     }
 
     #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
     #[test]
     fn sanity_ecrecover_call() {
-        let sig = hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
-        let hash = hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
-        let out = address!("c08b5542d177ac6686946920409741463a15dddb");
+        let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
+        let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
+        let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
 
-        assert_eq!(secp256k1::recover_signer_unchecked(&sig, &hash).ok(), Some(out));
+        assert_eq!(super::secp256k1::recover_signer_unchecked(&sig, &hash).ok(), Some(out));
     }
 }
