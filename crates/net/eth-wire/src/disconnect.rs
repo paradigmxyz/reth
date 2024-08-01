@@ -5,7 +5,7 @@ use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
-use std::{fmt::Display, future::Future};
+use std::future::Future;
 use thiserror::Error;
 use tokio::io::AsyncWrite;
 use tokio_util::codec::{Encoder, Framed};
@@ -15,57 +15,49 @@ use serde::{Deserialize, Serialize};
 
 /// RLPx disconnect reason.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, derive_more::Display)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
     #[default]
+    #[display(fmt = "disconnect requested")]
     DisconnectRequested = 0x00,
     /// TCP related error
+    #[display(fmt = "TCP sub-system error")]
     TcpSubsystemError = 0x01,
     /// Breach of protocol at the transport or p2p level
+    #[display(fmt = "breach of protocol, e.g. a malformed message, bad RLP, etc.")]
     ProtocolBreach = 0x02,
     /// Node has no matching protocols.
+    #[display(fmt = "useless peer")]
     UselessPeer = 0x03,
     /// Either the remote or local node has too many peers.
+    #[display(fmt = "too many peers")]
     TooManyPeers = 0x04,
     /// Already connected to the peer.
+    #[display(fmt = "already connected")]
     AlreadyConnected = 0x05,
     /// `p2p` protocol version is incompatible
+    #[display(fmt = "incompatible P2P protocol version")]
     IncompatibleP2PProtocolVersion = 0x06,
     /// Received a null node identity.
+    #[display(fmt = "null node identity received - this is automatically invalid")]
     NullNodeIdentity = 0x07,
     /// Reason when the client is shutting down.
+    #[display(fmt = "client quitting")]
     ClientQuitting = 0x08,
     /// When the received handshake's identify is different from what is expected.
+    #[display(fmt = "unexpected identity in handshake")]
     UnexpectedHandshakeIdentity = 0x09,
     /// The node is connected to itself
+    #[display(fmt = "identity is the same as this node (i.e. connected to itself)")]
     ConnectedToSelf = 0x0a,
     /// Peer or local node did not respond to a ping in time.
+    #[display(fmt = "ping timeout")]
     PingTimeout = 0x0b,
     /// Peer or local node violated a subprotocol-specific rule.
+    #[display(fmt = "some other reason specific to a subprotocol")]
     SubprotocolSpecific = 0x10,
-}
-
-impl Display for DisconnectReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            Self::DisconnectRequested => "disconnect requested",
-            Self::TcpSubsystemError => "TCP sub-system error",
-            Self::ProtocolBreach => "breach of protocol, e.g. a malformed message, bad RLP, etc.",
-            Self::UselessPeer => "useless peer",
-            Self::TooManyPeers => "too many peers",
-            Self::AlreadyConnected => "already connected",
-            Self::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
-            Self::NullNodeIdentity => "null node identity received - this is automatically invalid",
-            Self::ClientQuitting => "client quitting",
-            Self::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
-            Self::ConnectedToSelf => "identity is the same as this node (i.e. connected to itself)",
-            Self::PingTimeout => "ping timeout",
-            Self::SubprotocolSpecific => "some other reason specific to a subprotocol",
-        };
-        f.write_str(message)
-    }
 }
 
 /// This represents an unknown disconnect reason with the given code.
