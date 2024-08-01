@@ -26,9 +26,7 @@ pub use peers::{
     addr::PeerAddr,
     handle::PeersHandle,
     kind::PeerKind,
-    reputation::{
-        is_banned_reputation, ReputationChange, ReputationChangeOutcome, DEFAULT_REPUTATION,
-    },
+    reputation::{is_banned_reputation, ReputationChangeOutcome, DEFAULT_REPUTATION},
     state::PeerConnectionState,
     ConnectionsConfig, Peer, PeerCommand, PeersConfig,
 };

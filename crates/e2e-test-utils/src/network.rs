@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use reth::{
-    network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersHandleProvider, PeersInfo},
+    network::{NetworkEvent, NetworkEvents, PeersHandleProvider, PeersInfo},
     rpc::types::PeerId,
 };
 use reth_network_peers::NodeRecord;
@@ -9,14 +9,17 @@ use reth_tracing::tracing::info;
 
 /// Helper for network operations
 #[derive(Debug)]
-pub struct NetworkTestContext {
+pub struct NetworkTestContext<Network> {
     network_events: EventStream<NetworkEvent>,
-    network: NetworkHandle,
+    network: Network,
 }
 
-impl NetworkTestContext {
+impl<Network> NetworkTestContext<Network>
+where
+    Network: NetworkEvents + PeersInfo + PeersHandleProvider,
+{
     /// Creates a new network helper
-    pub fn new(network: NetworkHandle) -> Self {
+    pub fn new(network: Network) -> Self {
         let network_events = network.event_listener();
         Self { network_events, network }
     }

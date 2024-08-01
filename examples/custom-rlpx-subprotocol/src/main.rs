@@ -8,6 +8,8 @@
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
 
+mod subprotocol;
+
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth::builder::NodeHandle;
@@ -27,8 +29,6 @@ use subprotocol::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
-
-mod subprotocol;
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {
