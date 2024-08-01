@@ -1,5 +1,36 @@
 //! Transactions management for the p2p network.
 
+/// Aggregation on configurable parameters for [`TransactionsManager`].
+pub mod config;
+/// Default and spec'd bounds.
+pub mod constants;
+/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
+pub mod fetcher;
+pub mod validation;
+
+pub use self::constants::{
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+};
+pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
+pub use validation::*;
+
+pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
+
+use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
+
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -23,16 +54,6 @@ use reth_transaction_pool::{
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
     TransactionPool, ValidPoolTransaction,
 };
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
@@ -51,25 +72,6 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
-
-/// Aggregation on configurable parameters for [`TransactionsManager`].
-pub mod config;
-/// Default and spec'd bounds.
-pub mod constants;
-/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
-pub mod fetcher;
-pub mod validation;
-pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
-
-use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
-pub use validation::*;
-
-pub use self::constants::{
-    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-};
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for importing transactions into the pool.
 ///

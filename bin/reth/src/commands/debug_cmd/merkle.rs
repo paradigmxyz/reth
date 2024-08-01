@@ -1,5 +1,7 @@
 //! Command for debugging merkle trie calculation.
-use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
+
+use std::{path::PathBuf, sync::Arc};
+
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -11,7 +13,7 @@ use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_primitives::BlockHashOrNumber;
@@ -25,8 +27,9 @@ use reth_stages::{
     ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
-use std::{path::PathBuf, sync::Arc};
 use tracing::*;
+
+use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
 
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]

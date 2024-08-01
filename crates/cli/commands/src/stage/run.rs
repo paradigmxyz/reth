@@ -1,7 +1,9 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+
+use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -11,6 +13,7 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_network::BlockDownloaderProvider;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -35,8 +38,9 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
+
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
