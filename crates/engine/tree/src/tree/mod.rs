@@ -148,9 +148,19 @@ impl TreeState {
     }
 
     /// Determines if the given block is part of a fork by walking back the
-    /// canonical chain and checking if the given block is included.
-    fn is_fork(&self, block: &Block) -> bool {
-        self.parent_to_child.contains_key(&block.parent_hash)
+    /// chain from the given hash and checking if the current canonical head
+    /// is part of it.
+    fn is_fork(&self, block_hash: B256) -> bool {
+        let target_hash = self.canonical_block_hash();
+        let mut current_hash = block_hash;
+
+        while let Some(current_block) = self.block_by_hash(current_hash) {
+            if current_block.hash() == target_hash {
+                return false
+            }
+            current_hash = current_block.header.parent_hash;
+        }
+        true
     }
 
     /// Remove all blocks up to the given block number.
@@ -1347,7 +1357,7 @@ where
         }
 
         let executed = ExecutedBlock {
-            block: Arc::new(block.block.clone().seal(block_hash)),
+            block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
                 output.state,
@@ -1368,7 +1378,7 @@ where
         self.state.tree_state.insert_executed(executed);
 
         // emit insert event
-        let engine_event = if self.state.tree_state.is_fork(&block.block) {
+        let engine_event = if self.state.tree_state.is_fork(block_hash) {
             BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block)
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, start.elapsed())
@@ -2398,17 +2408,11 @@ mod tests {
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
         let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
-        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 3);
         test_harness = test_harness.with_blocks(base_chain.clone());
 
-        // add main chain blocks to the tree
-        for (index, block) in main_chain.iter().enumerate() {
-            test_harness.insert_block(block.clone()).unwrap();
-        }
-
-        // create FCU for the tip of the fork
+        // create FCU for the tip of the base chain
         let fcu_state = ForkchoiceState {
-            head_block_hash: main_chain.last().unwrap().hash(),
+            head_block_hash: base_chain.last().unwrap().block().hash(),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2420,30 +2424,6 @@ mod tests {
 
         let response = rx.await.unwrap().unwrap().await.unwrap();
         assert!(response.payload_status.is_valid());
-
-        // check for CanonicalBlockAdded events, we expect main_chain.len() blocks added
-        for index in 0..main_chain.len() {
-            let event = test_harness.from_tree_rx.recv().await.unwrap();
-            match event {
-                EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
-                ) => {
-                    assert!(main_chain.iter().any(|b| b.hash() == block.hash()));
-                }
-                _ => panic!("Unexpected event: {:#?}", event),
-            }
-        }
-
-        // check for CanonicalChainCommitted event
-        let event = test_harness.from_tree_rx.recv().await.unwrap();
-        match event {
-            EngineApiEvent::BeaconConsensus(
-                BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
-            ) => {
-                assert_eq!(header.hash(), main_chain.last().unwrap().hash());
-            }
-            _ => panic!("Unexpected event: {:#?}", event),
-        }
 
         // check for ForkchoiceUpdated event
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -2458,11 +2438,25 @@ mod tests {
             _ => panic!("Unexpected event: {:#?}", event),
         }
 
-        // new head is the tip of the main chain
-        assert_eq!(
-            test_harness.tree.state.tree_state.canonical_head().hash,
-            main_chain.last().unwrap().hash()
-        );
+        // extend main chain
+        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 3);
+
+        for (index, block) in main_chain.iter().enumerate() {
+            test_harness.insert_block(block.clone()).unwrap();
+        }
+
+        // check for CanonicalBlockAdded events, we expect main_chain.len() blocks added
+        for index in 0..main_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                ) => {
+                    assert!(main_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
     }
 
     #[tokio::test]
