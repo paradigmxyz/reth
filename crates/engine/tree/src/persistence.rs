@@ -1,23 +1,21 @@
 #![allow(dead_code)]
 
 use reth_chain_state::ExecutedBlock;
-use reth_db::{models::CompactU256, tables, transaction::DbTxMut, Database};
+use reth_db::Database;
 use reth_errors::ProviderResult;
-use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256};
+use reth_primitives::{SealedBlock, StaticFileSegment, B256};
 use reth_provider::{
     providers::StaticFileProvider, writer::StorageWriter, BlockExecutionWriter, BlockNumReader,
-    BlockWriter, DatabaseProviderRW, HistoryWriter, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointWriter, StateChangeWriter, StateWriter, StaticFileProviderFactory,
-    StaticFileWriter, TransactionsProviderExt, TrieWriter,
+    DatabaseProviderRW, ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    TransactionsProviderExt,
 };
 use reth_prune::{Pruner, PrunerOutput};
-use reth_stages_types::{StageCheckpoint, StageId};
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
     Arc,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, instrument};
+use tracing::debug;
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -95,123 +93,6 @@ impl<DB: Database> PersistenceService<DB> {
         // TODO: doing this properly depends on pruner segment changes
         self.pruner.run(block_num).expect("todo: handle errors")
     }
-
-    /// Writes the transactions to static files.
-    ///
-    /// Returns the block number and new total difficulty.
-    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()) target = "engine")]
-    fn write_transactions(
-        &self,
-        block: Arc<SealedBlock>,
-        provider_rw: &DatabaseProviderRW<DB>,
-    ) -> ProviderResult<()> {
-        debug!(target: "tree::persistence", "Writing transactions");
-        let provider = self.provider.static_file_provider();
-
-        let td = {
-            let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
-            let mut storage_writer = StorageWriter::new(Some(provider_rw), Some(header_writer));
-            let td = storage_writer.append_headers_from_blocks(
-                block.header().number,
-                std::iter::once(&(block.header(), block.hash())),
-            )?;
-
-            let transactions_writer =
-                provider.get_writer(block.number, StaticFileSegment::Transactions)?;
-            let mut storage_writer =
-                StorageWriter::new(Some(provider_rw), Some(transactions_writer));
-            let no_hash_transactions =
-                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
-            storage_writer.append_transactions_from_blocks(
-                block.header().number,
-                std::iter::once(&no_hash_transactions),
-            )?;
-
-            td
-        };
-
-        debug!(target: "tree::persistence", block_num=block.number, "Updating transaction metadata after writing");
-        provider_rw
-            .tx_ref()
-            .put::<tables::HeaderTerminalDifficulties>(block.number, CompactU256(td))?;
-        provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
-        provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
-
-        Ok(())
-    }
-
-    /// Writes the cloned tree state to database
-    fn save_blocks(
-        &self,
-        blocks: &[ExecutedBlock],
-        provider_rw: &DatabaseProviderRW<DB>,
-        static_file_provider: &StaticFileProvider,
-    ) -> ProviderResult<()> {
-        if blocks.is_empty() {
-            debug!(target: "tree::persistence", "Attempted to write empty block range");
-            return Ok(())
-        }
-
-        // NOTE: checked non-empty above
-        let first_block = blocks.first().unwrap().block();
-        let last_block = blocks.last().unwrap().block().clone();
-        let first_number = first_block.number;
-        let last_block_number = last_block.number;
-
-        // Only write receipts to static files if there is no receipt pruning configured.
-        let mut storage_writer = if provider_rw.prune_modes_ref().has_receipts_pruning() {
-            StorageWriter::new(Some(provider_rw), None)
-        } else {
-            StorageWriter::new(
-                Some(provider_rw),
-                Some(
-                    static_file_provider
-                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
-                ),
-            )
-        };
-
-        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks and execution data to storage");
-
-        // TODO: remove all the clones and do performant / batched writes for each type of object
-        // instead of a loop over all blocks,
-        // meaning:
-        //  * blocks
-        //  * state
-        //  * hashed state
-        //  * trie updates (cannot naively extend, need helper)
-        //  * indices (already done basically)
-        // Insert the blocks
-        for block in blocks {
-            let sealed_block =
-                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
-            provider_rw.insert_block(sealed_block)?;
-            self.write_transactions(block.block.clone(), provider_rw)?;
-
-            // Write state and changesets to the database.
-            // Must be written after blocks because of the receipt lookup.
-            let execution_outcome = block.execution_outcome().clone();
-            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
-
-            // insert hashes and intermediate merkle nodes
-            {
-                let trie_updates = block.trie_updates().clone();
-                let hashed_state = block.hashed_state();
-                provider_rw.write_hashed_state(&hashed_state.clone().into_sorted())?;
-                provider_rw.write_trie_updates(&trie_updates)?;
-            }
-        }
-
-        // update history indices
-        provider_rw.update_history_indices(first_number..=last_block_number)?;
-
-        // Update pipeline progress
-        provider_rw.update_pipeline_stages(last_block_number, false)?;
-
-        debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
-
-        Ok(())
-    }
 }
 
 impl<DB> PersistenceService<DB>
@@ -245,11 +126,12 @@ where
 
                     let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
                     let static_file_provider = self.provider.static_file_provider();
-                    self.save_blocks(&blocks, &provider_rw, &static_file_provider)
-                        .expect("todo: handle errors");
 
-                    static_file_provider.commit().expect("todo: handle errors");
-                    provider_rw.commit().expect("todo: handle errors");
+                    StorageWriter::from(&provider_rw, &static_file_provider)
+                        .save_blocks(&blocks)
+                        .expect("todo: handle errors");
+                    StorageWriter::commit(provider_rw, static_file_provider)
+                        .expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(last_block_hash);
