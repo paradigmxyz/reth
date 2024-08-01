@@ -46,17 +46,44 @@ impl<DB: Database> PersistenceService<DB> {
         Self { provider, incoming, pruner }
     }
 
-    /// Removes block data above the given block number from the database.
-    /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
-    /// `block_number`.
-    ///
-    /// This will then send a command to the static file service, to remove the actual block data.
-    fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
+    /// Removes all block, transaction and receipt data above the given block number from the
+    /// database and static files. This is exclusive, i.e., it only removes blocks above
+    /// `block_number`, and does not remove `block_number`.
+    fn remove_blocks_above(
+        &self,
+        block_number: u64,
+        provider_rw: &DatabaseProviderRW<DB>,
+        sf_provider: &StaticFileProvider,
+    ) -> ProviderResult<()> {
+        // Get highest static file block for the total block range
+        let highest_static_file_block = sf_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
+
+        // Get the total txs for the block range, so we have the correct number of columns for
+        // receipts and transactions
+        let tx_range = provider_rw
+            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
+        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
+
         debug!(target: "tree::persistence", ?block_number, "Removing blocks from database above block_number");
-        let provider_rw = self.provider.provider_rw()?;
-        let highest_block = self.provider.last_block_number()?;
-        provider_rw.remove_block_and_execution_range(block_number..=highest_block)?;
-        provider_rw.commit()?;
+        provider_rw
+            .remove_block_and_execution_range(block_number..=provider_rw.last_block_number()?)?;
+
+        debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
+        sf_provider
+            .get_writer(block_number, StaticFileSegment::Headers)?
+            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
+
+        sf_provider
+            .get_writer(block_number, StaticFileSegment::Transactions)?
+            .prune_transactions(total_txs, block_number)?;
+
+        if !provider_rw.prune_modes_ref().has_receipts_pruning() {
+            sf_provider
+                .get_writer(block_number, StaticFileSegment::Receipts)?
+                .prune_receipts(total_txs, block_number)?;
+        }
 
         Ok(())
     }
@@ -185,52 +212,6 @@ impl<DB: Database> PersistenceService<DB> {
 
         Ok(())
     }
-
-    /// Removes the blocks above the given block number from static files. Also removes related
-    /// receipt and header data.
-    ///
-    /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
-    /// `block_number`.
-    ///
-    /// Returns the block hash for the lowest block removed from the database, which should be
-    /// the hash for `block_number + 1`.
-    ///
-    /// This is meant to be called by the db service, as this should only be done after related data
-    /// is removed from the database, and checkpoints are updated.
-    ///
-    /// Returns the hash of the lowest removed block.
-    fn remove_static_file_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
-        debug!(target: "tree::persistence", ?block_number, "Removing static file blocks above block_number");
-        let sf_provider = self.provider.static_file_provider();
-        let db_provider_ro = self.provider.provider()?;
-
-        // get highest static file block for the total block range
-        let highest_static_file_block = sf_provider
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // Get the total txs for the block range, so we have the correct number of columns for
-        // receipts and transactions
-        let tx_range = db_provider_ro
-            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
-        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
-
-        // get the writers
-        let mut header_writer = sf_provider.get_writer(block_number, StaticFileSegment::Headers)?;
-        let mut transactions_writer =
-            sf_provider.get_writer(block_number, StaticFileSegment::Transactions)?;
-        let mut receipts_writer =
-            sf_provider.get_writer(block_number, StaticFileSegment::Receipts)?;
-
-        // finally actually truncate, these internally commit
-        receipts_writer.prune_receipts(total_txs, block_number)?;
-        transactions_writer.prune_transactions(total_txs, block_number)?;
-        header_writer.prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        sf_provider.commit()?;
-
-        Ok(())
-    }
 }
 
 impl<DB> PersistenceService<DB>
@@ -244,8 +225,14 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    self.remove_blocks_above(new_tip_num).expect("todo: handle errors");
-                    self.remove_static_file_blocks_above(new_tip_num).expect("todo: handle errors");
+                    let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
+                    let sf_provider = self.provider.static_file_provider();
+
+                    self.remove_blocks_above(new_tip_num, &provider_rw, &sf_provider)
+                        .expect("todo: handle errors");
+
+                    provider_rw.commit().expect("todo: handle errors");
+                    sf_provider.commit().expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
