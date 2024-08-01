@@ -1694,18 +1694,14 @@ impl<T> WithEncoded<Option<T>> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        hex, sign_message,
-        transaction::{
-            signature::Signature, TxEip1559, TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
-        },
+        hex,
+        transaction::{signature::Signature, TxEip1559, TxKind, TxLegacy},
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
-    use proptest_arbitrary_interop::arb;
     use reth_codecs::Compact;
-    use secp256k1::{Keypair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -1975,23 +1971,27 @@ mod tests {
         assert_eq!(data.as_slice(), b.as_slice());
     }
 
+    #[cfg(feature = "secp256k1")]
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(arb::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(
+            proptest_arbitrary_interop::arb::<Transaction>(),
+            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
+        )) {
             let mut rng =rand::thread_rng();
-            let secp = Secp256k1::new();
+            let secp = secp256k1::Secp256k1::new();
             let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
                  if let Some(chain_id) = tx.chain_id() {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = Keypair::new(&secp, &mut rng);
+                let key_pair = secp256k1::Keypair::new(&secp, &mut rng);
 
                 let signature =
-                    sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+                    crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
                 TransactionSigned::from_transaction_and_signature(tx, signature)
             }).collect();
