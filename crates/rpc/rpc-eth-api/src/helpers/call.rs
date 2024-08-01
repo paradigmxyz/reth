@@ -507,12 +507,20 @@ pub trait Call: LoadState + SpawnBlocking {
 
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search
+    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search.
+    ///
+    /// ## EVM settings
+    ///
+    /// This modifies certain EVM settings to mirror geth's `SkipAccountChecks` when transacting requests, see also: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L145-L148>:
+    ///
+    ///  - `disable_eip3607` is set to `true`
+    ///  - `disable_base_fee` is set to `true`
+    ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,
-        request: TransactionRequest,
+        mut request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
     ) -> Result<U256, Self::Error>
@@ -523,10 +531,13 @@ pub trait Call: LoadState + SpawnBlocking {
         // See <https://github.com/paradigmxyz/reth/issues/1959>
         cfg.disable_eip3607 = true;
 
-        // The basefee should be ignored for eth_createAccessList
+        // The basefee should be ignored for eth_estimateGas and similar
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         cfg.disable_base_fee = true;
+
+        // set nonce to None so that the correct nonce is chosen by the EVM
+        request.nonce = None;
 
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.gas;
@@ -885,16 +896,21 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// Does not commit any changes to the underlying database.
     ///
-    /// EVM settings:
-    ///  - `disable_block_gas_limit` is set to `true`
+    /// ## EVM settings
+    ///
+    /// This modifies certain EVM settings to mirror geth's `SkipAccountChecks` when transacting requests, see also: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L145-L148>:
+    ///
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// Additionally, the block gas limit so that higher tx gas limits can be used in `eth_call`.
+    ///  - `disable_block_gas_limit` is set to `true`
     fn prepare_call_env<DB>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
         mut block: BlockEnv,
-        request: TransactionRequest,
+        mut request: TransactionRequest,
         gas_limit: u64,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
@@ -916,6 +932,9 @@ pub trait Call: LoadState + SpawnBlocking {
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         cfg.disable_base_fee = true;
 
+        // set nonce to None so that the correct nonce is chosen by the EVM
+        request.nonce = None;
+
         // apply block overrides, we need to apply them first so that they take effect when we we
         // create the evm env via `build_call_evm_env`, e.g. basefee
         if let Some(mut block_overrides) = overrides.block {
@@ -929,8 +948,6 @@ pub trait Call: LoadState + SpawnBlocking {
 
         let request_gas = request.gas;
         let mut env = self.build_call_evm_env(cfg, block, request)?;
-        // set nonce to None so that the next nonce is used when transacting the call
-        env.tx.nonce = None;
 
         // apply state overrides
         if let Some(state_overrides) = overrides.state {
