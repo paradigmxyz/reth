@@ -1,7 +1,8 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
-    BlockWriter, DatabaseProvider, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
+    BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter, StateChangeWriter,
+    StateWriter, TrieWriter,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -9,6 +10,7 @@ use reth_db::{
     models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
+    Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
@@ -47,6 +49,11 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// - `static_file`: An optional mutable reference to a static file instance.
     pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<SF>) -> Self {
         Self { database, static_file }
+    }
+
+    /// Creates a new instance of [`StorageWriter`] a database provider and a static file instance
+    pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
+        Self::new(Some(database), Some(static_file))
     }
 
     /// Creates a new instance of [`StorageWriter`] from a static file instance.
@@ -105,6 +112,32 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
         if self.static_file.is_none() {
             return Err(StorageWriterError::MissingStaticFileWriter)
         }
+        Ok(())
+    }
+}
+
+impl StorageWriter<'_, (), ()> {
+    /// Commits both storage types in the right order.
+    ///
+    /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
+    pub fn commit<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        static_file.commit()?;
+        database.commit()?;
+        Ok(())
+    }
+
+    /// Commits both storage types in the right order for an unwind operation.
+    ///
+    /// NOTE: Should only be used after unwinding data from storage!
+    pub fn commit_unwind<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        database.commit()?;
+        static_file.commit()?;
         Ok(())
     }
 }

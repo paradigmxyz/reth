@@ -139,12 +139,11 @@ where
                     let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
                     let static_file_provider = self.provider.static_file_provider();
 
-                    StorageWriter::new(Some(&provider_rw), Some(&static_file_provider))
+                    StorageWriter::from(&provider_rw, &static_file_provider)
                         .save_blocks(&blocks)
                         .expect("todo: handle errors");
-
-                    static_file_provider.commit().expect("todo: handle errors");
-                    provider_rw.commit().expect("todo: handle errors");
+                    StorageWriter::commit(provider_rw, static_file_provider)
+                        .expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(last_block_hash);
