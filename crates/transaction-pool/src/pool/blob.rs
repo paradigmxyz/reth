@@ -50,8 +50,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         assert!(!self.contains(&id), "transaction already included {:?}", self.get(&id).unwrap());
         let submission_id = self.next_id();
 
-        trace!(target: "txpool", hash=%tx.hash(), "Added transaction to the blob pool");
-
         // keep track of size
         self.size_of += tx.size();
 
@@ -75,8 +73,6 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Option<Arc<ValidPoolTransaction<T>>> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
-        trace!(target: "txpool", hash=%tx.transaction.hash(), "Removed transaction from blob pool");
-
         self.all.remove(&tx);
 
         // keep track of size
