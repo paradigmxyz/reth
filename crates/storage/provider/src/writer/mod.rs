@@ -38,18 +38,18 @@ impl<'a, S, TX> StorageWriter<'a, S, TX> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
-    /// - `database`: An optional reference to a database provider/writer.
-    /// - `static_file`: An optional mutable reference to a static file provider/writer.
+    /// - `database`: An optional reference to a database provider.
+    /// - `static_file`: An optional mutable reference to a static file instance.
     pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<S>) -> Self {
         Self { database, static_file }
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a static file writer.
+    /// Creates a new instance of [`StorageWriter`] from a static file instance.
     pub const fn from_static_file(static_file: S) -> Self {
         Self::new(None, Some(static_file))
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a read-only database provider.
+    /// Creates a new instance of [`StorageWriter`] from a database provider.
     pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
         StorageWriter::new(Some(database), None)
     }
@@ -57,7 +57,7 @@ impl<'a, S, TX> StorageWriter<'a, S, TX> {
     /// Returns a reference to the database writer.
     ///
     /// # Panics
-    /// If the database instance is not set.
+    /// If the database provider is not set.
     fn database(&self) -> &DatabaseProvider<TX> {
         self.database.as_ref().expect("should exist")
     }
@@ -70,11 +70,11 @@ impl<'a, S, TX> StorageWriter<'a, S, TX> {
         self.static_file.as_mut().expect("should exist")
     }
 
-    /// Ensures that the database instance is set.
+    /// Ensures that the database provider is set.
     ///
     /// # Returns
-    /// - `Ok(())` if the database instance is set.
-    /// - `Err(StorageWriterError::MissingDatabaseWriter)` if the database instance is not set.
+    /// - `Ok(())` if the database provider is set.
+    /// - `Err(StorageWriterError::MissingDatabaseWriter)` if the database provider is not set.
     const fn ensure_database(&self) -> Result<(), StorageWriterError> {
         if self.database.is_none() {
             return Err(StorageWriterError::MissingDatabaseWriter)
