@@ -147,6 +147,8 @@ impl TreeState {
         }
     }
 
+    /// Determines if the given block is part of a fork by checking if its
+    /// parent is already registered in the `parent_to_child` relationship.
     fn is_fork(&self, block: &Block) -> bool {
         self.parent_to_child.contains_key(&block.parent_hash)
     }
