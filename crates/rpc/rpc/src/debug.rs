@@ -2,8 +2,7 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
-use reth_errors::ProviderError;
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
@@ -559,22 +558,36 @@ where
     /// state root recomputation.
     pub async fn debug_execution_witness(
         &self,
-        block: BlockNumberOrTag,
+        block_id: BlockNumberOrTag,
     ) -> Result<HashMap<B256, Bytes>, Eth::Error> {
-        let block = match self.inner.eth_api.block(block.into()).await? {
-            None => return Err(EthApiError::UnknownBlockNumber.into()),
-            Some(res) => res,
-        };
-        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
+        let ((cfg, block_env, _), maybe_block) = futures::try_join!(
+            self.inner.eth_api.evm_env_at(block_id.into()),
+            self.inner.eth_api.block_with_senders(block_id.into()),
+        )?;
+        let block = maybe_block.ok_or(EthApiError::UnknownBlockNumber.into())?;
+
         let this = self.clone();
 
         self.inner
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
+                let evm_config = Call::evm_config(this.eth_api()).clone();
                 let mut db = StateBuilder::new()
                     .with_database(StateProviderDatabase::new(state))
                     .with_bundle_update()
                     .build();
+
+                pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &evm_config,
+                    &this.inner.provider.chain_spec(),
+                    &cfg,
+                    &block_env,
+                    block.timestamp,
+                    block.number,
+                    block.parent_beacon_block_root,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 // Re-execute all of the transactions in the block to load all touched accounts into
                 // the cache DB.
@@ -585,7 +598,7 @@ where
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            Call::evm_config(this.eth_api()).tx_env(&tx_envelope),
+                            evm_config.tx_env(&tx_envelope),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -616,13 +629,12 @@ where
                         .storages
                         .entry(hashed_address)
                         .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
-                    for (slot, value) in account
-                        .account
-                        .ok_or(ProviderError::CacheServiceUnavailable.into())?
-                        .storage
-                    {
-                        let hashed_slot = keccak256(Into::<B256>::into(slot));
-                        storage.storage.insert(hashed_slot, value);
+
+                    if let Some(account) = account.account {
+                        for (slot, value) in account.storage {
+                            let hashed_slot = keccak256(B256::from(slot));
+                            storage.storage.insert(hashed_slot, value);
+                        }
                     }
                 }
 
@@ -659,7 +671,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(inspector).into(), res.state));
+                        return Ok((FourByteFrame::from(inspector).into(), res.state))
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
