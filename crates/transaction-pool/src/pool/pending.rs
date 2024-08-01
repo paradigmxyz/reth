@@ -13,7 +13,6 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::broadcast;
-use tracing::trace;
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -330,7 +329,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
             self.independent_transactions.insert(unlocked.clone());
         }
         let tx = self.by_id.remove(id)?;
-
         self.size_of -= tx.transaction.size();
         self.all.remove(&tx);
         self.independent_transactions.remove(&tx);

@@ -1,5 +1,3 @@
-use tracing::trace;
-
 use super::txpool::PendingFees;
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
@@ -73,6 +71,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ) -> Option<Arc<ValidPoolTransaction<T>>> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
+
         self.all.remove(&tx);
 
         // keep track of size
