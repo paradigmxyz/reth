@@ -181,8 +181,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Increment block on static file header.
             if block_number > 0 {
-                let appended_block_number = static_file_producer
-                    .increment_block(StaticFileSegment::Transactions, block_number)?;
+                let appended_block_number = static_file_producer.increment_block(block_number)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
