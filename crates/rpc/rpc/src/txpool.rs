@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::Address;
+use reth_primitives::{Address, TransactionSignedEcRecovered};
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
@@ -38,7 +38,7 @@ where
         ) {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                reth_rpc_types_compat::transaction::from_recovered(tx.to_recovered_transaction()),
+                reth_rpc_types_compat::transaction::from_recovered(tx.clone().into()),
             );
         }
 
@@ -87,7 +87,7 @@ where
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx = tx.to_recovered_transaction();
+            let tx: TransactionSignedEcRecovered = tx.clone().into();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

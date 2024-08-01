@@ -3,8 +3,9 @@ pub mod cmd;
 pub mod config;
 pub mod handle;
 pub mod kind;
-pub mod reputation;
 pub mod state;
+
+pub use reth_network_p2p::reputation;
 
 pub use cmd::PeerCommand;
 pub use config::{ConnectionsConfig, PeersConfig};

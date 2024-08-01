@@ -341,7 +341,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
 impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.to_recovered_transaction()
+        self.transaction.clone().into()
     }
 }
 

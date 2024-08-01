@@ -160,8 +160,6 @@ where
 
         let pipeline_events = pipeline.events();
 
-        let initial_target = ctx.node_config().debug.tip;
-
         let mut pruner_builder = ctx.pruner_builder();
         if let Some(exex_manager_handle) = &exex_manager_handle {
             pruner_builder =
@@ -251,6 +249,7 @@ where
         .await?;
 
         // Run consensus engine to completion
+        let initial_target = ctx.initial_backfill_target()?;
         let network_handle = ctx.components().network().clone();
         let chainspec = ctx.chain_spec();
         let (exit, rx) = oneshot::channel();

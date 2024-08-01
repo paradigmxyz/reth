@@ -28,7 +28,8 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -103,6 +104,22 @@ impl TreeState {
             .map(|executed_block| executed_block.block.clone())
     }
 
+    /// Returns all available blocks for the given hash that lead back to the canonical chain, from
+    /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
+    ///
+    /// Returns `None` if the block for the given hash is not found.
+    fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock>)> {
+        let block = self.blocks_by_hash.get(&hash).cloned()?;
+        let mut parent_hash = block.block().parent_hash;
+        let mut blocks = vec![block];
+        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
+            parent_hash = executed.block.parent_hash;
+            blocks.push(executed.clone());
+        }
+
+        Some((parent_hash, blocks))
+    }
+
     /// Insert executed block into the state.
     fn insert_executed(&mut self, executed: ExecutedBlock) {
         let hash = executed.block.hash();
@@ -128,6 +145,22 @@ impl TreeState {
         for children in self.parent_to_child.values_mut() {
             children.retain(|child| self.blocks_by_hash.contains_key(child));
         }
+    }
+
+    /// Determines if the given block is part of a fork by walking back the
+    /// chain from the given hash and checking if the current canonical head
+    /// is part of it.
+    fn is_fork(&self, block_hash: B256) -> bool {
+        let target_hash = self.canonical_block_hash();
+        let mut current_hash = block_hash;
+
+        while let Some(current_block) = self.block_by_hash(current_hash) {
+            if current_block.hash() == target_hash {
+                return false
+            }
+            current_hash = current_block.header.parent_hash;
+        }
+        true
     }
 
     /// Remove all blocks up to the given block number.
@@ -516,9 +549,13 @@ where
 
         if self.should_persist() && !self.persistence_state.in_progress() {
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
-            let (tx, rx) = oneshot::channel();
-            self.persistence.save_blocks(blocks_to_persist, tx);
-            self.persistence_state.start(rx);
+            if !blocks_to_persist.is_empty() {
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
+            } else {
+                warn!(target: "engine", "Returned empty set of blocks to persist");
+            }
         }
 
         if self.persistence_state.in_progress() {
@@ -766,30 +803,33 @@ where
             self.config.persistence_threshold()
     }
 
-    /// Returns a batch of consecutive canonical blocks to persist. The expected order is
-    /// oldest -> newest.
+    /// Returns a batch of consecutive canonical blocks to persist in the range
+    /// `(last_persisted_number .. canonical_head - threshold]` . The expected
+    /// order is oldest -> newest.
     fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block_number;
+
+        let canonical_head_number = self.state.tree_state.canonical_block_number();
+
+        let target_number =
+            canonical_head_number.saturating_sub(self.config.persistence_threshold());
 
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             if block.block.number <= last_persisted_number {
                 break;
             }
 
-            blocks_to_persist.push(block.clone());
+            if block.block.number <= target_number {
+                blocks_to_persist.push(block.clone());
+            }
+
             current_hash = block.block.parent_hash;
         }
 
         // reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
-
-        // limit the number of blocks to persist if it exceeds the threshold
-        let threshold = self.config.persistence_threshold() as usize;
-        if blocks_to_persist.len() > threshold {
-            blocks_to_persist.truncate(threshold);
-        }
 
         blocks_to_persist
     }
@@ -826,21 +866,35 @@ where
         Ok(block)
     }
 
-    /// Return state provider with reference to in-memory blocks that overlay database state.
+    /// Returns the state provider for the requested block hash.
     ///
     /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    // TODO: return error if the chain has gaps
-    fn state_provider(&self, hash: B256) -> ProviderResult<MemoryOverlayStateProvider> {
-        let mut in_memory = Vec::new();
-        let mut parent_hash = hash;
-        while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
-            parent_hash = executed.block.parent_hash;
-            in_memory.push(executed.clone());
+    /// the head of and are not yet persisted on disk. This includes all blocks that connect back to
+    /// a canonical block on disk.
+    ///
+    /// Returns `None` if the state for the requested hash is not found, this happens if the
+    /// requested state belongs to a block that is not connected to the canonical chain.
+    ///
+    /// Returns an error if we failed to fetch the state from the database.
+    fn state_provider(&self, hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            trace!(target: "engine", %hash, "found canonical state for block in memory");
+            // the block leads back to the canonical chain
+            let historical = self.provider.state_by_block_hash(historical)?;
+            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(blocks, historical))))
         }
 
-        let historical = self.provider.state_by_block_hash(parent_hash)?;
-        Ok(MemoryOverlayStateProvider::new(in_memory, historical))
+        // the hash could belong to an unknown block or a persisted block
+        if let Some(header) = self.provider.header(&hash)? {
+            trace!(target: "engine", %hash, number = %header.number, "found canonical state for block in database");
+            // the block is known and persisted
+            let historical = self.provider.state_by_block_hash(hash)?;
+            return Ok(Some(historical))
+        }
+
+        trace!(target: "engine", %hash, "no canonical state found for block");
+
+        Ok(None)
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
@@ -1132,6 +1186,8 @@ where
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
         trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        let start = Instant::now();
+
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
@@ -1140,10 +1196,16 @@ where
 
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
-        self.canonical_in_memory_state.set_canonical_head(tip);
+        self.canonical_in_memory_state.set_canonical_head(tip.clone());
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
+
+        // emit event
+        self.emit_event(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+            Box::new(tip),
+            start.elapsed(),
+        ));
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -1256,14 +1318,33 @@ where
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
         }
 
+        let start = Instant::now();
         // validate block consensus rules
         self.validate_block(&block)?;
 
-        let state_provider = self.state_provider(block.parent_hash)?;
+        let Some(state_provider) = self.state_provider(block.parent_hash)? else {
+            // we don't have the state required to execute this block, buffering it and find the
+            // missing parent block
+            let missing_ancestor = self
+                .state
+                .buffer
+                .lowest_ancestor(&block.parent_hash)
+                .map(|block| block.parent_num_hash())
+                .unwrap_or_else(|| block.parent_num_hash());
+
+            self.state.buffer.insert_block(block);
+
+            return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head: self.state.tree_state.current_canonical_head,
+                missing_ancestor,
+            }))
+        };
+
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number;
         let block_hash = block.hash();
+        let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
         let output = executor.execute((&block, U256::MAX).into())?;
         self.consensus.validate_block_post_execution(
@@ -1283,7 +1364,7 @@ where
         }
 
         let executed = ExecutedBlock {
-            block: Arc::new(block.block.seal(block_hash)),
+            block: sealed_block.clone(),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
                 output.state,
@@ -1303,7 +1384,16 @@ where
 
         self.state.tree_state.insert_executed(executed);
 
+        // emit insert event
+        let engine_event = if self.state.tree_state.is_fork(block_hash) {
+            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block)
+        } else {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, start.elapsed())
+        };
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
+
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
@@ -1778,13 +1868,13 @@ mod tests {
     use super::*;
     use crate::persistence::PersistenceAction;
     use alloy_rlp::Decodable;
-    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_beacon_consensus::{EthBeaconConsensus, ForkchoiceStatus};
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_payload_builder::PayloadServiceCommand;
-    use reth_primitives::Bytes;
+    use reth_primitives::{Address, Bytes};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
@@ -1801,6 +1891,8 @@ mod tests {
         action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
         chain_spec: Arc<ChainSpec>,
+        executor_provider: MockExecutorProvider,
+        block_builder: TestBlockBuilder,
     }
 
     impl TestHarness {
@@ -1811,7 +1903,7 @@ mod tests {
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
             let provider = MockEthProvider::default();
-            let executor_factory = MockExecutorProvider::default();
+            let executor_provider = MockExecutorProvider::default();
 
             let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
 
@@ -1827,7 +1919,7 @@ mod tests {
 
             let tree = EngineApiTreeHandlerImpl::new(
                 provider,
-                executor_factory,
+                executor_provider.clone(),
                 consensus,
                 payload_validator,
                 to_tree_rx,
@@ -1840,6 +1932,9 @@ mod tests {
                 TreeConfig::default(),
             );
 
+            let block_builder = TestBlockBuilder::default()
+                .with_chain_spec((*chain_spec).clone())
+                .with_signer(Address::random());
             Self {
                 tree,
                 to_tree_tx,
@@ -1848,6 +1943,8 @@ mod tests {
                 action_rx,
                 payload_command_rx,
                 chain_spec,
+                executor_provider,
+                block_builder,
             }
         }
 
@@ -1891,6 +1988,23 @@ mod tests {
             self.tree.backfill_sync_state = state;
             self
         }
+
+        fn extend_execution_outcome(
+            &self,
+            execution_outcomes: impl IntoIterator<Item = impl Into<ExecutionOutcome>>,
+        ) {
+            self.executor_provider.extend(execution_outcomes);
+        }
+
+        fn insert_block(
+            &mut self,
+            block: SealedBlockWithSenders,
+        ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
+            let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
+            self.extend_execution_outcome([execution_outcome]);
+            self.tree.provider.add_state_root(block.state_root);
+            self.tree.insert_block(block)
+        }
     }
 
     #[tokio::test]
@@ -1900,10 +2014,10 @@ mod tests {
         let mut test_block_builder =
             TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
 
-        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
-        // persistence task.
+        // we need more than tree_config.persistence_threshold() +1 blocks to
+        // trigger the persistence task.
         let blocks: Vec<_> = test_block_builder
-            .get_executed_blocks(1..tree_config.persistence_threshold() + 1)
+            .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
             .collect();
         let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
         std::thread::Builder::new()
@@ -1915,11 +2029,13 @@ mod tests {
         test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
         let received_action =
-            test_harness.action_rx.recv().expect("Failed to receive saved blocks");
+            test_harness.action_rx.recv().expect("Failed to receive save blocks action");
         if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
-            // only PERSISTENCE_THRESHOLD will be persisted
-            assert_eq!(saved_blocks.len() as u64, tree_config.persistence_threshold());
-            assert_eq!(saved_blocks, blocks);
+            // only blocks.len() - tree_config.persistence_threshold() will be
+            // persisted
+            let expected_persist_len = blocks.len() - tree_config.persistence_threshold() as usize;
+            assert_eq!(saved_blocks.len(), expected_persist_len);
+            assert_eq!(saved_blocks, blocks[..expected_persist_len]);
         } else {
             panic!("unexpected action received {received_action:?}");
         }
@@ -1981,6 +2097,45 @@ mod tests {
 
         let resp = rx.await.unwrap().unwrap().await.unwrap();
         assert!(resp.payload_status.is_syncing());
+    }
+
+    #[test]
+    fn test_disconnected_payload() {
+        let s = include_str!("../../test-data/holesky/2.rlp");
+        let data = Bytes::from_str(s).unwrap();
+        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let sealed = block.seal_slow();
+        let hash = sealed.hash();
+        let payload = block_to_payload_v1(sealed.clone());
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        let outcome = test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+        assert!(outcome.outcome.is_syncing());
+
+        // ensure block is buffered
+        let buffered = test_harness.tree.state.buffer.block(&hash).unwrap();
+        assert_eq!(buffered.block, sealed);
+    }
+
+    #[test]
+    fn test_disconnected_block() {
+        let s = include_str!("../../test-data/holesky/2.rlp");
+        let data = Bytes::from_str(s).unwrap();
+        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let sealed = block.seal_slow();
+        let hash = sealed.hash();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
+        assert_eq!(
+            outcome,
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head: test_harness.tree.state.tree_state.current_canonical_head,
+                missing_ancestor: sealed.parent_num_hash()
+            })
+        );
     }
 
     #[tokio::test]
@@ -2159,48 +2314,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_blocks_to_persist() {
+    async fn test_get_canonical_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
         let mut test_block_builder = TestBlockBuilder::default();
 
-        let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..10).collect();
+        let canonical_head_number = 9;
+        let blocks: Vec<_> =
+            test_block_builder.get_executed_blocks(0..canonical_head_number + 1).collect();
         test_harness = test_harness.with_blocks(blocks.clone());
 
-        test_harness.tree.persistence_state.last_persisted_block_number = 3;
+        let last_persisted_block_number = 3;
+        test_harness.tree.persistence_state.last_persisted_block_number =
+            last_persisted_block_number;
 
-        test_harness.tree.config = TreeConfig::default().with_persistence_threshold(5);
+        let persistence_threshold = 4;
+        test_harness.tree.config =
+            TreeConfig::default().with_persistence_threshold(persistence_threshold);
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
-        assert_eq!(blocks_to_persist.len(), 5);
-        assert_eq!(blocks_to_persist[0].block.number, 4);
-        assert_eq!(blocks_to_persist[4].block.number, 8);
+        let expected_blocks_to_persist_length: usize =
+            (canonical_head_number - persistence_threshold - last_persisted_block_number)
+                .try_into()
+                .unwrap();
 
-        for i in 0..4 {
-            assert_eq!(
-                blocks_to_persist[i].block.hash(),
-                blocks_to_persist[i + 1].block.parent_hash
-            );
+        assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
+        for (i, item) in
+            blocks_to_persist.iter().enumerate().take(expected_blocks_to_persist_length)
+        {
+            assert_eq!(item.block.number, last_persisted_block_number + i as u64 + 1);
         }
 
         // make sure only canonical blocks are included
-        let fork_block = test_block_builder.get_executed_block_with_number(7, B256::random());
+        let fork_block = test_block_builder.get_executed_block_with_number(4, B256::random());
         let fork_block_hash = fork_block.block.hash();
         test_harness.tree.state.tree_state.insert_executed(fork_block);
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
-        assert_eq!(blocks_to_persist.len(), 5);
+        assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
         // check that the fork block is not included in the blocks to persist
         assert!(!blocks_to_persist.iter().any(|b| b.block.hash() == fork_block_hash));
 
-        // check that the original block 7 is still included
+        // check that the original block 4 is still included
         assert!(blocks_to_persist
             .iter()
-            .any(|b| b.block.number == 7 && b.block.hash() == blocks[7].block.hash()));
+            .any(|b| b.block.number == 4 && b.block.hash() == blocks[4].block.hash()));
     }
 
     #[tokio::test]
@@ -2254,5 +2416,135 @@ mod tests {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_fcu_canon_chain_insertion() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        // create FCU for the tip of the base chain
+        let fcu_state = ForkchoiceState {
+            head_block_hash: base_chain.last().unwrap().block().hash(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated { state: fcu_state, payload_attrs: None, tx },
+        ));
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid());
+
+        // check for ForkchoiceUpdated event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                state,
+                status,
+            )) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, ForkchoiceStatus::Valid);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // extend main chain
+        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 3);
+
+        for (index, block) in main_chain.iter().enumerate() {
+            test_harness.insert_block(block.clone()).unwrap();
+        }
+
+        // check for CanonicalBlockAdded events, we expect main_chain.len() blocks added
+        for index in 0..main_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                ) => {
+                    assert!(main_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_fcu_reorg_with_all_blocks() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let main_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(main_chain.clone());
+
+        let fork_chain = test_harness.block_builder.create_fork(main_chain[2].block(), 3);
+        // add fork blocks to the tree
+        for (index, block) in fork_chain.iter().enumerate() {
+            test_harness.insert_block(block.clone()).unwrap();
+        }
+
+        // create FCU for the tip of the fork
+        let fcu_state = ForkchoiceState {
+            head_block_hash: fork_chain.last().unwrap().hash(),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        test_harness.tree.on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated { state: fcu_state, payload_attrs: None, tx },
+        ));
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid());
+
+        // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
+        for index in 0..fork_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
+                    block,
+                )) => {
+                    assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        // check for CanonicalChainCommitted event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(
+                BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
+            ) => {
+                assert_eq!(header.hash(), fork_chain.last().unwrap().hash());
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // check for ForkchoiceUpdated event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                state,
+                status,
+            )) => {
+                assert_eq!(state, fcu_state);
+                assert_eq!(status, ForkchoiceStatus::Valid);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        // new head is the tip of the fork chain
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_head().hash,
+            fork_chain.last().unwrap().hash()
+        );
     }
 }
