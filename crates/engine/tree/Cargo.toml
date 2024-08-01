@@ -32,7 +32,6 @@ reth-prune.workspace = true
 reth-revm.workspace = true
 reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
-reth-stages-types.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
 

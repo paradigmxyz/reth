@@ -7022,7 +7022,6 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-stages",
  "reth-stages-api",
- "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
  "reth-tracing",
