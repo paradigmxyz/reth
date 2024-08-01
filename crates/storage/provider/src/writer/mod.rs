@@ -51,7 +51,8 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
         Self { database, static_file }
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a database provider and a static file instance.
+    /// Creates a new instance of [`StorageWriter`] from a database provider and a static file
+    /// instance.
     pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
         Self::new(Some(database), Some(static_file))
     }
