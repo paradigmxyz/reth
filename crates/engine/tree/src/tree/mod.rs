@@ -516,9 +516,13 @@ where
 
         if self.should_persist() && !self.persistence_state.in_progress() {
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
-            let (tx, rx) = oneshot::channel();
-            self.persistence.save_blocks(blocks_to_persist, tx);
-            self.persistence_state.start(rx);
+            if !blocks_to_persist.is_empty() {
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
+            } else {
+                warn!(target: "engine", "Returned empty set of blocks to persist");
+            }
         }
 
         if self.persistence_state.in_progress() {
