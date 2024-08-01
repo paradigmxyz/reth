@@ -16,7 +16,7 @@ reth-primitives.workspace = true
 
 # misc
 auto_impl.workspace = true
-thiserror-no-std = {workspace = true, default-features = false, optional = true }
+thiserror-no-std = { workspace = true, default-features = false, optional = true }
 derive_more.workspace = true
 
 [features]
