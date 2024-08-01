@@ -1,11 +1,13 @@
 //! Discovery support for the network.
 
-use crate::{
-    cache::LruMap,
-    error::{NetworkError, ServiceKind},
-    manager::DiscoveredEvent,
-    peers::PeerAddr,
+use std::{
+    collections::VecDeque,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Context, Poll},
 };
+
 use enr::Enr;
 use futures::StreamExt;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
@@ -14,18 +16,18 @@ use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
 use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::PeerAddr;
 use reth_primitives::{EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
-use std::{
-    collections::VecDeque,
-    net::{IpAddr, SocketAddr},
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::trace;
+
+use crate::{
+    cache::LruMap,
+    error::{NetworkError, ServiceKind},
+    manager::DiscoveredEvent,
+};
 
 /// Default max capacity for cache of discovered peers.
 ///
