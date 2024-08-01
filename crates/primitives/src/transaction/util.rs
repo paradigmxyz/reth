@@ -128,20 +128,45 @@ mod tests {
     #[cfg(feature = "secp256k1")]
     #[test]
     fn sanity_ecrecover_call_secp256k1() {
-        let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
-        let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
-        let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
+        use super::impl_secp256k1::*;
+        use revm_primitives::{keccak256, B256};
 
-        assert_eq!(super::impl_secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
+        let (secret, public) = secp256k1::generate_keypair(&mut rand::thread_rng());
+        let signer = public_key_to_address(public);
+
+        let message = b"hello world";
+        let hash = keccak256(message);
+        let signature =
+            sign_message(B256::from_slice(&secret.secret_bytes()[..]), hash).expect("sign message");
+
+        let mut sig: [u8; 65] = [0; 65];
+        sig[0..32].copy_from_slice(&signature.r.to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&signature.s.to_be_bytes::<32>());
+        sig[64] = signature.odd_y_parity as u8;
+
+        assert_eq!(recover_signer_unchecked(&sig, &hash), Ok(signer));
     }
 
     #[cfg(feature = "k256")]
     #[test]
     fn sanity_ecrecover_call_k256() {
-        let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
-        let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
-        let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
+        use super::impl_k256::*;
+        use revm_primitives::{keccak256, B256};
 
-        assert_eq!(super::impl_k256::recover_signer_unchecked(&sig, &hash).ok(), Some(out));
+        let secret = k256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        let public = *secret.verifying_key();
+        let signer = public_key_to_address(public);
+
+        let message = b"hello world";
+        let hash = keccak256(message);
+        let signature =
+            sign_message(B256::from_slice(&secret.to_bytes()[..]), hash).expect("sign message");
+
+        let mut sig: [u8; 65] = [0; 65];
+        sig[0..32].copy_from_slice(&signature.r.to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&signature.s.to_be_bytes::<32>());
+        sig[64] = signature.odd_y_parity as u8;
+
+        assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
     }
 }
