@@ -6,6 +6,7 @@ use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
+    network::PeersHandleProvider,
     rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
@@ -13,7 +14,7 @@ use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeComponents, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -50,6 +51,7 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
+    <<N::ComponentsBuilder as NodeComponentsBuilder<TmpNodeAdapter<N>>>::Components as NodeComponents<TmpNodeAdapter<N>>>::Network: PeersHandleProvider,
     <N::AddOns as NodeAddOns<Adapter<N>>>::EthApi:
         FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
 {

@@ -1,5 +1,7 @@
 //! P2P Debugging tool
 
+use std::{path::PathBuf, sync::Arc};
+
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
@@ -15,7 +17,6 @@ use reth_node_core::{
     utils::get_single_header,
 };
 use reth_primitives::BlockHashOrNumber;
-use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
