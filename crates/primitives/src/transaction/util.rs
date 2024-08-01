@@ -93,12 +93,12 @@ mod impl_k256 {
     /// Returns the corresponding signature.
     pub fn sign_message(secret: B256, message: B256) -> Result<Signature, Error> {
         let sec = SigningKey::from_slice(secret.as_ref())?;
-        let (s, rec_id) = sec.sign_recoverable(&message.0)?;
-        let data = s.to_bytes();
+        let (sig, rec_id) = sec.sign_prehash_recoverable(&message.0)?;
+        let (r, s) = sig.split_bytes();
 
         let signature = Signature {
-            r: U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
-            s: U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
+            r: U256::try_from_be_slice(&r).expect("The slice has at most 32 bytes"),
+            s: U256::try_from_be_slice(&s).expect("The slice has at most 32 bytes"),
             odd_y_parity: rec_id.is_y_odd(),
         };
         Ok(signature)
