@@ -8092,7 +8092,6 @@ dependencies = [
  "sucds",
  "tempfile",
  "test-fuzz",
- "thiserror-no-std",
  "toml",
  "triehash",
  "zstd",
