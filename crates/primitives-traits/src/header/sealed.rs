@@ -5,7 +5,7 @@ use alloy_primitives::{keccak256, BlockHash};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
-use core::{fmt, mem};
+use core::mem;
 use derive_more::{AsRef, Deref};
 use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
 use serde::{Deserialize, Serialize};
@@ -133,13 +133,5 @@ impl SealedHeader {
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Header::arbitrary(u)?.seal_slow())
-    }
-}
-
-impl fmt::Display for SealedHeader {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(
-            format_args!("Consensus error: {}, Invalid header: {}", self.hash, self.header)
-        )
     }
 }

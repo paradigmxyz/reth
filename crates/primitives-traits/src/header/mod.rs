@@ -15,7 +15,7 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
-use core::{mem, fmt};
+use core::mem;
 use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
@@ -487,15 +487,6 @@ impl Decodable for Header {
             })
         }
         Ok(this)
-    }
-}
-
-impl fmt::Display for Header {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("what a header!")
-        // f.write_fmt(
-        //     format_args!("Consensus error: {}, Invalid header: {}")
-        // )
     }
 }
 
