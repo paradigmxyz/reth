@@ -4,11 +4,11 @@ use revm_primitives::B256;
 // Silence the `unused_imports` warning for the `k256` feature if both `secp256k1` and `k256` are
 // enabled.
 #[cfg(all(feature = "k256", feature = "secp256k1"))]
+#[allow(unused_imports)]
 use k256 as _;
 
-// Do not check `not(feature = "k256")` because then compilation with `--all-features` will fail.
 #[cfg(feature = "secp256k1")]
-pub(crate) mod secp256k1 {
+mod impl_secp256k1 {
     use super::*;
     use crate::keccak256;
     pub(crate) use ::secp256k1::Error;
@@ -57,8 +57,10 @@ pub(crate) mod secp256k1 {
     }
 }
 
-#[cfg(all(feature = "k256", not(feature = "secp256k1")))]
-pub(crate) mod secp256k1 {
+#[cfg(feature = "k256")]
+// If both `secp256k1` and `k256` are enabled, then we need to silence the warnings
+#[cfg_attr(all(feature = "k256", feature = "secp256k1"), allow(unused, unreachable_pub))]
+mod impl_k256 {
     use super::*;
     use crate::keccak256;
     pub(crate) use ::k256::ecdsa::Error;
@@ -110,42 +112,36 @@ pub(crate) mod secp256k1 {
     }
 }
 
-#[cfg(not(any(feature = "secp256k1", feature = "k256")))]
+// Do not check `not(feature = "k256")` because then compilation with `--all-features` will fail.
+#[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {
-    use super::*;
+    pub use super::impl_secp256k1::*;
+}
 
-    pub fn recover_signer_unchecked(_: &[u8; 65], _: &[u8; 32]) -> Result<Address, ()> {
-        unimplemented!("please enable one of the `secp256k1` or `k256` features")
-    }
-
-    pub fn sign_message(_: B256, _: B256) -> Result<Signature, ()> {
-        unimplemented!("please enable one of the `secp256k1` or `k256` features")
-    }
-
-    pub fn public_key_to_address(_: &[u8; 257]) -> Address {
-        unimplemented!("please enable one of the `secp256k1` or `k256` features")
-    }
+#[cfg(all(feature = "k256", not(feature = "secp256k1")))]
+pub(crate) mod secp256k1 {
+    pub use super::impl_k256::*;
 }
 
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "secp256k1")]
     #[test]
-    fn sanity_ecrecover_call() {
+    fn sanity_ecrecover_call_secp256k1() {
         let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
         let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
         let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
 
-        assert_eq!(super::secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
+        assert_eq!(super::impl_secp256k1::recover_signer_unchecked(&sig, &hash), Ok(out));
     }
 
-    #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
+    #[cfg(feature = "k256")]
     #[test]
-    fn sanity_ecrecover_call() {
+    fn sanity_ecrecover_call_k256() {
         let sig = crate::hex!("650acf9d3f5f0a2c799776a1254355d5f4061762a237396a99a0e0e3fc2bcd6729514a0dacb2e623ac4abd157cb18163ff942280db4d5caad66ddf941ba12e0300");
         let hash = crate::hex!("47173285a8d7341e5e972fc677286384f802f8ef42a5ec5f03bbfa254cb01fad");
         let out = crate::address!("c08b5542d177ac6686946920409741463a15dddb");
 
-        assert_eq!(super::secp256k1::recover_signer_unchecked(&sig, &hash).ok(), Some(out));
+        assert_eq!(super::impl_k256::recover_signer_unchecked(&sig, &hash).ok(), Some(out));
     }
 }
