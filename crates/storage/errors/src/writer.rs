@@ -10,8 +10,8 @@ pub enum StorageWriterError {
     /// Static file writer is missing
     #[error("Static file writer is missing")]
     MissingStaticFileWriter,
-    /// Static file writer is of wrong variant
-    #[error("Static file writer is of wrong variant: got {0}, expected {1}")]
+    /// Static file writer is of wrong segment
+    #[error("Static file writer is of wrong segment: got {0}, expected {1}")]
     IncorrectStaticFileWriter(StaticFileSegment, StaticFileSegment),
     /// Database-related errors.
     #[error(transparent)]
