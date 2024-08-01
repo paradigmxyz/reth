@@ -345,7 +345,9 @@ reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = ["std"] }
+reth-primitives = { path = "crates/primitives", default-features = false, features = [
+    "std",
+] }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
@@ -544,3 +546,7 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
 iai-callgrind = "0.11"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/trigger_selfdestruct_eip7702_change" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/trigger_selfdestruct_eip7702_change" }
