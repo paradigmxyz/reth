@@ -1,12 +1,6 @@
 use crate::{Address, Signature};
 use revm_primitives::B256;
 
-// Silence the `unused_imports` warning for the `k256` feature if both `secp256k1` and `k256` are
-// enabled.
-#[cfg(all(feature = "k256", feature = "secp256k1"))]
-#[allow(unused_imports)]
-use k256 as _;
-
 #[cfg(feature = "secp256k1")]
 mod impl_secp256k1 {
     use super::*;
@@ -57,13 +51,11 @@ mod impl_secp256k1 {
     }
 }
 
-#[cfg(feature = "k256")]
-// If both `secp256k1` and `k256` are enabled, then we need to silence the warnings
-#[cfg_attr(all(feature = "k256", feature = "secp256k1"), allow(unused, unreachable_pub))]
+#[cfg_attr(feature = "secp256k1", allow(unused, unreachable_pub))]
 mod impl_k256 {
     use super::*;
     use crate::keccak256;
-    pub(crate) use ::k256::ecdsa::Error;
+    pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
     use revm_primitives::U256;
 
@@ -112,13 +104,12 @@ mod impl_k256 {
     }
 }
 
-// Do not check `not(feature = "k256")` because then compilation with `--all-features` will fail.
 #[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {
     pub use super::impl_secp256k1::*;
 }
 
-#[cfg(all(feature = "k256", not(feature = "secp256k1")))]
+#[cfg(not(feature = "secp256k1"))]
 pub(crate) mod secp256k1 {
     pub use super::impl_k256::*;
 }
@@ -147,7 +138,7 @@ mod tests {
         assert_eq!(recover_signer_unchecked(&sig, &hash), Ok(signer));
     }
 
-    #[cfg(feature = "k256")]
+    #[cfg(not(feature = "secp256k1"))]
     #[test]
     fn sanity_ecrecover_call_k256() {
         use super::impl_k256::*;
@@ -170,7 +161,6 @@ mod tests {
         assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
     }
 
-    #[cfg(all(feature = "k256", feature = "secp256k1"))]
     #[test]
     fn sanity_secp256k1_k256_compat() {
         use super::{impl_k256, impl_secp256k1};
