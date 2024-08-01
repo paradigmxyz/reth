@@ -89,6 +89,14 @@ impl StateProofProvider for StateProviderTest {
     ) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
     }
+
+    fn witness(
+        &self,
+        _overlay: HashedPostState,
+        _target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        unimplemented!("witness generation is not supported")
+    }
 }
 
 impl StateProvider for StateProviderTest {

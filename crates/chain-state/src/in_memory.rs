@@ -667,7 +667,9 @@ mod tests {
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, BlockNumber, Bytecode, Receipt, StorageKey, StorageValue};
+    use reth_primitives::{
+        Account, BlockNumber, Bytecode, Bytes, Receipt, StorageKey, StorageValue,
+    };
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     };
@@ -761,6 +763,14 @@ mod tests {
             _slots: &[B256],
         ) -> ProviderResult<AccountProof> {
             Ok(AccountProof::new(Address::random()))
+        }
+
+        fn witness(
+            &self,
+            _overlay: HashedPostState,
+            _target: HashedPostState,
+        ) -> ProviderResult<HashMap<B256, Bytes>> {
+            Ok(HashMap::default())
         }
     }
 

@@ -72,3 +72,19 @@ pub enum TrieWitnessError {
     #[error("target node missing from proof {0:?}")]
     MissingTargetNode(Nibbles),
 }
+
+impl From<TrieWitnessError> for ProviderError {
+    fn from(value: TrieWitnessError) -> Self {
+        match value {
+            TrieWitnessError::Proof(error) => Self::from(error),
+            TrieWitnessError::Rlp(error) => Self::Rlp(error),
+            TrieWitnessError::MissingAccount(hashed_address) => {
+                Self::WitnessMissingAccount(hashed_address)
+            }
+            TrieWitnessError::MissingStorageMultiProof(hashed_address) => {
+                Self::WitnessMissingStorageMultiProof(hashed_address)
+            }
+            TrieWitnessError::MissingTargetNode(nibbles) => Self::WitnessMissingTargetNode(nibbles),
+        }
+    }
+}

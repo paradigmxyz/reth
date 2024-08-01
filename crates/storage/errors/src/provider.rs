@@ -1,3 +1,4 @@
+use nybbles::Nibbles;
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
@@ -108,6 +109,15 @@ pub enum ProviderError {
     /// Root mismatch during unwind
     #[error("unwind merkle trie {0}")]
     UnwindStateRootMismatch(Box<RootMismatch>),
+    /// Missing storage multiproof.
+    #[error("missing storage multiproof for {0}")]
+    WitnessMissingStorageMultiProof(B256),
+    /// Missing account.
+    #[error("missing account {0}")]
+    WitnessMissingAccount(B256),
+    /// Missing target node.
+    #[error("target node missing from proof {0:?}")]
+    WitnessMissingTargetNode(Nibbles),
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{0} is pruned")]
     StateAtBlockPruned(BlockNumber),
