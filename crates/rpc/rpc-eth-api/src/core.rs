@@ -2,11 +2,13 @@
 //! the `eth_` namespace.
 
 use alloy_dyn_abi::TypedData;
+use alloy_network::Network;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
     U256, U64,
 };
+use alloy_json_rpc::RpcObject;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -26,14 +28,14 @@ use crate::{
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
-pub trait FullEthApiServer: EthApiServer<Self> + FullEthApi + UpdateRawTxForwarder + Clone {}
+pub trait FullEthApiServer: EthApiServer<Transaction<Self>, Block<Self>> + FullEthApi + UpdateRawTxForwarder + Clone {}
 
-impl<T> FullEthApiServer for T where T: EthApiServer<T> + FullEthApi + UpdateRawTxForwarder + Clone {}
+impl<T> FullEthApiServer for T where T: EthApiServer<Transaction<T>, Block<T>> + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: EthApiTypes> {
+pub trait EthApi<T: RpcObject, B: RpcObject> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -60,7 +62,7 @@ pub trait EthApi<T: EthApiTypes> {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<Block<T>>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<B>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
@@ -68,7 +70,7 @@ pub trait EthApi<T: EthApiTypes> {
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> RpcResult<Option<Block<T>>>;
+    ) -> RpcResult<Option<B>>;
 
     /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "getBlockTransactionCountByHash")]
@@ -105,7 +107,7 @@ pub trait EthApi<T: EthApiTypes> {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Block<T>>>;
+    ) -> RpcResult<Option<B>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockNumberAndIndex")]
@@ -113,7 +115,7 @@ pub trait EthApi<T: EthApiTypes> {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Block<T>>>;
+    ) -> RpcResult<Option<B>>;
 
     /// Returns the EIP-2718 encoded transaction if it exists.
     ///
@@ -123,7 +125,7 @@ pub trait EthApi<T: EthApiTypes> {
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
-    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction<T>>>;
+    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<T>>;
 
     /// Returns information about a raw transaction by block hash and transaction index position.
     #[method(name = "getRawTransactionByBlockHashAndIndex")]
@@ -139,7 +141,7 @@ pub trait EthApi<T: EthApiTypes> {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Transaction<T>>>;
+    ) -> RpcResult<Option<T>>;
 
     /// Returns information about a raw transaction by block number and transaction index
     /// position.
@@ -156,7 +158,7 @@ pub trait EthApi<T: EthApiTypes> {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Transaction<T>>>;
+    ) -> RpcResult<Option<T>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
@@ -337,7 +339,7 @@ pub trait EthApi<T: EthApiTypes> {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer<T> for T
+impl<T> EthApiServer<Transaction<T>, Block<T>> for T
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,

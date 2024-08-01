@@ -158,6 +158,7 @@ use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, FullRpcProvider, StateProviderFactory,
 };
+use reth_rpc_eth_api::{Block, Transaction};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
     TxPoolApi, Web3Api,
@@ -799,7 +800,7 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: EthApiTypesCompat,
+    EthApi: EthApiTypesCompat + EthApiServer<Transaction<EthApi>, Block<EthApi>>,
 {
     /// Register Eth Namespace
     ///
@@ -808,7 +809,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self
     where
-        EthApi: EthApiTypesCompat + EthApiServer<EthApi>,
+        EthApi: EthApiTypesCompat + EthApiServer<Transaction<EthApi>, Block<EthApi>>,
     {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -822,7 +823,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer<EthApi> + TraceExt,
+        EthApi: TraceExt,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -922,7 +923,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
     where
-        EthApi: EthApiServer<EthApi> + EthApiTypes,
+        EthApi: EthApiServer<Transaction<EthApi>, Block<EthApi>> + EthApiTypes,
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)
