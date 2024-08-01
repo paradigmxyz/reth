@@ -785,7 +785,7 @@ where
     /// # Returns
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
-    fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+    pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
