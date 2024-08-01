@@ -147,6 +147,10 @@ impl TreeState {
         }
     }
 
+    fn is_fork(&self, block: &Block) -> bool {
+        self.parent_to_child.contains_key(&block.parent_hash)
+    }
+
     /// Remove all blocks up to the given block number.
     pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
         let mut numbers_to_remove = Vec::new();
@@ -1163,6 +1167,8 @@ where
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
         trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        let start = Instant::now();
+
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
@@ -1171,10 +1177,16 @@ where
 
         // update the tracked in-memory state with the new chain
         self.canonical_in_memory_state.update_chain(chain_update);
-        self.canonical_in_memory_state.set_canonical_head(tip);
+        self.canonical_in_memory_state.set_canonical_head(tip.clone());
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
+
+        // emit event
+        self.emit_event(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+            Box::new(tip),
+            start.elapsed(),
+        ));
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -1287,6 +1299,7 @@ where
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
         }
 
+        let start = Instant::now();
         // validate block consensus rules
         self.validate_block(&block)?;
 
@@ -1312,6 +1325,7 @@ where
 
         let block_number = block.number;
         let block_hash = block.hash();
+        let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
         let output = executor.execute((&block, U256::MAX).into())?;
         self.consensus.validate_block_post_execution(
@@ -1331,7 +1345,7 @@ where
         }
 
         let executed = ExecutedBlock {
-            block: Arc::new(block.block.seal(block_hash)),
+            block: Arc::new(block.block.clone().seal(block_hash)),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
                 output.state,
@@ -1351,7 +1365,16 @@ where
 
         self.state.tree_state.insert_executed(executed);
 
+        // emit insert event
+        let engine_event = if self.state.tree_state.is_fork(&block.block) {
+            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block)
+        } else {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, start.elapsed())
+        };
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
+
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 
@@ -2396,6 +2419,30 @@ mod tests {
         let response = rx.await.unwrap().unwrap().await.unwrap();
         assert!(response.payload_status.is_valid());
 
+        // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
+        for index in 0..fork_chain.len() {
+            let event = test_harness.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
+                    block,
+                )) => {
+                    assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        // check for CanonicalChainCommitted event
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(
+                BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
+            ) => {
+                assert_eq!(header.hash(), fork_chain.last().unwrap().hash());
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
         // check for ForkchoiceUpdated event
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
@@ -2409,49 +2456,10 @@ mod tests {
             _ => panic!("Unexpected event: {:#?}", event),
         }
 
-        /*
-            // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
-            for index in 0..fork_chain.len() {
-                let event = test_harness.from_tree_rx.recv().await.unwrap();
-                match event {
-                    EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
-                        block,
-                    )) => {
-                        assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
-                    }
-                    _ => panic!("Unexpected event: {:#?}", event),
-                }
-            }
-
-            // check for CanonicalBlockAdded events, we expect fork_chain.len() canonical blocks
-            for _ in 0..fork_chain.len() {
-                let event = test_harness.from_tree_rx.recv().await.unwrap();
-                match event {
-                    EngineApiEvent::BeaconConsensus(
-                        BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
-                    ) => {
-                        assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
-                    }
-                    _ => panic!("Unexpected event: {:#?}", event),
-                }
-            }
-
-            // check for CanonicalChainCommitted event
-            let event = test_harness.from_tree_rx.recv().await.unwrap();
-            match event {
-                EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
-                ) => {
-                    assert_eq!(header.hash(), fork_chain.last().unwrap().hash());
-                }
-                _ => panic!("Unexpected event: {:#?}", event),
-            }
-
-            // new head is the tip of the fork chain
-            assert_eq!(
-                test_harness.tree.state.tree_state.canonical_head().hash,
-                fork_chain.last().unwrap().hash()
+        // new head is the tip of the fork chain
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_head().hash,
+            fork_chain.last().unwrap().hash()
         );
-            */
     }
 }
