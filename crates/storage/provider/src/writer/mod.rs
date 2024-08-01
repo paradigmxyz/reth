@@ -1,9 +1,13 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProvider, DatabaseProviderRO,
-    DatabaseProviderRW, StateChangeWriter, StateWriter,
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
+    writer::static_file::StaticFileWriter,
+    BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter, StateChangeWriter,
+    StateWriter, TrieWriter,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
+    models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
     Database,
@@ -11,13 +15,14 @@ use reth_db::{
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, Header, StaticFileSegment, TransactionSignedNoHash, B256, U256,
+    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
 };
-use reth_storage_api::{HeaderProvider, ReceiptWriter};
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::{HeaderProvider, ReceiptWriter, StageCheckpointWriter};
 use reth_storage_errors::writer::StorageWriterError;
 use revm::db::OriginalValuesKnown;
-use static_file::StaticFileWriter;
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::Arc};
+use tracing::{debug, instrument};
 
 mod database;
 mod static_file;
@@ -31,96 +36,255 @@ enum StorageType<C = (), S = ()> {
 /// [`StorageWriter`] is responsible for managing the writing to either database, static file or
 /// both.
 #[derive(Debug)]
-pub struct StorageWriter<'a, 'b, TX> {
-    database_writer: Option<&'a DatabaseProvider<TX>>,
-    static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
+pub struct StorageWriter<'a, TX, SF> {
+    database: Option<&'a DatabaseProvider<TX>>,
+    static_file: Option<SF>,
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, 'b, TX> {
+impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
-    /// - `database_writer`: An optional reference to a database writer.
-    /// - `static_file_writer`: An optional mutable reference to a static file writer.
-    pub const fn new(
-        database_writer: Option<&'a DatabaseProvider<TX>>,
-        static_file_writer: Option<StaticFileProviderRWRefMut<'b>>,
-    ) -> Self {
-        Self { database_writer, static_file_writer }
+    /// - `database`: An optional reference to a database provider.
+    /// - `static_file`: An optional mutable reference to a static file instance.
+    pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<SF>) -> Self {
+        Self { database, static_file }
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a static file writer.
-    pub const fn from_static_file_writer(
-        static_file_writer: StaticFileProviderRWRefMut<'b>,
-    ) -> Self {
-        Self::new(None, Some(static_file_writer))
+    /// Creates a new instance of [`StorageWriter`] from a database provider and a static file
+    /// instance.
+    pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
+        Self::new(Some(database), Some(static_file))
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a read-only database provider.
-    pub const fn from_database_provider_ro<DB>(
-        database: &'a DatabaseProviderRO<DB>,
-    ) -> StorageWriter<'_, '_, <DB as Database>::TX>
-    where
-        DB: Database,
-    {
-        StorageWriter::new(Some(database), None)
+    /// Creates a new instance of [`StorageWriter`] from a static file instance.
+    pub const fn from_static_file(static_file: SF) -> Self {
+        Self::new(None, Some(static_file))
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a read-write database provider.
-    pub fn from_database_provider_rw<DB>(
-        database: &'a DatabaseProviderRW<DB>,
-    ) -> StorageWriter<'_, '_, <DB as Database>::TXMut>
-    where
-        DB: Database,
-    {
-        StorageWriter::new(Some(database), None)
+    /// Creates a new instance of [`StorageWriter`] from a database provider.
+    pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
+        Self::new(Some(database), None)
     }
 
     /// Returns a reference to the database writer.
     ///
     /// # Panics
-    /// If the database writer is not set.
-    fn database_writer(&self) -> &DatabaseProvider<TX> {
-        self.database_writer.as_ref().expect("should exist")
+    /// If the database provider is not set.
+    fn database(&self) -> &DatabaseProvider<TX> {
+        self.database.as_ref().expect("should exist")
     }
 
-    /// Returns a mutable reference to the static file writer.
+    /// Returns a reference to the static file instance.
     ///
     /// # Panics
-    /// If the static file writer is not set.
-    fn static_file_writer(&mut self) -> &mut StaticFileProviderRWRefMut<'b> {
-        self.static_file_writer.as_mut().expect("should exist")
+    /// If the static file instance is not set.
+    fn static_file(&self) -> &SF {
+        self.static_file.as_ref().expect("should exist")
     }
 
-    /// Ensures that the database writer is set.
+    /// Returns a mutable reference to the static file instance.
+    ///
+    /// # Panics
+    /// If the static file instance is not set.
+    fn static_file_mut(&mut self) -> &mut SF {
+        self.static_file.as_mut().expect("should exist")
+    }
+
+    /// Ensures that the database provider is set.
     ///
     /// # Returns
-    /// - `Ok(())` if the database writer is set.
-    /// - `Err(StorageWriterError::MissingDatabaseWriter)` if the database writer is not set.
-    const fn ensure_database_writer(&self) -> Result<(), StorageWriterError> {
-        if self.database_writer.is_none() {
+    /// - `Ok(())` if the database provider is set.
+    /// - `Err(StorageWriterError::MissingDatabaseWriter)` if the database provider is not set.
+    const fn ensure_database(&self) -> Result<(), StorageWriterError> {
+        if self.database.is_none() {
             return Err(StorageWriterError::MissingDatabaseWriter)
         }
         Ok(())
     }
 
-    /// Ensures that the static file writer is set.
+    /// Ensures that the static file instance is set.
     ///
     /// # Returns
-    /// - `Ok(())` if the static file writer is set.
-    /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file writer is not set.
-    const fn ensure_static_file_writer(&self) -> Result<(), StorageWriterError> {
-        if self.static_file_writer.is_none() {
+    /// - `Ok(())` if the static file instance is set.
+    /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file instance is not set.
+    #[allow(unused)]
+    const fn ensure_static_file(&self) -> Result<(), StorageWriterError> {
+        if self.static_file.is_none() {
             return Err(StorageWriterError::MissingStaticFileWriter)
         }
         Ok(())
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
+impl StorageWriter<'_, (), ()> {
+    /// Commits both storage types in the right order.
+    ///
+    /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
+    pub fn commit<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        static_file.commit()?;
+        database.commit()?;
+        Ok(())
+    }
+
+    /// Commits both storage types in the right order for an unwind operation.
+    ///
+    /// NOTE: Should only be used after unwinding data from storage!
+    pub fn commit_unwind<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        database.commit()?;
+        static_file.commit()?;
+        Ok(())
+    }
+}
+
+impl<'a, 'b, TX> StorageWriter<'a, TX, &'b StaticFileProvider>
+where
+    TX: DbTxMut + DbTx,
+{
+    /// Writes executed blocks and receipts to storage.
+    pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            debug!(target: "provider::storage_writer", "Attempted to write empty block range");
+            return Ok(())
+        }
+
+        // NOTE: checked non-empty above
+        let first_block = blocks.first().unwrap().block();
+        let last_block = blocks.last().unwrap().block().clone();
+        let first_number = first_block.number;
+        let last_block_number = last_block.number;
+
+        // Only write receipts to static files if there is no receipt pruning configured.
+        let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
+            StorageWriter::from_database(self.database())
+        } else {
+            StorageWriter::new(
+                Some(self.database()),
+                Some(
+                    self.static_file()
+                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
+                ),
+            )
+        };
+
+        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks and execution data to storage");
+
+        // TODO: remove all the clones and do performant / batched writes for each type of object
+        // instead of a loop over all blocks,
+        // meaning:
+        //  * blocks
+        //  * state
+        //  * hashed state
+        //  * trie updates (cannot naively extend, need helper)
+        //  * indices (already done basically)
+        // Insert the blocks
+        for block in blocks {
+            let sealed_block =
+                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
+            self.database().insert_block(sealed_block)?;
+            self.save_header_and_transactions(block.block.clone())?;
+
+            // Write state and changesets to the database.
+            // Must be written after blocks because of the receipt lookup.
+            let execution_outcome = block.execution_outcome().clone();
+            state_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
+
+            // insert hashes and intermediate merkle nodes
+            {
+                let trie_updates = block.trie_updates().clone();
+                let hashed_state = block.hashed_state();
+                self.database().write_hashed_state(&hashed_state.clone().into_sorted())?;
+                self.database().write_trie_updates(&trie_updates)?;
+            }
+        }
+
+        // update history indices
+        self.database().update_history_indices(first_number..=last_block_number)?;
+
+        // Update pipeline progress
+        self.database().update_pipeline_stages(last_block_number, false)?;
+
+        debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
+    }
+
+    /// Writes the header & transactions to static files, and updates their respective checkpoints
+    /// on database.
+    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()) target = "storage")]
+    fn save_header_and_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<()> {
+        debug!(target: "tree::persistence", "Writing headers and transactions.");
+
+        {
+            let header_writer =
+                self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
+            let mut storage_writer = StorageWriter::new(Some(self.database()), Some(header_writer));
+            let td = storage_writer.append_headers_from_blocks(
+                block.header().number,
+                std::iter::once(&(block.header(), block.hash())),
+            )?;
+
+            debug!(target: "tree::persistence", block_num=block.number, "Updating transaction metadata after writing");
+            self.database()
+                .tx_ref()
+                .put::<tables::HeaderTerminalDifficulties>(block.number, CompactU256(td))?;
+            self.database()
+                .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
+        }
+
+        {
+            let transactions_writer =
+                self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
+            let mut storage_writer =
+                StorageWriter::new(Some(self.database()), Some(transactions_writer));
+            let no_hash_transactions =
+                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            storage_writer.append_transactions_from_blocks(
+                block.header().number,
+                std::iter::once(&no_hash_transactions),
+            )?;
+            self.database()
+                .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTx,
 {
+    /// Ensures that the static file writer is set and of the right [`StaticFileSegment`] variant.
+    ///
+    /// # Returns
+    /// - `Ok(())` if the static file writer is set.
+    /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file instance is not set.
+    fn ensure_static_file_segment(
+        &self,
+        segment: StaticFileSegment,
+    ) -> Result<(), StorageWriterError> {
+        match &self.static_file {
+            Some(writer) => {
+                if writer.user_header().segment() != segment {
+                    Err(StorageWriterError::IncorrectStaticFileWriter(
+                        writer.user_header().segment(),
+                        segment,
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            None => Err(StorageWriterError::MissingStaticFileWriter),
+        }
+    }
+
     /// Appends headers to static files, using the
     /// [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties) table to determine the
     /// total difficulty of the parent block during header insertion.
@@ -136,11 +300,11 @@ where
         I: Borrow<(H, B256)>,
         H: Borrow<Header>,
     {
-        self.ensure_database_writer()?;
-        self.ensure_static_file_writer()?;
+        self.ensure_database()?;
+        self.ensure_static_file_segment(StaticFileSegment::Headers)?;
 
         let mut td = self
-            .database_writer()
+            .database()
             .header_td_by_number(initial_block_number)?
             .ok_or(ProviderError::TotalDifficultyNotFound(initial_block_number))?;
 
@@ -148,7 +312,7 @@ where
             let (header, hash) = pair.borrow();
             let header = header.borrow();
             td += header.difficulty;
-            self.static_file_writer().append_header(header, td, hash)?;
+            self.static_file_mut().append_header(header, td, hash)?;
         }
 
         Ok(td)
@@ -168,11 +332,11 @@ where
     where
         T: Borrow<Vec<TransactionSignedNoHash>>,
     {
-        self.ensure_database_writer()?;
-        self.ensure_static_file_writer()?;
+        self.ensure_database()?;
+        self.ensure_static_file_segment(StaticFileSegment::Transactions)?;
 
         let mut bodies_cursor =
-            self.database_writer().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+            self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
         let mut last_tx_idx = None;
         for (idx, transactions) in transactions.enumerate() {
@@ -193,12 +357,11 @@ where
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             for tx in transactions.borrow() {
-                self.static_file_writer().append_transaction(tx_index, tx)?;
+                self.static_file_mut().append_transaction(tx_index, tx)?;
                 tx_index += 1;
             }
 
-            self.static_file_writer()
-                .increment_block(StaticFileSegment::Transactions, block_number)?;
+            self.static_file_mut().increment_block(block_number)?;
 
             // update index
             last_tx_idx = Some(tx_index);
@@ -207,7 +370,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, 'b, TX>
+impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
@@ -228,23 +391,21 @@ where
         initial_block_number: BlockNumber,
         blocks: impl Iterator<Item = Vec<Option<reth_primitives::Receipt>>>,
     ) -> ProviderResult<()> {
-        self.ensure_database_writer()?;
+        self.ensure_database()?;
         let mut bodies_cursor =
-            self.database_writer().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
+            self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
         // We write receipts to database in two situations:
         // * If we are in live sync. In this case, `StorageWriter` is built without a static file
         //   writer.
         // * If there is any kind of receipt pruning
-        let mut storage_type = if self.static_file_writer.is_none() ||
-            self.database_writer().prune_modes_ref().has_receipts_pruning()
+        let mut storage_type = if self.static_file.is_none() ||
+            self.database().prune_modes_ref().has_receipts_pruning()
         {
-            StorageType::Database(
-                self.database_writer().tx_ref().cursor_write::<tables::Receipts>()?,
-            )
+            StorageType::Database(self.database().tx_ref().cursor_write::<tables::Receipts>()?)
         } else {
-            self.ensure_static_file_writer()?;
-            StorageType::StaticFile(self.static_file_writer())
+            self.ensure_static_file_segment(StaticFileSegment::Receipts)?;
+            StorageType::StaticFile(self.static_file_mut())
         };
 
         let mut last_tx_idx = None;
@@ -290,7 +451,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StateWriter for StorageWriter<'a, 'b, TX>
+impl<'a, 'b, TX> StateWriter for StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
@@ -301,18 +462,18 @@ where
         execution_outcome: ExecutionOutcome,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()> {
-        self.ensure_database_writer()?;
+        self.ensure_database()?;
         let (plain_state, reverts) =
             execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
 
-        self.database_writer().write_state_reverts(reverts, execution_outcome.first_block)?;
+        self.database().write_state_reverts(reverts, execution_outcome.first_block)?;
 
         self.append_receipts_from_blocks(
             execution_outcome.first_block,
             execution_outcome.receipts.into_iter(),
         )?;
 
-        self.database_writer().write_state_changes(plain_state)?;
+        self.database().write_state_changes(plain_state)?;
 
         Ok(())
     }

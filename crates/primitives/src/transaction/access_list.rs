@@ -3,8 +3,12 @@
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
 pub use alloy_eips::eip2930::{AccessList, AccessListItem};
+
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
 
 /// `AccessListResult` for handling errors from `eth_createAccessList`
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
