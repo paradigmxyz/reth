@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
@@ -9,9 +10,9 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey,
-    StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
+    TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -332,6 +333,14 @@ impl StateProofProvider for NoopProvider {
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
+    }
+
+    fn witness(
+        &self,
+        _overlay: HashedPostState,
+        _target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        Ok(HashMap::default())
     }
 }
 
