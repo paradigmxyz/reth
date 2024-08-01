@@ -128,28 +128,23 @@ impl<DB: Database> PersistenceService<DB> {
         // NOTE: checked non-empty above
         let first_block = blocks.first().unwrap().block();
         let last_block = blocks.last().unwrap().block().clone();
-
-        // use the storage writer to write receipts
-        let current_block = first_block.number;
-        debug!(target: "tree::persistence", len=blocks.len(), ?current_block, "Writing execution data to static files");
-
-        let receipts_writer =
-            static_file_provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
-
-        {
-            let mut storage_writer = StorageWriter::new(Some(provider_rw), Some(receipts_writer));
-            let receipts_iter = blocks.iter().map(|block| {
-                let receipts = block.execution_outcome().receipts().receipt_vec.clone();
-                debug_assert!(receipts.len() == 1);
-                receipts.first().unwrap().clone()
-            });
-            storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
-        }
-
-        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks to database");
         let first_number = first_block.number;
-
         let last_block_number = last_block.number;
+
+        // Only write receipts to static files if there is no receipt pruning configured.
+        let mut storage_writer = if provider_rw.prune_modes_ref().has_receipts_pruning() {
+            StorageWriter::new(Some(provider_rw), None)
+        } else {
+            StorageWriter::new(
+                Some(provider_rw),
+                Some(
+                    static_file_provider
+                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
+                ),
+            )
+        };
+
+        debug!(target: "tree::persistence", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
         // TODO: remove all the clones and do performant / batched writes for each type of object
         // instead of a loop over all blocks,
@@ -169,8 +164,6 @@ impl<DB: Database> PersistenceService<DB> {
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
-            // TODO: do we provide a static file producer here?
-            let mut storage_writer = StorageWriter::new(Some(provider_rw), None);
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
