@@ -15,41 +15,6 @@
 //! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
-use crate::{
-    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
-    config::NetworkConfig,
-    discovery::Discovery,
-    error::{NetworkError, ServiceKind},
-    eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
-    listener::ConnectionListener,
-    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeerAddr, PeersHandle, PeersManager},
-    poll_nested_stream_with_budget,
-    protocol::IntoRlpxSubProtocol,
-    session::SessionManager,
-    state::NetworkState,
-    swarm::{Swarm, SwarmEvent},
-    transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
-};
-use futures::{Future, StreamExt};
-use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    DisconnectReason, EthVersion, Status,
-};
-use reth_fs_util::{self as fs, FsPathError};
-use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
-use reth_network_peers::{NodeRecord, PeerId};
-use reth_primitives::ForkId;
-use reth_storage_api::BlockNumReader;
-use reth_tasks::shutdown::GracefulShutdown;
-use reth_tokio_util::EventSender;
-use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     path::Path,
@@ -61,9 +26,47 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+
+use futures::{Future, StreamExt};
+use parking_lot::Mutex;
+use reth_eth_wire::{
+    capability::{Capabilities, CapabilityMessage},
+    DisconnectReason, EthVersion, Status,
+};
+use reth_fs_util::{self as fs, FsPathError};
+use reth_metrics::common::mpsc::UnboundedMeteredSender;
+use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::{PeerAddr, PeersHandle, ReputationChangeKind};
+use reth_primitives::ForkId;
+use reth_storage_api::BlockNumReader;
+use reth_tasks::shutdown::GracefulShutdown;
+use reth_tokio_util::EventSender;
+use secp256k1::SecretKey;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
+
+use crate::{
+    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
+    config::NetworkConfig,
+    discovery::Discovery,
+    error::{NetworkError, ServiceKind},
+    eth_requests::IncomingEthRequest,
+    import::{BlockImport, BlockImportOutcome, BlockValidation},
+    listener::ConnectionListener,
+    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
+    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    network::{NetworkHandle, NetworkHandleMessage},
+    peers::PeersManager,
+    poll_nested_stream_with_budget,
+    protocol::IntoRlpxSubProtocol,
+    session::SessionManager,
+    state::NetworkState,
+    swarm::{Swarm, SwarmEvent},
+    transactions::NetworkTransactionEvent,
+    FetchClient, NetworkBuilder,
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Manages the _entire_ state of the network.

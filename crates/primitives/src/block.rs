@@ -133,6 +133,12 @@ impl Block {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
 
+    /// Returns whether or not the block contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip7702())
+    }
+
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
@@ -437,6 +443,12 @@ impl SealedBlock {
     #[inline]
     pub fn has_blob_transactions(&self) -> bool {
         self.body.iter().any(|tx| tx.is_eip4844())
+    }
+
+    /// Returns whether or not the block contains any eip-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip7702())
     }
 
     /// Ensures that the transaction root in the block header is valid.

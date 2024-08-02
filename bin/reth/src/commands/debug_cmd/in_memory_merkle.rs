@@ -1,10 +1,7 @@
 //! Command for debugging in-memory merkle trie calculation.
 
-use crate::{
-    args::NetworkArgs,
-    macros::block_executor,
-    utils::{get_single_body, get_single_header},
-};
+use std::{path::PathBuf, sync::Arc};
+
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
@@ -15,7 +12,7 @@ use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
@@ -28,8 +25,13 @@ use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
-use std::{path::PathBuf, sync::Arc};
 use tracing::*;
+
+use crate::{
+    args::NetworkArgs,
+    macros::block_executor,
+    utils::{get_single_body, get_single_header},
+};
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.

@@ -1,5 +1,10 @@
 //! Connection types for a session
 
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
@@ -7,10 +12,6 @@ use reth_eth_wire::{
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthMessage, EthStream, EthVersion, P2PStream,
-};
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
 };
 use tokio::net::TcpStream;
 

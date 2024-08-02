@@ -1,11 +1,9 @@
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
 use reth_primitives::{Bytes, B256};
 use reth_trie::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::DatabaseTrieCursorFactory,
-    witness::TrieWitness,
-    HashedPostState,
+    hashed_cursor::HashedPostStateCursorFactory, witness::TrieWitness, HashedPostState,
 };
 use std::collections::HashMap;
 

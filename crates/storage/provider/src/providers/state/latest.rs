@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, StateProvider, StateRootProvider,
@@ -8,12 +10,16 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey, StorageValue, B256,
+    Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment, StorageKey, StorageValue,
+    B256,
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
+use reth_trie::{
+    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
+    HashedStorage, StateRoot, StorageRoot,
+};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -87,6 +93,15 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         StateRoot::overlay_root_with_updates(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
+
+    fn hashed_storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
 }
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
@@ -98,6 +113,14 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     ) -> ProviderResult<AccountProof> {
         Proof::overlay_account_proof(self.tx, hashed_state, address, slots)
             .map_err(Into::<ProviderError>::into)
+    }
+
+    fn witness(
+        &self,
+        overlay: HashedPostState,
+        target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        TrieWitness::overlay_witness(self.tx, overlay, target).map_err(Into::<ProviderError>::into)
     }
 }
 
