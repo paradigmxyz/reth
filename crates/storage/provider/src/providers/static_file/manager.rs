@@ -866,6 +866,8 @@ impl StaticFileProvider {
                             };
                             return Err(err)
                         }
+                        drop(cursor);
+                        drop(provider);
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                         retrying = true;
@@ -898,14 +900,15 @@ impl StaticFileProvider {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
-        let mut provider = get_provider(range.start)?;
 
+        let mut provider = Some(get_provider(range.start)?);
         Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
-                    provider = get_provider(number).ok()?;
-                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                    provider.take();
+                    provider = Some(get_provider(number).ok()?);
+                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
         }))
