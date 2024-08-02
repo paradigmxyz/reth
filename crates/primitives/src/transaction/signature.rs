@@ -130,12 +130,12 @@ impl Signature {
 
     /// Output the length of the signature without the length of the RLP header
     pub fn payload_len(&self) -> usize {
-        self.parity.y_parity().length() + self.r.length() + self.s.length()
+        self.parity.length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `parity`, `r`, `s` values without a RLP header.
     pub fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.parity.y_parity().encode(out);
+        self.parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
@@ -143,7 +143,7 @@ impl Signature {
     /// Decodes the `parity`, `r`, `s` values without a RLP header.
     pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
-            parity: Parity::Parity(Decodable::decode(buf)?),
+            parity: Decodable::decode(buf)?,
             r: Decodable::decode(buf)?,
             s: Decodable::decode(buf)?,
         })
