@@ -8,7 +8,6 @@ use reth_codecs::{reth_codec, Compact};
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
-pub use alloy_consensus::Account as AccountTrie;
 /// An Ethereum account.
 #[reth_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -22,7 +22,7 @@ pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
 pub mod account;
-pub use account::{Account, AccountTrie, Bytecode};
+pub use account::{Account, Bytecode};
 
 mod integer_list;
 pub use integer_list::{IntegerList, RoaringBitmapError};
