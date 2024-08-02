@@ -540,9 +540,10 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
+    #[default]
     Local,
     /// Transaction has been received externally.
     ///
