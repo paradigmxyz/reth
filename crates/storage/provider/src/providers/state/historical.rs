@@ -10,24 +10,18 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{
-    constants::EPOCH_SLOTS, keccak256, Account, Address, BlockNumber, Bytecode, Bytes,
-    StaticFileSegment, StorageKey, StorageValue, B256,
+    constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment,
+    StorageKey, StorageValue, B256,
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof::Proof, updates::TrieUpdates,
-    witness::TrieWitness, AccountProof, HashedAccountsSorted, HashedPostState,
-    HashedPostStateSorted, HashedStorage, StateRoot, StorageRoot,
+    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
+    HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    proof::Proof,
-    trie_cursor::DatabaseTrieCursorFactory,
-    updates::TrieUpdates,
-    AccountProof, DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness,
-    HashedAccountsSorted, HashedPostState, HashedPostStateSorted, HashedStorage, StateRoot,
-    StorageRoot,
+    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
+    DatabaseTrieWitness,
 };
 use std::{collections::HashMap, fmt::Debug};
 
@@ -286,29 +280,13 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
         address: Address,
-        from: BlockNumber,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        let hashed_address = keccak256(address);
-        let hashed_storage = HashedStorage::from_reverts(address, self.tx, from)?;
-        let hashed_storage_sorted = hashed_storage.into_sorted();
-        let hashed_storages = HashMap::from([(hashed_address, hashed_storage_sorted)]);
-        let hashed_state_sorted =
-            HashedPostStateSorted::new(HashedAccountsSorted::default(), hashed_storages);
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.tx),
-            &hashed_state_sorted,
-        );
-        StorageRoot::new_hashed(
-            DatabaseTrieCursorFactory::new(self.tx),
-            hashed_cursor_factory,
-            hashed_address,
-            Default::default(),
-        )
-        .root()
-        .map_err(|err| ProviderError::Database(err.into()))
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

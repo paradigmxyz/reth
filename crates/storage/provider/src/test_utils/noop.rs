@@ -324,10 +324,10 @@ impl StateRootProvider for NoopProvider {
         Ok((B256::default(), TrieUpdates::default()))
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
         _address: Address,
-        _from: BlockNumber,
+        _hashed_storage: reth_trie::HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
     }

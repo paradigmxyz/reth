@@ -3,9 +3,10 @@
 //! `reth_rpc_eth_api::helpers::Call`.
 
 use reth_errors::ProviderResult;
-use reth_primitives::{Address, BlockNumber, B256, U256};
+use reth_primitives::{Address, B256, U256};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_trie::HashedStorage;
 use revm::Database;
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -31,12 +32,12 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
         self.0.hashed_state_root_with_updates(hashed_state)
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
         address: Address,
-        from: BlockNumber,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        self.0.storage_root_from_reverts(address, from)
+        self.0.hashed_storage_root(address, hashed_storage)
     }
 }
 

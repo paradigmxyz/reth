@@ -6,7 +6,7 @@ use crate::{
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 use revm::db::BundleState;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -99,12 +99,18 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         self.state_provider.hashed_state_root_with_updates(state)
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
-        _address: Address,
-        _from: BlockNumber,
+        address: Address,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        unimplemented!()
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut storage = bundle_state
+            .account(&address)
+            .map(|account| HashedStorage::from_bundle_state(account.status, &account.storage))
+            .unwrap_or(HashedStorage::new(false));
+        storage.extend(hashed_storage);
+        self.state_provider.hashed_storage_root(address, storage)
     }
 }
 

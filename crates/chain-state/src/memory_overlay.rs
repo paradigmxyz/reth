@@ -8,7 +8,7 @@ use reth_primitives::{
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -102,12 +102,13 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         self.historical.hashed_state_root_with_updates(state)
     }
 
-    fn storage_root_from_reverts(
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn hashed_storage_root(
         &self,
         address: Address,
-        from: BlockNumber,
+        storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        self.historical.storage_root_from_reverts(address, from)
+        self.historical.hashed_storage_root(address, storage)
     }
 }
 

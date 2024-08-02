@@ -6,7 +6,7 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -79,12 +79,12 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
         _address: Address,
-        _from: BlockNumber,
+        _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        unimplemented!("storage root from range is not supported")
+        unimplemented!("storage root is not supported")
     }
 }
 

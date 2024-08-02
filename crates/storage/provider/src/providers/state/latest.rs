@@ -17,9 +17,9 @@ use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    StateRoot,
+    HashedStorage, StateRoot, StorageRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -94,12 +94,13 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn storage_root_from_reverts(
+    fn hashed_storage_root(
         &self,
-        _address: Address,
-        _from: BlockNumber,
+        address: Address,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        unimplemented!("LatestStateProviderRef storage root from range not support")
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

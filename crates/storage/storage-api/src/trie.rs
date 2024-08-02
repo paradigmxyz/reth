@@ -1,6 +1,6 @@
-use reth_primitives::{Address, BlockNumber, Bytes, B256};
+use reth_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 use revm::db::BundleState;
 use std::collections::HashMap;
 
@@ -37,11 +37,12 @@ pub trait StateRootProvider: Send + Sync {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
-    /// Return the storage root from special block to last.
-    fn storage_root_from_reverts(
+    /// Returns the storage root of the `HashedStorage` for target address on top of the current
+    /// state.
+    fn hashed_storage_root(
         &self,
         address: Address,
-        from: BlockNumber,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256>;
 }
 

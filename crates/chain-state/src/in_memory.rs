@@ -673,7 +673,7 @@ mod tests {
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     };
-    use reth_trie::AccountProof;
+    use reth_trie::{AccountProof, HashedStorage};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -754,10 +754,10 @@ mod tests {
             Ok((B256::random(), TrieUpdates::default()))
         }
 
-        fn storage_root_from_reverts(
+        fn hashed_storage_root(
             &self,
             _address: Address,
-            _from: BlockNumber,
+            _hashed_storage: HashedStorage,
         ) -> ProviderResult<B256> {
             Ok(B256::random())
         }
