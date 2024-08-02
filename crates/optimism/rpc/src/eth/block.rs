@@ -15,7 +15,7 @@ use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
 use crate::{op_receipt_fields, OpEthApi, OpEthApiError};
 
-impl<N> EthBlocks for OpEthApi<N>
+impl<N, Eth> EthBlocks for OpEthApi<N, Eth>
 where
     Self: LoadBlock + EthApiSpec + LoadTransaction,
     Self::Error: From<OpEthApiError>,
@@ -76,7 +76,7 @@ where
     }
 }
 
-impl<N> LoadBlock for OpEthApi<N>
+impl<N, Eth> LoadBlock for OpEthApi<N, Eth>
 where
     Self: LoadPendingBlock + SpawnBlocking,
     N: FullNodeComponents,

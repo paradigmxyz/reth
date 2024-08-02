@@ -19,6 +19,7 @@ use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
+use reth_rpc::eth::EthTxBuilder;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
@@ -107,7 +108,7 @@ impl NodeTypes for OptimismNode {
 pub struct OptimismAddOns;
 
 impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
-    type EthApi = OpEthApi<N>;
+    type EthApi = OpEthApi<N, EthTxBuilder>;
 }
 
 /// A regular optimism evm and executor builder.

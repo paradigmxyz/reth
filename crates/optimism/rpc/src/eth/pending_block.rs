@@ -12,7 +12,7 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::OpEthApi;
 
-impl<N> LoadPendingBlock for OpEthApi<N>
+impl<N, Eth> LoadPendingBlock for OpEthApi<N, Eth>
 where
     Self: SpawnBlocking,
     N: FullNodeComponents,

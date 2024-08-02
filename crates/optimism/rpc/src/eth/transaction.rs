@@ -2,21 +2,22 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use op_alloy_network::Optimism;
+use alloy_rpc_types::optimism::OptimismTransactionFields;
+use op_alloy_network::{Network, Optimism};
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::TransactionSigned;
+use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, B256};
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, RawTransactionForwarder,
+    EthApiTypes, RawTransactionForwarder, TransactionBuilder,
 };
 use reth_rpc_eth_types::EthStateCache;
 use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
 
-impl<N> EthTransactions for OpEthApi<N>
+impl<N, Eth> EthTransactions for OpEthApi<N, Eth>
 where
     Self: LoadTransaction,
     N: FullNodeComponents,
@@ -34,7 +35,7 @@ where
     }
 }
 
-impl<N> LoadTransaction for OpEthApi<N>
+impl<N, Eth> LoadTransaction for OpEthApi<N, Eth>
 where
     Self: SpawnBlocking,
     N: FullNodeComponents,
@@ -76,7 +77,7 @@ impl OptimismTxMeta {
     }
 }
 
-impl<N> OpEthApi<N>
+impl<N, Eth> OpEthApi<N, Eth>
 where
     Self: EthApiSpec + LoadTransaction,
     <Self as EthApiTypes>::Error: From<OpEthApiError>,
@@ -115,25 +116,27 @@ where
     }
 }
 
+/// Builds OP transaction response type.
 #[derive(Debug, Clone, Copy)]
 pub struct OpTxBuilder<Eth> {
     _l1_builders: PhantomData<Eth>,
 }
 
-impl<Eth: TransactionBuilder<Transaction = Optimism::TransactionResponse>> TransactionBuilder
-    for OpTxBuilder
+impl<Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>>
+    TransactionBuilder for OpTxBuilder<Eth>
 {
-    type Transaction = Optimism::TransactionResponse;
+    type Transaction = <Optimism as Network>::TransactionResponse;
 
     fn fill(
-        &self,
         tx: TransactionSignedEcRecovered,
         block_hash: Option<B256>,
         block_number: Option<BlockNumber>,
         base_fee: Option<u64>,
         transaction_index: Option<usize>,
     ) -> Self::Transaction {
-        let mut resp = Eth::fill(self, tx, block_hash, block_number, base_fee, transaction_index);
+        let signed_tx = tx.clone().into_signed();
+
+        let mut resp = Eth::fill(tx, block_hash, block_number, base_fee, transaction_index);
 
         resp.other = OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
