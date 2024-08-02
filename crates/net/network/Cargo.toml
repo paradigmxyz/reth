@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
@@ -91,6 +91,7 @@ alloy-provider= { workspace = true, features = ["admin-api"] }
 # misc
 serial_test.workspace = true
 tempfile.workspace = true
+url.workspace = true
 
 ## Benchmarks
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }

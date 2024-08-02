@@ -7,6 +7,7 @@ use reth_rpc_types::{
     },
     Bundle, RichBlock, StateContext, TransactionRequest,
 };
+use std::collections::HashMap;
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -131,6 +132,18 @@ pub trait DebugApi {
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>>;
+
+    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    ///
+    /// The first and only argument is the block number or block hash.
+    #[method(name = "executionWitness")]
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<HashMap<B256, Bytes>>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

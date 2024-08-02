@@ -44,3 +44,7 @@ pub mod sync;
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+
+pub mod reputation;
+
+pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};

@@ -1,9 +1,8 @@
 use crate::{
-    providers::{BundleStateProvider, StaticFileProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderRO, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
+    DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -56,14 +55,6 @@ impl<DB> Clone for BlockchainProvider2<DB> {
     }
 }
 
-impl<DB> BlockchainProvider2<DB> {
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
-    pub fn with_latest(database: ProviderFactory<DB>, latest: SealedHeader) -> Self {
-        Self { database, canonical_in_memory_state: CanonicalInMemoryState::with_head(latest) }
-    }
-}
-
 impl<DB> BlockchainProvider2<DB>
 where
     DB: Database,
@@ -76,10 +67,28 @@ where
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest(database, header.seal(best.best_hash)))
+                Ok(Self::with_latest(database, header.seal(best.best_hash))?)
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
+    }
+
+    /// Create new provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker.
+    ///
+    /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
+    /// `database`.
+    pub fn with_latest(
+        database: ProviderFactory<DB>,
+        latest: SealedHeader,
+    ) -> ProviderResult<Self> {
+        let provider = database.provider()?;
+        let finalized_block_number = provider.last_finalized_block_number()?;
+        let finalized_header = provider.sealed_header(finalized_block_number)?;
+        Ok(Self {
+            database,
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
+        })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -646,16 +655,6 @@ where
         }
         Ok(None)
     }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn FullExecutionDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.pending()?;
-
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
-    }
 }
 
 impl<DB> CanonChainTracker for BlockchainProvider2<DB>
@@ -778,19 +777,6 @@ where
                 self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
             }
         }
-    }
-}
-
-impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn find_pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullExecutionDataProvider>> {
-        // TODO: check in memory overlay https://github.com/paradigmxyz/reth/issues/9614
-        None
     }
 }
 

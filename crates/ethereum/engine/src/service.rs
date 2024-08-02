@@ -159,7 +159,8 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default());
+            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
+                .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner =

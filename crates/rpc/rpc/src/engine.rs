@@ -4,7 +4,8 @@ use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
+    RichBlock, SyncStatus, TransactionRequest,
 };
 use tracing_futures::Instrument;
 
@@ -97,5 +98,15 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
         self.eth_filter.logs(filter).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getProof`
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> Result<EIP1186AccountProofResponse> {
+        self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 }

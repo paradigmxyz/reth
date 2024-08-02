@@ -1,4 +1,5 @@
-use crate::{args::NetworkArgs, macros::block_executor};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -14,7 +15,7 @@ use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_fs_util as fs;
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
@@ -25,9 +26,10 @@ use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
-use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::*;
+
+use crate::{args::NetworkArgs, macros::block_executor};
 
 /// `reth debug replay-engine` command
 /// This script will read stored engine API messages and replay them by the timestamp.

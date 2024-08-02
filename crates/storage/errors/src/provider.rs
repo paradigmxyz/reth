@@ -30,6 +30,9 @@ pub enum ProviderError {
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
+    /// Trie witness error.
+    #[error("trie witness error: {0}")]
+    TrieWitnessError(String),
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
@@ -144,7 +147,7 @@ pub enum ProviderError {
     StorageLockError(#[from] crate::lockfile::StorageLockError),
     /// Storage writer error.
     #[error(transparent)]
-    StorageWriterError(#[from] crate::writer::StorageWriterError),
+    UnifiedStorageWriterError(#[from] crate::writer::UnifiedStorageWriterError),
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

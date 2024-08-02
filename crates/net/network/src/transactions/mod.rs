@@ -1,5 +1,61 @@
 //! Transactions management for the p2p network.
 
+/// Aggregation on configurable parameters for [`TransactionsManager`].
+pub mod config;
+/// Default and spec'd bounds.
+pub mod constants;
+/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
+pub mod fetcher;
+pub mod validation;
+
+pub use self::constants::{
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+};
+pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
+pub use validation::*;
+
+pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
+
+use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
+
+use futures::{stream::FuturesUnordered, Future, StreamExt};
+use reth_eth_wire::{
+    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
+    PooledTransactions, RequestTxHashes, Transactions,
+};
+use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
+use reth_network_api::Peers;
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    sync::SyncStateProvider,
+};
+use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
+use reth_primitives::{PooledTransactionsElement, TransactionSigned, TxHash, B256};
+use reth_tokio_util::EventStream;
+use reth_transaction_pool::{
+    error::{PoolError, PoolResult},
+    GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
+    TransactionPool, ValidPoolTransaction,
+};
+use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tracing::{debug, trace};
+
 use crate::{
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -14,60 +70,6 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
-use futures::{stream::FuturesUnordered, Future, StreamExt};
-use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
-    NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
-    PooledTransactions, RequestTxHashes, Transactions,
-};
-use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
-use reth_network_api::{Peers, ReputationChangeKind};
-use reth_network_p2p::{
-    error::{RequestError, RequestResult},
-    sync::SyncStateProvider,
-};
-use reth_network_peers::PeerId;
-use reth_primitives::{
-    FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
-};
-use reth_tokio_util::EventStream;
-use reth_transaction_pool::{
-    error::{PoolError, PoolResult},
-    GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
-    TransactionPool, ValidPoolTransaction,
-};
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
-use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace};
-
-/// Aggregation on configurable parameters for [`TransactionsManager`].
-pub mod config;
-/// Default and spec'd bounds.
-pub mod constants;
-/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
-pub mod fetcher;
-pub mod validation;
-pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
-
-use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
-pub use validation::*;
-
-pub use self::constants::{
-    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-};
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for importing transactions into the pool.
 ///
@@ -1002,7 +1004,7 @@ where
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction = <Pool::Transaction as FromRecoveredPooledTransaction>::from_recovered_pooled_transaction(tx);
+                            let pool_transaction: Pool::Transaction = tx.into();
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1373,7 +1375,7 @@ impl PropagateTransaction {
     /// Create a new instance from a pooled transaction
     fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into().into_signed());
         Self { size, transaction }
     }
 }

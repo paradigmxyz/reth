@@ -9,7 +9,7 @@ use reth_db_common::{
     DbTool,
 };
 use reth_node_core::args::StageEnum;
-use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
 use reth_stages::StageId;
 use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
@@ -174,8 +174,7 @@ impl Command {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        static_file_provider.commit()?;
-        provider_rw.commit()?;
+        UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
         Ok(())
     }

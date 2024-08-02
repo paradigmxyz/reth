@@ -5,11 +5,11 @@ use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::state_root_prehashed,
-    trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
+    trie_cursor::InMemoryTrieCursorFactory,
     StateRoot,
 };
 use reth_trie_common::Nibbles;
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, DatabaseTrieCursorFactory};
 use std::collections::BTreeMap;
 
 proptest! {

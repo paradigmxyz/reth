@@ -16,7 +16,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    writer::StorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
     StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;
@@ -222,7 +222,7 @@ where
         }
 
         // We're reusing receipt writing code internal to
-        // `StorageWriter::append_receipts_from_blocks`, so we just use a default empty
+        // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
         // `BundleState`.
         let execution_outcome =
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
@@ -231,14 +231,13 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        let mut storage_writer = StorageWriter::new(Some(&provider), Some(static_file_producer));
+        let mut storage_writer = UnifiedStorageWriter::from(&provider, static_file_producer);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
-    provider.commit()?;
     // as static files works in file ranges, internally it will be committing when creating the
     // next file range already, so we only need to call explicitly at the end.
-    static_file_provider.commit()?;
+    UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

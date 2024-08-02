@@ -1,11 +1,12 @@
 //! Network cache support
 
 use core::hash::BuildHasher;
+use std::{fmt, hash::Hash};
+
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 // use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
-use std::{fmt, hash::Hash};
 
 /// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.
 ///

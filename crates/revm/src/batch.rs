@@ -4,7 +4,7 @@ use crate::{
     precompile::{Address, HashSet},
     primitives::alloy_primitives::BlockNumber,
 };
-use reth_execution_errors::BlockExecutionError;
+use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
@@ -118,7 +118,7 @@ impl BlockBatchRecord {
     pub fn save_receipts(&mut self, receipts: Vec<Receipt>) -> Result<(), BlockExecutionError> {
         let mut receipts = receipts.into_iter().map(Some).collect();
         // Prune receipts if necessary.
-        self.prune_receipts(&mut receipts)?;
+        self.prune_receipts(&mut receipts).map_err(InternalBlockExecutionError::from)?;
         // Save receipts.
         self.receipts.push(receipts);
         Ok(())

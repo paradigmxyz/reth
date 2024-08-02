@@ -17,6 +17,7 @@ use reth_rpc_layer::AuthClientService;
 use std::marker::PhantomData;
 
 /// Helper for engine api operations
+#[derive(Debug)]
 pub struct EngineApiTestContext<E> {
     pub canonical_stream: CanonStateNotificationStream,
     pub engine_api_client: HttpClient<AuthClientService<HttpBackend>>,

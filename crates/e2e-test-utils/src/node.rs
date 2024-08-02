@@ -6,6 +6,7 @@ use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
+    network::PeersHandleProvider,
     payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
@@ -24,21 +25,28 @@ use crate::{
 };
 
 /// An helper struct to handle node actions
+#[allow(missing_debug_implementations)]
 pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
     AddOns: NodeAddOns<Node>,
 {
+    /// The core structure representing the full node.
     pub inner: FullNode<Node, AddOns>,
+    /// Context for testing payload-related features.
     pub payload: PayloadTestContext<Node::Engine>,
-    pub network: NetworkTestContext,
+    /// Context for testing network functionalities.
+    pub network: NetworkTestContext<Node::Network>,
+    /// Context for testing the Engine API.
     pub engine_api: EngineApiTestContext<Node::Engine>,
+    /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
 
 impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    Node::Network: PeersHandleProvider,
     AddOns: NodeAddOns<Node>,
 {
     /// Creates a new test node
@@ -59,7 +67,7 @@ where
     }
 
     /// Establish a connection to the node
-    pub async fn connect(&mut self, node: &mut NodeTestContext<Node, AddOns>) {
+    pub async fn connect(&mut self, node: &mut Self) {
         self.network.add_peer(node.network.record()).await;
         node.network.next_session_established().await;
         self.network.next_session_established().await;
@@ -182,14 +190,16 @@ where
                     assert_eq!(latest_block.hash_slow(), expected_block_hash);
                     break
                 }
-                if wait_finish_checkpoint {
-                    panic!("Finish checkpoint matches, but could not fetch block.");
-                }
+                assert!(
+                    !wait_finish_checkpoint,
+                    "Finish checkpoint matches, but could not fetch block."
+                );
             }
         }
         Ok(())
     }
 
+    /// Waits for the node to unwind to the given block number
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
