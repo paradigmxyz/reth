@@ -15,6 +15,7 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::broadcast;
+use std::collections::BTreeMap;
 
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
@@ -28,7 +29,7 @@ pub(crate) struct InMemoryState {
     /// All canonical blocks that are not on disk yet.
     blocks: RwLock<HashMap<B256, Arc<BlockState>>>,
     /// Mapping of block numbers to block hashes.
-    numbers: RwLock<HashMap<u64, B256>>,
+    numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
     pending: RwLock<Option<BlockState>>,
 }
@@ -36,7 +37,7 @@ pub(crate) struct InMemoryState {
 impl InMemoryState {
     pub(crate) const fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
-        numbers: HashMap<u64, B256>,
+        numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
     ) -> Self {
         Self {
@@ -116,7 +117,7 @@ impl CanonicalInMemoryState {
     /// header if it exists.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
-        numbers: HashMap<u64, B256>,
+        numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
         finalized: Option<SealedHeader>,
     ) -> Self {
@@ -848,7 +849,7 @@ mod tests {
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
         state_by_hash.insert(state.hash(), state.clone());
 
-        let in_memory_state = InMemoryState::new(state_by_hash, HashMap::new(), None);
+        let in_memory_state = InMemoryState::new(state_by_hash, BTreeMap::new(), None);
 
         assert_eq!(in_memory_state.state_by_hash(state.hash()), Some(state));
         assert_eq!(in_memory_state.state_by_hash(B256::random()), None);
@@ -857,7 +858,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_state_by_number() {
         let mut state_by_hash = HashMap::new();
-        let mut hash_by_number = HashMap::new();
+        let mut hash_by_number = BTreeMap::new();
 
         let number = rand::thread_rng().gen::<u64>();
         let mut test_block_builder = TestBlockBuilder::default();
@@ -876,7 +877,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_head_state() {
         let mut state_by_hash = HashMap::new();
-        let mut hash_by_number = HashMap::new();
+        let mut hash_by_number = BTreeMap::new();
         let mut test_block_builder = TestBlockBuilder::default();
         let state1 = Arc::new(create_mock_state(&mut test_block_builder, 1, B256::random()));
         let hash1 = state1.hash();
@@ -903,7 +904,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            InMemoryState::new(HashMap::new(), HashMap::new(), Some(pending_state));
+            InMemoryState::new(HashMap::new(), BTreeMap::new(), Some(pending_state));
 
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
@@ -914,7 +915,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_no_pending_state() {
-        let in_memory_state = InMemoryState::new(HashMap::new(), HashMap::new(), None);
+        let in_memory_state = InMemoryState::new(HashMap::new(), BTreeMap::new(), None);
 
         assert_eq!(in_memory_state.pending_state(), None);
     }
@@ -988,7 +989,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_chain_update() {
-        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None, None);
+        let state = CanonicalInMemoryState::new(HashMap::new(), BTreeMap::new(), None, None);
         let mut test_block_builder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let block2 = test_block_builder.get_executed_block_with_number(0, B256::random());
@@ -1021,7 +1022,7 @@ mod tests {
         blocks.insert(block2.block().hash(), Arc::new(state2));
         blocks.insert(block3.block().hash(), Arc::new(state3));
 
-        let mut numbers = HashMap::new();
+        let mut numbers = BTreeMap::new();
         numbers.insert(1, block1.block().hash());
         numbers.insert(2, block2.block().hash());
         numbers.insert(3, block3.block().hash());
@@ -1054,7 +1055,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
-        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None, None);
+        let state = CanonicalInMemoryState::new(HashMap::new(), BTreeMap::new(), None, None);
         let chain: Vec<_> = state.canonical_chain().collect();
         assert!(chain.is_empty());
     }
@@ -1065,7 +1066,7 @@ mod tests {
         let hash = block.block().hash();
         let mut blocks = HashMap::new();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
-        let mut numbers = HashMap::new();
+        let mut numbers = BTreeMap::new();
         numbers.insert(1, hash);
 
         let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
@@ -1079,7 +1080,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
         let mut blocks = HashMap::new();
-        let mut numbers = HashMap::new();
+        let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();
 
@@ -1103,7 +1104,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
         let mut blocks = HashMap::new();
-        let mut numbers = HashMap::new();
+        let mut numbers = BTreeMap::new();
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::default();
 
