@@ -35,8 +35,8 @@ enum StorageType<C = (), S = ()> {
     StaticFile(S),
 }
 
-/// [`StorageWriter`] is responsible for managing the writing to either database, static file or
-/// both.
+/// [`UnifiedStorageWriter`] is responsible for managing the writing to storage with both database
+/// and static file providers.
 #[derive(Debug)]
 pub struct UnifiedStorageWriter<'a, TX, SF> {
     database: &'a DatabaseProvider<TX>,
@@ -44,7 +44,7 @@ pub struct UnifiedStorageWriter<'a, TX, SF> {
 }
 
 impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
-    /// Creates a new instance of [`StorageWriter`].
+    /// Creates a new instance of [`UnifiedStorageWriter`].
     ///
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
@@ -53,13 +53,13 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
         Self { database, static_file }
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a database provider and a static file
-    /// instance.
+    /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider and a static
+    /// file instance.
     pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
         Self::new(database, Some(static_file))
     }
 
-    /// Creates a new instance of [`StorageWriter`] from a database provider.
+    /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider.
     pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
         Self::new(database, None)
     }
@@ -321,8 +321,8 @@ where
     /// [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties) table to determine the
     /// total difficulty of the parent block during header insertion.
     ///
-    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
-    /// the Headers segment.
+    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
+    /// writer for the Headers segment.
     pub fn append_headers_from_blocks<H, I>(
         &mut self,
         initial_block_number: BlockNumber,
@@ -353,8 +353,8 @@ where
     /// [`BlockBodyIndices`](tables::BlockBodyIndices) table to determine the transaction number
     /// when appending to static files.
     ///
-    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
-    /// the Transactions segment.
+    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
+    /// writer for the Transactions segment.
     pub fn append_transactions_from_blocks<T>(
         &mut self,
         initial_block_number: BlockNumber,
@@ -406,11 +406,12 @@ where
 {
     /// Appends receipts block by block.
     ///
-    /// ATTENTION: If called from [`StorageWriter`] without a static file producer, it will always
-    /// write them to database. Otherwise, it will look into the pruning configuration to decide.
+    /// ATTENTION: If called from [`UnifiedStorageWriter`] without a static file producer, it will
+    /// always write them to database. Otherwise, it will look into the pruning configuration to
+    /// decide.
     ///
-    /// NOTE: The static file writer used to construct this [`StorageWriter`] MUST be a writer for
-    /// the Receipts segment.
+    /// NOTE: The static file writer used to construct this [`UnifiedStorageWriter`] MUST be a
+    /// writer for the Receipts segment.
     ///
     /// # Parameters
     /// - `initial_block_number`: The starting block number.
@@ -425,8 +426,8 @@ where
             self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
         // We write receipts to database in two situations:
-        // * If we are in live sync. In this case, `StorageWriter` is built without a static file
-        //   writer.
+        // * If we are in live sync. In this case, `UnifiedStorageWriter` is built without a static
+        //   file writer.
         // * If there is any kind of receipt pruning
         let mut storage_type = if self.static_file.is_none() ||
             self.database().prune_modes_ref().has_receipts_pruning()

@@ -8,9 +8,8 @@ use futures_util::Future;
 use reth_db_api::database::Database;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::StaticFileWriter, writer::UnifiedStorageWriter, FinalizedBlockReader,
-    FinalizedBlockWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;

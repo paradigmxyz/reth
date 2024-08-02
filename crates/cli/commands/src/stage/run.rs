@@ -28,7 +28,7 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{

@@ -3570,7 +3570,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         Ok(block_indices)
     }
 
-    /// TODO(joshie): this fn should be moved to `StorageWriter` eventually
+    /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,

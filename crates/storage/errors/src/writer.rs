@@ -1,7 +1,7 @@
 use crate::db::DatabaseError;
 use reth_primitives::StaticFileSegment;
 
-/// `StorageWriter` related errors
+/// `UnifiedStorageWriter` related errors
 #[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
 pub enum StorageWriterError {
     /// Static file writer is missing
