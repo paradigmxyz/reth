@@ -562,6 +562,10 @@ impl PoolTransaction for MockTransaction {
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
+
     fn hash(&self) -> &TxHash {
         match self {
             Self::Legacy { hash, .. } |

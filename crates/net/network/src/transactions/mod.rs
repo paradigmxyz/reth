@@ -1004,7 +1004,7 @@ where
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction: Pool::Transaction = tx.into();
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
