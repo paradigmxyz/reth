@@ -4,13 +4,13 @@ use reth_fs_util::FsPathError;
 use alloc::string::{String, ToString};
 
 /// Storage lock error.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror_no_std::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
 pub enum StorageLockError {
     /// Write lock taken
-    #[error("storage directory is currently in use as read-write by another process: PID {0}")]
+    #[display(fmt="storage directory is currently in use as read-write by another process: PID {_0}")]
     Taken(usize),
     /// Indicates other unspecified errors.
-    #[error("{0}")]
+    #[display(fmt="{_0}")]
     Other(String),
 }
 
