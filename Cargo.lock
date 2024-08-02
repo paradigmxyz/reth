@@ -8681,7 +8681,6 @@ dependencies = [
  "derive_more",
  "reth-fs-util",
  "reth-primitives",
- "thiserror-no-std",
 ]
 
 [[package]]

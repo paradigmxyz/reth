@@ -7,10 +7,10 @@ use alloc::string::{String, ToString};
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
 pub enum StorageLockError {
     /// Write lock taken
-    #[display(fmt="storage directory is currently in use as read-write by another process: PID {_0}")]
+    #[display(fmt = "storage directory is currently in use as read-write by another process: PID {_0}")]
     Taken(usize),
     /// Indicates other unspecified errors.
-    #[display(fmt="{_0}")]
+    #[display(fmt = "{_0}")]
     Other(String),
 }
 
