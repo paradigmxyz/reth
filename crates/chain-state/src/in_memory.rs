@@ -9,7 +9,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256,
+    SealedHeader, TransactionMeta, TransactionSigned, TxHash, B256,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -416,6 +416,64 @@ impl CanonicalInMemoryState {
         };
 
         MemoryOverlayStateProvider::new(in_memory, historical)
+    }
+
+    /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.
+    pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState>> {
+        let pending = self.inner.in_memory_state.pending.read().clone();
+        let head = self.inner.in_memory_state.head_state();
+
+        // this clone is cheap because we only expect to keep in memory a few
+        // blocks and all of them are Arcs.
+        let blocks = self.inner.in_memory_state.blocks.read().clone();
+
+        std::iter::once(pending).filter_map(|p| p.map(Arc::new)).chain(std::iter::successors(
+            head,
+            move |state| {
+                let parent_hash = state.block().block().parent_hash;
+                blocks.get(&parent_hash).cloned()
+            },
+        ))
+    }
+
+    /// Returns a `TransactionSigned` for the given `TxHash` if found.
+    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
+        for block_state in self.canonical_chain() {
+            if let Some(tx) = block_state.block().block().body.iter().find(|tx| tx.hash() == hash) {
+                return Some(tx.clone())
+            }
+        }
+        None
+    }
+
+    /// Returns a tuple with `TransactionSigned` and `TransactionMeta` for the
+    /// given `TxHash` if found.
+    pub fn transaction_by_hash_with_meta(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(TransactionSigned, TransactionMeta)> {
+        for (block_number, block_state) in self.canonical_chain().enumerate() {
+            if let Some((index, tx)) = block_state
+                .block()
+                .block()
+                .body
+                .iter()
+                .enumerate()
+                .find(|(_, tx)| tx.hash() == tx_hash)
+            {
+                let meta = TransactionMeta {
+                    tx_hash,
+                    index: index as u64,
+                    block_hash: block_state.hash(),
+                    block_number: block_number as u64,
+                    base_fee: block_state.block().block().header.base_fee_per_gas,
+                    timestamp: block_state.block().block.timestamp,
+                    excess_blob_gas: block_state.block().block.excess_blob_gas,
+                };
+                return Some((tx.clone(), meta))
+            }
+        }
+        None
     }
 }
 
@@ -992,6 +1050,81 @@ mod tests {
         let empty_overlay_provider =
             canonical_state.state_provider(unknown_hash, Box::new(MockStateProvider));
         assert_eq!(empty_overlay_provider.in_memory.len(), 0);
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_canonical_chain_empty() {
+        let state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None, None);
+        let chain: Vec<_> = state.canonical_chain().collect();
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_canonical_chain_single_block() {
+        let block = TestBlockBuilder::default().get_executed_block_with_number(1, B256::random());
+        let hash = block.block().hash();
+        let mut blocks = HashMap::new();
+        blocks.insert(hash, Arc::new(BlockState::new(block)));
+        let mut numbers = HashMap::new();
+        numbers.insert(1, hash);
+
+        let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let chain: Vec<_> = state.canonical_chain().collect();
+
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].number(), 1);
+        assert_eq!(chain[0].hash(), hash);
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
+        let mut blocks = HashMap::new();
+        let mut numbers = HashMap::new();
+        let mut parent_hash = B256::random();
+        let mut block_builder = TestBlockBuilder::default();
+
+        for i in 1..=3 {
+            let block = block_builder.get_executed_block_with_number(i, parent_hash);
+            let hash = block.block().hash();
+            blocks.insert(hash, Arc::new(BlockState::new(block.clone())));
+            numbers.insert(i, hash);
+            parent_hash = hash;
+        }
+
+        let state = CanonicalInMemoryState::new(blocks, numbers, None, None);
+        let chain: Vec<_> = state.canonical_chain().collect();
+
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0].number(), 3);
+        assert_eq!(chain[1].number(), 2);
+        assert_eq!(chain[2].number(), 1);
+    }
+
+    #[test]
+    fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
+        let mut blocks = HashMap::new();
+        let mut numbers = HashMap::new();
+        let mut parent_hash = B256::random();
+        let mut block_builder = TestBlockBuilder::default();
+
+        for i in 1..=2 {
+            let block = block_builder.get_executed_block_with_number(i, parent_hash);
+            let hash = block.block().hash();
+            blocks.insert(hash, Arc::new(BlockState::new(block.clone())));
+            numbers.insert(i, hash);
+            parent_hash = hash;
+        }
+
+        let pending_block = block_builder.get_executed_block_with_number(3, parent_hash);
+        let pending_state = BlockState::new(pending_block);
+
+        let state = CanonicalInMemoryState::new(blocks, numbers, Some(pending_state), None);
+        let chain: Vec<_> = state.canonical_chain().collect();
+
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0].number(), 3);
+        assert_eq!(chain[1].number(), 2);
+        assert_eq!(chain[2].number(), 1);
     }
 
     #[test]
