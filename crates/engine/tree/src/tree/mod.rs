@@ -1802,6 +1802,11 @@ where
             let tip = chain_update.tip().header.clone();
             self.on_canonical_chain_update(chain_update);
 
+            if let Some(attr) = attrs {
+                let updated = self.process_payload_attributes(attr, &tip, state);
+                return Ok(TreeOutcome::new(updated))
+            }
+
             // update the safe and finalized blocks and ensure their values are valid, but only
             // after the head block is made canonical
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
