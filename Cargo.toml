@@ -11,10 +11,10 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
-    "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
-    "crates/chainspec/",
+    "crates/blockchain-tree/",
     "crates/chain-state/",
+    "crates/chainspec/",
     "crates/cli/cli/",
     "crates/cli/commands/",
     "crates/cli/runner/",
@@ -25,17 +25,17 @@ members = [
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
-    "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/engine/primitives/",
     "crates/engine/tree/",
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
+    "crates/ethereum-forks/",
     "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
-    "crates/ethereum/engine/",
     "crates/ethereum/engine-primitives/",
+    "crates/ethereum/engine/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
     "crates/ethereum/payload/",
@@ -62,9 +62,9 @@ members = [
     "crates/net/network/",
     "crates/net/p2p/",
     "crates/net/peers/",
-    "crates/node/core/",
     "crates/node/api/",
     "crates/node/builder/",
+    "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
     "crates/optimism/cli",
@@ -78,8 +78,8 @@ members = [
     "crates/payload/builder/",
     "crates/payload/primitives/",
     "crates/payload/validator/",
-    "crates/primitives/",
     "crates/primitives-traits/",
+    "crates/primitives/",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
@@ -90,21 +90,21 @@ members = [
     "crates/rpc/rpc-eth-api/",
     "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
-    "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-server-types/",
+    "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
-    "crates/static-file/types/",
     "crates/static-file/static-file",
+    "crates/static-file/types/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
-    "crates/storage/db/",
     "crates/storage/db-api/",
     "crates/storage/db-common",
+    "crates/storage/db/",
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
     "crates/storage/libmdbx-rs/mdbx-sys/",
@@ -125,10 +125,10 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
-    "examples/stateful-precompile/",
     "examples/custom-inspector/",
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
+    "examples/custom-rlpx-subprotocol",
     "examples/db-access",
     "examples/manual-p2p/",
     "examples/network-txpool/",
@@ -137,8 +137,8 @@ members = [
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
+    "examples/stateful-precompile/",
     "examples/txpool-tracing/",
-    "examples/custom-rlpx-subprotocol",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
@@ -151,9 +151,9 @@ resolver = "2"
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
+rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
-rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 
@@ -166,20 +166,37 @@ rustdoc.all = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 derive_partial_eq_without_eq = "warn"
+doc_markdown = "warn"
+empty_line_after_doc_comments = "warn"
 empty_line_after_outer_attr = "warn"
+enum_glob_use = "warn"
 equatable_if_let = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+flat_map_option = "warn"
 imprecise_flops = "warn"
 iter_on_empty_collections = "warn"
+iter_on_single_items = "warn"
 iter_with_drain = "warn"
+iter_without_into_iter = "warn"
 large_stack_frames = "warn"
+manual_assert = "warn"
 manual_clamp = "warn"
+manual_string_new = "warn"
+match_same_arms = "warn"
+missing_const_for_fn = "warn"
 mutex_integer = "warn"
+naive_bytecount = "warn"
+needless_bitwise_bool = "warn"
+needless_continue = "warn"
 needless_pass_by_ref_mut = "warn"
 nonstandard_macro_braces = "warn"
 or_fun_call = "warn"
 path_buf_push_overwrite = "warn"
 read_zero_byte_vec = "warn"
 redundant_clone = "warn"
+single_char_pattern = "warn"
+string_lit_as_bytes = "warn"
 suboptimal_flops = "warn"
 suspicious_operation_groupings = "warn"
 trailing_empty_array = "warn"
@@ -187,31 +204,14 @@ trait_duplication_in_bounds = "warn"
 transmute_undefined_repr = "warn"
 trivial_regex = "warn"
 tuple_array_conversions = "warn"
+type_repetition_in_bounds = "warn"
 uninhabited_references = "warn"
+unnecessary_struct_initialization = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
-useless_let_if_seq = "warn"
 use_self = "warn"
-missing_const_for_fn = "warn"
-empty_line_after_doc_comments = "warn"
-iter_on_single_items = "warn"
-match_same_arms = "warn"
-doc_markdown = "warn"
-unnecessary_struct_initialization = "warn"
-string_lit_as_bytes = "warn"
-explicit_into_iter_loop = "warn"
-explicit_iter_loop = "warn"
-type_repetition_in_bounds = "warn"
-flat_map_option = "warn"
-manual_assert = "warn"
-manual_string_new = "warn"
-naive_bytecount = "warn"
-needless_bitwise_bool = "warn"
+useless_let_if_seq = "warn"
 zero_sized_map_values = "warn"
-single_char_pattern = "warn"
-needless_continue = "warn"
-enum_glob_use = "warn"
-iter_without_into_iter = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -231,8 +231,8 @@ significant_drop_tightening = "allow"
 # Speed up tests.
 [profile.dev.package]
 proptest.opt-level = 3
-rand_xorshift.opt-level = 3
 rand_chacha.opt-level = 3
+rand_xorshift.opt-level = 3
 unarray.opt-level = 3
 
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
@@ -268,14 +268,14 @@ codegen-units = 1
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
-reth-bench = { path = "bin/reth-bench" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
+reth-bench = { path = "bin/reth-bench" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
-reth-chainspec = { path = "crates/chainspec" }
 reth-chain-state = { path = "crates/chain-state" }
+reth-chainspec = { path = "crates/chainspec" }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
@@ -326,9 +326,9 @@ reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
-reth-network-types = { path = "crates/net/network-types" }
-reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
+reth-network-peers = { path = "crates/net/peers", default-features = false }
+reth-network-types = { path = "crates/net/network-types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-node-api = { path = "crates/node/api" }
 reth-node-builder = { path = "crates/node/builder" }
@@ -357,8 +357,8 @@ reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
-reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types" }
+reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
@@ -385,120 +385,120 @@ revm = { version = "12.1.0", features = [
     "secp256k1",
     "blst",
 ], default-features = false }
+revm-inspectors = "0.5"
 revm-primitives = { version = "7.1.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = "0.5"
 
 # eth
 alloy-chains = "0.1.18"
-alloy-primitives = "0.7.2"
+alloy-consensus = { version = "0.2.1", default-features = false }
 alloy-dyn-abi = "0.7.2"
-alloy-sol-types = "0.7.2"
+alloy-eips = { version = "0.2.1", default-features = false }
+alloy-genesis = { version = "0.2.1", default-features = false }
+alloy-json-rpc = { version = "0.2.1", default-features = false }
+alloy-network = { version = "0.2.1", default-features = false }
+alloy-node-bindings = { version = "0.2.1", default-features = false }
+alloy-primitives = "0.7.2"
+alloy-provider = { version = "0.2.1", features = [
+    "reqwest",
+], default-features = false }
+alloy-pubsub = { version = "0.2.1", default-features = false }
 alloy-rlp = "0.3.4"
-alloy-trie = { version = "0.4", default-features = false }
-alloy-rpc-types = { version = "0.2.1", default-features = false, features = [
+alloy-rpc-client = { version = "0.2.1", default-features = false }
+alloy-rpc-types = { version = "0.2.1", features = [
     "eth",
-] }
+], default-features = false }
+alloy-rpc-types-admin = { version = "0.2.1", default-features = false }
 alloy-rpc-types-anvil = { version = "0.2.1", default-features = false }
 alloy-rpc-types-beacon = { version = "0.2.1", default-features = false }
-alloy-rpc-types-admin = { version = "0.2.1", default-features = false }
-alloy-rpc-types-txpool = { version = "0.2.1", default-features = false }
-alloy-serde = { version = "0.2.1", default-features = false }
 alloy-rpc-types-engine = { version = "0.2.1", default-features = false }
 alloy-rpc-types-eth = { version = "0.2.1", default-features = false }
 alloy-rpc-types-mev = { version = "0.2.1", default-features = false }
 alloy-rpc-types-trace = { version = "0.2.1", default-features = false }
-alloy-genesis = { version = "0.2.1", default-features = false }
-alloy-node-bindings = { version = "0.2.1", default-features = false }
-alloy-provider = { version = "0.2.1", default-features = false, features = [
-    "reqwest",
-] }
-alloy-eips = { version = "0.2.1", default-features = false }
+alloy-rpc-types-txpool = { version = "0.2.1", default-features = false }
+alloy-serde = { version = "0.2.1", default-features = false }
 alloy-signer = { version = "0.2.1", default-features = false }
 alloy-signer-local = { version = "0.2.1", default-features = false }
-alloy-network = { version = "0.2.1", default-features = false }
-alloy-consensus = { version = "0.2.1", default-features = false }
+alloy-sol-types = "0.7.2"
 alloy-transport = { version = "0.2" }
 alloy-transport-http = { version = "0.2.1", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ws = { version = "0.2.1", default-features = false }
 alloy-transport-ipc = { version = "0.2.1", default-features = false }
-alloy-pubsub = { version = "0.2.1", default-features = false }
-alloy-json-rpc = { version = "0.2.1", default-features = false }
-alloy-rpc-client = { version = "0.2.1", default-features = false }
+alloy-transport-ws = { version = "0.2.1", default-features = false }
+alloy-trie = { version = "0.4", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.1"
 
 # misc
-auto_impl = "1"
 aquamarine = "0.5"
-bytes = "1.5"
+auto_impl = "1"
+backon = "0.4"
 bitflags = "2.4"
+boyer-moore-magiclen = "0.2.16"
+bytes = "1.5"
 clap = "4"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "6.0"
 derive_more = "0.99.17"
-fdlimit = "0.3.0"
+dyn-clone = "1.0.17"
 eyre = "0.6"
+fdlimit = "0.3.0"
 generic-array = "0.14"
-linked_hash_set = "0.1"
-tracing = "0.1.0"
-tracing-appender = "0.2"
-thiserror = "1.0"
-thiserror-no-std = { version = "2.0.2", default-features = false }
-serde_json = "1.0.94"
-serde = { version = "1.0", default-features = false }
-serde_with = "3.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
+itertools = "0.13"
+linked_hash_set = "0.1"
+modular-bitfield = "0.11.2"
+nybbles = "0.2.1"
+once_cell = "1.17"
+parking_lot = "0.12"
+paste = "1.0"
 rand = "0.8.5"
+rayon = "1.7"
 rustc-hash = { version = "2.0", default-features = false }
 schnellru = "0.2"
-strum = { version = "0.26", default-features = false }
-rayon = "1.7"
-itertools = "0.13"
-parking_lot = "0.12"
-modular-bitfield = "0.11.2"
-once_cell = "1.17"
-syn = "2.0"
-nybbles = "0.2.1"
-smallvec = "1"
-dyn-clone = "1.0.17"
+serde = { version = "1.0", default-features = false }
+serde_json = "1.0.94"
+serde_with = "3.3.0"
 sha2 = { version = "0.10", default-features = false }
-paste = "1.0"
-url = "2.3"
-backon = "0.4"
-boyer-moore-magiclen = "0.2.16"
 shellexpand = "3.0.0"
+smallvec = "1"
+strum = { version = "0.26", default-features = false }
+syn = "2.0"
+thiserror = "1.0"
+thiserror-no-std = { version = "2.0.2", default-features = false }
+tracing = "0.1.0"
+tracing-appender = "0.2"
+url = "2.3"
 zstd = "0.13"
 
 # metrics
 metrics = "0.23.0"
 metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
-metrics-util = "0.17.0"
 metrics-process = "2.1.0"
+metrics-util = "0.17.0"
 
 # proc-macros
 proc-macro2 = "1.0"
 quote = "1.0"
 
 # tokio
-tokio-stream = "0.1.11"
 tokio = { version = "1.21", default-features = false }
+tokio-stream = "0.1.11"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 # async
 async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3"
-futures-util = "0.3"
 futures-core = "0.3"
-pin-project = "1.0.12"
+futures-util = "0.3"
 hyper = "1.3"
 hyper-util = "0.1.5"
+pin-project = "1.0.12"
 reqwest = { version = "0.12", default-features = false }
 tower = "0.4"
 tower-http = "0.5"
@@ -509,8 +509,8 @@ discv5 = "0.6.0"
 # rpc
 jsonrpsee = "0.24"
 jsonrpsee-core = "0.24"
-jsonrpsee-types = "0.24"
 jsonrpsee-http-client = "0.24"
+jsonrpsee-types = "0.24"
 
 # http
 http = "1.0"
@@ -519,11 +519,11 @@ jsonwebtoken = "9"
 proptest-arbitrary-interop = "0.1.0"
 
 # crypto
+enr = { version = "0.12.1", default-features = false }
 secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-enr = { version = "0.12.1", default-features = false }
 
 # for eip-4844
 c-kzg = "1.0.0"
@@ -535,12 +535,12 @@ toml = "0.8"
 # misc-testing
 arbitrary = "1.3"
 assert_matches = "1.5.0"
-tempfile = "3.8"
 criterion = "0.5"
+iai-callgrind = "0.11"
 pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.5"
 serial_test = "3"
 similar-asserts = "1.5.0"
+tempfile = "3.8"
 test-fuzz = "5"
-iai-callgrind = "0.11"
