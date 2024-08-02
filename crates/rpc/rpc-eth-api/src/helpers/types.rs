@@ -4,12 +4,12 @@ use std::error::Error;
 
 use alloy_network::Network;
 use reth_rpc_types::Rich;
-use reth_rpc_types_compat::ResponseTypeBuilders;
+use reth_rpc_types_compat::{BlockBuilder, TransactionBuilder};
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
 /// Network specific `eth` API types.
-pub trait EthApiTypes: Send + Sync {
+pub trait EthApiTypes: Send + Sync + Clone {
     /// Extension of [`EthApiError`](reth_rpc_eth_types::EthApiError), with network specific errors.
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
@@ -18,8 +18,12 @@ pub trait EthApiTypes: Send + Sync {
         + Error
         + Send
         + Sync;
-    /// Blockchain data types, specific to network, e.g. block and transaction.
+    /// Blockchain primitive types, specific to network, e.g. block and transaction.
     type NetworkTypes: Network;
+    /// Conversion methods for transaction RPC type.
+    type TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self>>;
+    /// Conversion methods for block RPC type.
+    type BlockBuilder: BlockBuilder<TxBuilder = Self::TransactionBuilder>;
 }
 
 /// Adapter for network specific transaction type.
@@ -27,6 +31,3 @@ pub type Transaction<T> = <<T as EthApiTypes>::NetworkTypes as Network>::Transac
 
 /// Adapter for network specific block type.
 pub type Block<T> = Rich<reth_rpc_types::Block<Transaction<T>>>;
-
-/// Helper trait that unifies [`EthApiTypes`] with type conversions.
-pub trait EthApiTypesCompat: EthApiTypes + ResponseTypeBuilders {}

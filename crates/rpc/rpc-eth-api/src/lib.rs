@@ -23,7 +23,7 @@ pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use helpers::{
     error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError},
-    types::{Block, EthApiTypes, EthApiTypesCompat, Transaction},
+    types::{Block, EthApiTypes, Transaction},
 };
 pub use pubsub::EthPubSubApiServer;
 

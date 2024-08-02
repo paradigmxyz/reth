@@ -3,7 +3,6 @@
 use std::marker::PhantomData;
 
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
-use reth_rpc_types_compat::ResponseTypeBuilders;
 use reth_tasks::TaskSpawner;
 
 use crate::{

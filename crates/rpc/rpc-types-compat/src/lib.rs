@@ -11,11 +11,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod block;
-pub mod builders;
 pub mod engine;
 pub mod proof;
 pub mod transaction;
 
 pub use block::BlockBuilder;
-pub use builders::ResponseTypeBuilders;
 pub use transaction::TransactionBuilder;

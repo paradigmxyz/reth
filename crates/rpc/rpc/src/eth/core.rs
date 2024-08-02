@@ -16,7 +16,6 @@ use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
 };
-use reth_rpc_types_compat::ResponseTypeBuilders;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskExecutor, TaskSpawner, TokioTaskExecutor,
@@ -140,11 +139,6 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-}
-
-impl<Provider, Pool, Network, EvmConfig> ResponseTypeBuilders
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
     type TransactionBuilder = EthTxBuilder;
     type BlockBuilder = EthBlockBuilder<EthTxBuilder>;
 }
