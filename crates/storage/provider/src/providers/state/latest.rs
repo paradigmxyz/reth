@@ -17,9 +17,9 @@ use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    StateRoot,
+    HashedStorage, StateRoot, StorageRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -91,6 +91,15 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         StateRoot::overlay_root_with_updates(self.tx, hashed_state, Default::default())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn hashed_storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
