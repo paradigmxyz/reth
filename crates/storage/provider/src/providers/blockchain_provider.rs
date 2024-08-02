@@ -26,7 +26,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    ops::{Bound, RangeBounds, RangeInclusive},
+    ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
     time::Instant,
 };
@@ -94,6 +94,30 @@ where
     /// Gets a clone of `canonical_in_memory_state`.
     pub fn canonical_in_memory_state(&self) -> CanonicalInMemoryState {
         self.canonical_in_memory_state.clone()
+    }
+
+    // Helper function to convert range bounds
+    fn convert_range_bounds<T>(
+        &self,
+        range: impl RangeBounds<T>,
+        end_unbounded: impl FnOnce() -> T,
+    ) -> (T, T)
+    where
+        T: Copy + Add<Output = T> + Sub<Output = T> + From<u8>,
+    {
+        let start = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + T::from(1u8),
+            Bound::Unbounded => T::from(0u8),
+        };
+
+        let end = match range.end_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n - T::from(1u8),
+            Bound::Unbounded => end_unbounded(),
+        };
+
+        (start, end)
     }
 }
 
@@ -165,16 +189,9 @@ where
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         let mut headers = Vec::new();
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n - 1,
-            Bound::Unbounded => self.canonical_in_memory_state.get_canonical_block_number(),
-        };
+        let (start, end) = self.convert_range_bounds(range, || {
+            self.canonical_in_memory_state.get_canonical_block_number()
+        });
 
         for num in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
@@ -204,16 +221,9 @@ where
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
         let mut sealed_headers = Vec::new();
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n - 1,
-            Bound::Unbounded => self.canonical_in_memory_state.get_canonical_block_number(),
-        };
+        let (start, end) = self.convert_range_bounds(range, || {
+            self.canonical_in_memory_state.get_canonical_block_number()
+        });
 
         for num in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
@@ -236,16 +246,9 @@ where
         mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
         let mut headers = Vec::new();
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n - 1,
-            Bound::Unbounded => self.canonical_in_memory_state.get_canonical_block_number(),
-        };
+        let (start, end) = self.convert_range_bounds(range, || {
+            self.canonical_in_memory_state.get_canonical_block_number()
+        });
 
         for num in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
@@ -605,16 +608,9 @@ where
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n - 1,
-            Bound::Unbounded => self.canonical_in_memory_state.get_canonical_block_number(),
-        };
+        let (start, end) = self.convert_range_bounds(range, || {
+            self.canonical_in_memory_state.get_canonical_block_number()
+        });
 
         let mut transactions = Vec::new();
         let mut last_in_memory_block = None;
