@@ -38,12 +38,12 @@ enum StorageType<C = (), S = ()> {
 /// [`StorageWriter`] is responsible for managing the writing to either database, static file or
 /// both.
 #[derive(Debug)]
-pub struct StorageWriter<'a, TX, SF> {
+pub struct UnifiedStorageWriter<'a, TX, SF> {
     database: &'a DatabaseProvider<TX>,
     static_file: Option<SF>,
 }
 
-impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
+impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     /// Creates a new instance of [`StorageWriter`].
     ///
     /// # Parameters
@@ -102,7 +102,7 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     }
 }
 
-impl StorageWriter<'_, (), ()> {
+impl UnifiedStorageWriter<'_, (), ()> {
     /// Commits both storage types in the right order.
     ///
     /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
@@ -128,7 +128,7 @@ impl StorageWriter<'_, (), ()> {
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, TX, &'b StaticFileProvider>
+impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, &'b StaticFileProvider>
 where
     TX: DbTxMut + DbTx,
 {
@@ -147,9 +147,9 @@ where
 
         // Only write receipts to static files if there is no receipt pruning configured.
         let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
-            StorageWriter::from_database(self.database())
+            UnifiedStorageWriter::from_database(self.database())
         } else {
-            StorageWriter::from(
+            UnifiedStorageWriter::from(
                 self.database(),
                 self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
             )
@@ -206,7 +206,7 @@ where
         {
             let header_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
-            let mut storage_writer = StorageWriter::from(self.database(), header_writer);
+            let mut storage_writer = UnifiedStorageWriter::from(self.database(), header_writer);
             let td = storage_writer.append_headers_from_blocks(
                 block.header().number,
                 std::iter::once(&(block.header(), block.hash())),
@@ -223,7 +223,8 @@ where
         {
             let transactions_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
-            let mut storage_writer = StorageWriter::from(self.database(), transactions_writer);
+            let mut storage_writer =
+                UnifiedStorageWriter::from(self.database(), transactions_writer);
             let no_hash_transactions =
                 block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
             storage_writer.append_transactions_from_blocks(
@@ -278,7 +279,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTx,
 {
@@ -389,7 +390,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
@@ -469,7 +470,7 @@ where
     }
 }
 
-impl<'a, 'b, TX> StateWriter for StorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, TX> StateWriter for UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
 where
     TX: DbTxMut + DbTx,
 {
@@ -766,7 +767,7 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -867,7 +868,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -935,7 +936,7 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1083,7 +1084,7 @@ mod tests {
         let bundle = state.take_bundle();
 
         let outcome = ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1249,7 +1250,7 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1297,7 +1298,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::from_database(&provider);
+        let mut writer = UnifiedStorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
