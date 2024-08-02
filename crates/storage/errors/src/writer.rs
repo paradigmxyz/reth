@@ -3,7 +3,7 @@ use reth_primitives::StaticFileSegment;
 
 /// `UnifiedStorageWriter` related errors
 #[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
-pub enum StorageWriterError {
+pub enum UnifiedStorageWriterError {
     /// Static file writer is missing
     #[error("Static file writer is missing")]
     MissingStaticFileWriter,

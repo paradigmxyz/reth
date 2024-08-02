@@ -21,7 +21,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockNumReader, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
 };
-use reth_storage_errors::writer::StorageWriterError;
+use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
 use std::{borrow::Borrow, sync::Arc};
 use tracing::{debug, instrument};
@@ -94,9 +94,9 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     /// - `Ok(())` if the static file instance is set.
     /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file instance is not set.
     #[allow(unused)]
-    const fn ensure_static_file(&self) -> Result<(), StorageWriterError> {
+    const fn ensure_static_file(&self) -> Result<(), UnifiedStorageWriterError> {
         if self.static_file.is_none() {
-            return Err(StorageWriterError::MissingStaticFileWriter)
+            return Err(UnifiedStorageWriterError::MissingStaticFileWriter)
         }
         Ok(())
     }
@@ -301,11 +301,11 @@ where
     fn ensure_static_file_segment(
         &self,
         segment: StaticFileSegment,
-    ) -> Result<(), StorageWriterError> {
+    ) -> Result<(), UnifiedStorageWriterError> {
         match &self.static_file {
             Some(writer) => {
                 if writer.user_header().segment() != segment {
-                    Err(StorageWriterError::IncorrectStaticFileWriter(
+                    Err(UnifiedStorageWriterError::IncorrectStaticFileWriter(
                         writer.user_header().segment(),
                         segment,
                     ))
@@ -313,7 +313,7 @@ where
                     Ok(())
                 }
             }
-            None => Err(StorageWriterError::MissingStaticFileWriter),
+            None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),
         }
     }
 
