@@ -8,7 +8,7 @@ pub use alloy_eips::eip4844::{
     TARGET_BLOBS_PER_BLOCK, TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG,
 };
 
-#[cfg(feature = "c-kzg")]
+#[cfg(all(feature = "c-kzg", feature = "std"))]
 mod trusted_setup {
     use crate::kzg::KzgSettings;
     use std::io::Write;

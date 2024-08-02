@@ -11,10 +11,9 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
-    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
-    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
+    TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -460,12 +459,12 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.to_recovered_transaction())
+        self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+        self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -758,10 +757,17 @@ pub trait PoolTransaction:
     fmt::Debug
     + Send
     + Sync
-    + FromRecoveredPooledTransaction
-    + TryFromRecoveredTransaction
-    + IntoRecoveredTransaction
+    + Clone
+    + From<PooledTransactionsElementEcRecovered>
+    + TryFrom<TransactionSignedEcRecovered>
+    + Into<TransactionSignedEcRecovered>
 {
+    /// Associated type representing the raw consensus variant of the transaction.
+    type Consensus: From<Self> + TryInto<Self>;
+
+    /// Associated type representing the recovered pooled variant of the transaction.
+    type Pooled: Into<Self>;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -993,6 +999,10 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type Consensus = TransactionSignedEcRecovered;
+
+    type Pooled = PooledTransactionsElementEcRecovered;
+
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -1142,12 +1152,10 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFromRecoveredTransaction for EthPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.tx_type() as u8 {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
@@ -1171,15 +1179,9 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
     }
 }
 
-impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        Self::from(tx)
-    }
-}
-
-impl IntoRecoveredTransaction for EthPooledTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone()
+impl From<EthPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: EthPooledTransaction) -> Self {
+        tx.transaction
     }
 }
 

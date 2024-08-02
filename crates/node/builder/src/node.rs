@@ -4,7 +4,6 @@ pub use reth_node_api::{FullNodeTypes, NodeTypes};
 use std::{marker::PhantomData, sync::Arc};
 
 use reth_chainspec::ChainSpec;
-use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -91,7 +90,7 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The node's transaction pool.
     pub pool: Node::Pool,
     /// Handle to the node's network.
-    pub network: NetworkHandle,
+    pub network: Node::Network,
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
     /// Handle to the node's payload builder service.

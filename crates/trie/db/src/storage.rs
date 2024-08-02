@@ -1,8 +1,7 @@
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_db_api::transaction::DbTx;
 use reth_primitives::{Address, B256};
-use reth_trie::{
-    hashed_cursor::DatabaseHashedCursorFactory, trie_cursor::DatabaseTrieCursorFactory, StorageRoot,
-};
+use reth_trie::StorageRoot;
 
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::{TrieRootMetrics, TrieType};
