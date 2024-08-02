@@ -3,7 +3,7 @@
 use std::marker::PhantomData;
 
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
-use reth_rpc_types_compat::{ResponseTypeBuilders, TransactionBuilder};
+use reth_rpc_types_compat::ResponseTypeBuilders;
 use reth_tasks::TaskSpawner;
 
 use crate::{
@@ -13,15 +13,7 @@ use crate::{
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
-pub struct EthApiBuilderCtx<
-    Provider,
-    Pool,
-    EvmConfig,
-    Network,
-    Tasks,
-    Events,
-    Eth: TransactionBuilder,
-> {
+pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth> {
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -46,7 +38,6 @@ impl<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
     EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>
 where
     Provider: BlockReaderIdExt + Clone,
-    Eth: ResponseTypeBuilders,
 {
     /// Returns a new [`FeeHistoryCache`] for the context.
     pub fn new_fee_history_cache(&self) -> FeeHistoryCache
@@ -75,7 +66,6 @@ impl GasPriceOracleBuilder {
     ) -> GasPriceOracle<Provider>
     where
         Provider: BlockReaderIdExt + Clone,
-        Eth: ResponseTypeBuilders,
     {
         GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle, ctx.cache.clone())
     }
@@ -94,7 +84,6 @@ impl FeeHistoryCacheBuilder {
         Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
         Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
-        Eth: ResponseTypeBuilders,
     {
         let fee_history_cache =
             FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache);

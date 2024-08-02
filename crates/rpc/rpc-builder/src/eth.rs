@@ -66,15 +66,7 @@ where
 
 /// Builds [`EthHandlers`] for core, filter, and pubsub `eth_` apis.
 #[allow(missing_debug_implementations)]
-pub struct EthHandlersBuilder<
-    Provider,
-    Pool,
-    Network,
-    Tasks,
-    Events,
-    EvmConfig,
-    EthApi: EthApiTypesCompat,
-> {
+pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -179,7 +171,6 @@ impl EthPubSubApiBuilder {
         Events: Clone,
         Network: Clone,
         Tasks: TaskSpawner + Clone + 'static,
-        Eth: EthApiTypesCompat,
     {
         EthPubSub::with_spawner(
             ctx.provider.clone(),
