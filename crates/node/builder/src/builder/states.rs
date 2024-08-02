@@ -8,7 +8,6 @@
 use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
-use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     node_config::NodeConfig,
@@ -103,6 +102,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
+    type Network = C::Network;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -120,7 +120,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         &self.provider
     }
 
-    fn network(&self) -> &NetworkHandle {
+    fn network(&self) -> &Self::Network {
         self.components.network()
     }
 

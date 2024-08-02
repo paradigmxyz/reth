@@ -1,21 +1,30 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProvider, StateChangeWriter, StateWriter,
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
+    writer::static_file::StaticFileWriter,
+    BlockExecutionWriter, BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter,
+    StateChangeWriter, StateWriter, TrieWriter,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
+    models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
+    Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, Header, StaticFileSegment, TransactionSignedNoHash, B256, U256,
+    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
 };
-use reth_storage_api::{HeaderProvider, ReceiptWriter};
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::{
+    BlockNumReader, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
+};
 use reth_storage_errors::writer::StorageWriterError;
 use revm::db::OriginalValuesKnown;
-use static_file::StaticFileWriter;
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::Arc};
+use tracing::{debug, instrument};
 
 mod database;
 mod static_file;
@@ -44,6 +53,12 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
         Self { database, static_file }
     }
 
+    /// Creates a new instance of [`StorageWriter`] from a database provider and a static file
+    /// instance.
+    pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
+        Self::new(Some(database), Some(static_file))
+    }
+
     /// Creates a new instance of [`StorageWriter`] from a static file instance.
     pub const fn from_static_file(static_file: SF) -> Self {
         Self::new(None, Some(static_file))
@@ -51,7 +66,7 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
 
     /// Creates a new instance of [`StorageWriter`] from a database provider.
     pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
-        StorageWriter::new(Some(database), None)
+        Self::new(Some(database), None)
     }
 
     /// Returns a reference to the database writer.
@@ -62,11 +77,19 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
         self.database.as_ref().expect("should exist")
     }
 
+    /// Returns a reference to the static file instance.
+    ///
+    /// # Panics
+    /// If the static file instance is not set.
+    fn static_file(&self) -> &SF {
+        self.static_file.as_ref().expect("should exist")
+    }
+
     /// Returns a mutable reference to the static file instance.
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file(&mut self) -> &mut SF {
+    fn static_file_mut(&mut self) -> &mut SF {
         self.static_file.as_mut().expect("should exist")
     }
 
@@ -92,6 +115,186 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
         if self.static_file.is_none() {
             return Err(StorageWriterError::MissingStaticFileWriter)
         }
+        Ok(())
+    }
+}
+
+impl StorageWriter<'_, (), ()> {
+    /// Commits both storage types in the right order.
+    ///
+    /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
+    pub fn commit<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        static_file.commit()?;
+        database.commit()?;
+        Ok(())
+    }
+
+    /// Commits both storage types in the right order for an unwind operation.
+    ///
+    /// NOTE: Should only be used after unwinding data from storage!
+    pub fn commit_unwind<DB: Database>(
+        database: DatabaseProviderRW<DB>,
+        static_file: StaticFileProvider,
+    ) -> ProviderResult<()> {
+        database.commit()?;
+        static_file.commit()?;
+        Ok(())
+    }
+}
+
+impl<'a, 'b, TX> StorageWriter<'a, TX, &'b StaticFileProvider>
+where
+    TX: DbTxMut + DbTx,
+{
+    /// Writes executed blocks and receipts to storage.
+    pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            debug!(target: "provider::storage_writer", "Attempted to write empty block range");
+            return Ok(())
+        }
+
+        // NOTE: checked non-empty above
+        let first_block = blocks.first().unwrap().block();
+        let last_block = blocks.last().unwrap().block().clone();
+        let first_number = first_block.number;
+        let last_block_number = last_block.number;
+
+        // Only write receipts to static files if there is no receipt pruning configured.
+        let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
+            StorageWriter::from_database(self.database())
+        } else {
+            StorageWriter::new(
+                Some(self.database()),
+                Some(
+                    self.static_file()
+                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
+                ),
+            )
+        };
+
+        debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
+
+        // TODO: remove all the clones and do performant / batched writes for each type of object
+        // instead of a loop over all blocks,
+        // meaning:
+        //  * blocks
+        //  * state
+        //  * hashed state
+        //  * trie updates (cannot naively extend, need helper)
+        //  * indices (already done basically)
+        // Insert the blocks
+        for block in blocks {
+            let sealed_block =
+                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
+            self.database().insert_block(sealed_block)?;
+            self.save_header_and_transactions(block.block.clone())?;
+
+            // Write state and changesets to the database.
+            // Must be written after blocks because of the receipt lookup.
+            let execution_outcome = block.execution_outcome().clone();
+            state_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
+
+            // insert hashes and intermediate merkle nodes
+            {
+                let trie_updates = block.trie_updates().clone();
+                let hashed_state = block.hashed_state();
+                self.database().write_hashed_state(&hashed_state.clone().into_sorted())?;
+                self.database().write_trie_updates(&trie_updates)?;
+            }
+        }
+
+        // update history indices
+        self.database().update_history_indices(first_number..=last_block_number)?;
+
+        // Update pipeline progress
+        self.database().update_pipeline_stages(last_block_number, false)?;
+
+        debug!(target: "provider::storage_writer", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
+    }
+
+    /// Writes the header & transactions to static files, and updates their respective checkpoints
+    /// on database.
+    #[instrument(level = "trace", skip_all, fields(block = ?block.num_hash()) target = "storage")]
+    fn save_header_and_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<()> {
+        debug!(target: "provider::storage_writer", "Writing headers and transactions.");
+
+        {
+            let header_writer =
+                self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
+            let mut storage_writer = StorageWriter::new(Some(self.database()), Some(header_writer));
+            let td = storage_writer.append_headers_from_blocks(
+                block.header().number,
+                std::iter::once(&(block.header(), block.hash())),
+            )?;
+
+            debug!(target: "provider::storage_writer", block_num=block.number, "Updating transaction metadata after writing");
+            self.database()
+                .tx_ref()
+                .put::<tables::HeaderTerminalDifficulties>(block.number, CompactU256(td))?;
+            self.database()
+                .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
+        }
+
+        {
+            let transactions_writer =
+                self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
+            let mut storage_writer =
+                StorageWriter::new(Some(self.database()), Some(transactions_writer));
+            let no_hash_transactions =
+                block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
+            storage_writer.append_transactions_from_blocks(
+                block.header().number,
+                std::iter::once(&no_hash_transactions),
+            )?;
+            self.database()
+                .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
+        }
+
+        Ok(())
+    }
+
+    /// Removes all block, transaction and receipt data above the given block number from the
+    /// database and static files. This is exclusive, i.e., it only removes blocks above
+    /// `block_number`, and does not remove `block_number`.
+    pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
+        // Get highest static file block for the total block range
+        let highest_static_file_block = self
+            .static_file()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
+
+        // Get the total txs for the block range, so we have the correct number of columns for
+        // receipts and transactions
+        let tx_range = self
+            .database()
+            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
+        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
+
+        debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
+        self.database().remove_block_and_execution_range(
+            block_number..=self.database().last_block_number()?,
+        )?;
+
+        debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
+        self.static_file()
+            .get_writer(block_number, StaticFileSegment::Headers)?
+            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
+
+        self.static_file()
+            .get_writer(block_number, StaticFileSegment::Transactions)?
+            .prune_transactions(total_txs, block_number)?;
+
+        if !self.database().prune_modes_ref().has_receipts_pruning() {
+            self.static_file()
+                .get_writer(block_number, StaticFileSegment::Receipts)?
+                .prune_receipts(total_txs, block_number)?;
+        }
+
         Ok(())
     }
 }
@@ -151,7 +354,7 @@ where
             let (header, hash) = pair.borrow();
             let header = header.borrow();
             td += header.difficulty;
-            self.static_file().append_header(header, td, hash)?;
+            self.static_file_mut().append_header(header, td, hash)?;
         }
 
         Ok(td)
@@ -196,11 +399,11 @@ where
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
             for tx in transactions.borrow() {
-                self.static_file().append_transaction(tx_index, tx)?;
+                self.static_file_mut().append_transaction(tx_index, tx)?;
                 tx_index += 1;
             }
 
-            self.static_file().increment_block(block_number)?;
+            self.static_file_mut().increment_block(block_number)?;
 
             // update index
             last_tx_idx = Some(tx_index);
@@ -244,7 +447,7 @@ where
             StorageType::Database(self.database().tx_ref().cursor_write::<tables::Receipts>()?)
         } else {
             self.ensure_static_file_segment(StaticFileSegment::Receipts)?;
-            StorageType::StaticFile(self.static_file())
+            StorageType::StaticFile(self.static_file_mut())
         };
 
         let mut last_tx_idx = None;

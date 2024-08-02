@@ -33,6 +33,14 @@ pub enum StorageRootError {
     Database(#[from] DatabaseError),
 }
 
+impl From<StorageRootError> for DatabaseError {
+    fn from(err: StorageRootError) -> Self {
+        match err {
+            StorageRootError::Database(err) => err,
+        }
+    }
+}
+
 /// State proof errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
 pub enum StateProofError {
