@@ -17,9 +17,9 @@ use op_alloy_network::Optimism;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
-use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
     StateProviderFactory,
@@ -47,18 +47,8 @@ use crate::OpEthApiError;
 pub type EthApiNodeBackend<N> = EthApiInner<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
-    NetworkHandle,
+    <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
->;
-
-/// Adapter for [`EthApiBuilderCtx`].
-pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    NetworkHandle,
-    TaskExecutor,
-    <N as FullNodeTypes>::Provider,
 >;
 
 /// OP-Reth `Eth` API implementation.

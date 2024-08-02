@@ -1,14 +1,21 @@
-use crate::PrefixSetLoader;
-use reth_db_api::transaction::DbTx;
-use reth_execution_errors::StateRootError;
-use reth_primitives::{BlockNumber, B256};
-use reth_trie::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    trie_cursor::{DatabaseTrieCursorFactory, InMemoryTrieCursorFactory},
-    updates::TrieUpdates,
-    HashedPostState, StateRoot, StateRootProgress,
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
+use reth_db::tables;
+use reth_db_api::{
+    cursor::DbCursorRO,
+    models::{AccountBeforeTx, BlockNumberAddress},
+    transaction::DbTx,
 };
-use std::ops::RangeInclusive;
+use reth_execution_errors::StateRootError;
+use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
+use reth_storage_errors::db::DatabaseError;
+use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress,
+};
+use std::{
+    collections::{hash_map, HashMap},
+    ops::RangeInclusive,
+};
 use tracing::debug;
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -111,6 +118,13 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
+/// Extends [`HashedPostState`] with operations specific for working with a database transaction.
+pub trait DatabaseHashedPostState<TX>: Sized {
+    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
+    /// block up to the current tip and aggregates them into hashed state in reverse.
+    fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError>;
+}
+
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
@@ -180,6 +194,52 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
+    }
+}
+
+impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
+    fn from_reverts(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
+        // Iterate over account changesets and record value before first occurring account change.
+        let mut accounts = HashMap::<Address, Option<Account>>::default();
+        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        for entry in account_changesets_cursor.walk_range(from..)? {
+            let (_, AccountBeforeTx { address, info }) = entry?;
+            if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
+                entry.insert(info);
+            }
+        }
+
+        // Iterate over storage changesets and record value before first occurring storage change.
+        let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
+        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+        for entry in
+            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
+        {
+            let (BlockNumberAddress((_, address)), storage) = entry?;
+            let account_storage = storages.entry(address).or_default();
+            if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
+                entry.insert(storage.value);
+            }
+        }
+
+        let hashed_accounts = HashMap::from_iter(
+            accounts.into_iter().map(|(address, info)| (keccak256(address), info)),
+        );
+
+        let hashed_storages = HashMap::from_iter(storages.into_iter().map(|(address, storage)| {
+            (
+                keccak256(address),
+                HashedStorage::from_iter(
+                    // The `wiped` flag indicates only whether previous storage entries
+                    // should be looked up in db or not. For reverts it's a noop since all
+                    // wiped changes had been written as storage reverts.
+                    false,
+                    storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
+                ),
+            )
+        }));
+
+        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
     }
 }
 

@@ -6,7 +6,8 @@ use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{Block, EthApiTypes, Transaction};
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Filter, Log, SyncStatus, TransactionRequest,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
+    SyncStatus, TransactionRequest,
 };
 use reth_rpc_types_compat::TransactionBuilder;
 use tracing_futures::Instrument;
@@ -39,7 +40,7 @@ where
         + EthApiTypes
         + TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
-    EthFilter: EthFilterApiServer<Eth>,
+    EthFilter: EthFilterApiServer<Transaction<Eth>>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
@@ -103,5 +104,15 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
         self.eth_filter.logs(filter).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getProof`
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> Result<EIP1186AccountProofResponse> {
+        self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 }

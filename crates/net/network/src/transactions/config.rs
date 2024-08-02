@@ -1,8 +1,9 @@
+use derive_more::Constructor;
+
 use super::{
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use derive_more::Constructor;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Default, Clone)]

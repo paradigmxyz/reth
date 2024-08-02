@@ -1,3 +1,5 @@
+//! L1 `eth` API types.
+
 use std::marker::PhantomData;
 
 use alloy_network::{Ethereum, Network};

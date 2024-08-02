@@ -33,7 +33,7 @@ pub use tokio_util::codec::{
 
 pub use crate::{
     capability::Capability,
-    disconnect::{CanDisconnect, DisconnectReason},
+    disconnect::CanDisconnect,
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
     p2pstream::{
@@ -45,5 +45,3 @@ pub use crate::{
 // Re-export wire types
 #[doc(inline)]
 pub use reth_eth_wire_types::*;
-
-pub use disconnect::UnknownDisconnectReason;

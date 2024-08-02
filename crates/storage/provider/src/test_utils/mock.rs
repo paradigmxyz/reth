@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -558,6 +558,14 @@ impl StateRootProvider for MockEthProvider {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))
+    }
+
+    fn hashed_storage_root(
+        &self,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
     }
 }
 

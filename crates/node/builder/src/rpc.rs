@@ -6,11 +6,13 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_network::NetworkHandle;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_node_core::{
     node_config::NodeConfig,
-    rpc::{api::EngineApiServer, eth::FullEthApiServer},
+    rpc::{
+        api::EngineApiServer,
+        eth::{EthApiTypesCompat, FullEthApiServer},
+    },
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc_builder::{
@@ -161,7 +163,7 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi> {
     pub(crate) registry: RpcRegistryInner<
         Node::Provider,
         Node::Pool,
-        NetworkHandle,
+        Node::Network,
         TaskExecutor,
         Node::Provider,
         EthApi,
@@ -172,7 +174,7 @@ impl<Node: FullNodeComponents, EthApi> Deref for RpcRegistry<Node, EthApi> {
     type Target = RpcRegistryInner<
         Node::Provider,
         Node::Pool,
-        NetworkHandle,
+        Node::Network,
         TaskExecutor,
         Node::Provider,
         EthApi,
@@ -241,7 +243,7 @@ impl<'a, Node: FullNodeComponents, EthApi> RpcContext<'a, Node, EthApi> {
     }
 
     /// Returns the handle to the network
-    pub fn network(&self) -> &NetworkHandle {
+    pub fn network(&self) -> &Node::Network {
         self.node.network()
     }
 
@@ -334,18 +336,21 @@ where
 }
 
 /// Provides builder for the core `eth` API type.
-pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> {
+pub trait EthApiBuilderProvider<N: FullNodeComponents, Eth: EthApiTypesCompat>:
+    BuilderProvider<N>
+{
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Eth>) -> Self + Send>;
 }
 
-impl<N, F> EthApiBuilderProvider<N> for F
+impl<N, Eth, F> EthApiBuilderProvider<N, Eth> for F
 where
     N: FullNodeComponents,
-    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>>,
+    Eth: EthApiTypesCompat,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N, Eth>>,
 {
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N, Eth>) -> Self + Send> {
         F::builder()
     }
 }

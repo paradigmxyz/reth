@@ -41,7 +41,7 @@ pub type PeerId = reth_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction;
+    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -539,9 +539,10 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
+    #[default]
     Local,
     /// Transaction has been received externally.
     ///
@@ -758,7 +759,6 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + Clone
-    + From<PooledTransactionsElementEcRecovered>
     + TryFrom<TransactionSignedEcRecovered>
     + Into<TransactionSignedEcRecovered>
 {
@@ -767,6 +767,9 @@ pub trait PoolTransaction:
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Pooled` type to `Self`
+    fn from_pooled(pooled: Self::Pooled) -> Self;
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -864,7 +867,9 @@ pub trait PoolTransaction:
 
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
-pub trait EthPoolTransaction: PoolTransaction {
+pub trait EthPoolTransaction:
+    PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>
+{
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
@@ -1002,6 +1007,10 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
 
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {

@@ -6,6 +6,7 @@ use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
+    network::PeersHandleProvider,
     payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
@@ -35,7 +36,7 @@ where
     /// Context for testing payload-related features.
     pub payload: PayloadTestContext<Node::Engine>,
     /// Context for testing network functionalities.
-    pub network: NetworkTestContext,
+    pub network: NetworkTestContext<Node::Network>,
     /// Context for testing the Engine API.
     pub engine_api: EngineApiTestContext<Node::Engine>,
     /// Context for testing RPC features.
@@ -45,6 +46,7 @@ where
 impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    Node::Network: PeersHandleProvider,
     AddOns: NodeAddOns<Node>,
 {
     /// Creates a new test node

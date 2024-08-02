@@ -34,3 +34,6 @@ pub use state::*;
 
 pub mod receipts;
 pub use receipts::*;
+
+pub mod disconnect_reason;
+pub use disconnect_reason::*;

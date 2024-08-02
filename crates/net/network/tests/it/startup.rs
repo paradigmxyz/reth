@@ -1,3 +1,8 @@
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+};
+
 use reth_discv4::Discv4Config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
@@ -6,10 +11,6 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
-use std::{
-    io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-};
 use tokio::net::TcpListener;
 
 fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {

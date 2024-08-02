@@ -1092,7 +1092,7 @@ where
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => {
-                            TxPoolApi::new(self.pool.clone()).into_rpc().into()
+                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
                         }
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
