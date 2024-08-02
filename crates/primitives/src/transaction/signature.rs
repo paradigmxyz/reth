@@ -41,7 +41,7 @@ impl Signature {
     /// signature.
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
-        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+        Self { r: U256::ZERO, s: U256::ZERO, parity: Parity::Parity(false) }
     }
 }
 
@@ -119,7 +119,7 @@ impl Signature {
                 //
                 // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
                 if v == 0 && r.is_zero() && s.is_zero() {
-                    return Ok((Self { r, s, odd_y_parity: false }, None))
+                    return Ok((Self { r, s, parity: Parity::Parity(false) }, None))
                 }
             }
         }
@@ -133,14 +133,14 @@ impl Signature {
         self.parity.y_parity().length() + self.r.length() + self.s.length()
     }
 
-    /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
+    /// Encode the `parity`, `r`, `s` values without a RLP header.
     pub fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.parity.y_parity().encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
-    /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
+    /// Decodes the `parity`, `r`, `s` values without a RLP header.
     pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
             parity: Parity::Parity(Decodable::decode(buf)?),
