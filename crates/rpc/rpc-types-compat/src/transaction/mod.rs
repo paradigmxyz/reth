@@ -10,6 +10,7 @@ use std::fmt;
 
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxType, B256};
+use reth_rpc_types::{Transaction, WithOtherFields};
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionBuilder: Send + Sync + Unpin + Clone + fmt::Debug {
@@ -122,5 +123,21 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
+    }
+}
+
+impl TransactionBuilder for () {
+    // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
+    // `alloy_network::AnyNetwork`
+    type Transaction = WithOtherFields<Transaction>;
+
+    fn fill(
+        _tx: TransactionSignedEcRecovered,
+        _block_hash: Option<B256>,
+        _block_number: Option<BlockNumber>,
+        _base_fee: Option<u64>,
+        _transaction_index: Option<usize>,
+    ) -> Self::Transaction {
+        WithOtherFields::default()
     }
 }

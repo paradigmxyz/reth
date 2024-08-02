@@ -2,7 +2,8 @@
 
 use std::error::Error;
 
-use alloy_network::Network;
+use alloy_network::{AnyNetwork, Network};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types::Rich;
 use reth_rpc_types_compat::{BlockBuilder, TransactionBuilder};
 
@@ -24,6 +25,13 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self>>;
     /// Conversion methods for block RPC type.
     type BlockBuilder: BlockBuilder<TxBuilder = Self::TransactionBuilder>;
+}
+
+impl EthApiTypes for () {
+    type Error = EthApiError;
+    type NetworkTypes = AnyNetwork;
+    type TransactionBuilder = ();
+    type BlockBuilder = ();
 }
 
 /// Adapter for network specific transaction type.

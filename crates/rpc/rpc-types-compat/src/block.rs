@@ -101,6 +101,17 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
     }
 }
 
+impl BlockBuilder for () {
+    type TxBuilder = ();
+
+    fn from_block_full(
+        _block: BlockWithSenders,
+        _total_difficulty: U256,
+        _block_hash: Option<B256>,
+    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
+        Ok(Block::default())
+    }
+}
 /// Converts from a [`reth_primitives::SealedHeader`] to a [`reth_rpc_types::Header`]
 ///
 /// # Note
