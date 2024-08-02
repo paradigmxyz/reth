@@ -1,11 +1,11 @@
 //! Error handling for [`P2PStream`](crate::P2PStream).
 
-use crate::{
-    capability::SharedCapabilityError, disconnect::UnknownDisconnectReason, DisconnectReason,
-    ProtocolVersion,
-};
-use reth_primitives::GotExpected;
 use std::io;
+
+use reth_eth_wire_types::{DisconnectReason, UnknownDisconnectReason};
+use reth_primitives::GotExpected;
+
+use crate::{capability::SharedCapabilityError, ProtocolVersion};
 
 /// Errors when sending/receiving p2p messages. These should result in kicking the peer.
 #[derive(thiserror::Error, Debug)]
