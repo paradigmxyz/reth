@@ -11,7 +11,7 @@ use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
 /// Network specific `eth` API types.
 pub trait EthApiTypes: Send + Sync + Clone {
-    /// Extension of [`EthApiError`](reth_rpc_eth_types::EthApiError), with network specific errors.
+    /// Extension of [`EthApiError`], with network specific errors.
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError

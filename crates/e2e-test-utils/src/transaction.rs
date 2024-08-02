@@ -36,10 +36,11 @@ impl TransactionTestContext {
         builder.ingest(b"dummy blob");
         let sidecar: BlobTransactionSidecar = builder.build()?;
 
-        <TransactionRequest as TransactionBuilder<Ethereum>>::set_blob_sidecar(
-            &mut tx, sidecar,
+        <TransactionRequest as TransactionBuilder<Ethereum>>::set_blob_sidecar(&mut tx, sidecar);
+        <TransactionRequest as TransactionBuilder<Ethereum>>::set_max_fee_per_blob_gas(
+            &mut tx,
+            15e9 as u128,
         );
-        <TransactionRequest as TransactionBuilder<Ethereum>>::set_max_fee_per_blob_gas(&mut tx, 15e9 as u128);
 
         let signed = Self::sign_tx(wallet, tx).await;
         Ok(signed)
@@ -48,9 +49,7 @@ impl TransactionTestContext {
     /// Signs an arbitrary [`TransactionRequest`] using the provided wallet
     pub async fn sign_tx(wallet: PrivateKeySigner, tx: TransactionRequest) -> TxEnvelope {
         let signer = EthereumWallet::from(wallet);
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer)
-            .await
-            .unwrap()
+        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer).await.unwrap()
     }
 
     /// Creates a tx with blob sidecar and sign it, returning bytes
