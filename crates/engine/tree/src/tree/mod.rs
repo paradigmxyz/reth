@@ -1962,7 +1962,7 @@ mod tests {
             let mut blocks_by_hash = HashMap::new();
             let mut blocks_by_number = BTreeMap::new();
             let mut state_by_hash = HashMap::new();
-            let mut hash_by_number = HashMap::new();
+            let mut hash_by_number = BTreeMap::new();
             let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
             let mut parent_hash = B256::ZERO;
 
