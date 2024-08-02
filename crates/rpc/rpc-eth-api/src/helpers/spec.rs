@@ -66,7 +66,8 @@ pub trait EthApiSpec: Send + Sync {
 
             let stages = self
                 .provider()
-                .get_all_checkpoints()?
+                .get_all_checkpoints()
+                .unwrap_or_default()
                 .into_iter()
                 .map(|(name, checkpoint)| Stage { name, block: checkpoint.block_number })
                 .collect();
