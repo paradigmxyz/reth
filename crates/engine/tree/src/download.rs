@@ -9,6 +9,7 @@ use reth_network_p2p::{
     headers::client::HeadersClient,
 };
 use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
+use reth_revm::primitives::FixedBytes;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet},
@@ -40,6 +41,8 @@ pub enum DownloadAction {
 pub enum DownloadOutcome {
     /// Downloaded blocks.
     Blocks(Vec<SealedBlockWithSenders>),
+    /// New download started.
+    NewDownloadStarted { remaining_blocks: u64, target: B256 },
 }
 
 /// Basic [`BlockDownloader`].
@@ -58,6 +61,10 @@ where
     set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlockWithSenders>>,
     /// Engine download metrics.
     metrics: BlockDownloaderMetrics,
+    /// Set of hashes for in-flight full block requests from the previous poll
+    previous_full_block_hashes: HashSet<B256>,
+    /// Set of (`start_hash`, count) for in-flight block range requests from the previous poll
+    previous_block_range_requests: HashSet<(B256, u64)>,
 }
 
 impl<Client> BasicBlockDownloader<Client>
@@ -72,6 +79,8 @@ where
             inflight_block_range_requests: Vec::new(),
             set_buffered_blocks: BinaryHeap::new(),
             metrics: BlockDownloaderMetrics::default(),
+            previous_block_range_requests: Default::default(),
+            previous_full_block_hashes: Default::default(),
         }
     }
 
@@ -147,6 +156,45 @@ where
         self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
         // TODO: full block range metrics
     }
+
+    /// Check if there are any new requests in `inflight_full_block_requests`
+    /// or `inflight_block_range_requests` that weren't there in the previous poll.
+    /// Returns the number of remaining blocks and the target block hash.
+    fn check_new_downloads(&mut self) -> Option<(u64, B256)> {
+        // Check for new full block requests
+        for request in &self.inflight_full_block_requests {
+            let hash = *request.hash();
+            if !self.previous_full_block_hashes.contains(&hash) {
+                self.previous_full_block_hashes.insert(hash);
+                return Some((1, hash));
+            }
+        }
+
+        // Check for new block range requests
+        for request in &self.inflight_block_range_requests {
+            let start_hash = FixedBytes(*request.start_hash());
+            let count = request.count();
+            if !self.previous_block_range_requests.contains(&(start_hash, count)) {
+                self.previous_block_range_requests.insert((start_hash, count));
+                return Some((count, start_hash));
+            }
+        }
+
+        None
+    }
+
+    fn update_previous_requests(&mut self) {
+        self.previous_full_block_hashes.clear();
+        self.previous_full_block_hashes
+            .extend(self.inflight_full_block_requests.iter().map(|req| *req.hash()));
+
+        self.previous_block_range_requests.clear();
+        self.previous_block_range_requests.extend(
+            self.inflight_block_range_requests
+                .iter()
+                .map(|req| (B256::from(*req.start_hash()), req.count())),
+        );
+    }
 }
 
 impl<Client> BlockDownloader for BasicBlockDownloader<Client>
@@ -203,6 +251,11 @@ where
         if self.set_buffered_blocks.is_empty() {
             return Poll::Pending;
         }
+
+        if let Some((remaining_blocks, target)) = self.check_new_downloads() {
+            return Poll::Ready(DownloadOutcome::NewDownloadStarted { remaining_blocks, target });
+        }
+        self.update_previous_requests();
 
         // drain all unique element of the block buffer if there are any
         let mut downloaded_blocks: Vec<SealedBlockWithSenders> =
