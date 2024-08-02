@@ -63,13 +63,14 @@ pub trait EthApiSpec: Send + Sync {
             let current_block = U256::from(
                 self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
             );
-            SyncStatus::Info(SyncInfo {
+            SyncStatus::Info(Box::new(SyncInfo {
                 starting_block: self.starting_block(),
                 current_block,
                 highest_block: current_block,
                 warp_chunks_amount: None,
                 warp_chunks_processed: None,
-            })
+                stages: None,
+            }))
         } else {
             SyncStatus::None
         };

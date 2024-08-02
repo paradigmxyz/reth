@@ -5,7 +5,7 @@ use crate::{
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::{keccak256, Account, Address, B256, U256};
-use revm::db::BundleAccount;
+use revm::db::{states::StorageSlot, AccountStatus, BundleAccount};
 use std::collections::{hash_map, HashMap, HashSet};
 
 /// Representation of in-memory hashed state.
@@ -29,12 +29,8 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = keccak256(address);
                 let hashed_account = account.info.clone().map(Into::into);
-                let hashed_storage = HashedStorage::from_iter(
-                    account.status.was_destroyed(),
-                    account.storage.iter().map(|(key, value)| {
-                        (keccak256(B256::new(key.to_be_bytes())), value.present_value)
-                    }),
-                );
+                let hashed_storage =
+                    HashedStorage::from_bundle_state(account.status, &account.storage);
                 (hashed_address, (hashed_account, hashed_storage))
             })
             .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
@@ -46,6 +42,11 @@ impl HashedPostState {
             storages.insert(address, storage);
         }
         Self { accounts, storages }
+    }
+
+    /// Construct [`HashedPostState`] from a single [`HashedStorage`].
+    pub fn from_hashed_storage(hashed_address: B256, storage: HashedStorage) -> Self {
+        Self { accounts: HashMap::default(), storages: HashMap::from([(hashed_address, storage)]) }
     }
 
     /// Set account entries on hashed state.
@@ -127,12 +128,7 @@ impl HashedPostState {
         let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
         for (hashed_address, hashed_storage) in &self.storages {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-            let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
-            for hashed_slot in hashed_storage.storage.keys() {
-                prefix_set.insert(Nibbles::unpack(hashed_slot));
-            }
-            storage_prefix_sets.insert(*hashed_address, prefix_set);
+            storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
@@ -157,6 +153,24 @@ impl HashedStorage {
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
         Self { wiped, storage: HashMap::from_iter(iter) }
+    }
+
+    /// Create new hashed storage from bundle state account entry.
+    pub fn from_bundle_state(status: AccountStatus, storage: &HashMap<U256, StorageSlot>) -> Self {
+        let storage = storage
+            .iter()
+            .map(|(key, value)| (keccak256(B256::from(*key)), value.present_value))
+            .collect();
+        Self { wiped: status.was_destroyed(), storage }
+    }
+
+    /// Construct [`PrefixSetMut`] from hashed storage.
+    pub fn construct_prefix_set(&self) -> PrefixSetMut {
+        let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+        for hashed_slot in self.storage.keys() {
+            prefix_set.insert(Nibbles::unpack(hashed_slot));
+        }
+        prefix_set
     }
 
     /// Extend hashed storage with contents of other.
@@ -198,6 +212,14 @@ pub struct HashedPostStateSorted {
 }
 
 impl HashedPostStateSorted {
+    /// Create new instance of [`HashedPostStateSorted`]
+    pub const fn new(
+        accounts: HashedAccountsSorted,
+        storages: HashMap<B256, HashedStorageSorted>,
+    ) -> Self {
+        Self { accounts, storages }
+    }
+
     /// Returns reference to hashed accounts.
     pub const fn accounts(&self) -> &HashedAccountsSorted {
         &self.accounts

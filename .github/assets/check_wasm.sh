@@ -4,18 +4,18 @@ set +e  # Disable immediate exit on error
 # Array of crates 
 wasm_crates=(
   # The following were confirmed not working in the past, but could be enabled if issues have been resolved
+  # reth-consensus
   # reth-db
-  # reth-primitives
-  # reth-revm
   # reth-evm
   # reth-evm-ethereum
-  # reth-consensus
   # The following are confirmed working
+  reth-codecs
   reth-errors
   reth-ethereum-forks
   reth-network-peers
+  reth-primitives
   reth-primitives-traits
-  reth-codecs
+  reth-revm
 )
 
 # Array to hold the results

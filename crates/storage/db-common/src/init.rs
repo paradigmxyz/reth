@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    writer::StorageWriter,
+    writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
     ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
@@ -131,8 +131,9 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let segment = StaticFileSegment::Transactions;
     static_file_provider.latest_writer(segment)?.increment_block(0)?;
 
-    provider_rw.commit()?;
-    static_file_provider.commit()?;
+    // `commit_unwind`` will first commit the DB and then the static file provider, which is
+    // necessary on `init_genesis`.
+    UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
     Ok(hash)
 }
@@ -210,7 +211,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    let mut storage_writer = StorageWriter::new(Some(provider), None);
+    let mut storage_writer = UnifiedStorageWriter::from_database(provider);
     storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
