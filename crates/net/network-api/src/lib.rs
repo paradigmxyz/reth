@@ -20,7 +20,7 @@ pub mod error;
 pub mod noop;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
-pub use reth_network_p2p::{BodiesClient, HeadersClient};
+pub use reth_network_p2p::BlockClient;
 pub use reth_network_types::{PeerKind, PeersHandle, Reputation, ReputationChangeKind};
 
 pub use downloaders::BlockDownloaderProvider;
