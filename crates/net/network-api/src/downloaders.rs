@@ -7,8 +7,7 @@ use tokio::sync::oneshot;
 /// Provides client for downloading blocks.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockDownloaderProvider {
-    /// Returns a new combined [`HeadersClient`] and [`BodiesClient`], used for syncing blocks from
-    /// peers.
+    /// Returns a new [`BlockClient`], used for fetching blocks from peers.
     ///
     /// The client is the entrypoint for sending block requests to the network.
     fn fetch_client(
