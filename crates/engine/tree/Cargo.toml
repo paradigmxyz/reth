@@ -85,8 +85,3 @@ test-utils = [
   "reth-static-file",
   "reth-tracing",
 ]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-revm/optimism"
-]
