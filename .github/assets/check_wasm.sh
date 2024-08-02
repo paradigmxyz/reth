@@ -8,7 +8,6 @@ wasm_crates=(
   # reth-db
   # reth-evm
   # reth-evm-ethereum
-  # reth-revm
   # The following are confirmed working
   reth-codecs
   reth-errors
@@ -16,6 +15,7 @@ wasm_crates=(
   reth-network-peers
   reth-primitives
   reth-primitives-traits
+  reth-revm
 )
 
 # Array to hold the results
@@ -24,7 +24,8 @@ results=()
 any_failed=0
 
 for crate in "${wasm_crates[@]}"; do
-  cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
+  # TODO: use `wasm32-wasip1` once https://github.com/gyscos/zstd-rs/commit/fc3a73100b6d3f2ff6dd3da0ff14dd9185ba02f0 is released
+  cmd="cargo +stable build -p $crate --target wasm32-wasi --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
