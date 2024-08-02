@@ -39,7 +39,7 @@ enum StorageType<C = (), S = ()> {
 /// both.
 #[derive(Debug)]
 pub struct StorageWriter<'a, TX, SF> {
-    database: Option<&'a DatabaseProvider<TX>>,
+    database: &'a DatabaseProvider<TX>,
     static_file: Option<SF>,
 }
 
@@ -49,24 +49,19 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub const fn new(database: Option<&'a DatabaseProvider<TX>>, static_file: Option<SF>) -> Self {
+    pub const fn new(database: &'a DatabaseProvider<TX>, static_file: Option<SF>) -> Self {
         Self { database, static_file }
     }
 
     /// Creates a new instance of [`StorageWriter`] from a database provider and a static file
     /// instance.
     pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
-        Self::new(Some(database), Some(static_file))
-    }
-
-    /// Creates a new instance of [`StorageWriter`] from a static file instance.
-    pub const fn from_static_file(static_file: SF) -> Self {
-        Self::new(None, Some(static_file))
+        Self::new(database, Some(static_file))
     }
 
     /// Creates a new instance of [`StorageWriter`] from a database provider.
     pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
-        Self::new(Some(database), None)
+        Self::new(database, None)
     }
 
     /// Returns a reference to the database writer.
@@ -74,7 +69,7 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// # Panics
     /// If the database provider is not set.
     fn database(&self) -> &DatabaseProvider<TX> {
-        self.database.as_ref().expect("should exist")
+        self.database
     }
 
     /// Returns a reference to the static file instance.
@@ -91,18 +86,6 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     /// If the static file instance is not set.
     fn static_file_mut(&mut self) -> &mut SF {
         self.static_file.as_mut().expect("should exist")
-    }
-
-    /// Ensures that the database provider is set.
-    ///
-    /// # Returns
-    /// - `Ok(())` if the database provider is set.
-    /// - `Err(StorageWriterError::MissingDatabaseWriter)` if the database provider is not set.
-    const fn ensure_database(&self) -> Result<(), StorageWriterError> {
-        if self.database.is_none() {
-            return Err(StorageWriterError::MissingDatabaseWriter)
-        }
-        Ok(())
     }
 
     /// Ensures that the static file instance is set.
@@ -342,7 +325,6 @@ where
         I: Borrow<(H, B256)>,
         H: Borrow<Header>,
     {
-        self.ensure_database()?;
         self.ensure_static_file_segment(StaticFileSegment::Headers)?;
 
         let mut td = self
@@ -374,7 +356,6 @@ where
     where
         T: Borrow<Vec<TransactionSignedNoHash>>,
     {
-        self.ensure_database()?;
         self.ensure_static_file_segment(StaticFileSegment::Transactions)?;
 
         let mut bodies_cursor =
@@ -433,7 +414,6 @@ where
         initial_block_number: BlockNumber,
         blocks: impl Iterator<Item = Vec<Option<reth_primitives::Receipt>>>,
     ) -> ProviderResult<()> {
-        self.ensure_database()?;
         let mut bodies_cursor =
             self.database().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
@@ -504,7 +484,6 @@ where
         execution_outcome: ExecutionOutcome,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()> {
-        self.ensure_database()?;
         let (plain_state, reverts) =
             execution_outcome.bundle.into_plain_state_and_reverts(is_value_known);
 
