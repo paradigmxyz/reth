@@ -15,7 +15,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-revm.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-prune-types.workspace = true
