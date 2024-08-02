@@ -65,6 +65,7 @@ reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-node-api.workspace = true
+reth-rpc-types-compat.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

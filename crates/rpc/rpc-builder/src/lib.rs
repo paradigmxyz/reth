@@ -804,8 +804,7 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi:
-        EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>> + EthApiTypes,
+    EthApi: EthApiTypes,
     EthApi::NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Register Eth Namespace
@@ -813,7 +812,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn register_eth(&mut self) -> &mut Self {
+    pub fn register_eth(&mut self) -> &mut Self
+    where
+        EthApi: EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>>,
+    {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
@@ -826,7 +828,8 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt,
+        EthApi:
+            EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>> + TraceExt,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -840,7 +843,10 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
+        EthApi: EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>>
+            + EthApiSpec
+            + EthTransactions
+            + TraceExt,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -854,7 +860,8 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_trace(&mut self) -> &mut Self
     where
-        EthApi: TraceExt,
+        EthApi:
+            EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>> + TraceExt,
     {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -870,7 +877,9 @@ where
     /// If called outside of the tokio runtime.
     pub fn register_net(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + 'static,
+        EthApi: EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>>
+            + EthApiSpec
+            + 'static,
     {
         let netapi = self.net_api();
         self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
@@ -884,7 +893,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn register_reth(&mut self) -> &mut Self {
+    pub fn register_reth(&mut self) -> &mut Self
+    where
+        EthApi: EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>>,
+    {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
