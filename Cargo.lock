@@ -6620,7 +6620,6 @@ dependencies = [
  "auto_impl",
  "derive_more",
  "reth-primitives",
- "thiserror-no-std",
 ]
 
 [[package]]
