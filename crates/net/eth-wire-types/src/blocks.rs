@@ -109,8 +109,8 @@ mod tests {
     };
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxKind,
-        TxLegacy, U256,
+        alloy_primitives::Parity, hex, BlockHashOrNumber, Header, Signature, Transaction,
+        TransactionSigned, TxKind, TxLegacy, U256,
     };
     use std::str::FromStr;
 
@@ -367,7 +367,7 @@ mod tests {
                             input: Default::default(),
                         }),
                         Signature {
-                                odd_y_parity: false,
+                                parity: Parity::Parity(false),
                                 r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
@@ -381,7 +381,7 @@ mod tests {
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
                         }), Signature {
-                                odd_y_parity: false,
+                                parity: Parity::Parity(false),
                                 r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                             },
@@ -441,7 +441,7 @@ mod tests {
                                 input: Default::default(),
                             }),
                             Signature {
-                                odd_y_parity: false,
+                                parity: Parity::Parity(false),
                                 r: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 s: U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                             }
@@ -457,7 +457,7 @@ mod tests {
                                 input: Default::default(),
                             }),
                             Signature {
-                                odd_y_parity: false,
+                                parity: Parity::Parity(false),
                                 r: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                                 s: U256::from_str("0x52f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb").unwrap(),
                             }

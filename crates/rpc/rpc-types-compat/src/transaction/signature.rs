@@ -25,8 +25,8 @@ pub(crate) fn from_typed_primitive_signature(signature: PrimitiveSignature) -> S
     Signature {
         r: signature.r,
         s: signature.s,
-        v: U256::from(signature.odd_y_parity as u8),
-        y_parity: Some(Parity(signature.odd_y_parity)),
+        v: U256::from(signature.parity.y_parity() as u8),
+        y_parity: Some(Parity(signature.parity.y_parity())),
     }
 }
 

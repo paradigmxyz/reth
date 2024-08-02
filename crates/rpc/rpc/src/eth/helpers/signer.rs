@@ -104,6 +104,7 @@ impl EthSigner for DevSigner {
 mod tests {
     use std::str::FromStr;
 
+    use alloy_primitives::Parity;
     use reth_primitives::U256;
 
     use super::*;
@@ -197,7 +198,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            odd_y_parity: false,
+            parity: Parity::Parity(false),
         };
         assert_eq!(sig, expected)
     }
@@ -218,7 +219,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            odd_y_parity: true,
+            parity: Parity::Parity(true),
         };
         assert_eq!(sig, expected)
     }

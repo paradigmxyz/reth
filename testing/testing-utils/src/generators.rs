@@ -386,7 +386,9 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
+    use reth_primitives::{
+        alloy_primitives::Parity, hex, public_key_to_address, AccessList, Signature, TxEip1559,
+    };
     use std::str::FromStr;
 
     #[test]
@@ -459,7 +461,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            odd_y_parity: false,
+            parity: Parity::Parity(false),
         };
         assert_eq!(expected, signature);
     }

@@ -2,6 +2,8 @@ pub use alloy_consensus::TxLegacy;
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::Parity;
+
     use super::TxLegacy;
     use crate::{
         transaction::{signature::Signature, TxKind},
@@ -33,7 +35,7 @@ mod tests {
             s: U256::from_be_bytes(hex!(
                 "450d831a05b6e418724436c05c155e0a1b7b921015d0fbc2f667aed709ac4fb5"
             )),
-            odd_y_parity: false,
+            parity: Parity::Parity(false),
         };
 
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);

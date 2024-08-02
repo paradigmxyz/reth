@@ -30,10 +30,14 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                             crate::Signature {
                                 r: signature.r,
                                 s: signature.s,
-                                odd_y_parity: signature
-                                    .y_parity
-                                    .unwrap_or_else(|| alloy_rpc_types::Parity(!signature.v.bit(0)))
-                                    .0,
+                                parity: alloy_primitives::Parity::Parity(
+                                    signature
+                                        .y_parity
+                                        .unwrap_or_else(|| {
+                                            alloy_rpc_types::Parity(!signature.v.bit(0))
+                                        })
+                                        .0,
+                                ),
                             },
                         ))
                     })
@@ -246,18 +250,18 @@ impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: if let Some(y_parity) = signature.y_parity {
-                    y_parity.0
+                parity: if let Some(y_parity) = signature.y_parity {
+                    alloy_primitives::Parity::Parity(y_parity.0)
                 } else {
                     match transaction.tx_type() {
                         // If the transaction type is Legacy, adjust the v component of the
                         // signature according to the Ethereum specification
-                        TxType::Legacy => {
+                        TxType::Legacy => alloy_primitives::Parity::Parity(
                             extract_chain_id(signature.v.to())
                                 .map_err(|_| ConversionError::InvalidSignature)?
-                                .0
-                        }
-                        _ => !signature.v.is_zero(),
+                                .0,
+                        ),
+                        _ => alloy_primitives::Parity::Parity(!signature.v.is_zero()),
                     }
                 },
             },
@@ -289,7 +293,11 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
             extract_chain_id(signature.v.to()).map_err(|_| ConversionError::InvalidSignature)?.0
         };
 
-        Ok(Self { r: signature.r, s: signature.s, odd_y_parity })
+        Ok(Self {
+            r: signature.r,
+            s: signature.s,
+            parity: alloy_primitives::Parity::Parity(odd_y_parity),
+        })
     }
 }
 
