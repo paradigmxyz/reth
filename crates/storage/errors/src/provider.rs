@@ -153,14 +153,6 @@ pub enum ProviderError {
     StorageWriterError(crate::writer::StorageWriterError),
 }
 
-
-// #[cfg(feature = "std")]
-// impl fmt::Display for PathBuf {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!(f, "{}", self)
-//     }
-// }
-
 impl From<reth_fs_util::FsPathError> for ProviderError {
     fn from(err: reth_fs_util::FsPathError) -> Self {
         Self::FsPathError(err.to_string())
