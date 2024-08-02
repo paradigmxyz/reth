@@ -7,18 +7,15 @@ use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, Tra
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
-use reth_rpc_types_compat::{block::uncle_block_from_header, BlockBuilder, TransactionBuilder};
+use reth_rpc_types_compat::{block::uncle_block_from_header, BlockBuilder};
 
-use crate::{Block, FromEthApiError, Transaction};
+use crate::{Block, FromEthApiError};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks: LoadBlock + BlockBuilder
-where
-    Self::TxBuilder: TransactionBuilder<Transaction = Transaction<Self>>,
-{
+pub trait EthBlocks: LoadBlock {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -40,7 +37,7 @@ where
         &self,
         block_id: BlockId,
         full: bool,
-    ) -> impl Future<Output = Result<Option<Block<Self>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send {
         async move {
             let block = match self.block_with_senders(block_id).await? {
                 Some(block) => block,
@@ -51,9 +48,13 @@ where
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::UnknownBlockNumber)?;
-            let block =
-                Self::from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
-                    .map_err(Self::Error::from_eth_err)?;
+            let block = Self::BlockBuilder::from_block(
+                block.unseal(),
+                total_difficulty,
+                full.into(),
+                Some(block_hash),
+            )
+            .map_err(Self::Error::from_eth_err)?;
             Ok(Some(Rich { inner: block, extra_info: Default::default() }))
         }
     }
@@ -185,7 +186,7 @@ where
         &self,
         block_id: BlockId,
         index: Index,
-    ) -> impl Future<Output = Result<Option<Block<Self>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send {
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching

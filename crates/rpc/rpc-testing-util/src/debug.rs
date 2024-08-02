@@ -4,7 +4,6 @@ use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
-use reth_rpc_eth_api::{Block, EthApiTypes, Transaction};
 use reth_rpc_types::{
     trace::{
         common::TraceResult,
@@ -77,7 +76,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction<T>, Block<T>> + EthApiTypes + DebugApiClient + Sync,
+    T: EthApiClient + DebugApiClient + Sync,
 {
     type Provider = T;
 

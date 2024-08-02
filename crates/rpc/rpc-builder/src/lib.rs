@@ -804,7 +804,8 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: EthApiTypes + EthApiServer<Transaction<EthApi>, Block<EthApi>>,
+    EthApi:
+        EthApiServer<Transaction<EthApi::NetworkTypes>, Block<EthApi::NetworkTypes>> + EthApiTypes,
     EthApi::NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Register Eth Namespace
@@ -812,10 +813,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn register_eth(&mut self) -> &mut Self
-    where
-        EthApi: EthApiTypes + EthApiServer<Transaction<EthApi>, Block<EthApi>>,
-    {
+    pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
@@ -926,10 +924,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
-    where
-        EthApi: EthApiServer<Transaction<EthApi>, Block<EthApi>> + EthApiTypes,
-    {
+    pub fn otterscan_api(&self) -> OtterscanApi<EthApi> {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)
     }
@@ -1091,7 +1086,9 @@ where
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => {
-                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
+                            TxPoolApi::<_, EthApi::TransactionBuilder>::new(self.pool.clone())
+                                .into_rpc()
+                                .into()
                         }
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces

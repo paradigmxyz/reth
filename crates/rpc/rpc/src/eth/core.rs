@@ -577,7 +577,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -600,7 +600,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

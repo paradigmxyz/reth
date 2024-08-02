@@ -36,11 +36,9 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 #[async_trait::async_trait]
 impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<Transaction<Eth>, Block<Eth>>
-        + EthApiTypes
-        + TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>> + EthApiTypes,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
-    EthFilter: EthFilterApiServer<Transaction<Eth>>,
+    EthFilter: EthFilterApiServer<<Eth::TransactionBuilder as TransactionBuilder>::Transaction>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
@@ -83,7 +81,11 @@ where
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<Block<Eth>>> {
+    async fn block_by_hash(
+        &self,
+        hash: B256,
+        full: bool,
+    ) -> Result<Option<Block<Eth::NetworkTypes>>> {
         self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
@@ -92,7 +94,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> Result<Option<Block<Eth>>> {
+    ) -> Result<Option<Block<Eth::NetworkTypes>>> {
         self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 

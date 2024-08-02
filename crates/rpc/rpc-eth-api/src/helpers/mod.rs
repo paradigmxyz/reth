@@ -57,7 +57,7 @@ pub trait FullEthApi:
     EthApiTypes
     + EthApiSpec
     + EthTransactions
-    + EthBlocks<TxBuilder = Self>
+    + EthBlocks
     + EthState
     + EthCall
     + EthFees
@@ -70,7 +70,7 @@ impl<T> FullEthApi for T where
     T: EthApiTypes
         + EthApiSpec
         + EthTransactions
-        + EthBlocks<TxBuilder = T>
+        + EthBlocks
         + EthState
         + EthCall
         + EthFees

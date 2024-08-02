@@ -24,7 +24,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Provider, Pool, EthApi::TransactionBuilder>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi>,
+    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionBuilder>,
 }
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
@@ -164,13 +164,14 @@ impl EthPubSubApiBuilder {
     /// Builds the [`EthPubSubApiServer`](reth_rpc_eth_api::EthPubSubApiServer), for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
-    ) -> EthPubSub<Provider, Pool, Events, Network, Eth>
+    ) -> EthPubSub<Provider, Pool, Events, Network, Eth::TransactionBuilder>
     where
         Provider: Clone,
         Pool: Clone,
         Events: Clone,
         Network: Clone,
         Tasks: TaskSpawner + Clone + 'static,
+        Eth: EthApiTypes + 'static,
     {
         EthPubSub::with_spawner(
             ctx.provider.clone(),

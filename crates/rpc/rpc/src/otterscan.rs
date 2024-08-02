@@ -60,7 +60,10 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer<Transaction<Eth>, Block<Eth>> + EthApiTypes + TraceExt + 'static,
+    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>>
+        + EthApiTypes
+        + TraceExt
+        + 'static,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`

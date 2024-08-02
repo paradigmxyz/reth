@@ -53,9 +53,7 @@ use super::{
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions:
-    LoadTransaction + TransactionBuilder<Transaction = Transaction<Self>>
-{
+pub trait EthTransactions: LoadTransaction {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -197,7 +195,7 @@ pub trait EthTransactions:
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Self::Transaction>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Transaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
@@ -207,7 +205,7 @@ pub trait EthTransactions:
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
-                    return Ok(Some(Self::from_recovered_with_block_context(
+                    return Ok(Some(Self::TransactionBuilder::from_recovered_with_block_context(
                         tx,
                         block_hash,
                         block_number,
