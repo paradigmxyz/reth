@@ -178,6 +178,8 @@ where
 
         for num in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 headers.push(block_state.block().block().header.header().clone());
             } else {
                 let mut db_headers = self.database.headers_range(num..=end)?;
@@ -215,6 +217,8 @@ where
 
         for num in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 sealed_headers.push(block_state.block().block().header.clone());
             } else {
                 let mut db_headers = self.database.sealed_headers_range(num..=end)?;
@@ -252,6 +256,8 @@ where
                 headers.push(header);
             } else {
                 let mut db_headers = self.database.sealed_headers_while(num..=end, predicate)?;
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 headers.append(&mut db_headers);
                 break;
             }
@@ -284,6 +290,8 @@ where
                 hashes.push(block_state.hash());
             } else {
                 let mut db_hashes = self.database.canonical_hashes_range(number, end)?;
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 hashes.append(&mut db_hashes);
                 break;
             }
@@ -451,6 +459,8 @@ where
 
         for num in range.clone() {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 blocks.push(block_state.block().block().clone().unseal());
             } else {
                 let mut db_blocks = self.database.block_range(num..=*range.end())?;
@@ -472,6 +482,8 @@ where
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 blocks.push(BlockWithSenders { block: block.unseal(), senders });
             } else {
                 let mut db_blocks = self.database.block_with_senders_range(num..=*range.end())?;
@@ -493,6 +505,8 @@ where
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 blocks.push(SealedBlockWithSenders { block, senders });
             } else {
                 let mut db_blocks =
@@ -607,6 +621,8 @@ where
 
         for number in start..=end {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
                 transactions.push(block_state.block().block().body.clone());
                 last_in_memory_block = Some(number);
             } else {
