@@ -184,6 +184,9 @@ pub trait Peers: PeersInfo {
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
 
+    /// reconnect a connection to the given peer
+    fn reconnect_peer(&self, addr: SocketAddr, peer: PeerId);
+
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
 
