@@ -554,7 +554,7 @@ where
                 self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
             } else {
-                warn!(target: "engine", "Returned empty set of blocks to persist");
+                debug!(target: "engine", "Returned empty set of blocks to persist");
             }
         }
 
@@ -799,7 +799,7 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block_number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >=
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
     }
 
