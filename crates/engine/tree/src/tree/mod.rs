@@ -1255,6 +1255,7 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
+    #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number,), target = "engine")]
     fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -1274,19 +1275,27 @@ where
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
+                    trace!(target: "engine", "appended downloaded sync target block");
                     // we just inserted the current sync target block, we can try to make it
                     // canonical
                     return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
                         block_num_hash.hash,
                     )))
                 }
+                trace!(target: "engine", "appended downloaded block");
+                self.try_connect_buffered_blocks(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
                 // its missing branch first
                 return self.on_disconnected_downloaded_block(block_num_hash, missing_ancestor, head)
             }
-            _ => {}
+            Ok(InsertPayloadOk::AlreadySeen(_)) => {
+                trace!(target: "engine", "downloaded block already executed");
+            }
+            Err(err) => {
+                debug!(target: "engine", err=%err.kind(), "failed to insert downloaded block");
+            }
         }
         None
     }
@@ -1818,6 +1827,7 @@ where
         };
 
         let target = self.lowest_buffered_ancestor_or(target);
+        trace!(target: "engine", %target, "downloading missing block");
 
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
