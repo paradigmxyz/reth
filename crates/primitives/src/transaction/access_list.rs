@@ -2,25 +2,7 @@
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
-pub use alloy_eips::eip2930::{AccessList, AccessListItem};
-
-use revm_primitives::U256;
-use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-
-/// `AccessListResult` for handling errors from `eth_createAccessList`
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AccessListResult {
-    /// List with accounts accessed during transaction.
-    pub access_list: AccessList,
-    /// Estimated gas used with access list.
-    pub gas_used: U256,
-    /// Optional error message if the transaction failed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
+pub use alloy_eips::eip2930::{AccessList, AccessListItem, AccessListResult};
 
 #[cfg(test)]
 mod tests {
