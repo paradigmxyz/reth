@@ -129,7 +129,7 @@ impl MockEthProvider {
         }
     }
 
-    /// Add state root to local state root Fstore
+    /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
     }
