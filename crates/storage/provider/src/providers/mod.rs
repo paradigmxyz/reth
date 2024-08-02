@@ -37,7 +37,7 @@ use std::{
 };
 use tracing::trace;
 
-mod database;
+pub(crate) mod database;
 pub use database::*;
 
 mod static_file;

@@ -1,5 +1,8 @@
 use crate::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
+    providers::{
+        database::metrics, StaticFileProvider, StaticFileProviderRWRefMut,
+        StaticFileWriter as SfWriter,
+    },
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter,
     StateChangeWriter, StateWriter, TrieWriter,
@@ -15,13 +18,15 @@ use reth_db::{
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
+    BlockNumber, Header, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
+    TransactionSignedNoHash, B256, U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockNumReader, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
 };
 use reth_storage_errors::writer::UnifiedStorageWriterError;
+use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use revm::db::OriginalValuesKnown;
 use std::{borrow::Borrow, sync::Arc};
 use tracing::{debug, instrument};
@@ -203,6 +208,64 @@ where
         self.database().update_pipeline_stages(last_block_number, false)?;
 
         debug!(target: "provider::storage_writer", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
+    }
+
+    /// Appends blocks with state
+    fn _append_blocks_with_state(
+        &self,
+        blocks: Vec<SealedBlockWithSenders>,
+        execution_outcome: ExecutionOutcome,
+        hashed_state: HashedPostStateSorted,
+        trie_updates: TrieUpdates,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            debug!(target: "provider::storage_writer", "Attempted to append empty block range");
+            return Ok(())
+        }
+
+        let first_number = blocks.first().unwrap().number;
+        let last = blocks.last().unwrap();
+        let last_block_number = last.number;
+
+        let mut durations_recorder = metrics::DurationsRecorder::default();
+
+        let mut storage_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
+            UnifiedStorageWriter::from_database(self.database())
+        } else {
+            UnifiedStorageWriter::from(
+                self.database(),
+                self.static_file().get_writer(first_number, StaticFileSegment::Receipts)?,
+            )
+        };
+
+        // Insert the blocks
+        for block in blocks {
+            self.database.insert_block(block)?;
+            durations_recorder.record_relative(metrics::Action::InsertBlock);
+        }
+
+        // Write state and changesets to the database.
+        // Must be written after blocks because of the receipt lookup.
+        // TODO: should _these_ be moved to storagewriter? seems like storagewriter should be
+        // _above_ db provider
+        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
+        durations_recorder.record_relative(metrics::Action::InsertState);
+
+        // insert hashes and intermediate merkle nodes
+        self.database.write_hashed_state(&hashed_state)?;
+        self.database.write_trie_updates(&trie_updates)?;
+        durations_recorder.record_relative(metrics::Action::InsertHashes);
+
+        self.database.update_history_indices(first_number..=last_block_number)?;
+        durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
+
+        // Update pipeline progress
+        self.database.update_pipeline_stages(last_block_number, false)?;
+        durations_recorder.record_relative(metrics::Action::UpdatePipelineStages);
+
+        debug!(target: "provider::storage_writer", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions, "Appended blocks");
 
         Ok(())
     }

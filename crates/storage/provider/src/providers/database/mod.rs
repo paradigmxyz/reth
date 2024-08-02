@@ -30,7 +30,7 @@ use std::{
 use tokio::sync::watch;
 use tracing::trace;
 
-mod metrics;
+pub(crate) mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
