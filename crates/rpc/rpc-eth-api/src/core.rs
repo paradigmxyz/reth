@@ -4,8 +4,8 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
-    U256, U64,
+    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
+    U256, U64, AccountTrie
 };
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
@@ -13,7 +13,7 @@ use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
-    TransactionRequest, Work,
+    TransactionRequest, Work
 };
 use tracing::trace;
 
@@ -250,7 +250,7 @@ pub trait EthApi {
 
     /// Returns the account details by specifying an address and a block number/tag
     #[method(name = "getAccount")]
-    async fn get_account(&self, address: Address, block: BlockId) -> RpcResult<Account>;
+    async fn get_account(&self, address: Address, block: BlockId) -> RpcResult<AccountTrie>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -626,7 +626,7 @@ where
     }
 
     /// Handler for: `eth_getAccount`
-    async fn get_account(&self, _address: Address, _block: BlockId) -> RpcResult<Account> {
+    async fn get_account(&self, _address: Address, _block: BlockId) -> RpcResult<AccountTrie> {
         Err(internal_rpc_err("unimplemented"))
     }
 
