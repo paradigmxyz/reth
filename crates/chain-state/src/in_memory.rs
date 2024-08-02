@@ -13,9 +13,13 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::broadcast;
-use std::collections::BTreeMap;
 
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
