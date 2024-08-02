@@ -131,8 +131,9 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let segment = StaticFileSegment::Transactions;
     static_file_provider.latest_writer(segment)?.increment_block(0)?;
 
-    provider_rw.commit()?;
-    static_file_provider.commit()?;
+    // `commit_unwind`` will first commit the DB and then the static file provider, which is
+    // necessary on `init_genesis`.
+    UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
     Ok(hash)
 }

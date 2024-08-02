@@ -235,10 +235,9 @@ where
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
-    provider.commit()?;
     // as static files works in file ranges, internally it will be committing when creating the
     // next file range already, so we only need to call explicitly at the end.
-    static_file_provider.commit()?;
+    UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

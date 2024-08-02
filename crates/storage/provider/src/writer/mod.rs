@@ -105,6 +105,11 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
 impl UnifiedStorageWriter<'_, (), ()> {
     /// Commits both storage types in the right order.
     ///
+    /// For non-unwinding operations it makes more sense to commit the static files first, since if
+    /// it is interrupted before the database commit, we can just truncate
+    /// the static files according to the checkpoints on the next
+    /// start-up.
+    ///
     /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
     pub fn commit<DB: Database>(
         database: DatabaseProviderRW<DB>,
@@ -116,6 +121,11 @@ impl UnifiedStorageWriter<'_, (), ()> {
     }
 
     /// Commits both storage types in the right order for an unwind operation.
+    ///
+    /// For unwinding it makes more sense to commit the database first, since if
+    /// it is interrupted before the static files commit, we can just
+    /// truncate the static files according to the
+    /// checkpoints on the next start-up.
     ///
     /// NOTE: Should only be used after unwinding data from storage!
     pub fn commit_unwind<DB: Database>(
