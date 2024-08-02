@@ -9,7 +9,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256,
+    SealedHeader, TransactionMeta, TransactionSigned, TxHash, B256,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -434,6 +434,46 @@ impl CanonicalInMemoryState {
                 blocks.get(&parent_hash).cloned()
             },
         ))
+    }
+
+    /// Returns a `TransactionSigned` for the given `TxHash` if found.
+    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<TransactionSigned> {
+        for block_state in self.canonical_chain() {
+            if let Some(tx) = block_state.block().block().body.iter().find(|tx| tx.hash() == hash) {
+                return Some(tx.clone())
+            }
+        }
+        None
+    }
+
+    /// Returns a tuple with `TransactionSigned` and `TransactionMeta` for the
+    /// given `TxHash` if found.
+    pub fn transaction_by_hash_with_meta(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(TransactionSigned, TransactionMeta)> {
+        for (block_number, block_state) in self.canonical_chain().enumerate() {
+            if let Some((index, tx)) = block_state
+                .block()
+                .block()
+                .body
+                .iter()
+                .enumerate()
+                .find(|(_, tx)| tx.hash() == tx_hash)
+            {
+                let meta = TransactionMeta {
+                    tx_hash,
+                    index: index as u64,
+                    block_hash: block_state.hash(),
+                    block_number: block_number as u64,
+                    base_fee: block_state.block().block().header.base_fee_per_gas,
+                    timestamp: block_state.block().block.timestamp,
+                    excess_blob_gas: block_state.block().block.excess_blob_gas,
+                };
+                return Some((tx.clone(), meta))
+            }
+        }
+        None
     }
 }
 

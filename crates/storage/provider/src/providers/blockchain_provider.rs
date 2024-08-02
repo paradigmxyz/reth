@@ -542,10 +542,8 @@ where
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
-        for block_state in self.canonical_in_memory_state.canonical_chain() {
-            if let Some(tx) = block_state.block().block().body.iter().find(|tx| tx.hash() == hash) {
-                return Ok(Some(tx.clone()));
-            }
+        if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
+            return Ok(Some(tx))
         }
 
         self.database.transaction_by_hash(hash)
@@ -555,29 +553,12 @@ where
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
-        for (block_number, block_state) in
-            self.canonical_in_memory_state.canonical_chain().enumerate()
+        if let Some((tx, meta)) =
+            self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
         {
-            if let Some((index, tx)) = block_state
-                .block()
-                .block()
-                .body
-                .iter()
-                .enumerate()
-                .find(|(_, tx)| tx.hash() == tx_hash)
-            {
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index: index as u64,
-                    block_hash: block_state.hash(),
-                    block_number: block_number as u64,
-                    base_fee: block_state.block().block().header.base_fee_per_gas,
-                    timestamp: block_state.block().block.timestamp,
-                    excess_blob_gas: block_state.block().block.excess_blob_gas,
-                };
-                return Ok(Some((tx.clone(), meta)));
-            }
+            return Ok(Some((tx, meta)))
         }
+
         self.database.transaction_by_hash_with_meta(tx_hash)
     }
 
