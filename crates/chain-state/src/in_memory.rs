@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
+use std::{collections::{HashMap, BTreeMap}, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::broadcast;
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -28,7 +28,7 @@ pub(crate) struct InMemoryState {
     /// All canonical blocks that are not on disk yet.
     blocks: RwLock<HashMap<B256, Arc<BlockState>>>,
     /// Mapping of block numbers to block hashes.
-    numbers: RwLock<HashMap<u64, B256>>,
+    numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
     pending: RwLock<Option<BlockState>>,
 }
@@ -36,7 +36,7 @@ pub(crate) struct InMemoryState {
 impl InMemoryState {
     pub(crate) const fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
-        numbers: HashMap<u64, B256>,
+        numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
     ) -> Self {
         Self {
@@ -116,7 +116,7 @@ impl CanonicalInMemoryState {
     /// header if it exists.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
-        numbers: HashMap<u64, B256>,
+        numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
         finalized: Option<SealedHeader>,
     ) -> Self {
