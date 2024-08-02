@@ -68,7 +68,7 @@ impl<'a, TX, SF> StorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the database provider is not set.
-    fn database(&self) -> &DatabaseProvider<TX> {
+    const fn database(&self) -> &DatabaseProvider<TX> {
         self.database
     }
 
@@ -149,12 +149,9 @@ where
         let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
             StorageWriter::from_database(self.database())
         } else {
-            StorageWriter::new(
-                Some(self.database()),
-                Some(
-                    self.static_file()
-                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
-                ),
+            StorageWriter::from(
+                self.database(),
+                self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
             )
         };
 
@@ -209,7 +206,7 @@ where
         {
             let header_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
-            let mut storage_writer = StorageWriter::new(Some(self.database()), Some(header_writer));
+            let mut storage_writer = StorageWriter::from(self.database(), header_writer);
             let td = storage_writer.append_headers_from_blocks(
                 block.header().number,
                 std::iter::once(&(block.header(), block.hash())),
@@ -226,8 +223,7 @@ where
         {
             let transactions_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
-            let mut storage_writer =
-                StorageWriter::new(Some(self.database()), Some(transactions_writer));
+            let mut storage_writer = StorageWriter::from(self.database(), transactions_writer);
             let no_hash_transactions =
                 block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
             storage_writer.append_transactions_from_blocks(
@@ -770,7 +766,7 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -871,7 +867,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -939,7 +935,7 @@ mod tests {
 
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1087,7 +1083,7 @@ mod tests {
         let bundle = state.take_bundle();
 
         let outcome = ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1253,7 +1249,7 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
@@ -1301,7 +1297,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
-        let mut writer = StorageWriter::new(Some(&provider), None);
+        let mut writer = StorageWriter::from_database(&provider);
         writer
             .write_to_storage(outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");

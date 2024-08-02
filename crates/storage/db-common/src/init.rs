@@ -210,7 +210,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    let mut storage_writer = StorageWriter::new(Some(provider), None);
+    let mut storage_writer = StorageWriter::from_database(provider);
     storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");

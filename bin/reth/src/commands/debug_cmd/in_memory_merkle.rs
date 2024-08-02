@@ -171,7 +171,7 @@ impl Command {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+        let mut storage_writer = StorageWriter::from_database(&provider_rw);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;

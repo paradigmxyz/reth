@@ -361,7 +361,7 @@ where
         let time = Instant::now();
 
         // write output
-        let mut writer = StorageWriter::new(Some(provider), static_file_producer);
+        let mut writer = StorageWriter::new(provider, static_file_producer);
         writer.write_to_storage(state, OriginalValuesKnown::Yes)?;
 
         let db_write_duration = time.elapsed();

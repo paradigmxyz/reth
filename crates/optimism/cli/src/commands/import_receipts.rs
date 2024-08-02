@@ -231,7 +231,7 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        let mut storage_writer = StorageWriter::new(Some(&provider), Some(static_file_producer));
+        let mut storage_writer = StorageWriter::from(&provider, static_file_producer);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
