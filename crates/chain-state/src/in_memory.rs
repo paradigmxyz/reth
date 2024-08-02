@@ -769,6 +769,10 @@ mod tests {
         chain
     }
 
+    fn create_empty_state() -> CanonicalInMemoryState {
+        CanonicalInMemoryState::new(HashMap::new(), BTreeMap::new(), None, None)
+    }
+
     struct MockStateProvider;
 
     impl StateProvider for MockStateProvider {
@@ -993,7 +997,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_chain_update() {
-        let state = CanonicalInMemoryState::new(HashMap::new(), BTreeMap::new(), None, None);
+        let state = create_empty_state();
         let mut test_block_builder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let block2 = test_block_builder.get_executed_block_with_number(0, B256::random());
@@ -1059,7 +1063,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
-        let state = CanonicalInMemoryState::new(HashMap::new(), BTreeMap::new(), None, None);
+        let state = create_empty_state();
         let chain: Vec<_> = state.canonical_chain().collect();
         assert!(chain.is_empty());
     }
