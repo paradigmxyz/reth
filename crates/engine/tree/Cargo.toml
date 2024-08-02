@@ -38,6 +38,7 @@ reth-trie.workspace = true
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+thiserror-no-std = { workspace = true, default-features = false }
 
 # metrics
 metrics.workspace = true
@@ -75,6 +76,10 @@ assert_matches.workspace = true
 rand.workspace = true
 
 [features]
+std = [
+  "thiserror-no-std/std",
+  "reth-revm/std"
+]
 test-utils = [
   "reth-db/test-utils",
   "reth-chain-state/test-utils",
