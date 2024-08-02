@@ -423,7 +423,7 @@ impl CanonicalInMemoryState {
         let pending = self.inner.in_memory_state.pending.read().clone();
         let head = self.inner.in_memory_state.head_state();
 
-        // this clone is cheap beacuse we only expect to keep in memory a few
+        // this clone is cheap because we only expect to keep in memory a few
         // blocks and all of them are Arcs.
         let blocks = self.inner.in_memory_state.blocks.read().clone();
 
