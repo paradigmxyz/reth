@@ -7,8 +7,8 @@ use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, U256, U64};
-use reth_provider::{BlockNumReader, ChainSpecProvider};
-use reth_rpc_types::{SyncInfo, SyncStatus};
+use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
+use reth_rpc_types::{Stage, SyncInfo, SyncStatus};
 
 use super::EthSigner;
 
@@ -18,7 +18,7 @@ use super::EthSigner;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec: Send + Sync {
     /// Returns a handle for reading data from disk.
-    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader;
+    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader + StageCheckpointReader;
 
     /// Returns a handle for reading network data summary.
     fn network(&self) -> impl NetworkInfo;
@@ -63,13 +63,21 @@ pub trait EthApiSpec: Send + Sync {
             let current_block = U256::from(
                 self.provider().chain_info().map(|info| info.best_number).unwrap_or_default(),
             );
+
+            let stages = self
+                .provider()
+                .get_all_checkpoints()?
+                .into_iter()
+                .map(|(name, checkpoint)| Stage { name, block: checkpoint.block_number })
+                .collect();
+
             SyncStatus::Info(Box::new(SyncInfo {
                 starting_block: self.starting_block(),
                 current_block,
                 highest_block: current_block,
                 warp_chunks_amount: None,
                 warp_chunks_processed: None,
-                stages: None,
+                stages: Some(stages),
             }))
         } else {
             SyncStatus::None
