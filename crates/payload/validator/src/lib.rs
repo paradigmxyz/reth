@@ -45,6 +45,12 @@ impl ExecutionPayloadValidator {
         self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
     }
 
+    /// Returns true if the Prague harkdfork is active at the given timestamp.
+    #[inline]
+    fn _is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.chain_spec().is_prague_active_at_timestamp(timestamp)
+    }
+
     /// Cancun specific checks for EIP-4844 blob transactions.
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
