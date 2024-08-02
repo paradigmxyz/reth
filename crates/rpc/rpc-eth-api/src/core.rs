@@ -4,8 +4,8 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
-    U256, U64, AccountTrie
+    transaction::AccessListResult, AccountTrie, Address, BlockId, BlockNumberOrTag, Bytes, B256,
+    B64, U256, U64,
 };
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
@@ -13,7 +13,7 @@ use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
-    TransactionRequest, Work
+    TransactionRequest, Work,
 };
 use tracing::trace;
 
