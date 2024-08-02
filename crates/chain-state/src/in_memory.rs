@@ -1014,7 +1014,7 @@ mod tests {
         let block = TestBlockBuilder::default().get_executed_block_with_number(1, B256::random());
         let hash = block.block().hash();
         let mut blocks = HashMap::new();
-        blocks.insert(hash, Arc::new(BlockState::new(block.clone())));
+        blocks.insert(hash, Arc::new(BlockState::new(block)));
         let mut numbers = HashMap::new();
         numbers.insert(1, hash);
 
@@ -1066,7 +1066,7 @@ mod tests {
         }
 
         let pending_block = block_builder.get_executed_block_with_number(3, parent_hash);
-        let pending_state = BlockState::new(pending_block.clone());
+        let pending_state = BlockState::new(pending_block);
 
         let state = CanonicalInMemoryState::new(blocks, numbers, Some(pending_state), None);
         let chain: Vec<_> = state.canonical_chain().collect();
