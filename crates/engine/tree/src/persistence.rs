@@ -272,7 +272,7 @@ mod tests {
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
         let hash = rx.await.unwrap();
-        assert_eq!(hash, Some(B256::default()));
+        assert_eq!(hash, None);
     }
 
     #[tokio::test]
