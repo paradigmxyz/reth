@@ -47,7 +47,7 @@ impl ExecutionPayloadValidator {
 
     /// Returns true if the Prague harkdfork is active at the given timestamp.
     #[inline]
-    fn _is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+    fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.chain_spec().is_prague_active_at_timestamp(timestamp)
     }
 
@@ -159,7 +159,7 @@ impl ExecutionPayloadValidator {
             }
         }
 
-        if self._is_prague_active_at_timestamp(sealed_block.timestamp) &&
+        if self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
             sealed_block.has_eip7702_transactions()
         {
             return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
