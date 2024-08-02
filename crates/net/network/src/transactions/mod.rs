@@ -362,6 +362,8 @@ where
                 ),
             );
 
+            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| *tx.hash()), "Sending requested transactions to peer");
+
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
             peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
@@ -580,6 +582,8 @@ where
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
 
+            trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
+
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
@@ -728,7 +732,7 @@ where
             return
         }
 
-        trace!(target: "net::tx",
+        trace!(target: "net::tx::propagation",
             peer_id=format!("{peer_id:#}"),
             hashes_len=valid_announcement_data.iter().count(),
             hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
@@ -1037,6 +1041,7 @@ where
                 let tx_manager_info_pending_pool_imports =
                     self.pending_pool_imports_info.pending_pool_imports.clone();
 
+                trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
                 let import = Box::pin(async move {
                     let added = new_txs.len();
                     let res = pool.add_external_transactions(new_txs).await;
