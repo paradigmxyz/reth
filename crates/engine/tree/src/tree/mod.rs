@@ -551,7 +551,7 @@ where
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
             if !blocks_to_persist.is_empty() {
                 let (tx, rx) = oneshot::channel();
-                self.persistence.save_blocks(blocks_to_persist, tx);
+                let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
             } else {
                 debug!(target: "engine", "Returned empty set of blocks to persist");
@@ -568,6 +568,12 @@ where
             // Check if persistence has completed
             match rx.try_recv() {
                 Ok(last_persisted_block_hash) => {
+                    let Some(last_persisted_block_hash) = last_persisted_block_hash else {
+                        // if this happened, then we persisted no blocks because we sent an empty
+                        // vec of blocks
+                        warn!(target: "engine", "Persistence task completed but did not persist any blocks");
+                        return
+                    };
                     if let Some(block) =
                         self.state.tree_state.block_by_hash(last_persisted_block_hash)
                     {
@@ -1845,7 +1851,7 @@ pub struct PersistenceState {
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<oneshot::Receiver<B256>>,
+    rx: Option<oneshot::Receiver<Option<B256>>>,
     /// The last persisted block number.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -1860,7 +1866,7 @@ impl PersistenceState {
     }
 
     /// Sets state for a started persistence task.
-    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+    fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
         self.rx = Some(rx);
     }
 
