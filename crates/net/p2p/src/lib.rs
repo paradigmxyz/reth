@@ -47,4 +47,6 @@ pub mod test_utils;
 
 pub mod reputation;
 
+pub use bodies::client::BodiesClient;
+pub use headers::client::HeadersClient;
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
