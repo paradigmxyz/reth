@@ -18,7 +18,10 @@
 //! ```
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
+//! use reth_provider::{
+//!     AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider,
+//!     StageCheckpointReader,
+//! };
 //! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
@@ -33,7 +36,7 @@
 //!     events: Events,
 //!     evm_config: EvmConfig,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -69,7 +72,10 @@
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
+//! use reth_provider::{
+//!     AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider,
+//!     StageCheckpointReader,
+//! };
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
@@ -88,7 +94,7 @@
 //!     engine_api: EngineApi,
 //!     evm_config: EvmConfig,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -156,7 +162,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, StateProviderFactory,
+    EvmEnvProvider, FullRpcProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
@@ -223,7 +229,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -409,7 +415,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -793,7 +799,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: Clone,
@@ -960,7 +966,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + StageCheckpointReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
