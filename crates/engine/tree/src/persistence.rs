@@ -3,7 +3,7 @@
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_primitives::{SealedBlock, B256};
-use reth_provider::{writer::StorageWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerOutput};
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
@@ -62,10 +62,10 @@ where
                     let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
                     let sf_provider = self.provider.static_file_provider();
 
-                    StorageWriter::from(&provider_rw, &sf_provider)
+                    UnifiedStorageWriter::from(&provider_rw, &sf_provider)
                         .remove_blocks_above(new_tip_num)
                         .expect("todo: handle errors");
-                    StorageWriter::commit_unwind(provider_rw, sf_provider)
+                    UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)
                         .expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
@@ -80,10 +80,10 @@ where
                     let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
                     let static_file_provider = self.provider.static_file_provider();
 
-                    StorageWriter::from(&provider_rw, &static_file_provider)
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
                         .save_blocks(&blocks)
                         .expect("todo: handle errors");
-                    StorageWriter::commit(provider_rw, static_file_provider)
+                    UnifiedStorageWriter::commit(provider_rw, static_file_provider)
                         .expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
