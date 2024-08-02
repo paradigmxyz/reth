@@ -20,7 +20,7 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
+use reth_node_api::{EthApiTypes, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -328,6 +328,13 @@ where
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         > + FullEthApiServer + AddDevSigners,
+        <<N::AddOns as NodeAddOns<
+            NodeAdapter<
+                RethFullAdapter<DB, N>,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+            >,
+        >>::EthApi as EthApiTypes>::NetworkTypes:
+            alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
     {
         self.node(node).launch().await
     }
@@ -473,6 +480,8 @@ where
     AO::EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
         + FullEthApiServer
         + AddDevSigners,
+    <AO::EthApi as EthApiTypes>::NetworkTypes:
+        alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(

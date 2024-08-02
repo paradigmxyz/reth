@@ -104,7 +104,7 @@ where
     type NetworkTypes = Optimism;
 }
 
-impl<Eth, EthTxB> EthApiTypesCompat for OpEthApi<Eth, EthTxB> {
+impl<Eth, EthTxB> EthApiTypes for OpEthApi<Eth, EthTxB> {
     type TxBuilder = OpTxBuilder<EthTxB>;
     type BlockBuilder = EthBlockBuilder<OpTxBuilder<Eth>>;
 }

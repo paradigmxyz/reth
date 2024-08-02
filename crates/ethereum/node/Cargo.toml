@@ -38,6 +38,9 @@ reth-exex.workspace = true
 reth-blockchain-tree.workspace = true
 reth-engine-tree.workspace = true
 
+# ethereum
+alloy-network.workspace = true
+
 # misc
 eyre.workspace = true
 tokio = { workspace = true , features = ["sync"]}

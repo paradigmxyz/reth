@@ -20,7 +20,7 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::eth::{helpers::AddDevSigners, EthApiTypes, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -104,6 +104,8 @@ where
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi:
         EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    <AO::EthApi as EthApiTypes>::NetworkTypes:
+        alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
