@@ -10,7 +10,7 @@ use std::sync::{
     mpsc::{Receiver, SendError, Sender},
     Arc,
 };
-use thiserror_no_std::Error;
+use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::debug;
 

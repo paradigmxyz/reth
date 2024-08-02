@@ -569,9 +569,8 @@ where
             match rx.try_recv() {
                 Ok(last_persisted_block_hash) => {
                     let Some(last_persisted_block_hash) = last_persisted_block_hash else {
-                        // if this happened, then we persisted no blocks. Let's just `warn` here,
-                        // since this should not happen frequently, and we have multiple checks to
-                        // prevent against sending an empty range to the persistence task
+                        // if this happened, then we persisted no blocks because we sent an empty
+                        // vec of blocks
                         warn!(target: "engine", "Persistence task completed but did not persist any blocks");
                         return
                     };
