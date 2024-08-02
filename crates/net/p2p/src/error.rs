@@ -142,7 +142,6 @@ pub enum DownloadError {
         /// Number of header failing validation
         number: u64,
         /// The details of validation failure
-        // #[source] // q what does source do again?
         error: Box<ConsensusError>,
     },
     /// Received an invalid tip.
@@ -167,7 +166,6 @@ pub enum DownloadError {
         /// Number of the block failing validation
         number: u64,
         /// The details of validation failure
-        // #[source]
         error: Box<ConsensusError>,
     },
     /// Received more bodies than requested.
