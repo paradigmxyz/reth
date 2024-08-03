@@ -184,7 +184,18 @@ where
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.database.header_td_by_number(number)
+        match self.database.header_td_by_number(number)? {
+            Some(td) => Ok(Some(td)),
+            None => {
+                let block_hash = self.canonical_in_memory_state.state_by_number(number)
+                    .map(|state| state.block().block().hash());
+                if let Some(hash) = block_hash {
+                    self.database.header_td(&hash)
+                } else {
+                    Ok(None) 
+                }
+            }
+        }
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
