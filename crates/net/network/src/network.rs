@@ -35,31 +35,6 @@ use crate::{
     transactions::TransactionsHandle, FetchClient,
 };
 
-/// Helper trait that unifies network API needed to launch node.
-pub trait FullNetwork:
-    BlockDownloaderProvider
-    + NetworkSyncUpdater
-    + NetworkInfo
-    + NetworkEventListenerProvider
-    + PeersInfo
-    + Peers
-    + Clone
-    + 'static
-{
-}
-
-impl<T> FullNetwork for T where
-    T: BlockDownloaderProvider
-        + NetworkSyncUpdater
-        + NetworkInfo
-        + NetworkEventListenerProvider
-        + PeersInfo
-        + Peers
-        + Clone
-        + 'static
-{
-}
-
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
