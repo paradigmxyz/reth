@@ -230,6 +230,7 @@ impl TreeState {
     const fn canonical_block_hash(&self) -> B256 {
         self.canonical_head().hash
     }
+
     /// Returns the block number of the canonical head.
     const fn canonical_block_number(&self) -> BlockNumber {
         self.canonical_head().number
@@ -1784,6 +1785,20 @@ where
         // 1. ensure we have a new head block
         if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
             trace!(target: "engine", "fcu head hash is already canonical");
+
+            // we still need to process payload attributes if the head is already canonical
+            if let Some(attr) = attrs {
+                let tip = self
+                    .block_by_hash(self.state.tree_state.canonical_block_hash())?
+                    .ok_or_else(|| {
+                        // If we can't find the canonical block, then something is wrong and we need
+                        // to return an error
+                        ProviderError::HeaderNotFound(state.head_block_hash.into())
+                    })?;
+                let updated = self.process_payload_attributes(attr, &tip, state);
+                return Ok(TreeOutcome::new(updated))
+            }
+
             // the head block is already canonical
             return Ok(valid_outcome(state.head_block_hash))
         }
