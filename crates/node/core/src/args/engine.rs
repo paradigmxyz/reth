@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for Engine related arguments.
+//! clap [Args] for Engine related arguments.
 
 use clap::Args;
 
