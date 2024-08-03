@@ -12,7 +12,7 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
@@ -559,13 +559,13 @@ impl PendingTransactionsReceiver {
 
 /// A structure to manage and provide access to a stream of full transaction details.
 #[derive(Debug, Clone)]
-struct FullTransactionsReceiver<T: PoolTransaction> {
+struct FullTransactionsReceiver<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
 }
 
 impl<T> FullTransactionsReceiver<T>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -595,7 +595,7 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         Self::drain(self).await

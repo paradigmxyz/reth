@@ -562,6 +562,10 @@ impl PoolTransaction for MockTransaction {
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
+    fn into_consensus(&self) -> Self::Consensus {
+        self.clone().into()
+    }
+
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()
     }

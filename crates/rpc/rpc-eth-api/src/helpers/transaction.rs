@@ -608,7 +608,7 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
+                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.into_consensus()) {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }

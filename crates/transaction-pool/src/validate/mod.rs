@@ -29,7 +29,8 @@ pub use constants::{
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
-pub enum TransactionValidationOutcome<T: PoolTransaction> {
+pub enum TransactionValidationOutcome<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>
+{
     /// The transaction is considered _currently_ valid and can be inserted into the pool.
     Valid {
         /// Balance of the sender at the current point.
@@ -53,7 +54,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl<T: PoolTransaction> TransactionValidationOutcome<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> TransactionValidationOutcome<T> {
     /// Returns the hash of the transactions
     pub fn tx_hash(&self) -> TxHash {
         match self {
@@ -115,7 +116,7 @@ impl<T> ValidTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction> ValidTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidTransaction<T> {
     /// Returns the transaction.
     #[inline]
     pub const fn transaction(&self) -> &T {
@@ -153,7 +154,10 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -215,7 +219,7 @@ pub trait TransactionValidator: Send + Sync {
 ///
 /// For EIP-4844 blob transactions this will _not_ contain the blob sidecar which is stored
 /// separately in the [`BlobStore`](crate::blobstore::BlobStore).
-pub struct ValidPoolTransaction<T: PoolTransaction> {
+pub struct ValidPoolTransaction<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
     /// The transaction
     pub transaction: T,
     /// The identifier for this transaction.
@@ -230,7 +234,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
 
 // === impl ValidPoolTransaction ===
 
-impl<T: PoolTransaction> ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidPoolTransaction<T> {
     /// Returns the hash of the transaction.
     pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
@@ -340,14 +344,18 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecoveredTransaction
+    for ValidPoolTransaction<T>
+{
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into()
+        self.transaction.into_consensus()
     }
 }
 
 #[cfg(test)]
-impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + Clone> Clone
+    for ValidPoolTransaction<T>
+{
     fn clone(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),
@@ -359,7 +367,9 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> fmt::Debug
+    for ValidPoolTransaction<T>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
             .field("hash", self.transaction.hash())
