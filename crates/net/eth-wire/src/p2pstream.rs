@@ -302,7 +302,7 @@ impl<S> P2PStream<S> {
     }
 
     /// Queues in a _snappy_ encoded [`P2PMessage::Ping`] message.
-    fn send_ping(&mut self) {
+    pub fn send_ping(&mut self) {
         self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Ping)));
     }
 }

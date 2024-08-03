@@ -18,7 +18,7 @@ use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
-    StateProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner, EthBlockBuilder};
 use reth_rpc_eth_api::{
@@ -110,7 +110,7 @@ where
     N: FullNodeComponents,
 {
     #[inline]
-    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader {
+    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader + StageCheckpointReader {
         self.inner.provider()
     }
 

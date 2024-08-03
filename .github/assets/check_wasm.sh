@@ -8,7 +8,6 @@ wasm_crates=(
   # reth-db
   # reth-evm
   # reth-evm-ethereum
-  # reth-revm
   # The following are confirmed working
   reth-codecs
   reth-errors
@@ -16,6 +15,7 @@ wasm_crates=(
   reth-network-peers
   reth-primitives
   reth-primitives-traits
+  reth-revm
 )
 
 # Array to hold the results
