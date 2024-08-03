@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 struct Authorization {
     chain_id: ChainId,
     address: Address,
-    nonce: Option<u64>,
+    nonce: u64,
 }
 
 impl Compact for AlloyAuthorization {
@@ -33,7 +33,7 @@ impl Compact for AlloyAuthorization {
         let alloy_authorization = Self {
             chain_id: authorization.chain_id,
             address: authorization.address,
-            nonce: authorization.nonce.into(),
+            nonce: authorization.nonce,
         };
         (alloy_authorization, buf)
     }
@@ -80,7 +80,7 @@ mod tests {
         let authorization = AlloyAuthorization {
             chain_id: 1,
             address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
-            nonce: None.into(),
+            nonce: 0,
         }
         .into_signed(
             alloy_primitives::Signature::from_rs_and_parity(
