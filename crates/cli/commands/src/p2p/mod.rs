@@ -18,6 +18,8 @@ use reth_node_core::{
 };
 use reth_primitives::BlockHashOrNumber;
 
+mod rlpx;
+
 /// `reth p2p` command
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -69,10 +71,12 @@ pub enum Subcommands {
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
     },
+    // RLPx utilities
+    Rlpx(rlpx::Command),
 }
 impl Command {
     /// Execute `p2p` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -151,6 +155,9 @@ impl Command {
                 }
                 let body = result.into_iter().next().unwrap();
                 println!("Successfully downloaded body: {body:?}")
+            }
+            Subcommands::Rlpx(command) => {
+                command.execute().await?;
             }
         }
 
