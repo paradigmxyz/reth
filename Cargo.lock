@@ -6552,7 +6552,6 @@ dependencies = [
  "comfy-table",
  "confy",
  "crossterm",
- "enr",
  "eyre",
  "fdlimit",
  "futures",

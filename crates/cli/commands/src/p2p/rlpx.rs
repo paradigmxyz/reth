@@ -1,11 +1,10 @@
 //! RLPx subcommand of P2P Debugging tool.
 
 use clap::{Parser, Subcommand};
-use enr::Enr;
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{HelloMessage, UnauthedP2PStream};
 use reth_network::config::rng_secret_key;
-use reth_network_peers::{pk2id, NodeRecord};
+use reth_network_peers::{pk2id, AnyNode};
 use secp256k1::SECP256K1;
 use tokio::net::TcpStream;
 
@@ -22,8 +21,9 @@ impl Command {
         match self.subcommand {
             Subcommands::Ping { node } => {
                 let key = rng_secret_key();
-                let enr = node.parse::<Enr<secp256k1::SecretKey>>().unwrap();
-                let node_record = NodeRecord::try_from(&enr)?;
+                let node_record = node
+                    .node_record()
+                    .ok_or_else(|| eyre::eyre!("failed to parse node {}", node))?;
                 let outgoing =
                     TcpStream::connect((node_record.address, node_record.tcp_port)).await?;
                 let ecies_stream = ECIESStream::connect(outgoing, key, node_record.id).await?;
@@ -45,8 +45,7 @@ impl Command {
 enum Subcommands {
     /// ping node
     Ping {
-        #[arg(long, short)]
         /// The node to ping.
-        node: String,
+        node: AnyNode,
     },
 }

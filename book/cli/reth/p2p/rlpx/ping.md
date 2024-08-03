@@ -4,12 +4,13 @@ ping node
 
 ```bash
 $ reth p2p rlpx ping --help
-Usage: reth p2p rlpx ping [OPTIONS] --node <NODE>
+Usage: reth p2p rlpx ping [OPTIONS] <NODE>
 
-Options:
-  -n, --node <NODE>
+Arguments:
+  <NODE>
           The node to ping
 
+Options:
       --instance <INSTANCE>
           Add a new instance of a node.
 
