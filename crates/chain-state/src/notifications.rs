@@ -145,6 +145,14 @@ impl CanonStateNotification {
 #[derive(Debug, Deref, DerefMut)]
 pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
 
+impl ForkChoiceNotifications {
+    /// Creates a new `ForkChoiceNotifications` instance.
+    /// `receiver` - A broadcast receiver for `SealedHeader` notifications.
+    pub fn new(receiver: broadcast::Receiver<SealedHeader>) -> Self {
+        Self(receiver)
+    }
+}
+
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {

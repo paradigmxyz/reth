@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::{CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -543,7 +543,7 @@ where
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
-            return Ok(Some(tx))
+            return Ok(Some(tx));
         }
 
         self.database.transaction_by_hash(hash)
@@ -556,7 +556,7 @@ where
         if let Some((tx, meta)) =
             self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
         {
-            return Ok(Some((tx, meta)))
+            return Ok(Some((tx, meta)));
         }
 
         self.database.transaction_by_hash_with_meta(tx_hash)
@@ -920,7 +920,7 @@ where
                 let pending_provider =
                     self.canonical_in_memory_state.state_provider(block_hash, historical);
 
-                return Ok(Some(Box::new(pending_provider)))
+                return Ok(Some(Box::new(pending_provider)));
             }
         }
         Ok(None)

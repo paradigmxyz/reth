@@ -12,7 +12,7 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::ChainInfoTracker;
+use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -667,7 +667,7 @@ where
 
         if let Some(block) = self.tree.pending_block_num_hash() {
             if let Ok(pending) = self.tree.pending_state_provider(block.hash) {
-                return self.pending_with_provider(pending)
+                return self.pending_with_provider(pending);
             }
         }
 
@@ -677,7 +677,7 @@ where
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
-            return Ok(Some(self.pending_with_provider(state)?))
+            return Ok(Some(self.pending_with_provider(state)?));
         }
         Ok(None)
     }
@@ -924,5 +924,14 @@ where
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
+    }
+}
+
+impl<DB> ForkChoiceSubscriptions for BlockchainProvider<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications {
+        self.tree.subscribe_to_fork_choice()
     }
 }
