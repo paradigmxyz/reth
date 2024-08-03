@@ -1,18 +1,25 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
+use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use bytes::BytesMut;
-use reth_codecs::{main_codec, Compact};
-use std::mem;
+use core::mem;
+
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip2930 {
-    /// Added as EIP-pub 155: Simple replay attack protection
+    /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,
+
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
+
     /// A scalar value equal to the number of
     /// Wei to be paid per unit of gas for all computation
     /// costs incurred as a result of the execution of this transaction; formally Tp.
@@ -21,36 +28,44 @@ pub struct TxEip2930 {
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
     pub gas_price: u128,
+
     /// A scalar value equal to the maximum
     /// amount of gas that should be used in executing
     /// this transaction. This is paid up-front, before any
     /// computation is done and may not be increased
     /// later; formally Tg.
     pub gas_limit: u64,
+
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
+    pub to: TxKind,
+
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
     pub value: U256,
+
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
     /// A gas cost is charged, though at a discount relative to the cost of
     /// accessing outside the list.
     pub access_list: AccessList,
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
+
+    /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
+    /// [`TxKind::Call`].
+    ///
+    /// Input as init code, or if `to` is [`TxKind::Create`]: An unlimited size byte array
+    /// specifying the EVM-code for the account initialisation procedure `CREATE`
+    ///
+    /// Input as data, or if `to` is [`TxKind::Call`]: An unlimited size byte array specifying the
     /// input data of the message call, formally Td.
     pub input: Bytes,
 }
 
 impl TxEip2930 {
-    /// Calculates a heuristic for the in-memory size of the [TxEip2930] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip2930`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
@@ -63,7 +78,7 @@ impl TxEip2930 {
         self.input.len() // input
     }
 
-    /// Decodes the inner [TxEip2930] fields from RLP bytes.
+    /// Decodes the inner [`TxEip2930`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -153,11 +168,11 @@ impl TxEip2930 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip2930
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-2930 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, gas_price, gas_limit, to, value, input, access_list)`
@@ -179,7 +194,7 @@ impl TxEip2930 {
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
     pub(crate) fn signature_hash(&self) -> B256 {
-        let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
+        let mut buf = Vec::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
     }
@@ -189,7 +204,7 @@ impl TxEip2930 {
 mod tests {
     use super::TxEip2930;
     use crate::{
-        transaction::{signature::Signature, TransactionKind},
+        transaction::{signature::Signature, TxKind},
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
@@ -202,7 +217,7 @@ mod tests {
             nonce: 0,
             gas_price: 1,
             gas_limit: 2,
-            to: TransactionKind::Create,
+            to: TxKind::Create,
             value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
@@ -225,7 +240,7 @@ mod tests {
             nonce: 0,
             gas_price: 1,
             gas_limit: 2,
-            to: TransactionKind::Call(Address::default()),
+            to: Address::default().into(),
             value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

@@ -1,56 +1,14 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH,
-    keccak256,
-    trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
-    B256, U256,
+    constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
+    ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
 };
-use alloy_rlp::Encodable;
-use bytes::BufMut;
-use itertools::Itertools;
+use alloy_eips::eip7685::Encodable7685;
+use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
-/// Adjust the index of an item for rlp encoding.
-pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
-    if i > 0x7f {
-        i
-    } else if i == 0x7f || i + 1 == len {
-        0
-    } else {
-        i + 1
-    }
-}
-
-/// Compute a trie root of the collection of rlp encodable items.
-pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
-    ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
-}
-
-/// Compute a trie root of the collection of items with a custom encoder.
-pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
-where
-    F: FnMut(&T, &mut dyn BufMut),
-{
-    let mut index_buffer = Vec::new();
-    let mut value_buffer = Vec::new();
-
-    let mut hb = HashBuilder::default();
-    let items_len = items.len();
-    for i in 0..items_len {
-        let index = adjust_index_for_rlp(i, items_len);
-
-        index_buffer.clear();
-        index.encode(&mut index_buffer);
-
-        value_buffer.clear();
-        encode(&items[index], &mut value_buffer);
-
-        hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
-    }
-
-    hb.root()
-}
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Calculate a transaction root.
 ///
@@ -72,11 +30,18 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
+/// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
+///
+/// NOTE: The requests are encoded as `id + request`
+pub fn calculate_requests_root(requests: &[Request]) -> B256 {
+    ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
+}
+
 /// Calculates the receipt root for a header.
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
-    chain_spec: &crate::ChainSpec,
+    chain_spec: &reth_chainspec::ChainSpec,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -84,8 +49,9 @@ pub fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Regolith, timestamp) &&
+        !chain_spec
+            .is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -104,10 +70,15 @@ pub fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
+/// Calculates the receipt root for a header.
+pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+/// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
+pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })
@@ -115,11 +86,11 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+/// NOTE: Prefer [`calculate_receipt_root_optimism`] if you have log blooms memoized.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_ref_optimism(
+pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
-    chain_spec: &crate::ChainSpec,
+    chain_spec: &reth_chainspec::ChainSpec,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -127,8 +98,9 @@ pub fn calculate_receipt_root_ref_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Regolith, timestamp) &&
+        !chain_spec
+            .is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -161,111 +133,15 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     keccak256(ommers_rlp)
 }
 
-/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
-/// represented as MPT.
-/// See [state_root_unsorted] for more info.
-pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
-    state: impl IntoIterator<Item = (&'a Address, &'a A)>,
-) -> B256 {
-    state_root_unsorted(
-        state.into_iter().map(|(address, account)| (keccak256(address), account.clone())),
-    )
-}
-
-/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
-/// represented as MPT.
-/// See [state_root_unsorted] for more info.
-pub fn state_root_unhashed<A: Into<TrieAccount>>(
-    state: impl IntoIterator<Item = (Address, A)>,
-) -> B256 {
-    state_root_unsorted(state.into_iter().map(|(address, account)| (keccak256(address), account)))
-}
-
-/// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
-/// See [state_root] for more info.
-pub fn state_root_unsorted<A: Into<TrieAccount>>(
-    state: impl IntoIterator<Item = (B256, A)>,
-) -> B256 {
-    state_root(state.into_iter().sorted_by_key(|(key, _)| *key))
-}
-
-/// Calculates the root hash of the state represented as MPT.
-/// Corresponds to [geth's `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-///
-/// # Panics
-///
-/// If the items are not in sorted order.
-pub fn state_root<A: Into<TrieAccount>>(state: impl IntoIterator<Item = (B256, A)>) -> B256 {
-    let mut hb = HashBuilder::default();
-    let mut account_rlp_buf = Vec::new();
-    for (hashed_key, account) in state {
-        account_rlp_buf.clear();
-        account.into().encode(&mut account_rlp_buf);
-        hb.add_leaf(Nibbles::unpack(hashed_key), &account_rlp_buf);
-    }
-    hb.root()
-}
-
-/// Hashes storage keys, sorts them and them calculates the root hash of the storage trie.
-/// See [storage_root_unsorted] for more info.
-pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    storage_root_unsorted(storage.into_iter().map(|(slot, value)| (keccak256(slot), value)))
-}
-
-/// Sorts and calculates the root hash of account storage trie.
-/// See [storage_root] for more info.
-pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
-}
-
-/// Calculates the root hash of account storage trie.
-///
-/// # Panics
-///
-/// If the items are not in sorted order.
-pub fn storage_root(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    let mut hb = HashBuilder::default();
-    for (hashed_slot, value) in storage {
-        hb.add_leaf(Nibbles::unpack(hashed_slot), alloy_rlp::encode_fixed_size(&value).as_ref());
-    }
-    hb.root()
-}
-
-/// Implementation of hasher using our keccak256 hashing function
-/// for compatibility with `triehash` crate.
-#[cfg(any(test, feature = "test-utils"))]
-pub mod triehash {
-    use super::{keccak256, B256};
-    use hash_db::Hasher;
-    use plain_hasher::PlainHasher;
-
-    /// A [Hasher] that calculates a keccak256 hash of the given data.
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
-    #[non_exhaustive]
-    pub struct KeccakHasher;
-
-    #[cfg(any(test, feature = "test-utils"))]
-    impl Hasher for KeccakHasher {
-        type Out = B256;
-        type StdHasher = PlainHasher;
-
-        const LENGTH: usize = 32;
-
-        fn hash(x: &[u8]) -> Self::Out {
-            keccak256(x)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
-        GOERLI, HOLESKY, MAINNET, SEPOLIA,
-    };
-    use alloy_primitives::b256;
+    use crate::{bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, Log, TxType, U256};
+    use alloy_genesis::GenesisAccount;
+    use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
+    use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
+    use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 
     #[test]
@@ -338,32 +214,36 @@ mod tests {
                         logs: vec![
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
-                                    b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                    b256!("0000000000000000000000000000000000000000000000000000000000000000"),
-                                ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")),
+                                data: LogData::new_unchecked(
+                                    vec![
+                                        b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                                    ],
+                                    Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"))
+                                )
                             },
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
-                                    b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                    b256!("0000000000000000000000000000000000000000000000000000000000000000"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001")),
+                                data: LogData::new_unchecked(
+                                    vec![
+                                        b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                    ],
+                                    Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001"))
+                                )
                             },
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
+                                data: LogData::new_unchecked(
+                                vec![
                                     b256!("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
                                     b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
                                     b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")),
+                                ], Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
                         ],
                         #[cfg(feature = "optimism")]
@@ -382,32 +262,32 @@ mod tests {
                         logs: vec![
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked(vec![
                                     b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000000000000000000000000000000000000000000000"),
                                 ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")),
+                                Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")))
                             },
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked(vec![
                                     b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000000000000000000000000000000000000000000000"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                 ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001")),
+                                Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001")))
                             },
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked(vec![
                                     b256!("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                 ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")),
+                                Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
                         ],
                         #[cfg(feature = "optimism")]
@@ -426,62 +306,62 @@ mod tests {
                         logs: vec![
                             Log {
                                 address: hex!("4200000000000000000000000000000000000006").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
                                     b256!("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8"),
                                     b256!("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4"),
                                 ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000018de76816d8000")),
+                                Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000018de76816d8000")))
                             },
                             Log {
                                 address: hex!("cf8e7e6b26f407dee615fc4db18bf829e7aa8c09").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
                                     b256!("0000000000000000000000002992607c1614484fe6d865088e5c048f0650afd4"),
                                     b256!("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09"),
                                 ],
-                                data: Bytes::from_static(&hex!("000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2")),
+                                Bytes::from_static(&hex!("000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2")))
                             },
                             Log {
                                 address: hex!("2992607c1614484fe6d865088e5c048f0650afd4").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"),
                                 ],
-                                data: Bytes::from_static(&hex!("000000000000000000000000000000000000000000000009bd50642785c15736000000000000000000000000000000000000000000011bb7ac324f724a29bbbf")),
+                                Bytes::from_static(&hex!("000000000000000000000000000000000000000000000009bd50642785c15736000000000000000000000000000000000000000000011bb7ac324f724a29bbbf")))
                             },
                             Log {
                                 address: hex!("2992607c1614484fe6d865088e5c048f0650afd4").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"),
                                     b256!("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb"),
                                     b256!("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09"),
                                 ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000018de76816d800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2")),
+                                Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000018de76816d800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e2")))
                             },
                             Log {
                                 address: hex!("6d0f8d488b669aa9ba2d0f0b7b75a88bf5051cd3").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
                                     b256!("0000000000000000000000008dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09"),
                                     b256!("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8"),
                                 ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000014bc73062aea8093")),
+                                Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000014bc73062aea8093")))
                             },
                             Log {
                                 address: hex!("8dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"),
                                 ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000002f122cfadc1ca82a35000000000000000000000000000000000000000000000665879dc0609945d6d1")),
+                                Bytes::from_static(&hex!("00000000000000000000000000000000000000000000002f122cfadc1ca82a35000000000000000000000000000000000000000000000665879dc0609945d6d1")))
                             },
                             Log {
                                 address: hex!("8dbffe4c8bf3caf5deae3a99b50cfcf3648cbc09").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"),
                                     b256!("00000000000000000000000029843613c7211d014f5dd5718cf32bcd314914cb"),
                                     b256!("000000000000000000000000c3feb4ef4c2a5af77add15c95bd98f6b43640cc8"),
                                 ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e200000000000000000000000000000000000000000000000014bc73062aea80930000000000000000000000000000000000000000000000000000000000000000")),
+                                Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e200000000000000000000000000000000000000000000000014bc73062aea80930000000000000000000000000000000000000000000000000000000000000000")))
                             },
                         ],
                         #[cfg(feature = "optimism")]
@@ -500,32 +380,32 @@ mod tests {
                         logs: vec![
                             Log {
                                 address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
                                     b256!("0000000000000000000000000000000000000000000000000000000000000000"),
                                     b256!("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e"),
                                     b256!("000000000000000000000000000000000000000000000000000000000011a1d3"),
                                 ],
-                                data: Default::default(),
+                                Default::default())
                             },
                             Log {
                                 address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("9d89e36eadf856db0ad9ffb5a569e07f95634dddd9501141ecf04820484ad0dc"),
                                     b256!("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e"),
                                     b256!("000000000000000000000000000000000000000000000000000000000011a1d3"),
                                 ],
-                                data: Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000")),
+                                Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000")))
                             },
-                             Log {
+                            Log {
                                 address: hex!("ac6564f3718837caadd42eed742d75c12b90a052").into(),
-                                topics: vec![
+                                data:  LogData::new_unchecked( vec![
                                     b256!("110d160a1bedeea919a88fbc4b2a9fb61b7e664084391b6ca2740db66fef80fe"),
                                     b256!("00000000000000000000000084d47f6eea8f8d87910448325519d1bb45c2972a"),
                                     b256!("000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e"),
                                     b256!("000000000000000000000000000000000000000000000000000000000011a1d3"),
                                 ],
-                                data: Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007717500762343034303661353035646234633961386163316433306335633332303265370000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000")),
+                                Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007717500762343034303661353035646234633961386163316433306335633332303265370000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000")))
                             },
                         ],
                         #[cfg(feature = "optimism")]
@@ -544,7 +424,10 @@ mod tests {
     #[cfg(feature = "optimism")]
     #[test]
     fn check_receipt_root_optimism() {
-        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let logs = vec![Log {
+            address: Address::ZERO,
+            data: LogData::new_unchecked(vec![], Default::default()),
+        }];
         let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
@@ -565,7 +448,10 @@ mod tests {
     #[cfg(not(feature = "optimism"))]
     #[test]
     fn check_receipt_root_optimism() {
-        let logs = vec![Log { address: Address::ZERO, topics: vec![], data: Default::default() }];
+        let logs = vec![Log {
+            address: Address::ZERO,
+            data: LogData::new_unchecked(vec![], Default::default()),
+        }];
         let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
@@ -647,14 +533,6 @@ mod tests {
         assert_eq!(
             expected_mainnet_state_root, calculated_mainnet_state_root,
             "mainnet state root mismatch"
-        );
-
-        let expected_goerli_state_root =
-            b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
-        let calculated_goerli_state_root = state_root_ref_unhashed(&GOERLI.genesis.alloc);
-        assert_eq!(
-            expected_goerli_state_root, calculated_goerli_state_root,
-            "goerli state root mismatch"
         );
 
         let expected_sepolia_state_root =

@@ -114,7 +114,7 @@ You can use `curl`, a programming language with a low-level library, or a tool l
 As a reminder, you need to run the command below to enable all of these APIs using an HTTP transport:
 
 ```bash
-RUST_LOG=info reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc"
+reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc"
 ```
 
 This allows you to then call:

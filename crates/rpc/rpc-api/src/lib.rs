@@ -15,12 +15,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod admin;
-mod bundle;
+mod anvil;
 mod debug;
 mod engine;
-mod eth;
-mod eth_filter;
-mod eth_pubsub;
+mod ganache;
+mod hardhat;
 mod mev;
 mod net;
 mod otterscan;
@@ -38,12 +37,8 @@ pub use servers::*;
 pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
-        bundle::{EthBundleApiServer, EthCallBundleApiServer},
         debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer},
-        eth::EthApiServer,
-        eth_filter::EthFilterApiServer,
-        eth_pubsub::EthPubSubApiServer,
         mev::MevApiServer,
         net::NetApiServer,
         otterscan::OtterscanServer,
@@ -53,6 +48,10 @@ pub mod servers {
         txpool::TxPoolApiServer,
         validation::BlockSubmissionValidationApiServer,
         web3::Web3ApiServer,
+    };
+    pub use reth_rpc_eth_api::{
+        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
+        EthPubSubApiServer,
     };
 }
 
@@ -65,11 +64,11 @@ pub use clients::*;
 pub mod clients {
     pub use crate::{
         admin::AdminApiClient,
-        bundle::{EthBundleApiClient, EthCallBundleApiClient},
+        anvil::AnvilApiClient,
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
-        eth::EthApiClient,
-        eth_filter::EthFilterApiClient,
+        ganache::GanacheApiClient,
+        hardhat::HardhatApiClient,
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
@@ -78,5 +77,8 @@ pub mod clients {
         txpool::TxPoolApiClient,
         validation::BlockSubmissionValidationApiClient,
         web3::Web3ApiClient,
+    };
+    pub use reth_rpc_eth_api::{
+        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
     };
 }

@@ -5,8 +5,10 @@ use crate::{
     receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
+use alloy_primitives::{hex, B256};
 use rand::{thread_rng, Rng, RngCore};
-use reth_primitives::{hex, pk2id, ForkHash, ForkId, NodeRecord, B256};
+use reth_ethereum_forks::{ForkHash, ForkId};
+use reth_network_peers::{pk2id, NodeRecord};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::{HashMap, HashSet},
@@ -103,17 +105,17 @@ impl MockDiscovery {
     }
 
     /// Returns the local socket address associated with the service.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
     /// Returns the local [`NodeRecord`] associated with the service.
-    pub fn local_enr(&self) -> NodeRecord {
+    pub const fn local_enr(&self) -> NodeRecord {
         self.local_enr
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
+    fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         let _ = self.egress.try_send((payload, to));
         hash
@@ -166,7 +168,7 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Pong(_) => {}
+                    Message::Pong(_) | Message::Neighbours(_) => {}
                     Message::FindNode(msg) => {
                         if let Some(nodes) = this.pending_neighbours.remove(&msg.id) {
                             let msg = Message::Neighbours(Neighbours {
@@ -180,7 +182,6 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Neighbours(_) => {}
                     Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
                 },
             }

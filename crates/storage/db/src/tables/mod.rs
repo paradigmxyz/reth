@@ -4,45 +4,40 @@
 //!
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
-//! - [`codecs`] integrates different codecs into [`Encode`](crate::abstraction::table::Encode) and
-//!   [`Decode`](crate::abstraction::table::Decode)
-//! - [`models`] defines the values written to tables
+//! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
+//! - [`models`](reth_db_api::models) defines the values written to tables
 //!
 //! # Database Tour
 //!
 //! TODO(onbjerg): Find appropriate format for this...
 
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
-
 pub mod codecs;
-pub mod models;
 
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
+#[cfg(feature = "mdbx")]
 pub(crate) mod utils;
 
-use crate::{
-    abstraction::table::Table,
-    table::DupSort,
-    tables::{
-        codecs::CompactU256,
-        models::{
-            accounts::{AccountBeforeTx, BlockNumberAddress},
-            blocks::{HeaderHash, StoredBlockOmmers},
-            client_version::ClientVersion,
-            storage_sharded_key::StorageShardedKey,
-            ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
-        },
+use reth_db_api::{
+    models::{
+        accounts::{AccountBeforeTx, BlockNumberAddress},
+        blocks::{HeaderHash, StoredBlockOmmers},
+        client_version::ClientVersion,
+        storage_sharded_key::StorageShardedKey,
+        CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
+    table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
-    stage::StageCheckpoint,
-    trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, Receipt, Requests, StorageEntry,
+    TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
+use reth_primitives_traits::IntegerList;
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::StageCheckpoint;
+use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
@@ -60,10 +55,8 @@ pub enum TableType {
 /// # Example
 ///
 /// ```
-/// use reth_db::{
-///     table::{DupSort, Table},
-///     TableViewer, Tables,
-/// };
+/// use reth_db::{TableViewer, Tables};
+/// use reth_db_api::table::{DupSort, Table};
 ///
 /// struct MyTableViewer;
 ///
@@ -90,6 +83,11 @@ pub trait TableViewer<R> {
     /// The error type returned by the viewer.
     type Error;
 
+    /// Calls `view` with the correct table type.
+    fn view_rt(&self, table: Tables) -> Result<R, Self::Error> {
+        table.view(self)
+    }
+
     /// Operate on the table in a generic way.
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 
@@ -102,6 +100,7 @@ pub trait TableViewer<R> {
 }
 
 /// Defines all the tables in the database.
+#[macro_export]
 macro_rules! tables {
     (@bool) => { false };
     (@bool $($t:tt)+) => { true };
@@ -130,8 +129,8 @@ macro_rules! tables {
                 }
             }
 
-            impl $crate::table::Table for $name {
-                const TABLE: Tables = Tables::$name;
+            impl reth_db_api::table::Table for $name {
+                const NAME: &'static str = table_names::$name;
 
                 type Key = $key;
                 type Value = $value;
@@ -195,7 +194,7 @@ macro_rules! tables {
             /// Allows to operate on specific table type
             pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
             where
-                T: TableViewer<R>,
+                T: ?Sized + TableViewer<R>,
             {
                 match self {
                     $(
@@ -238,6 +237,34 @@ macro_rules! tables {
             $(
                 pub(super) const $name: &'static str = stringify!($name);
             )*
+        }
+
+        /// Maps a run-time [`Tables`] enum value to its corresponding compile-time [`Table`] type.
+        ///
+        /// This is a simpler alternative to [`TableViewer`].
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use reth_db::{Tables, tables_to_generic};
+        /// use reth_db_api::table::Table;
+        ///
+        /// let table = Tables::Headers;
+        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::NAME);
+        /// assert_eq!(result, table.name());
+        /// ```
+        #[macro_export]
+        macro_rules! tables_to_generic {
+            ($table:expr, |$generic_name:ident| $e:expr) => {
+                match $table {
+                    $(
+                        Tables::$name => {
+                            use $crate::tables::$name as $generic_name;
+                            $e
+                        },
+                    )*
+                }
+            };
         }
     };
 }
@@ -355,7 +382,7 @@ tables! {
     table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state's Merkle Patricia Tree.
-    table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNode>;
+    table AccountsTrie<Key = StoredNibbles, Value = BranchNodeCompact>;
 
     /// From HashedAddress => NibblesSubKey => Intermediate value
     table StoragesTrie<Key = B256, Value = StorageTrieEntry, SubKey = StoredNibblesSubKey>;
@@ -376,6 +403,39 @@ tables! {
 
     /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
     table VersionHistory<Key = u64, Value = ClientVersion>;
+
+    /// Stores EIP-7685 EL -> CL requests, indexed by block number.
+    table BlockRequests<Key = BlockNumber, Value = Requests>;
+
+    /// Stores generic chain state info, like the last finalized block.
+    table ChainState<Key = ChainStateKey, Value = BlockNumber>;
+}
+
+/// Keys for the `ChainState` table.
+#[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Hash)]
+pub enum ChainStateKey {
+    /// Last finalized block key
+    LastFinalizedBlock,
+}
+
+impl Encode for ChainStateKey {
+    type Encoded = [u8; 1];
+
+    fn encode(self) -> Self::Encoded {
+        match self {
+            Self::LastFinalizedBlock => [0],
+        }
+    }
+}
+
+impl Decode for ChainStateKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
+        if value.as_ref() == [0] {
+            Ok(Self::LastFinalizedBlock)
+        } else {
+            Err(reth_db_api::DatabaseError::Decode)
+        }
+    }
 }
 
 // Alias types.

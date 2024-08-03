@@ -1,19 +1,25 @@
+use std::collections::HashMap;
+
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, StateProvider, StateRootProvider,
 };
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
     transaction::DbTx,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
-    StorageValue, B256,
+    Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment, StorageKey, StorageValue,
+    B256,
 };
-use reth_trie::{proof::Proof, updates::TrieUpdates, HashedPostState};
-use revm::db::BundleState;
+use reth_storage_api::StateProofProvider;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::{
+    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
+    HashedStorage, StateRoot, StorageRoot,
+};
+use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -26,7 +32,7 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
         Self { tx, static_file_provider }
     }
 }
@@ -75,19 +81,46 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
-            .state_root(self.tx)
+    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        StateRoot::overlay_root(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
+        hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
-            .state_root_with_updates(self.tx)
+        StateRoot::overlay_root_with_updates(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn hashed_storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+}
+
+impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
+    fn hashed_proof(
+        &self,
+        hashed_state: HashedPostState,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        Proof::overlay_account_proof(self.tx, hashed_state, address, slots)
+            .map_err(Into::<ProviderError>::into)
+    }
+
+    fn witness(
+        &self,
+        overlay: HashedPostState,
+        target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        TrieWitness::overlay_witness(self.tx, overlay, target).map_err(Into::<ProviderError>::into)
     }
 }
 
@@ -111,12 +144,6 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
-
-    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(Proof::new(self.tx)
-            .account_proof(address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
-    }
 }
 
 /// State provider for the latest state.
@@ -130,7 +157,7 @@ pub struct LatestStateProvider<TX: DbTx> {
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
         Self { db, static_file_provider }
     }
 
@@ -148,9 +175,9 @@ delegate_provider_impls!(LatestStateProvider<TX> where [TX: DbTx]);
 mod tests {
     use super::*;
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    fn assert_latest_state_provider<T: DbTx>() {
+    const fn assert_latest_state_provider<T: DbTx>() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }

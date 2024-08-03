@@ -1,5 +1,5 @@
 use jsonrpsee::proc_macros::rpc;
-use reth_rpc_types::{
+use reth_rpc_types::mev::{
     SendBundleRequest, SendBundleResponse, SimBundleOverrides, SimBundleResponse,
 };
 

@@ -20,7 +20,7 @@ use tokio::sync::mpsc::{
 /// The size of the event channel used to propagate transaction events.
 const TX_POOL_EVENT_CHANNEL_SIZE: usize = 1024;
 
-/// A Stream that receives [TransactionEvent] only for the transaction with the given hash.
+/// A Stream that receives [`TransactionEvent`] only for the transaction with the given hash.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct TransactionEvents {
@@ -46,7 +46,7 @@ impl Stream for TransactionEvents {
     }
 }
 
-/// A Stream that receives [FullTransactionEvent] for _all_ transaction.
+/// A Stream that receives [`FullTransactionEvent`] for _all_ transaction.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct AllTransactionsEvents<T: PoolTransaction> {
@@ -184,7 +184,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
 
 /// All Sender half(s) of the event channels for all transactions.
 ///
-/// This mimics [tokio::sync::broadcast] but uses separate channels.
+/// This mimics [`tokio::sync::broadcast`] but uses separate channels.
 #[derive(Debug)]
 struct AllPoolEventsBroadcaster<T: PoolTransaction> {
     /// Corresponding sender half(s) for event listener channel
@@ -209,7 +209,7 @@ impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
 
 /// All Sender half(s) of the event channels for a specific transaction.
 ///
-/// This mimics [tokio::sync::broadcast] but uses separate channels and is unbounded.
+/// This mimics [`tokio::sync::broadcast`] but uses separate channels and is unbounded.
 #[derive(Default, Debug)]
 struct PoolEventBroadcaster {
     /// Corresponding sender half(s) for event listener channel

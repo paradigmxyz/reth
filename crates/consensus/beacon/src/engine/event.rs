@@ -1,9 +1,9 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
-use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{SealedBlock, SealedHeader, B256};
+use reth_rpc_types::engine::ForkchoiceState;
 use std::{sync::Arc, time::Duration};
 
-/// Events emitted by [crate::BeaconConsensusEngine].
+/// Events emitted by [`crate::BeaconConsensusEngine`].
 #[derive(Clone, Debug)]
 pub enum BeaconConsensusEngineEvent {
     /// The fork choice state was updated, and the current fork choice status
@@ -16,6 +16,17 @@ pub enum BeaconConsensusEngineEvent {
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
     /// A block was added to the fork chain.
     ForkBlockAdded(Arc<SealedBlock>),
+}
+
+impl BeaconConsensusEngineEvent {
+    /// Returns the canonical header if the event is a
+    /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
+    pub const fn canonical_header(&self) -> Option<&SealedHeader> {
+        match self {
+            Self::CanonicalChainCommitted(header, _) => Some(header),
+            _ => None,
+        }
+    }
 }
 
 /// Progress of the consensus engine during live sync.

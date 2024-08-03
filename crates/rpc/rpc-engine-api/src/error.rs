@@ -2,9 +2,10 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_node_api::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::EngineObjectValidationError;
 use reth_primitives::{B256, U256};
+use reth_rpc_types::ToRpcError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -41,7 +42,7 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
@@ -86,11 +87,16 @@ pub enum EngineApiError {
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
-    /// If the optimism feature flag is enabled, the payload attributes must have a present
-    /// gas limit for the forkchoice updated method.
-    #[cfg(feature = "optimism")]
-    #[error("Missing gas limit in payload attributes")]
-    MissingGasLimitInPayloadAttributes,
+    /// Any other error
+    #[error("{0}")]
+    Other(Box<dyn ToRpcError>),
+}
+
+impl EngineApiError {
+    /// Crates a new [`EngineApiError::Other`] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
 }
 
 /// Helper type to represent the `error` field in the error response:
@@ -167,52 +173,18 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
-            EngineApiError::NewPayload(ref err) => match err {
-                BeaconOnNewPayloadError::Internal(_) => jsonrpsee_types::error::ErrorObject::owned(
-                    INTERNAL_ERROR_CODE,
-                    SERVER_ERROR_MSG,
-                    Some(ErrorData::new(error)),
-                ),
-                BeaconOnNewPayloadError::PreCancunBlockWithBlobTransactions => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INVALID_PARAMS_CODE,
-                        INVALID_PARAMS_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-                BeaconOnNewPayloadError::EngineUnavailable => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INTERNAL_ERROR_CODE,
-                        SERVER_ERROR_MSG,
-                        Some(ErrorData::new(error)),
-                    )
-                }
-            },
-            // Optimism errors
-            #[cfg(feature = "optimism")]
-            EngineApiError::MissingGasLimitInPayloadAttributes => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    INVALID_PARAMS_CODE,
-                    INVALID_PARAMS_MSG,
-                    Some(ErrorData::new(error)),
-                )
-            }
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
+            EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |
             EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
                 INTERNAL_ERROR_CODE,
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
+            EngineApiError::Other(err) => err.to_rpc_error(),
         }
-    }
-}
-
-impl From<EngineApiError> for jsonrpsee_core::error::Error {
-    fn from(error: EngineApiError) -> Self {
-        jsonrpsee_core::error::Error::Call(error.into())
     }
 }
 
@@ -228,7 +200,6 @@ mod tests {
         err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
     ) {
         let err = err.into();
-        dbg!(&err);
         assert_eq!(err.code(), code);
         assert_eq!(err.message(), message);
     }

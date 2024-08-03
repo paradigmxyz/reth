@@ -1,4 +1,4 @@
-use reth_interfaces::{RethError, RethResult};
+use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use std::{
     fmt,
@@ -48,7 +48,7 @@ pub trait EngineHook: Send + Sync + 'static {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        ctx: EngineContext,
+        ctx: EngineHookContext,
     ) -> Poll<RethResult<EngineHookEvent>>;
 
     /// Returns [db access level][`EngineHookDBAccessLevel`] the hook needs.
@@ -57,7 +57,7 @@ pub trait EngineHook: Send + Sync + 'static {
 
 /// Engine context passed to the [hook polling function][`EngineHook::poll`].
 #[derive(Copy, Clone, Debug)]
-pub struct EngineContext {
+pub struct EngineHookContext {
     /// Tip block number.
     pub tip_block_number: BlockNumber,
     /// Finalized block number, if known.
@@ -83,12 +83,12 @@ pub enum EngineHookEvent {
 
 impl EngineHookEvent {
     /// Returns `true` if the event is [`EngineHookEvent::Started`].
-    pub fn is_started(&self) -> bool {
+    pub const fn is_started(&self) -> bool {
         matches!(self, Self::Started)
     }
 
     /// Returns `true` if the event is [`EngineHookEvent::Finished`].
-    pub fn is_finished(&self) -> bool {
+    pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished(_))
     }
 }
@@ -99,7 +99,7 @@ pub enum EngineHookError {
     /// Hook channel closed.
     #[error("hook channel closed")]
     ChannelClosed,
-    /// Common error. Wrapper around [RethError].
+    /// Common error. Wrapper around [`RethError`].
     #[error(transparent)]
     Common(#[from] RethError),
     /// An internal error occurred.
@@ -118,12 +118,12 @@ pub enum EngineHookDBAccessLevel {
 
 impl EngineHookDBAccessLevel {
     /// Returns `true` if the hook needs read-only access to the database.
-    pub fn is_read_only(&self) -> bool {
+    pub const fn is_read_only(&self) -> bool {
         matches!(self, Self::ReadOnly)
     }
 
     /// Returns `true` if the hook needs read-write access to the database.
-    pub fn is_read_write(&self) -> bool {
+    pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::ReadWrite)
     }
 }

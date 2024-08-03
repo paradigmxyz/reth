@@ -3,7 +3,7 @@ use reth::{primitives::Block, providers::BlockReaderIdExt};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
-use reth::rpc::eth::error::EthResult;
+use reth::rpc::server_types::eth::EthResult;
 
 /// trait interface for a custom rpc namespace: `MyRpc`
 ///

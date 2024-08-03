@@ -1,7 +1,9 @@
 //! API for block submission validation.
 
 use jsonrpsee::proc_macros::rpc;
-use reth_rpc_types::relay::{BuilderBlockValidationRequest, BuilderBlockValidationRequestV2};
+use reth_rpc_types::beacon::relay::{
+    BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
+};
 
 /// Block validation rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "flashbots"))]

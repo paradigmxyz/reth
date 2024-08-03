@@ -39,7 +39,7 @@ To run Reth as a full node, follow the steps from the previous chapter on
 [how to run on mainnet or official testnets](./mainnet.md), and add a `--full` flag. For example:
 
 ```bash
-RUST_LOG=info reth node \
+reth node \
     --full \
     --authrpc.jwtsecret /path/to/secret \
     --authrpc.addr 127.0.0.1 \
@@ -48,14 +48,14 @@ RUST_LOG=info reth node \
 
 ## Size
 
-All numbers are as of October 2023 at block number 18.3M for mainnet.
+All numbers are as of April 2024 at block number 19.6M for mainnet.
 
 ### Archive Node
 
 Archive node occupies at least 2.14TB.
 
 You can track the growth of Reth archive node size with our
-[public Grafana dashboard](https://reth.paradigm.xyz/d/2k8BXz24k/reth?orgId=1&refresh=30s&viewPanel=52).
+[public Grafana dashboard](https://reth.paradigm.xyz/d/2k8BXz24x/reth?orgId=1&refresh=30s&viewPanel=52).
 
 ### Pruned Node
 
@@ -64,15 +64,15 @@ If pruned fully, this is the total freed space you'll get, per segment:
 
 | Segment            | Size  |
 | ------------------ | ----- |
-| Sender Recovery    | 75GB  |
-| Transaction Lookup | 150GB |
+| Sender Recovery    | 85GB  |
+| Transaction Lookup | 200GB |
 | Receipts           | 250GB |
-| Account History    | 240GB |
-| Storage History    | 700GB |
+| Account History    | 235GB |
+| Storage History    | 590GB |
 
 ### Full Node
 
-Full node occupies at least 950GB.
+Full node occupies at least 1.13TB.
 
 Essentially, the full node is the same as following configuration for the pruned node:
 
@@ -99,16 +99,6 @@ Meaning, it prunes:
 - All of Sender Recovery data. The caveat is that it's pruned gradually after the initial sync
   is completed, so the disk space is reclaimed slowly.
 - Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
-
-Given the aforementioned segment sizes, we get the following full node size:
-
-```text
-Archive Node - Receipts - AccountsHistory - StoragesHistory = Full Node
-```
-
-```text
-2.14TB - 250GB - 240GB - 700GB = 950GB
-```
 
 ## RPC support
 

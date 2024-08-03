@@ -1,22 +1,24 @@
 //! A client implementation that can interact with the network and download data.
 
-use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse, peers::PeersHandle};
-use futures::{future, future::Either};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
-use reth_interfaces::p2p::{
+use futures::{future, future::Either};
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
-use reth_primitives::{Header, PeerId, B256};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use reth_network_peers::PeerId;
+use reth_network_types::{PeersHandle, ReputationChangeKind};
+use reth_primitives::{Header, B256};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+
+use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Front-end API for fetching data from the network.

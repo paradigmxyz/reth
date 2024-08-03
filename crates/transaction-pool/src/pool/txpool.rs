@@ -18,14 +18,13 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use fnv::FnvHashMap;
-use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
     Address, TxHash, B256,
 };
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -41,10 +40,10 @@ use tracing::trace;
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
 ///
-/// include_mmd!("docs/mermaid/txpool.mmd")
+/// `include_mmd!("docs/mermaid/txpool.mmd`")
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
-    sender_info: FnvHashMap<SenderId, SenderInfo>,
+    sender_info: FxHashMap<SenderId, SenderInfo>,
     /// pending subpool
     ///
     /// Holds transactions that are ready to be executed on the current state.
@@ -413,7 +412,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
-        for tx_hash in mined_transactions.iter() {
+        for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 // Update removed transactions metric
                 self.metrics.removed_transactions.increment(1);
@@ -428,7 +427,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Update sub-pools size metrics.
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         let stats = self.size();
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
@@ -647,7 +646,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// subpool.
     ///
     /// This is intended to be used when a transaction is included in a block,
-    /// [Self::on_canonical_state_change]
+    /// [`Self::on_canonical_state_change`]
     fn prune_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
@@ -664,12 +663,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        match pool {
+        let tx = match pool {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
+        };
+
+        if let Some(ref tx) = tx {
+            // We trace here instead of in subpool structs directly, because the `ParkedPool` type
+            // is generic and it would not be possible to distinguish whether a transaction is
+            // being removed from the `BaseFee` pool, or the `Queued` pool.
+            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Removed transaction from a subpool");
         }
+
+        tx
     }
 
     /// Removes the transaction from the given pool and advance sub-pool internal state, with the
@@ -679,12 +687,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        match pool {
+        let tx = match pool {
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
+        };
+
+        if let Some(ref tx) = tx {
+            // We trace here instead of in subpool structs directly, because the `ParkedPool` type
+            // is generic and it would not be possible to distinguish whether a transaction is
+            // being pruned from the `BaseFee` pool, or the `Queued` pool.
+            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Pruned transaction from a subpool");
         }
+
+        tx
     }
 
     /// Removes _only_ the descendants of the given transaction from the __entire__ pool.
@@ -718,19 +735,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
     ) {
+        // We trace here instead of in structs directly, because the `ParkedPool` type is
+        // generic and it would not be possible to distinguish whether a transaction is being
+        // added to the `BaseFee` pool, or the `Queued` pool.
+        trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Adding transaction to a subpool");
         match pool {
-            SubPool::Queued => {
-                self.queued_pool.add_transaction(tx);
-            }
+            SubPool::Queued => self.queued_pool.add_transaction(tx),
             SubPool::Pending => {
                 self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
             }
-            SubPool::BaseFee => {
-                self.basefee_pool.add_transaction(tx);
-            }
-            SubPool::Blob => {
-                self.blob_pool.add_transaction(tx);
-            }
+            SubPool::BaseFee => self.basefee_pool.add_transaction(tx),
+            SubPool::Blob => self.blob_pool.add_transaction(tx),
         }
     }
 
@@ -903,7 +918,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
-    tx_counter: FnvHashMap<SenderId, usize>,
+    tx_counter: FxHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
     last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
@@ -912,7 +927,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
-    /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
+    /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
@@ -983,14 +998,18 @@ impl<T: PoolTransaction> AllTransactions<T> {
         } = block_info;
         self.last_seen_block_number = last_seen_block_number;
         self.last_seen_block_hash = last_seen_block_hash;
+
         self.pending_fees.base_fee = pending_basefee;
+        self.metrics.base_fee.set(pending_basefee as f64);
+
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;
+            self.metrics.blob_base_fee.set(pending_blob_fee as f64);
         }
     }
 
     /// Updates the size metrics
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         self.metrics.all_transactions_by_hash.set(self.by_hash.len() as f64);
         self.metrics.all_transactions_by_id.set(self.txs.len() as f64);
     }
@@ -1002,6 +1021,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// For all transactions:
     ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
     ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    ///
     /// Individually:
     ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
     ///   - increased sender allowance: promote from `queued` to
@@ -1271,7 +1291,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Checks if the given transaction's type conflicts with an existing transaction.
     ///
-    /// See also [ValidPoolTransaction::tx_type_conflicts_with].
+    /// See also [`ValidPoolTransaction::tx_type_conflicts_with`].
     ///
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
@@ -1335,11 +1355,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if let Some(ancestor) = ancestor {
             let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
+                self.metrics.blob_transactions_nonce_gaps.increment(1);
                 return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             };
             if ancestor_tx.state.has_nonce_gap() {
                 // the ancestor transaction already has a nonce gap, so we can't insert the new
                 // blob
+                self.metrics.blob_transactions_nonce_gaps.increment(1);
                 return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             }
 
@@ -1703,7 +1725,7 @@ pub(crate) struct PendingFees {
 
 impl Default for PendingFees {
     fn default() -> Self {
-        PendingFees { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
+        Self { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
     }
 }
 
@@ -1766,8 +1788,8 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
     pub(crate) subpool: SubPool,
-    /// Keeps track of the current state of the transaction and therefor in which subpool it should
-    /// reside
+    /// Keeps track of the current state of the transaction and therefore in which subpool it
+    /// should reside
     pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.
     ///
@@ -1796,35 +1818,6 @@ pub(crate) struct UpdateOutcome<T: PoolTransaction> {
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
         Self { promoted: vec![], discarded: vec![] }
-    }
-}
-
-/// Represents the outcome of a prune
-pub struct PruneResult<T: PoolTransaction> {
-    /// A list of added transactions that a pruned marker satisfied
-    pub promoted: Vec<AddedTransaction<T>>,
-    /// all transactions that failed to be promoted and now are discarded
-    pub failed: Vec<TxHash>,
-    /// all transactions that were pruned from the ready pool
-    pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PruneResult")
-            .field(
-                "promoted",
-                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
-            )
-            .field("failed", &self.failed)
-            .field(
-                "pruned",
-                &format_args!(
-                    "[{}]",
-                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
-                ),
-            )
-            .finish()
     }
 }
 
@@ -2172,7 +2165,7 @@ mod tests {
         // dedup the test cases
         let expected_promotions = expected_promotions.into_iter().collect::<HashSet<_>>();
 
-        for promotion_test in expected_promotions.iter() {
+        for promotion_test in &expected_promotions {
             let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
             // set block info so the tx is initially underpriced w.r.t. blob fee

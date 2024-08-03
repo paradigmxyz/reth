@@ -23,6 +23,12 @@ Automatically-generated CLI reference from `--help` output.
 """
 
 
+def write_file(file_path, content):
+    content = "\n".join([line.rstrip() for line in content.split("\n")])
+    with open(file_path, "w") as f:
+        f.write(content)
+
+
 def main():
     args = parse_args(sys.argv[1:])
     for cmd in args.commands:
@@ -65,13 +71,11 @@ def main():
 
         root_summary += cmd_summary(root_path, cmd, obj, args.root_indentation)
         root_summary += "\n"
-    with open(path.join(args.out_dir, "SUMMARY.md"), "w") as f:
-        f.write(summary)
+    write_file(path.join(args.out_dir, "SUMMARY.md"), summary)
 
     # Generate README.md.
     if args.readme:
-        with open(path.join(args.out_dir, "README.md"), "w") as f:
-            f.write(README)
+        write_file(path.join(args.out_dir, "README.md"), README)
 
     if args.root_summary:
         update_root_summary(args.root_dir, root_summary)
@@ -162,8 +166,7 @@ def cmd_markdown(out_dir: str, cmd: str, obj: object):
         for arg in cmd:
             out_path = path.join(out_path, arg)
         makedirs(path.dirname(out_path), exist_ok=True)
-        with open(f"{out_path}.md", "w") as f:
-            f.write(out)
+        write_file(f"{out_path}.md", out)
 
         for k, v in obj.items():
             if k == HELP_KEY:
@@ -250,14 +253,39 @@ def command_name(cmd: str):
     """Returns the name of a command."""
     return cmd.split("/")[-1]
 
+
 def preprocess_help(s: str):
     """Preprocesses the help output of a command."""
     # Remove the user-specific paths.
-    s = re.sub(r"default: /.*/reth", "default: <CACHE_DIR>", s)
-    # Remove the commit SHA and target architecture triple
-    s = re.sub(r"default: reth/.*-[0-9A-Fa-f]{6,10}/\w+-\w*-\w+", "default: reth/<VERSION>-<SHA>/<ARCH>", s)
+    s = re.sub(
+        r"default: /.*/reth",
+        "default: <CACHE_DIR>",
+        s,
+    )
+    # Remove the commit SHA and target architecture triple or fourth
+    # rustup available targets:
+    #   aarch64-apple-darwin
+    #   x86_64-unknown-linux-gnu
+    #   x86_64-pc-windows-gnu
+    s = re.sub(
+        r"default: reth/.*-[0-9A-Fa-f]{6,10}/([_\w]+)-(\w+)-(\w+)(-\w+)?",
+        "default: reth/<VERSION>-<SHA>/<ARCH>",
+        s,
+    )
     # Remove the OS
-    s = re.sub(r"default: reth/.*/\w+", "default: reth/<VERSION>/<OS>", s)
+    s = re.sub(
+        r"default: reth/.*/\w+",
+        "default: reth/<VERSION>/<OS>",
+        s,
+    )
+
+    # Remove rpc.max-tracing-requests default value
+    s = re.sub(
+        r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*)\[default: \d+\]",
+        r"\1[default: <NUM CPU CORES-2>]",
+        s,
+        flags=re.MULTILINE,
+    )
 
     return s
 

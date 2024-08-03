@@ -1,0 +1,20 @@
+[package]
+name = "reth-testing-utils"
+description = "Testing utils for reth."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-primitives = { workspace = true, features = ["secp256k1"] }
+
+alloy-genesis.workspace = true
+
+secp256k1 = { workspace = true, features = ["rand"] }
+rand.workspace = true

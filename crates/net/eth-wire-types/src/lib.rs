@@ -17,6 +17,9 @@ pub use version::EthVersion;
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
 
+pub mod header;
+pub use header::*;
+
 pub mod blocks;
 pub use blocks::*;
 
@@ -31,3 +34,6 @@ pub use state::*;
 
 pub mod receipts;
 pub use receipts::*;
+
+pub mod disconnect_reason;
+pub use disconnect_reason::*;

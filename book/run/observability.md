@@ -3,7 +3,7 @@
 Reth exposes a number of metrics, which are listed [here][metrics]. We can serve them from an HTTP endpoint by adding the `--metrics` flag:
 
 ```bash
-RUST_LOG=info reth node --metrics 127.0.0.1:9001
+reth node --metrics 127.0.0.1:9001
 ```
 
 Now, as the node is running, you can `curl` the endpoint you provided to the `--metrics` flag to get a text dump of the metrics at that time:

@@ -1,49 +1,44 @@
 //! Command for debugging block building.
-
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    core::cli::runner::CliContext,
-    dirs::{DataDirPath, MaybePlatformPath},
-};
+use crate::macros::block_executor;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_runner::CliContext;
+use reth_consensus::Consensus;
+use reth_db::DatabaseEnv;
+use reth_errors::RethResult;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_types::ExecutionOutcome;
+use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
-#[cfg(not(feature = "optimism"))]
-use reth_node_ethereum::EthEvmConfig;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    fs,
-    revm_primitives::KzgSettings,
-    stage::StageId,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
-    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
+    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
+    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::EvmProcessorFactory;
-#[cfg(feature = "optimism")]
-use reth_rpc_types::engine::OptimismPayloadAttributes;
+use reth_prune::PruneModes;
+use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
+use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
 };
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
@@ -52,31 +47,8 @@ use tracing::*;
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
-    /// Database arguments.
     #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
@@ -109,12 +81,10 @@ impl Command {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(&self, db: Arc<DatabaseEnv>) -> RethResult<Arc<SealedBlock>> {
-        let factory = ProviderFactory::new(
-            db,
-            self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
-        )?;
+    fn lookup_best_block(
+        &self,
+        factory: ProviderFactory<Arc<DatabaseEnv>>,
+    ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -132,62 +102,55 @@ impl Command {
     }
 
     /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
-    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+    /// `EnvKzgSettings::Default`.
+    fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
                 .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
+            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+            Ok(EnvKzgSettings::Default)
         }
     }
 
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
-        fs::create_dir_all(&db_path)?;
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
-        // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory = ProviderFactory::new(
-            Arc::clone(&db),
-            Arc::clone(&self.chain),
-            data_dir.static_files_path(),
-        )?;
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
-
-        #[cfg(feature = "optimism")]
-        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
-
-        #[cfg(not(feature = "optimism"))]
-        let evm_config = EthEvmConfig::default();
+        let executor = block_executor!(provider_factory.chain_spec());
 
         // configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
-            Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let tree_externals =
+            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            PruneModes::none(),
+        )?;
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
-        let best_block =
-            self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let best_block = self
+            .lookup_best_block(provider_factory.clone())
+            .wrap_err("the head block is missing")?;
 
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
-            .with_head_timestamp(best_block.timestamp)
-            .kzg_settings(self.kzg_settings()?)
-            .with_additional_tasks(1)
-            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider_factory.chain_spec())
+                .with_head_timestamp(best_block.timestamp)
+                .kzg_settings(self.kzg_settings()?)
+                .with_additional_tasks(1)
+                .build_with_tasks(
+                    blockchain_db.clone(),
+                    ctx.task_executor.clone(),
+                    blob_store.clone(),
+                );
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             validator,
@@ -205,20 +168,20 @@ impl Command {
             })
             .transpose()?;
 
-        for tx_bytes in self.transactions.iter() {
+        for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
                 .into_ecrecovered()
-                .ok_or(eyre::eyre!("failed to recover tx"))?;
+                .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
 
             let encoded_length = match &transaction.transaction {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                    ))?;
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
+                        eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
+                    })?;
 
                     let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion
@@ -261,7 +224,7 @@ impl Command {
             #[cfg(feature = "optimism")]
             reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
-                OptimismPayloadAttributes {
+                reth_rpc_types::engine::OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
                     transactions: None,
                     no_tx_pool: None,
@@ -273,7 +236,7 @@ impl Command {
                 best_block.hash(),
                 payload_attrs,
             )?,
-            self.chain.clone(),
+            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(
@@ -286,8 +249,10 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone())
-            .compute_pending_block();
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            reth_node_optimism::OptimismEvmConfig::default(),
+        )
+        .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
@@ -299,23 +264,32 @@ impl Command {
 
                 consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
                 consensus.validate_header(block)?;
-                consensus.validate_block(block)?;
+                consensus.validate_block_pre_execution(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = EvmProcessorFactory::new(self.chain.clone(), evm_config);
-                let mut executor = executor_factory.with_state(blockchain_db.latest()?);
-                executor
-                    .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
-                let state = executor.take_output_state();
-                debug!(target: "reth::cli", ?state, "Executed block");
+                let db = StateProviderDatabase::new(blockchain_db.latest()?);
+                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
-                let hashed_state = state.hash_state_slow();
-                let (state_root, trie_updates) = state
-                    .hash_state_slow()
-                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
+                let BlockExecutionOutput { state, receipts, requests, .. } =
+                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                let execution_outcome = ExecutionOutcome::new(
+                    state,
+                    receipts.into(),
+                    block.number,
+                    vec![requests.into()],
+                );
+
+                debug!(target: "reth::cli", ?execution_outcome, "Executed block");
+
+                let hashed_post_state = execution_outcome.hash_state_slow();
+                let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
+                    provider_factory.provider()?.tx_ref(),
+                    hashed_post_state.clone(),
+                    Default::default(),
+                )?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(
@@ -329,10 +303,9 @@ impl Command {
                 let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
-                    state,
-                    hashed_state,
+                    execution_outcome,
+                    hashed_post_state.into_sorted(),
                     trie_updates,
-                    None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");
             }

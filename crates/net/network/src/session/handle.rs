@@ -1,10 +1,7 @@
 //! Session handles.
 
-use crate::{
-    message::PeerMessage,
-    session::{conn::EthRlpxConnection, Direction, SessionId},
-    PendingSessionHandshakeError,
-};
+use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -12,11 +9,17 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
-use reth_primitives::PeerId;
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::PeerKind;
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
+};
+
+use crate::{
+    message::PeerMessage,
+    session::{conn::EthRlpxConnection, Direction, SessionId},
+    PendingSessionHandshakeError,
 };
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
@@ -42,7 +45,7 @@ impl PendingSessionHandle {
     }
 
     /// Returns the direction of the pending session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 }
@@ -96,27 +99,27 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the direction of the active session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 
     /// Returns the assigned session id for this session.
-    pub fn session_id(&self) -> SessionId {
+    pub const fn session_id(&self) -> SessionId {
         self.session_id
     }
 
     /// Returns the negotiated eth version for this session.
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the identifier of the remote peer.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id
     }
 
     /// Returns the timestamp when the session has been established.
-    pub fn established(&self) -> Instant {
+    pub const fn established(&self) -> Instant {
         self.established
     }
 
@@ -131,15 +134,17 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the address we're connected to.
-    pub fn remote_addr(&self) -> SocketAddr {
+    pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
-    /// Extracts the [PeerInfo] from the session handle.
-    pub(crate) fn peer_info(&self) -> PeerInfo {
+    /// Extracts the [`PeerInfo`] from the session handle.
+    pub(crate) fn peer_info(&self, record: &NodeRecord, kind: PeerKind) -> PeerInfo {
         PeerInfo {
             remote_id: self.remote_id,
             direction: self.direction,
+            enode: record.to_string(),
+            enr: None,
             remote_addr: self.remote_addr,
             local_addr: self.local_addr,
             capabilities: self.capabilities.clone(),
@@ -147,6 +152,7 @@ impl ActiveSessionHandle {
             eth_version: self.version,
             status: self.status.clone(),
             session_established: self.established,
+            kind,
         }
     }
 }
@@ -247,7 +253,7 @@ pub enum ActiveSessionMessage {
         /// The error that caused the session to close
         error: EthStreamError,
     },
-    /// A session received a valid message via RLPx.
+    /// A session received a valid message via `RLPx`.
     ValidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,

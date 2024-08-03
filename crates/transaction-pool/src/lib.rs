@@ -35,7 +35,7 @@
 //! The pool itself does not validate incoming transactions, instead this should be provided by
 //! implementing `TransactionsValidator`. Only transactions that the validator returns as valid are
 //! included in the pool. It is assumed that transaction that are in the pool are either valid on
-//! the current state or could become valid after certain state changes. transaction that can never
+//! the current state or could become valid after certain state changes. Transactions that can never
 //! become valid (e.g. nonce lower than current on chain nonce) will never be added to the pool and
 //! instead are discarded right away.
 //!
@@ -71,7 +71,7 @@
 //!
 //! Blob transaction can be quite large hence they are stored in a separate blobstore. The pool is
 //! responsible for inserting blob data for new transactions into the blobstore.
-//! See also [ValidTransaction](validate::ValidTransaction)
+//! See also [`ValidTransaction`](validate::ValidTransaction)
 //!
 //!
 //! ## Examples
@@ -79,7 +79,7 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_primitives::MAINNET;
+//! use reth_chainspec::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
@@ -107,7 +107,7 @@
 //!
 //! ```
 //! use futures_util::Stream;
-//! use reth_primitives::MAINNET;
+//! use reth_chainspec::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
@@ -147,11 +147,11 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![warn(clippy::missing_const_for_fn)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleMempoolData;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -187,7 +187,7 @@ pub mod validate;
 
 pub mod blobstore;
 mod config;
-mod identifier;
+pub mod identifier;
 mod ordering;
 mod traits;
 
@@ -232,7 +232,7 @@ where
         self.inner().config()
     }
 
-    /// Returns future that validates all transaction in the given iterator.
+    /// Returns future that validates all transactions in the given iterator.
     ///
     /// This returns the validated transactions in the iterator's order.
     async fn validate_all(
@@ -278,13 +278,13 @@ where
     Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
-    /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
-    /// validating [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
+    /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
     ///
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::MAINNET;
+    /// use reth_chainspec::MAINNET;
     /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{

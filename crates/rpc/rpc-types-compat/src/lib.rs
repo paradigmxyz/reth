@@ -12,6 +12,5 @@
 
 pub mod block;
 pub mod engine;
-pub mod log;
 pub mod proof;
 pub mod transaction;

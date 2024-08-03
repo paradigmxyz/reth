@@ -1,0 +1,88 @@
+[package]
+name = "reth-engine-tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-beacon-consensus.workspace = true
+reth-blockchain-tree.workspace = true
+reth-blockchain-tree-api.workspace = true
+reth-chain-state.workspace = true
+reth-consensus.workspace = true
+reth-db.workspace = true
+reth-db-api.workspace = true
+reth-engine-primitives.workspace = true
+reth-errors.workspace = true
+reth-evm.workspace = true
+reth-network-p2p.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-validator.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-revm.workspace = true
+reth-rpc-types.workspace = true
+reth-stages-api.workspace = true
+reth-tasks.workspace = true
+reth-trie.workspace = true
+
+# common
+futures.workspace = true
+tokio = { workspace = true, features = ["macros", "sync"] }
+thiserror.workspace = true
+
+# metrics
+metrics.workspace = true
+reth-metrics = { workspace = true, features = ["common"] }
+
+# misc
+tracing.workspace = true
+
+# optional deps for test-utils
+reth-chainspec = { workspace = true, optional = true }
+reth-prune-types = { workspace = true, optional = true }
+reth-stages = { workspace = true, optional = true }
+reth-static-file = { workspace = true, optional = true }
+reth-tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-chainspec.workspace = true
+reth-chain-state = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-evm = { workspace = true, features = ["test-utils"] }
+reth-exex-types.workspace = true
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-prune-types.workspace = true
+reth-rpc-types-compat.workspace = true
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-static-file.workspace = true
+reth-tracing.workspace = true
+
+alloy-rlp.workspace = true
+
+assert_matches.workspace = true
+rand.workspace = true
+
+[features]
+test-utils = [
+  "reth-db/test-utils",
+  "reth-chain-state/test-utils",
+  "reth-chainspec",
+  "reth-network-p2p/test-utils",
+  "reth-prune-types",
+  "reth-stages/test-utils",
+  "reth-static-file",
+  "reth-tracing",
+]

@@ -1,0 +1,47 @@
+*                           @gakonst
+bin/                        @onbjerg
+crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
+crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
+crates/chainspec/           @Rjected @joshieDo @mattsse
+crates/chain-state/         @fgimenez @mattsse @rkrasiuk
+crates/cli/                 @onbjerg @mattsse
+crates/config/              @onbjerg
+crates/consensus/           @rkrasiuk @mattsse @Rjected
+crates/engine               @rkrasiuk @mattsse @Rjected
+crates/e2e-test-utils/      @mattsse @Rjected
+crates/engine/              @rkrasiuk @mattsse @Rjected @fgimenez
+crates/errors/              @mattsse
+crates/ethereum/            @mattsse @Rjected
+crates/ethereum-forks/      @mattsse @Rjected
+crates/etl/                 @joshieDo @shekhirin
+crates/evm/                 @rakita @mattsse @Rjected
+crates/exex/                @onbjerg @shekhirin
+crates/fs-util/             @onbjerg @emhane
+crates/metrics/             @onbjerg
+crates/net/                 @emhane @mattsse @Rjected
+crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
+crates/node/                @mattsse @Rjected @onbjerg
+crates/optimism/            @mattsse @Rjected @fgimenez
+crates/payload/             @mattsse @Rjected
+crates/primitives/          @Rjected
+crates/primitives-traits/   @Rjected @joshieDo
+crates/prune/               @shekhirin @joshieDo
+crates/revm/                @mattsse @rakita
+crates/rpc/                 @mattsse @Rjected @emhane
+crates/stages/              @onbjerg @rkrasiuk @shekhirin
+crates/static-file/         @joshieDo @shekhirin
+crates/storage/codecs/      @joshieDo
+crates/storage/db/          @joshieDo @rakita
+crates/storage/db-api/      @joshieDo @rakita
+crates/storage/db-common/   @Rjected @onbjerg
+crates/storage/errors/      @rakita @onbjerg
+crates/storage/libmdbx-rs/  @rakita @shekhirin
+crates/storage/nippy-jar/   @joshieDo @shekhirin
+crates/storage/provider/    @rakita @joshieDo @shekhirin
+crates/storage/storage-api/ @joshieDo @rkrasiuk
+crates/tasks/               @mattsse
+crates/tokio-util/          @fgimenez @emhane
+crates/tracing/             @onbjerg
+crates/transaction-pool/    @mattsse
+crates/trie/                @rkrasiuk @Rjected
+.github/                    @onbjerg @gakonst @DaniPopes

@@ -40,7 +40,7 @@ pub struct Zstd {
 
 impl Zstd {
     /// Creates new [`Zstd`].
-    pub fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
+    pub const fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
         Self {
             state: if use_dict { ZstdState::PendingDictionary } else { ZstdState::Ready },
             level: 0,
@@ -51,7 +51,7 @@ impl Zstd {
         }
     }
 
-    pub fn with_level(mut self, level: i32) -> Self {
+    pub const fn with_level(mut self, level: i32) -> Self {
         self.level = level;
         self
     }
@@ -185,6 +185,7 @@ impl Compression for Zstd {
         matches!(self.state, ZstdState::Ready)
     }
 
+    #[cfg(test)]
     /// If using it with dictionaries, prepares a dictionary for each column.
     fn prepare_compression(
         &mut self,
@@ -208,7 +209,6 @@ impl Compression for Zstd {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        // TODO: parallel calculation
         let mut dictionaries = vec![];
         for column in columns {
             // ZSTD requires all training data to be continuous in memory, alongside the size of
@@ -273,6 +273,7 @@ impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
 }
 
 impl<'a> ZstdDictionaries<'a> {
+    #[cfg(test)]
     /// Creates [`ZstdDictionaries`].
     pub(crate) fn new(raw: Vec<RawDictionary>) -> Self {
         Self(raw.into_iter().map(ZstdDictionary::Raw).collect())
@@ -315,13 +316,14 @@ impl<'a> ZstdDictionaries<'a> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
+    #[allow(dead_code)]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }
 
 impl<'a> ZstdDictionary<'a> {
     /// Returns a reference to the expected `RawDictionary`
-    pub(crate) fn raw(&self) -> Option<&RawDictionary> {
+    pub(crate) const fn raw(&self) -> Option<&RawDictionary> {
         match self {
             ZstdDictionary::Raw(dict) => Some(dict),
             ZstdDictionary::Loaded(_) => None,
@@ -329,7 +331,7 @@ impl<'a> ZstdDictionary<'a> {
     }
 
     /// Returns a reference to the expected `DecoderDictionary`
-    pub(crate) fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
+    pub(crate) const fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
         match self {
             ZstdDictionary::Raw(_) => None,
             ZstdDictionary::Loaded(dict) => Some(dict),

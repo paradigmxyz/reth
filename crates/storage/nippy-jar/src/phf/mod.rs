@@ -32,15 +32,15 @@ pub enum Functions {
 impl PerfectHashingFunction for Functions {
     fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         match self {
-            Functions::Fmph(f) => f.set_keys(keys),
-            Functions::GoFmph(f) => f.set_keys(keys),
+            Self::Fmph(f) => f.set_keys(keys),
+            Self::GoFmph(f) => f.set_keys(keys),
         }
     }
 
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         match self {
-            Functions::Fmph(f) => f.get_index(key),
-            Functions::GoFmph(f) => f.get_index(key),
+            Self::Fmph(f) => f.get_index(key),
+            Self::GoFmph(f) => f.get_index(key),
         }
     }
 }

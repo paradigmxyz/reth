@@ -53,12 +53,12 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     }
 
     /// Returns a reference to the related [`NippyJar`]
-    pub fn jar(&self) -> &NippyJar<H> {
+    pub const fn jar(&self) -> &NippyJar<H> {
         self.jar
     }
 
     /// Returns current row index of the cursor
-    pub fn row_index(&self) -> u64 {
+    pub const fn row_index(&self) -> u64 {
         self.row
     }
 
@@ -67,7 +67,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         self.row = 0;
     }
 
-    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`].
+    /// Returns a row, searching it by a key.
     ///
     /// **May return false positives.**
     ///
@@ -130,7 +130,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         ))
     }
 
-    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
+    /// Returns a row, searching it by a key using a
     /// `mask` to only read certain columns from the row.
     ///
     /// **May return false positives.**
@@ -213,13 +213,13 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     ) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
-        let value_offset = self.reader.offset(offset_pos) as usize;
+        let value_offset = self.reader.offset(offset_pos)? as usize;
 
         let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
             // It's the last column of the last row
             value_offset..self.reader.size()
         } else {
-            let next_value_offset = self.reader.offset(offset_pos + 1) as usize;
+            let next_value_offset = self.reader.offset(offset_pos + 1)? as usize;
             value_offset..next_value_offset
         };
 

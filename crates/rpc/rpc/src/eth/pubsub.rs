@@ -1,12 +1,17 @@
-//! `eth_` PubSub RPC handler implementation
+//! `eth_` `PubSub` RPC handler implementation
 
-use crate::{eth::logs_utils, result::invalid_params_rpc_err};
+use std::sync::Arc;
+
 use futures::StreamExt;
-use jsonrpsee::{server::SubscriptionMessage, PendingSubscriptionSink, SubscriptionSink};
+use jsonrpsee::{
+    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_api::EthPubSubApiServer;
+use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
+use reth_rpc_eth_types::logs_utils;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
@@ -17,7 +22,6 @@ use reth_rpc_types::{
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
-use std::sync::Arc;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -39,7 +43,7 @@ pub struct EthPubSub<Provider, Pool, Events, Network> {
 impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
-    /// Subscription tasks are spawned via [tokio::task::spawn]
+    /// Subscription tasks are spawned via [`tokio::task::spawn`]
     pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
         Self::with_spawner(
             provider,
@@ -95,7 +99,7 @@ async fn handle_accepted<Provider, Pool, Events, Network>(
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
-) -> Result<(), jsonrpsee::core::Error>
+) -> Result<(), ErrorObject<'static>>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
@@ -114,7 +118,7 @@ where
             let filter = match params {
                 Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
                 Some(Params::Bool(_)) => {
-                    return Err(invalid_params_rpc_err("Invalid params for logs").into())
+                    return Err(invalid_params_rpc_err("Invalid params for logs"))
                 }
                 _ => FilteredParams::default(),
             };
@@ -142,8 +146,7 @@ where
                     Params::Logs(_) => {
                         return Err(invalid_params_rpc_err(
                             "Invalid params for newPendingTransactions",
-                        )
-                        .into())
+                        ))
                     }
                 }
             }
@@ -159,10 +162,11 @@ where
                 BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
             // get current sync status
             let mut initial_sync_status = pubsub.network.is_syncing();
-            let current_sub_res = pubsub.sync_status(initial_sync_status).await;
+            let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
-            let msg = SubscriptionMessage::from_json(&current_sub_res)?;
+            let msg = SubscriptionMessage::from_json(&current_sub_res)
+                .map_err(SubscriptionSerializeError::new)?;
             if accepted_sink.send(msg).await.is_err() {
                 return Ok(())
             }
@@ -175,8 +179,9 @@ where
                     initial_sync_status = current_syncing;
 
                     // send a new message now that the status changed
-                    let sync_status = pubsub.sync_status(current_syncing).await;
-                    let msg = SubscriptionMessage::from_json(&sync_status)?;
+                    let sync_status = pubsub.sync_status(current_syncing);
+                    let msg = SubscriptionMessage::from_json(&sync_status)
+                        .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
                         break
                     }
@@ -188,11 +193,28 @@ where
     }
 }
 
+/// Helper to convert a serde error into an [`ErrorObject`]
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to serialize subscription item: {0}")]
+pub struct SubscriptionSerializeError(#[from] serde_json::Error);
+
+impl SubscriptionSerializeError {
+    const fn new(err: serde_json::Error) -> Self {
+        Self(err)
+    }
+}
+
+impl From<SubscriptionSerializeError> for ErrorObject<'static> {
+    fn from(value: SubscriptionSerializeError) -> Self {
+        internal_rpc_err(value.to_string())
+    }
+}
+
 /// Pipes all stream items to the subscription sink.
 async fn pipe_from_stream<T, St>(
     sink: SubscriptionSink,
     mut stream: St,
-) -> Result<(), jsonrpsee::core::Error>
+) -> Result<(), ErrorObject<'static>>
 where
     St: Stream<Item = T> + Unpin,
     T: Serialize,
@@ -211,7 +233,7 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = SubscriptionMessage::from_json(&item)?;
+                let msg = SubscriptionMessage::from_json(&item).map_err(SubscriptionSerializeError::new)?;
                 if sink.send(msg).await.is_err() {
                     break Ok(());
                 }
@@ -248,7 +270,7 @@ where
     Provider: BlockReader + 'static,
 {
     /// Returns the current sync status for the `syncing` subscription
-    async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
+    fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
         if is_syncing {
             let current_block =
                 self.provider.chain_info().map(|info| info.best_number).unwrap_or_default();
@@ -291,10 +313,7 @@ where
     /// Returns a stream that yields all new RPC blocks.
     fn new_headers_stream(&self) -> impl Stream<Item = Header> {
         self.chain_events.canonical_state_stream().flat_map(|new_chain| {
-            let headers = new_chain
-                .committed()
-                .map(|chain| chain.headers().collect::<Vec<_>>())
-                .unwrap_or_default();
+            let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
                 headers.into_iter().map(reth_rpc_types_compat::block::from_primitive_with_hash),
             )

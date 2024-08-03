@@ -38,7 +38,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// the number of successfully deleted blobs and the number of failed deletions.
     ///
     /// This is intended to be called in the background to clean up any old or unused data, in case
-    /// the store uses deferred cleanup: [DiskFileBlobStore]
+    /// the store uses deferred cleanup: [`DiskFileBlobStore`]
     fn cleanup(&self) -> BlobStoreCleanupStat;
 
     /// Retrieves the decoded blob data for the given transaction hash.
@@ -58,7 +58,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError>;
 
-    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the exact
+    /// Returns the exact [`BlobTransactionSidecar`] for the given transaction hashes in the exact
     /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.

@@ -7,7 +7,8 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::{ChainSpec, SealedBlock};
+use reth_chainspec::ChainSpec;
+use reth_primitives::SealedBlock;
 use reth_provider::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
@@ -27,7 +28,7 @@ type ValidationStream = ReceiverStream<ValidationFuture>;
 ///
 /// This listens for incoming validation jobs and executes them.
 ///
-/// This should be spawned as a task: [ValidationTask::run]
+/// This should be spawned as a task: [`ValidationTask::run`]
 #[derive(Clone)]
 pub struct ValidationTask {
     validation_jobs: Arc<Mutex<ValidationStream>>,
@@ -42,7 +43,7 @@ impl ValidationTask {
 
     /// Creates a new task with the given receiver.
     pub fn with_receiver(jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>) -> Self {
-        ValidationTask { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
+        Self { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
     }
 
     /// Executes all new validation jobs that come in.
@@ -61,7 +62,7 @@ impl std::fmt::Debug for ValidationTask {
     }
 }
 
-/// A sender new type for sending validation jobs to [ValidationTask].
+/// A sender new type for sending validation jobs to [`ValidationTask`].
 #[derive(Debug)]
 pub struct ValidationJobSender {
     tx: mpsc::Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
@@ -77,7 +78,7 @@ impl ValidationJobSender {
     }
 }
 
-/// A [TransactionValidator] implementation that validates ethereum transaction.
+/// A [`TransactionValidator`] implementation that validates ethereum transaction.
 ///
 /// This validator is non-blocking, all validation work is done in a separate task.
 #[derive(Debug, Clone)]
@@ -91,7 +92,7 @@ pub struct TransactionValidationTaskExecutor<V> {
 // === impl TransactionValidationTaskExecutor ===
 
 impl TransactionValidationTaskExecutor<()> {
-    /// Convenience method to create a [EthTransactionValidatorBuilder]
+    /// Convenience method to create a [`EthTransactionValidatorBuilder`]
     pub fn eth_builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
         EthTransactionValidatorBuilder::new(chain_spec)
     }
@@ -114,10 +115,10 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
 where
     Client: BlockReaderIdExt,
 {
-    /// Creates a new instance for the given [ChainSpec]
+    /// Creates a new instance for the given [`ChainSpec`]
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
-    /// See [TransactionValidationTaskExecutor::eth_with_additional_tasks]
+    /// See [`TransactionValidationTaskExecutor::eth_with_additional_tasks`]
     pub fn eth<T, S: BlobStore>(
         client: Client,
         chain_spec: Arc<ChainSpec>,
@@ -130,7 +131,7 @@ where
         Self::eth_with_additional_tasks(client, chain_spec, blob_store, tasks, 0)
     }
 
-    /// Creates a new instance for the given [ChainSpec]
+    /// Creates a new instance for the given [`ChainSpec`]
     ///
     /// By default this will enable support for:
     ///   - shanghai

@@ -34,7 +34,7 @@ pub struct PoolConfig {
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
     /// How to handle locally received transactions:
-    /// [TransactionOrigin::Local](crate::TransactionOrigin).
+    /// [`TransactionOrigin::Local`](crate::TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
 }
 
@@ -125,13 +125,13 @@ impl Default for PriceBumpConfig {
 }
 
 /// Configuration options for the locally received transactions:
-/// [TransactionOrigin::Local](crate::TransactionOrigin)
+/// [`TransactionOrigin::Local`](crate::TransactionOrigin)
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LocalTransactionConfig {
     /// Apply no exemptions to the locally received transactions.
     ///
     /// This includes:
-    ///   - available slots are limited to the configured `max_account_slots` of [PoolConfig]
+    ///   - available slots are limited to the configured `max_account_slots` of [`PoolConfig`]
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
@@ -176,11 +176,11 @@ impl LocalTransactionConfig {
     }
 
     /// Sets toggle to propagate transactions received locally by this client (e.g
-    /// transactions from eth_sendTransaction to this nodes' RPC server)
+    /// transactions from `eth_sendTransaction` to this nodes' RPC server)
     ///
     /// If set to false, only transactions received by network peers (via
     /// p2p) will be marked as propagated in the local transaction pool and returned on a
-    /// GetPooledTransactions p2p request
+    /// `GetPooledTransactions` p2p request
     pub const fn set_propagate_local_transactions(mut self, propagate_local_txs: bool) -> Self {
         self.propagate_local_transactions = propagate_local_txs;
         self
@@ -224,5 +224,76 @@ mod tests {
 
         // now this should be above the limits
         assert!(config.is_exceeded(pool_size));
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = LocalTransactionConfig::default();
+
+        assert!(!config.no_exemptions);
+        assert!(config.local_addresses.is_empty());
+        assert!(config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn test_no_local_exemptions() {
+        let config = LocalTransactionConfig { no_exemptions: true, ..Default::default() };
+        assert!(config.no_local_exemptions());
+    }
+
+    #[test]
+    fn test_contains_local_address() {
+        let address = Address::new([1; 20]);
+        let mut local_addresses = HashSet::new();
+        local_addresses.insert(address);
+
+        let config = LocalTransactionConfig { local_addresses, ..Default::default() };
+
+        // Should contain the inserted address
+        assert!(config.contains_local_address(address));
+
+        // Should not contain another random address
+        assert!(!config.contains_local_address(Address::new([2; 20])));
+    }
+
+    #[test]
+    fn test_is_local_with_no_exemptions() {
+        let address = Address::new([1; 20]);
+        let config = LocalTransactionConfig {
+            no_exemptions: true,
+            local_addresses: HashSet::new(),
+            ..Default::default()
+        };
+
+        // Should return false as no exemptions is set to true
+        assert!(!config.is_local(TransactionOrigin::Local, address));
+    }
+
+    #[test]
+    fn test_is_local_without_no_exemptions() {
+        let address = Address::new([1; 20]);
+        let mut local_addresses = HashSet::new();
+        local_addresses.insert(address);
+
+        let config =
+            LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
+
+        // Should return true as the transaction origin is local
+        assert!(config.is_local(TransactionOrigin::Local, Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, address));
+
+        // Should return true as the address is in the local_addresses set
+        assert!(config.is_local(TransactionOrigin::External, address));
+        // Should return false as the address is not in the local_addresses set
+        assert!(!config.is_local(TransactionOrigin::External, Address::new([2; 20])));
+    }
+
+    #[test]
+    fn test_set_propagate_local_transactions() {
+        let config = LocalTransactionConfig::default();
+        assert!(config.propagate_local_transactions);
+
+        let new_config = config.set_propagate_local_transactions(false);
+        assert!(!new_config.propagate_local_transactions);
     }
 }

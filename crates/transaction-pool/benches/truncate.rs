@@ -60,7 +60,7 @@ fn create_transactions_for_sender(
 /// Because this uses [Arbitrary], the number of transactions per sender needs to be bounded. This
 /// is done by using the `max_depth` parameter.
 ///
-/// This uses [create_transactions_for_sender] to generate the transactions.
+/// This uses [`create_transactions_for_sender`] to generate the transactions.
 fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTransaction> {
     let config = ProptestConfig::default();
     let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
@@ -142,7 +142,7 @@ fn truncate_pending(
         let mut txpool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             // add transactions with a basefee of zero, so they are not immediately removed
             txpool.add_transaction(f.validated_arc(tx.clone()), 0);
         }
@@ -177,7 +177,7 @@ fn truncate_queued(
         let mut txpool = ParkedPool::<QueuedOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool
@@ -211,7 +211,7 @@ fn truncate_basefee(
         let mut txpool = ParkedPool::<BasefeeOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool

@@ -3,7 +3,7 @@ use crate::{
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
-use fnv::FnvHashMap;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -19,8 +19,8 @@ use std::{
 /// This pool is a bijection: at all times each set (`best`, `by_id`) contains the same
 /// transactions.
 ///
-/// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
-/// is [ValidPoolTransaction] wrapped in an [Arc].
+/// Note: This type is generic over [`ParkedPool`] which enforces that the underlying transaction
+/// type is [`ValidPoolTransaction`] wrapped in an [Arc].
 #[derive(Debug, Clone)]
 pub struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
@@ -40,7 +40,7 @@ pub struct ParkedPool<T: ParkedOrd> {
     last_sender_submission: BTreeSet<SubmissionSenderId>,
     /// Keeps track of the number of transactions in the pool by the sender and the last submission
     /// id.
-    sender_transaction_count: FnvHashMap<SenderId, SenderTransactionCount>,
+    sender_transaction_count: FxHashMap<SenderId, SenderTransactionCount>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`].
@@ -171,7 +171,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.last_sender_submission.iter().cloned()
     }
 
-    /// Truncates the pool by removing transactions, until the given [SubPoolLimit] has been met.
+    /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
     ///
     /// This is done by first ordering senders by the last time they have submitted a transaction
     ///
@@ -384,7 +384,7 @@ impl<T: ParkedOrd> Ord for ParkedPoolTransaction<T> {
     }
 }
 
-/// Includes a [SenderId] and `submission_id`. This is used to sort senders by their last
+/// Includes a [`SenderId`] and `submission_id`. This is used to sort senders by their last
 /// submission id.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub(crate) struct SubmissionSenderId {
@@ -395,7 +395,7 @@ pub(crate) struct SubmissionSenderId {
 }
 
 impl SubmissionSenderId {
-    /// Creates a new [SubmissionSenderId] based on the [SenderId] and `submission_id`.
+    /// Creates a new [`SubmissionSenderId`] based on the [`SenderId`] and `submission_id`.
     const fn new(sender_id: SenderId, submission_id: u64) -> Self {
         Self { sender_id, submission_id }
     }

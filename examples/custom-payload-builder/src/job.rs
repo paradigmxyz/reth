@@ -26,7 +26,7 @@ where
     /// The type responsible for building payloads.
     ///
     /// See [PayloadBuilder]
-    pub(crate) _builder: Builder,
+    pub(crate) builder: Builder,
 }
 
 impl<Client, Pool, Tasks, Builder> PayloadJob for EmptyBlockPayloadJob<Client, Pool, Tasks, Builder>
@@ -44,7 +44,7 @@ where
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let payload = Builder::build_empty_payload(&self.client, self.config.clone())?;
+        let payload = self.builder.build_empty_payload(&self.client, self.config.clone())?;
         Ok(payload)
     }
 

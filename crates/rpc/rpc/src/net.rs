@@ -1,8 +1,8 @@
-use crate::eth::EthApiSpec;
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::PeersInfo;
 use reth_primitives::U64;
 use reth_rpc_api::NetApiServer;
+use reth_rpc_eth_api::helpers::EthApiSpec;
 use reth_rpc_types::PeerCount;
 
 /// `Net` API implementation.
@@ -19,7 +19,7 @@ pub struct NetApi<Net, Eth> {
 
 impl<Net, Eth> NetApi<Net, Eth> {
     /// Returns a new instance with the given network and eth interface implementations
-    pub fn new(network: Net, eth: Eth) -> Self {
+    pub const fn new(network: Net, eth: Eth) -> Self {
         Self { network, eth }
     }
 }

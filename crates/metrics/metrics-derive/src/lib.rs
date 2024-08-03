@@ -58,10 +58,10 @@ mod with_attrs;
 /// impl Default for CustomMetrics {
 ///     fn default() -> Self {
 ///         Self {
-///             gauge: metrics::register_gauge!("metrics_custom_gauge"),
-///             gauge2: metrics::register_gauge!("metrics_custom_second_gauge"),
-///             counter: metrics::register_counter!("metrics_custom_counter"),
-///             histo: metrics::register_histogram!("metrics_custom_histogram"),
+///             gauge: metrics::gauge!("metrics_custom_gauge"),
+///             gauge2: metrics::gauge!("metrics_custom_second_gauge"),
+///             counter: metrics::counter!("metrics_custom_counter"),
+///             histo: metrics::histogram!("metrics_custom_histogram"),
 ///         }
 ///     }
 /// }
@@ -115,7 +115,7 @@ mod with_attrs;
 ///
 /// impl DynamicScopeMetrics {
 ///     pub fn new(scope: &str) -> Self {
-///         Self { gauge: metrics::register_gauge!(format!("{}{}{}", scope, "_", "gauge")) }
+///         Self { gauge: metrics::gauge!(format!("{}{}{}", scope, "_", "gauge")) }
 ///     }
 ///
 ///     pub fn describe(scope: &str) {

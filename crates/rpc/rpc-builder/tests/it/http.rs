@@ -5,34 +5,33 @@ use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
         client::{ClientT, SubscriptionClientT},
-        error::Error,
         params::ArrayParams,
     },
     http_client::HttpClient,
     rpc_params,
     types::error::ErrorCode,
 };
+use reth_network_peers::NodeRecord;
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
-    U256, U64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256, B64, U256, U64,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
     Web3ApiClient,
 };
-use reth_rpc_builder::RethRpcModule;
+use reth_rpc_server_types::RethRpcModule;
 use reth_rpc_types::{
-    trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
-    SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
+    trace::filter::TraceFilter, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind,
+    RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn is_unimplemented(err: Error) -> bool {
+fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     match err {
-        Error::Call(error_obj) => {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
@@ -87,7 +86,7 @@ impl RawRpcParamsBuilder {
     }
 
     /// Sets the ID for the JSON-RPC request.
-    pub fn set_id(mut self, id: i32) -> Self {
+    pub const fn set_id(mut self, id: i32) -> Self {
         self.id = id;
         self
     }
@@ -160,6 +159,17 @@ where
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();
     let tx = Bytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));
+    let typed_data = serde_json::from_str(
+        r#"{
+        "types": {
+            "EIP712Domain": []
+        },
+        "primaryType": "EIP712Domain",
+        "domain": {},
+        "message": {}
+    }"#,
+    )
+    .unwrap();
 
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
@@ -168,7 +178,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::fee_history(client, 0.into(), block_number, None).await.unwrap();
+    EthApiClient::fee_history(client, U64::from(0), block_number, None).await.unwrap();
     EthApiClient::balance(client, address, None).await.unwrap();
     EthApiClient::transaction_count(client, address, None).await.unwrap();
     EthApiClient::storage_at(client, address, U256::default().into(), None).await.unwrap();
@@ -181,9 +191,7 @@ where
     EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::uncle_by_block_number_and_index(client, block_number, index).await.unwrap();
     EthApiClient::sign(client, address, bytes.clone()).await.unwrap_err();
-    EthApiClient::sign_typed_data(client, address, jsonrpsee::core::JsonValue::Null)
-        .await
-        .unwrap_err();
+    EthApiClient::sign_typed_data(client, address, typed_data).await.unwrap_err();
     EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap();
     EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();
@@ -226,7 +234,7 @@ where
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap();
+    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
     DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
@@ -287,13 +295,16 @@ where
     let address = Address::default();
     let sender = Address::default();
     let tx_hash = TxHash::default();
-    let block_number = BlockNumberOrTag::default();
+    let block_number = 1;
     let page_number = 1;
     let page_size = 10;
     let nonce = 1;
     let block_hash = B256::default();
 
+    OtterscanClient::get_header_by_number(client, block_number).await.unwrap();
+
     OtterscanClient::has_code(client, address, None).await.unwrap();
+    OtterscanClient::has_code(client, address, Some(block_number.into())).await.unwrap();
 
     OtterscanClient::get_api_level(client).await.unwrap();
 
@@ -301,13 +312,11 @@ where
 
     OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
 
-    assert!(is_unimplemented(
-        OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
-    ));
+    OtterscanClient::trace_transaction(client, tx_hash).await.unwrap();
 
-    OtterscanClient::get_block_details(client, block_number).await.unwrap();
+    OtterscanClient::get_block_details(client, block_number).await.unwrap_err();
 
-    OtterscanClient::get_block_details_by_hash(client, block_hash).await.unwrap();
+    OtterscanClient::get_block_details_by_hash(client, block_hash).await.unwrap_err();
 
     OtterscanClient::get_block_transactions(client, block_number, page_number, page_size)
         .await
@@ -326,15 +335,11 @@ where
             .err()
             .unwrap()
     ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce,)
-            .await
-            .err()
-            .unwrap()
-    ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
-    ));
+    assert!(OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
+        .await
+        .err()
+        .is_none());
+    assert!(OtterscanClient::get_contract_creator(client, address).await.unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -544,7 +549,7 @@ async fn test_eth_logs_args() {
     let client = handle.http_client().unwrap();
 
     let mut params = ArrayParams::default();
-    params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
+    params.insert(serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
 
     let resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await;
     // block does not exist
@@ -553,7 +558,6 @@ async fn test_eth_logs_args() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_by_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -583,7 +587,6 @@ async fn test_eth_get_block_by_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -617,7 +620,6 @@ async fn test_eth_get_block_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_code_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -676,7 +678,6 @@ async fn test_eth_get_code_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_block_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -698,7 +699,6 @@ async fn test_eth_block_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_chain_id_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -720,7 +720,6 @@ async fn test_eth_chain_id_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_syncing_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -742,7 +741,6 @@ async fn test_eth_syncing_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_protocol_version_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -764,7 +762,6 @@ async fn test_eth_protocol_version_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_coinbase_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -785,7 +782,6 @@ async fn test_eth_coinbase_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_accounts_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -807,7 +803,6 @@ async fn test_eth_accounts_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -845,7 +840,6 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -887,7 +881,6 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -920,7 +913,6 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -954,7 +946,6 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_receipts_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -996,7 +987,6 @@ async fn test_eth_get_block_receipts_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1042,7 +1032,6 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1084,7 +1073,6 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1122,7 +1110,6 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1168,7 +1155,6 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1210,7 +1196,6 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_receipt_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1252,7 +1237,6 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_balance_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1303,7 +1287,6 @@ async fn test_eth_get_balance_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_storage_at_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1370,7 +1353,6 @@ async fn test_eth_get_storage_at_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_count_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1428,20 +1410,32 @@ async fn test_eth_get_transaction_count_rpc_call() {
     .await;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_rpc_builder_basic() {
+    let rpc_string = RawRpcParamsBuilder::default()
+        .method("eth_getBalance")
+        .add_param("0xaa00000000000000000000000000000000000000")
+        .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")
+        .set_id(1)
+        .build();
 
-    #[test]
-    fn test_rpc_builder_basic() {
-        let rpc_string = RawRpcParamsBuilder::default()
-            .method("eth_getBalance")
-            .add_param("0xaa00000000000000000000000000000000000000")
-            .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")
-            .set_id(1)
-            .build();
+    let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
+    assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
+}
 
-        let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
-        assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
-    }
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_fee_history_raw() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block by number with proper fields
+    test_rpc_call_ok::<Option<FeeHistory>>(
+        &client,
+        "eth_feeHistory",
+        rpc_params!["0x0", "latest", [0]],
+    )
+    .await;
 }

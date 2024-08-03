@@ -38,10 +38,12 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "0BSD",
     "ISC",
     "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
+    "Zlib",
     # https://github.com/briansmith/ring/issues/902
     "LicenseRef-ring",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
@@ -58,10 +60,10 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "secp256k1-sys" },
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
+    { allow = ["CC0-1.0"], name = "to_method" },
     { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
     # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
-    { allow = ["MPL-2.0"], name = "attohttpc" },
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]
@@ -87,7 +89,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
-    # TODO: remove, see ./Cargo.toml
+    # TODO: Please avoid adding new entries to this list.
     "https://github.com/alloy-rs/alloy",
-    "https://github.com/paradigmxyz/evm-inspectors",
+    "https://github.com/foundry-rs/block-explorers",
+    "https://github.com/bluealloy/revm",
+    "https://github.com/paradigmxyz/revm-inspectors",
 ]

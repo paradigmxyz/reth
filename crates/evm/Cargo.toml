@@ -12,7 +12,24 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
+reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 revm-primitives.workspace = true
-revm.workspace = true
+reth-prune-types.workspace = true
+reth-storage-errors.workspace = true
+reth-execution-types.workspace = true
 
+revm.workspace = true
+alloy-eips.workspace = true
+auto_impl.workspace = true
+futures-util.workspace = true
+parking_lot = { workspace = true, optional = true }
+
+[dev-dependencies]
+parking_lot.workspace = true
+
+[features]
+default = ["std"]
+std = []
+test-utils = ["dep:parking_lot"]

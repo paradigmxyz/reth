@@ -1,0 +1,17 @@
+[package]
+name = "example-node-custom-rpc"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-transaction-pool.workspace = true
+reth-node-ethereum.workspace = true
+
+clap = { workspace = true, features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+
+[dev-dependencies]
+tokio.workspace = true

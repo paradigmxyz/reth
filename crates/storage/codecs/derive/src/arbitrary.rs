@@ -26,7 +26,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let mut buf = vec![];
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-                    assert!(field == decoded);
+                    assert!(field == decoded, "maybe_generate_tests::compact");
                 }
             });
         } else if arg.to_string() == "rlp" {
@@ -37,7 +37,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let len = field.encode(&mut buf);
                     let mut b = &mut buf.as_slice();
                     let decoded = super::#type_ident::decode(b).unwrap();
-                    assert_eq!(field, decoded);
+                    assert_eq!(field, decoded, "maybe_generate_tests::rlp");
                     // ensure buffer is fully consumed by decode
                     assert!(b.is_empty(), "buffer was not consumed entirely");
 
@@ -47,10 +47,10 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                 #[test]
                 fn malformed_rlp_header_check() {
-                     use rand::RngCore;
+                    use rand::RngCore;
 
                     // get random instance of type
-                    let mut raw = [0u8;1024];
+                    let mut raw = [0u8; 1024];
                     rand::thread_rng().fill_bytes(&mut raw);
                     let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
                     let val = <super::#type_ident as arbitrary::Arbitrary>::arbitrary(&mut unstructured);
@@ -72,7 +72,6 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let res = super::#type_ident::decode(&mut b.as_ref());
                     assert!(res.is_err(), "malformed header was decoded");
                 }
-
             });
         } else if let Ok(num) = arg.to_string().parse() {
             default_cases = num;
@@ -88,12 +87,13 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             #[cfg(test)]
             mod #mod_tests {
                 #(#traits)*
+                use proptest_arbitrary_interop::arb;
 
                 #[test]
                 fn proptest() {
                     let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
 
-                    proptest::proptest!(config, |(field: super::#type_ident)| {
+                    proptest::proptest!(config, |(field in arb::<super::#type_ident>())| {
                         #(#roundtrips)*
                     });
                 }

@@ -34,7 +34,7 @@ pub struct UnauthedEthStream<S> {
 
 impl<S> UnauthedEthStream<S> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
@@ -197,19 +197,19 @@ impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
     #[inline]
-    pub fn new(version: EthVersion, inner: S) -> Self {
+    pub const fn new(version: EthVersion, inner: S) -> Self {
         Self { version, inner }
     }
 
     /// Returns the eth version.
     #[inline]
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the underlying stream.
     #[inline]
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 
@@ -348,14 +348,15 @@ mod tests {
     use crate::{
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
+        hello::DEFAULT_TCP_PORT,
         p2pstream::{ProtocolVersion, UnauthedP2PStream},
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec, Status,
     };
-    use alloy_chains::NamedChain;
     use futures::{SinkExt, StreamExt};
-    use reth_discv4::DEFAULT_DISCOVERY_PORT;
+    use reth_chainspec::NamedChain;
     use reth_ecies::stream::ECIESStream;
-    use reth_primitives::{pk2id, ForkFilter, Head, B256, U256};
+    use reth_network_peers::pk2id;
+    use reth_primitives::{ForkFilter, Head, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
@@ -623,7 +624,7 @@ mod tests {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
                 protocols: vec![EthVersion::Eth67.into()],
-                port: DEFAULT_DISCOVERY_PORT,
+                port: DEFAULT_TCP_PORT,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
 
@@ -651,7 +652,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
             protocols: vec![EthVersion::Eth67.into()],
-            port: DEFAULT_DISCOVERY_PORT,
+            port: DEFAULT_TCP_PORT,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
 

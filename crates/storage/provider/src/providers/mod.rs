@@ -1,37 +1,36 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
-    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    EvmEnvProvider, FinalizedBlockReader, FullExecutionDataProvider, HeaderProvider, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
-use reth_db::{
+use reth_blockchain_tree_api::{
+    error::{CanonicalError, InsertBlockError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
+};
+use reth_chain_state::ChainInfoTracker;
+use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    consensus::ForkchoiceState,
-    provider::ProviderResult,
-    RethResult,
-};
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, ChainInfo, ChainSpec, Header, PruneCheckpoint,
-    PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    U256,
+    BlockNumberOrTag, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, Withdrawals, B256, U256,
 };
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
@@ -43,8 +42,8 @@ pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
-    StaticFileWriter,
+    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
+    StaticFileProviderRWRefMut, StaticFileWriter,
 };
 
 mod state;
@@ -56,67 +55,86 @@ pub use state::{
 mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
 
-mod chain_info;
-use chain_info::ChainInfoTracker;
-
 mod consistent_view;
+use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
+
+mod blockchain_provider;
+pub use blockchain_provider::BlockchainProvider2;
 
 /// The main type for interacting with the blockchain.
 ///
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[derive(Clone, Debug)]
-pub struct BlockchainProvider<DB, Tree> {
+#[allow(missing_debug_implementations)]
+pub struct BlockchainProvider<DB> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
     /// The blockchain tree instance.
-    tree: Tree,
+    tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
 }
 
-impl<DB, Tree> BlockchainProvider<DB, Tree> {
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
-    pub fn with_latest(database: ProviderFactory<DB>, tree: Tree, latest: SealedHeader) -> Self {
-        Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
-    }
-}
-
-impl<DB, Tree> BlockchainProvider<DB, Tree>
-where
-    DB: Database,
-{
-    /// Create a new provider using only the database and the tree, fetching the latest header from
-    /// the database to initialize the provider.
-    pub fn new(database: ProviderFactory<DB>, tree: Tree) -> ProviderResult<Self> {
-        let provider = database.provider()?;
-        let best: ChainInfo = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                drop(provider);
-                Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
+impl<DB> Clone for BlockchainProvider<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            database: self.database.clone(),
+            tree: self.tree.clone(),
+            chain_info: self.chain_info.clone(),
         }
     }
 }
 
-impl<DB, Tree> BlockchainProvider<DB, Tree>
+impl<DB> BlockchainProvider<DB> {
+    /// Sets the treeviewer for the provider.
+    #[doc(hidden)]
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+        self.tree = tree;
+        self
+    }
+}
+
+impl<DB> BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer,
 {
+    /// Create new provider instance that wraps the database and the blockchain tree, using the
+    /// provided latest header to initialize the chain info tracker, alongside the finalized header
+    /// if it exists.
+    pub fn with_blocks(
+        database: ProviderFactory<DB>,
+        tree: Arc<dyn TreeViewer>,
+        latest: SealedHeader,
+        finalized: Option<SealedHeader>,
+    ) -> Self {
+        Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized) }
+    }
+
+    /// Create a new provider using only the database and the tree, fetching the latest header from
+    /// the database to initialize the provider.
+    pub fn new(database: ProviderFactory<DB>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
+        let provider = database.provider()?;
+        let best: ChainInfo = provider.chain_info()?;
+        let latest_header = provider
+            .header_by_number(best.best_number)?
+            .ok_or(ProviderError::HeaderNotFound(best.best_number.into()))?;
+
+        let finalized_block_number = provider.last_finalized_block_number()?;
+        let finalized_header = provider.sealed_header(finalized_block_number)?;
+
+        Ok(Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header))
+    }
+
     /// Ensures that the given block number is canonical (synced)
     ///
-    /// This is a helper for guarding the [HistoricalStateProvider] against block numbers that are
+    /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
     /// out of range and would lead to invalid results, mainly during initial sync.
     ///
-    /// Verifying the block_number would be expensive since we need to lookup sync table
+    /// Verifying the `block_number` would be expensive since we need to lookup sync table
     /// Instead, we ensure that the `block_number` is within the range of the
-    /// [Self::best_block_number] which is updated when a block is synced.
+    /// [`Self::best_block_number`] which is updated when a block is synced.
     #[inline]
     fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
         let latest = self.best_block_number()?;
@@ -128,7 +146,27 @@ where
     }
 }
 
-impl<DB, Tree> DatabaseProviderFactory<DB> for BlockchainProvider<DB, Tree>
+impl<DB> BlockchainProvider<DB>
+where
+    Self: StateProviderFactory,
+    DB: Database,
+{
+    /// Return a [`StateProviderBox`] that contains bundle state data provider.
+    /// Used to inspect or execute transaction on the pending state.
+    fn pending_with_provider(
+        &self,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
+    ) -> ProviderResult<StateProviderBox> {
+        let canonical_fork = bundle_state_data.canonical_fork();
+        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
+
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
+        Ok(Box::new(bundle_state_provider))
+    }
+}
+
+impl<DB> DatabaseProviderFactory<DB> for BlockchainProvider<DB>
 where
     DB: Database,
 {
@@ -137,10 +175,15 @@ where
     }
 }
 
-impl<DB, Tree> HeaderProvider for BlockchainProvider<DB, Tree>
+impl<DB> StaticFileProviderFactory for BlockchainProvider<DB> {
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.database.static_file_provider()
+    }
+}
+
+impl<DB> HeaderProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         self.database.header(block_hash)
@@ -182,10 +225,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockHashReader for BlockchainProvider<DB, Tree>
+impl<DB> BlockHashReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.database.block_hash(number)
@@ -200,10 +242,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockNumReader for BlockchainProvider<DB, Tree>
+impl<DB> BlockNumReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(self.chain_info.chain_info())
@@ -222,10 +263,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockIdReader for BlockchainProvider<DB, Tree>
+impl<DB> BlockIdReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.tree.pending_block_num_hash())
@@ -240,10 +280,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockReader for BlockchainProvider<DB, Tree>
+impl<DB> BlockReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         let block = match source {
@@ -258,7 +297,7 @@ where
                 block
             }
             BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
-            BlockSource::Database => self.database.block_by_hash(hash)?,
+            BlockSource::Canonical => self.database.block_by_hash(hash)?,
         };
 
         Ok(block)
@@ -296,7 +335,7 @@ where
 
     /// Returns the block with senders with matching number or hash from database.
     ///
-    /// **NOTE: If [TransactionVariant::NoHash] is provided then the transactions have invalid
+    /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
@@ -308,15 +347,36 @@ where
         self.database.block_with_senders(id, transaction_kind)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.database.sealed_block_with_senders(id, transaction_kind)
+    }
+
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.database.block_range(range)
     }
+
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        self.database.block_with_senders_range(range)
+    }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        self.database.sealed_block_with_senders_range(range)
+    }
 }
 
-impl<DB, Tree> TransactionsProvider for BlockchainProvider<DB, Tree>
+impl<DB> TransactionsProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.database.transaction_id(tx_hash)
@@ -381,10 +441,9 @@ where
     }
 }
 
-impl<DB, Tree> ReceiptProvider for BlockchainProvider<DB, Tree>
+impl<DB> ReceiptProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.database.receipt(id)
@@ -405,10 +464,10 @@ where
         self.database.receipts_by_tx_range(range)
     }
 }
-impl<DB, Tree> ReceiptProviderIdExt for BlockchainProvider<DB, Tree>
+
+impl<DB> ReceiptProviderIdExt for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreeViewer + Send + Sync,
 {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
@@ -433,10 +492,9 @@ where
     }
 }
 
-impl<DB, Tree> WithdrawalsProvider for BlockchainProvider<DB, Tree>
+impl<DB> WithdrawalsProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn withdrawals_by_block(
         &self,
@@ -451,10 +509,22 @@ where
     }
 }
 
-impl<DB, Tree> StageCheckpointReader for BlockchainProvider<DB, Tree>
+impl<DB> RequestsProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.database.requests_by_block(id, timestamp)
+    }
+}
+
+impl<DB> StageCheckpointReader for BlockchainProvider<DB>
+where
+    DB: Database,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
@@ -463,12 +533,15 @@ where
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.database.provider()?.get_stage_checkpoint_progress(id)
     }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.database.provider()?.get_all_checkpoints()
+    }
 }
 
-impl<DB, Tree> EvmEnvProvider for BlockchainProvider<DB, Tree>
+impl<DB> EvmEnvProvider for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn fill_env_at<EvmConfig>(
         &self,
@@ -496,22 +569,6 @@ where
         self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_block_env_at(block_env, at)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        self.database.provider()?.fill_block_env_with_header(block_env, header)
-    }
-
     fn fill_cfg_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -537,10 +594,9 @@ where
     }
 }
 
-impl<DB, Tree> PruneCheckpointReader for BlockchainProvider<DB, Tree>
+impl<DB> PruneCheckpointReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Send + Sync,
 {
     fn get_prune_checkpoint(
         &self,
@@ -548,22 +604,24 @@ where
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         self.database.provider()?.get_prune_checkpoint(segment)
     }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.database.provider()?.get_prune_checkpoints()
+    }
 }
 
-impl<DB, Tree> ChainSpecProvider for BlockchainProvider<DB, Tree>
+impl<DB> ChainSpecProvider for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: Send + Sync,
 {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.database.chain_spec()
     }
 }
 
-impl<DB, Tree> StateProviderFactory for BlockchainProvider<DB, Tree>
+impl<DB> StateProviderFactory for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: BlockchainTreePendingStateProvider + BlockchainTreeViewer,
 {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
@@ -603,7 +661,7 @@ where
     /// Returns the state provider for pending state.
     ///
     /// If there's no pending block available then the latest state provider is returned:
-    /// [Self::latest]
+    /// [`Self::latest`]
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
@@ -623,24 +681,11 @@ where
         }
         Ok(None)
     }
-
-    fn pending_with_provider(
-        &self,
-        bundle_state_data: Box<dyn BundleStateDataProvider>,
-    ) -> ProviderResult<StateProviderBox> {
-        let canonical_fork = bundle_state_data.canonical_fork();
-        trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
-
-        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
-        let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
-        Ok(Box::new(bundle_state_provider))
-    }
 }
 
-impl<DB, Tree> BlockchainTreeEngine for BlockchainProvider<DB, Tree>
+impl<DB> BlockchainTreeEngine for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: BlockchainTreeEngine,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         self.tree.buffer_block(block)
@@ -654,39 +699,36 @@ where
         self.tree.insert_block(block, validation_kind)
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         self.tree.finalize_block(finalized_block)
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block)
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> Result<BTreeMap<BlockNumber, B256>, CanonicalError> {
+        self.tree.update_block_hashes_and_clear_buffered()
+    }
+
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
-    }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        self.tree.unwind(unwind_to)
     }
 }
 
-impl<DB, Tree> BlockchainTreeViewer for BlockchainProvider<DB, Tree>
+impl<DB> BlockchainTreeViewer for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: BlockchainTreeViewer,
 {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        self.tree.blocks()
-    }
-
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         self.tree.header_by_hash(hash)
     }
@@ -699,20 +741,8 @@ where
         self.tree.block_with_senders_by_hash(block_hash)
     }
 
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.buffered_block_by_hash(block_hash)
-    }
-
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
         self.tree.buffered_header_by_hash(block_hash)
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        self.tree.canonical_blocks()
-    }
-
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
-        self.tree.find_canonical_ancestor(hash)
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -725,10 +755,6 @@ where
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        self.tree.pending_blocks()
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
@@ -744,10 +770,9 @@ where
     }
 }
 
-impl<DB, Tree> CanonChainTracker for BlockchainProvider<DB, Tree>
+impl<DB> CanonChainTracker for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: Send + Sync,
     Self: BlockReader,
 {
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
@@ -780,10 +805,9 @@ where
     }
 }
 
-impl<DB, Tree> BlockReaderIdExt for BlockchainProvider<DB, Tree>
+impl<DB> BlockReaderIdExt for BlockchainProvider<DB>
 where
     Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
-    Tree: BlockchainTreeEngine,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>> {
         match id {
@@ -795,7 +819,7 @@ where
                 // trait impl
                 if Some(true) == hash.require_canonical {
                     // check the database, canonical blocks are only stored in the database
-                    self.find_block_by_hash(hash.block_hash, BlockSource::Database)
+                    self.find_block_by_hash(hash.block_hash, BlockSource::Canonical)
                 } else {
                     self.block_by_hash(hash.block_hash)
                 }
@@ -860,33 +884,30 @@ where
     }
 }
 
-impl<DB, Tree> BlockchainTreePendingStateProvider for BlockchainProvider<DB, Tree>
+impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: BlockchainTreePendingStateProvider,
 {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         self.tree.find_pending_state_provider(block_hash)
     }
 }
 
-impl<DB, Tree> CanonStateSubscriptions for BlockchainProvider<DB, Tree>
+impl<DB> CanonStateSubscriptions for BlockchainProvider<DB>
 where
     DB: Send + Sync,
-    Tree: CanonStateSubscriptions,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.tree.subscribe_to_canonical_state()
     }
 }
 
-impl<DB, Tree> ChangeSetReader for BlockchainProvider<DB, Tree>
+impl<DB> ChangeSetReader for BlockchainProvider<DB>
 where
     DB: Database,
-    Tree: Sync + Send,
 {
     fn account_block_changeset(
         &self,
@@ -896,10 +917,9 @@ where
     }
 }
 
-impl<DB, Tree> AccountReader for BlockchainProvider<DB, Tree>
+impl<DB> AccountReader for BlockchainProvider<DB>
 where
     DB: Database + Sync + Send,
-    Tree: Sync + Send,
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {

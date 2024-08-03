@@ -2,12 +2,10 @@ use super::request::BodiesRequestFuture;
 use crate::metrics::BodyDownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
-        bodies::{client::BodiesClient, response::BlockResponse},
-        error::DownloadResult,
-    },
+use reth_consensus::Consensus;
+use reth_network_p2p::{
+    bodies::{client::BodiesClient, response::BlockResponse},
+    error::DownloadResult,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -16,7 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// The wrapper around [FuturesUnordered] that keeps information
+/// The wrapper around [`FuturesUnordered`] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
 pub(crate) struct BodiesRequestQueue<B: BodiesClient> {

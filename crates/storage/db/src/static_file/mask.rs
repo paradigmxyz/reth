@@ -1,4 +1,4 @@
-use crate::table::Decompress;
+use reth_db_api::table::Decompress;
 
 /// Generic Mask helper struct for selecting specific column values to read and decompress.
 ///
@@ -26,6 +26,9 @@ macro_rules! add_segments {
             $(
                 #[doc = concat!("Mask for ", stringify!($segment), " static file segment. See [`Mask`] for more.")]
                 #[derive(Debug)]
+                // TODO: remove next attribute when nightly is fixed (ie. does
+                // not return wrong warnings for never constructed structs).
+                #[allow(dead_code)]
                 pub struct [<$segment Mask>]<FIRST, SECOND = (), THIRD = ()>(Mask<FIRST, SECOND, THIRD>);
             )+
         }
@@ -37,7 +40,7 @@ add_segments!(Header, Receipt, Transaction);
 pub trait ColumnSelectorOne {
     /// First desired column value
     type FIRST: Decompress;
-    /// Mask to obtain desired values, should correspond to the order of columns in a static_file.
+    /// Mask to obtain desired values, should correspond to the order of columns in a `static_file`.
     const MASK: usize;
 }
 
@@ -47,7 +50,7 @@ pub trait ColumnSelectorTwo {
     type FIRST: Decompress;
     /// Second desired column value
     type SECOND: Decompress;
-    /// Mask to obtain desired values, should correspond to the order of columns in a static_file.
+    /// Mask to obtain desired values, should correspond to the order of columns in a `static_file`.
     const MASK: usize;
 }
 
@@ -59,7 +62,7 @@ pub trait ColumnSelectorThree {
     type SECOND: Decompress;
     /// Third desired column value
     type THIRD: Decompress;
-    /// Mask to obtain desired values, should correspond to the order of columns in a static_file.
+    /// Mask to obtain desired values, should correspond to the order of columns in a `static_file`.
     const MASK: usize;
 }
 

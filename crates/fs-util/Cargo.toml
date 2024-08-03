@@ -1,0 +1,19 @@
+[package]
+name = "reth-fs-util"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used fs utils in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+
+# misc
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true

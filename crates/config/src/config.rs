@@ -1,14 +1,16 @@
 //! Configuration files.
 
-use reth_discv4::Discv4Config;
-use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
-use reth_primitives::PruneModes;
-use secp256k1::SecretKey;
+use reth_network_types::{PeersConfig, SessionsConfig};
+use reth_prune_types::PruneModes;
+use reth_stages_types::ExecutionStageThresholds;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
+    ffi::OsStr,
     path::{Path, PathBuf},
     time::Duration,
 };
+
+const EXTENSION: &str = "toml";
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -27,25 +29,33 @@ pub struct Config {
 }
 
 impl Config {
-    /// Initializes network config from read data
-    pub fn network_config(
+    /// Returns the [`PeersConfig`] for the node.
+    ///
+    /// If a peers file is provided, the basic nodes from the file are added to the configuration.
+    pub fn peers_config_with_basic_nodes_from_file(
         &self,
-        nat_resolution_method: reth_net_nat::NatResolver,
-        peers_file: Option<PathBuf>,
-        secret_key: SecretKey,
-    ) -> NetworkConfigBuilder {
-        let peer_config = self
-            .peers
+        peers_file: Option<&Path>,
+    ) -> PeersConfig {
+        self.peers
             .clone()
             .with_basic_nodes_from_file(peers_file)
-            .unwrap_or_else(|_| self.peers.clone());
+            .unwrap_or_else(|_| self.peers.clone())
+    }
 
-        let discv4 =
-            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key)
-            .sessions_config(self.sessions.clone())
-            .peer_config(peer_config)
-            .discovery(discv4)
+    /// Save the configuration to toml file.
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        if path.extension() != Some(OsStr::new(EXTENSION)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("reth config file extension must be '{EXTENSION}'"),
+            ))
+        }
+        confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
+    /// Sets the pruning configuration.
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
     }
 }
 
@@ -61,6 +71,8 @@ pub struct StageConfig {
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Prune stage configuration.
+    pub prune: PruneStageConfig,
     /// Account Hashing stage configuration.
     pub account_hashing: HashingConfig,
     /// Storage Hashing stage configuration.
@@ -75,6 +87,19 @@ pub struct StageConfig {
     pub index_storage_history: IndexHistoryConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
+}
+
+impl StageConfig {
+    /// The highest threshold (in number of blocks) for switching between incremental and full
+    /// calculations across `MerkleStage`, `AccountHashingStage` and `StorageHashingStage`. This is
+    /// required to figure out if can prune or not changesets on subsequent pipeline runs during
+    /// `ExecutionStage`
+    pub fn execution_external_clean_threshold(&self) -> u64 {
+        self.merkle
+            .clean_threshold
+            .max(self.account_hashing.clean_threshold)
+            .max(self.storage_hashing.clean_threshold)
+    }
 }
 
 /// Header stage configuration.
@@ -120,7 +145,7 @@ pub struct BodiesConfig {
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     ///
-    /// Default: 1_000
+    /// Default: `1_000`
     pub downloader_stream_batch_size: usize,
     /// The size of the internal block buffer in bytes.
     ///
@@ -194,6 +219,31 @@ impl Default for ExecutionConfig {
     }
 }
 
+impl From<ExecutionConfig> for ExecutionStageThresholds {
+    fn from(config: ExecutionConfig) -> Self {
+        Self {
+            max_blocks: config.max_blocks,
+            max_changes: config.max_changes,
+            max_cumulative_gas: config.max_cumulative_gas,
+            max_duration: config.max_duration,
+        }
+    }
+}
+
+/// Prune stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct PruneStageConfig {
+    /// The maximum number of entries to prune before committing progress to the database.
+    pub commit_threshold: usize,
+}
+
+impl Default for PruneStageConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 1_000_000 }
+    }
+}
+
 /// Hashing stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
@@ -222,7 +272,7 @@ pub struct MerkleConfig {
 
 impl Default for MerkleConfig {
     fn default() -> Self {
-        Self { clean_threshold: 50_000 }
+        Self { clean_threshold: 5_000 }
     }
 }
 
@@ -258,7 +308,7 @@ impl Default for EtlConfig {
 
 impl EtlConfig {
     /// Creates an ETL configuration
-    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+    pub const fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
         Self { dir, file_size }
     }
 
@@ -305,6 +355,13 @@ impl Default for PruneConfig {
     }
 }
 
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+    }
+}
+
 /// Helper type to support older versions of Duration deserialization.
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
 where
@@ -325,10 +382,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
-    use std::time::Duration;
-
-    const EXTENSION: &str = "toml";
+    use super::{Config, EXTENSION};
+    use reth_network_peers::TrustedPeer;
+    use std::{str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -344,6 +400,14 @@ mod tests {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
             confy::store_path(config_path, config).expect("Failed to store config");
+        })
+    }
+
+    #[test]
+    fn test_store_config_method() {
+        with_tempdir("config-store-test-method", |config_path| {
+            let config = Config::default();
+            config.save(config_path).expect("Failed to store config");
         })
     }
 
@@ -687,5 +751,29 @@ connect_trusted_nodes_only = true
 #";
         let conf: Config = toml::from_str(trusted_nodes_only).unwrap();
         assert!(conf.peers.trusted_nodes_only);
+    }
+
+    #[test]
+    fn test_can_support_dns_in_trusted_nodes() {
+        let reth_toml = r#"
+    [peers]
+    trusted_nodes = [
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303"
+    ]
+    "#;
+
+        let conf: Config = toml::from_str(reth_toml).unwrap();
+        assert_eq!(conf.peers.trusted_nodes.len(), 2);
+
+        let expected_enodes = vec![
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+    ];
+
+        for enode in expected_enodes {
+            let node = TrustedPeer::from_str(enode).unwrap();
+            assert!(conf.peers.trusted_nodes.contains(&node));
+        }
     }
 }

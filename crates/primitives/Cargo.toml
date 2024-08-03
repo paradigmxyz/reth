@@ -13,109 +13,102 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth-primitives-traits.workspace = true
 reth-ethereum-forks.workspace = true
-reth-rpc-types.workspace = true
-revm.workspace = true
+reth-static-file-types.workspace = true
+reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
+reth-chainspec = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
-alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { workspace = true, features = ["serde"] }
-nybbles = { workspace = true, features = ["serde", "rlp"] }
+alloy-rpc-types = { workspace = true, optional = true }
 alloy-genesis.workspace = true
-alloy-eips.workspace = true
-enr = { workspace = true, features = ["rust-secp256k1"] }
+alloy-eips = { workspace = true, features = ["serde"] }
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "recovery",
+    "rand",
+], optional = true }
+k256.workspace = true
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
 bytes.workspace = true
-byteorder = "1"
-clap = { workspace = true, features = ["derive"], optional = true }
 derive_more.workspace = true
-itertools.workspace = true
-modular-bitfield = "0.11.2"
+modular-bitfield = { workspace = true, optional = true }
 once_cell.workspace = true
 rayon.workspace = true
-serde_with.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-sha2 = { version = "0.10.7", optional = true }
 tempfile = { workspace = true, optional = true }
-thiserror.workspace = true
-zstd = { version = "0.13", features = ["experimental"], optional = true }
-roaring = "0.10.2"
-cfg-if = "1.0.0"
-
-# `test-utils` feature
-hash-db = { version = "~0.15", optional = true }
-plain_hasher = { version = "0.2", optional = true }
+thiserror-no-std = { workspace = true, default-features = false, optional = true }
+zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
-strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-arbitrary = { workspace = true, features = ["derive"] }
-assert_matches.workspace = true
-proptest.workspace = true
-proptest-derive.workspace = true
-rand.workspace = true
+# eth
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
+reth-chainspec.workspace = true
+reth-codecs.workspace = true
 nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
+alloy-eips = { workspace = true, features = ["arbitrary"] }
+
+assert_matches.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
 triehash = "0.8"
-
-hash-db = "~0.15"
-plain_hasher = "0.2"
+modular-bitfield.workspace = true
 
 sucds = "0.8.1"
-anyhow = "1.0.75"
 
-# necessary so we don't hit a "undeclared 'std'":
-# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
-secp256k1.workspace = true
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 
 [features]
-default = ["c-kzg", "zstd-codec"]
+default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
+std = ["thiserror-no-std?/std", "reth-primitives-traits/std"]
+reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
+    "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
-    "reth-rpc-types/arbitrary",
+    "reth-chainspec?/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
-    "alloy-chains/arbitrary",
+    "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive",
-    "zstd-codec"
+    "reth-codec",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
-zstd-codec = [
-    "dep:zstd"
-]
-clap = ["dep:clap"]
+secp256k1 = ["dep:secp256k1"]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "dep:thiserror-no-std"]
 optimism = [
-    "reth-codecs/optimism",
-    "revm-primitives/optimism",
+    "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
-    "revm/optimism",
+    "revm-primitives/optimism",
 ]
-test-utils = ["dep:plain_hasher", "dep:hash-db"]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
+test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
@@ -126,11 +119,3 @@ name = "validate_blob_tx"
 required-features = ["arbitrary", "c-kzg"]
 harness = false
 
-[[bench]]
-name = "trie_root"
-required-features = ["arbitrary", "test-utils"]
-harness = false
-
-[[bench]]
-name = "integer_list"
-harness = false

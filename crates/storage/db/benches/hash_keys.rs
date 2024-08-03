@@ -9,7 +9,8 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{cursor::DbCursorRW, TransactionHashNumbers};
+use reth_db::TransactionHashNumbers;
+use reth_db_api::cursor::DbCursorRW;
 use std::collections::HashSet;
 
 criterion_group! {
@@ -26,7 +27,7 @@ criterion_main!(benches);
 /// * `put_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
 /// * `put_unsorted`: Table is preloaded with rows (same as batch size).
 ///
-/// It does the above steps with different batches of rows. 10_000, 100_000, 1_000_000. In the
+/// It does the above steps with different batches of rows. `10_000`, `100_000`, `1_000_000`. In the
 /// end, the table statistics are shown (eg. number of pages, table size...)
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");
@@ -129,14 +130,13 @@ where
 
 /// Generates two batches. The first is to be inserted into the database before running the
 /// benchmark. The second is to be benchmarked with.
-#[allow(clippy::type_complexity)]
 fn generate_batches<T>(size: usize) -> (Vec<TableRow<T>>, Vec<TableRow<T>>)
 where
     T: Table,
     T::Key: std::hash::Hash + Arbitrary,
     T::Value: Arbitrary,
 {
-    let strat = proptest::collection::vec(
+    let strategy = proptest::collection::vec(
         any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
@@ -147,8 +147,8 @@ where
     .boxed();
 
     let mut runner = TestRunner::new(ProptestConfig::default());
-    let mut preload = strat.new_tree(&mut runner).unwrap().current();
-    let mut input = strat.new_tree(&mut runner).unwrap().current();
+    let mut preload = strategy.new_tree(&mut runner).unwrap().current();
+    let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
     let mut unique_keys = HashSet::new();
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));

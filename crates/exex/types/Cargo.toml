@@ -1,0 +1,26 @@
+[package]
+name = "reth-exex-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for exex usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-provider.workspace = true
+
+# reth
+alloy-primitives.workspace = true
+
+# misc
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "reth-provider/serde"]

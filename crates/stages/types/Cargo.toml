@@ -1,0 +1,28 @@
+[package]
+name = "reth-stages-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for stages usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs.workspace = true
+reth-trie-common.workspace = true
+alloy-primitives.workspace = true
+
+modular-bitfield.workspace = true
+bytes.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+test-fuzz.workspace = true
+rand.workspace = true

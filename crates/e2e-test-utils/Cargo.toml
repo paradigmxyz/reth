@@ -1,0 +1,41 @@
+[package]
+name = "reth-e2e-test-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-chainspec.workspace = true
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-rpc.workspace = true
+reth-rpc-layer.workspace = true
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-provider.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-tokio-util.workspace = true
+reth-stages-types.workspace = true
+reth-network-peers.workspace = true
+reth-node-ethereum.workspace = true
+
+jsonrpsee.workspace = true
+
+futures-util.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+serde_json.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local = { workspace = true, features = ["mnemonic"] }
+alloy-rpc-types.workspace = true
+alloy-network.workspace = true
+alloy-consensus = { workspace = true, features = ["kzg"] }
+tracing.workspace = true

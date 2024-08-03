@@ -1,12 +1,17 @@
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
+use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
-use bytes::BytesMut;
-use reth_codecs::{main_codec, Compact};
-use std::mem;
+use core::mem;
+
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 /// Legacy transaction.
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: Option<ChainId>,
@@ -28,7 +33,7 @@ pub struct TxLegacy {
     pub gas_limit: u64,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
+    pub to: TxKind,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
@@ -43,7 +48,7 @@ pub struct TxLegacy {
 }
 
 impl TxLegacy {
-    /// Calculates a heuristic for the in-memory size of the [TxLegacy] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxLegacy`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<Option<ChainId>>() + // chain_id
@@ -102,7 +107,7 @@ impl TxLegacy {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Legacy
     }
 
@@ -161,9 +166,9 @@ impl TxLegacy {
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
     ///
-    /// See [Self::encode_for_signing] for more information on the encoding format.
+    /// See [`Self::encode_for_signing`] for more information on the encoding format.
     pub(crate) fn signature_hash(&self) -> B256 {
-        let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
+        let mut buf = Vec::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
     }
@@ -173,7 +178,7 @@ impl TxLegacy {
 mod tests {
     use super::TxLegacy;
     use crate::{
-        transaction::{signature::Signature, TransactionKind},
+        transaction::{signature::Signature, TxKind},
         Address, Transaction, TransactionSigned, B256, U256,
     };
 
@@ -190,7 +195,7 @@ mod tests {
             nonce: 0x18,
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
-            to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
+            to: TxKind::Call(hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
             value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });

@@ -126,7 +126,7 @@ The `NodeRecord::from_secret_key()` takes the socket address used for discovery 
 
 If the `discv4_config` supplied to the `Discovery::new()` function is `None`, the discv4 service will not be spawned. In this case, no new peers will be discovered across the network. The node will have to rely on manually added peers. However, if the `discv4_config` contains a `Some(Discv4Config)` value, then the `Discv4::bind()` function is called to bind to a new UdpSocket and create the disc_v4 service.
 
-[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L188)
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L178)
 ```rust ignore
 impl Discv4 {
     //--snip--
@@ -155,7 +155,7 @@ impl Discv4 {
 
 To better understand what is actually happening when the disc_v4 service is created, lets take a deeper look at the `Discv4Service::new()` function.
 
-[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L392)
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L495)
 ```rust ignore
 impl Discv4Service {
     /// Create a new instance for a bound [`UdpSocket`].
@@ -216,7 +216,7 @@ In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Fu
 
 Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections.
 
-[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1302)
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L495)
 ```rust ignore
 impl Discv4Service {
     //--snip--
@@ -259,7 +259,7 @@ impl Discv4Service {
 
 As the function starts, a `loop` is entered and the `Discv4Service.queued_events` are evaluated to see if there are any events ready to be processed. If there is an event ready, the function immediately returns the event wrapped in `Poll::Ready()`. The `queued_events` field is a `VecDeque<Discv4Event>` where `Discv4Event` is an enum containing one of the following variants.
 
-[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/discv4/src/lib.rs#L1455)
+[File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L1770)
 ```rust ignore
 pub enum Discv4Event {
     /// A `Ping` message was handled.
@@ -285,7 +285,7 @@ Next, the Discv4Service handles all incoming `Discv4Command`s until there are no
 
 In Reth, once a new `NetworkState` is initialized as the node starts up and a new task is spawned to handle the network, the `poll()` function is used to advance the state of the network.
 
-[File: crates/net/network/src/state.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/state.rs#L377)
+[File: crates/net/network/src/state.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/network/src/state.rs#L396)
 ```rust ignore
 impl<C> NetworkState<C>
 where

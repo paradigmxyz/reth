@@ -4,17 +4,18 @@
 //! the consensus client.
 
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_node_api::EngineTypes;
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+        ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2,
+        ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, RichBlock,
+    SyncStatus, TransactionRequest,
 };
-
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
@@ -41,6 +42,17 @@ pub trait EngineApi<Engine: EngineTypes> {
     async fn new_payload_v3(
         &self,
         payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus>;
+
+    /// Post Prague payload handler
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4>
+    #[method(name = "newPayloadV4")]
+    async fn new_payload_v4(
+        &self,
+        payload: ExecutionPayloadV4,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
@@ -115,12 +127,29 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "getPayloadV3")]
     async fn get_payload_v3(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV3>;
 
+    /// Post Prague payload handler.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4>
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call. Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    #[method(name = "getPayloadV4")]
+    async fn get_payload_v4(&self, payload_id: PayloadId) -> RpcResult<Engine::ExecutionPayloadV4>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     #[method(name = "getPayloadBodiesByHashV1")]
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyhashv2>
+    #[method(name = "getPayloadBodiesByHashV2")]
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     ///
@@ -131,7 +160,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
-    /// Implementors should take care when acting on the input to this method, specifically
+    /// Implementers should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     #[method(name = "getPayloadBodiesByRangeV1")]
@@ -140,6 +169,16 @@ pub trait EngineApi<Engine: EngineTypes> {
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadbodiesbyrangev2>
+    ///
+    /// Similar to `getPayloadBodiesByRangeV1`, but returns [`ExecutionPayloadBodiesV2`]
+    #[method(name = "getPayloadBodiesByRangeV2")]
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
     ///
@@ -153,6 +192,22 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         transition_configuration: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration>;
+
+    /// This function will return the ClientVersionV1 object.
+    /// See also:
+    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
+    ///
+    ///
+    /// - When connected to a single execution client, the consensus client **MUST** receive an
+    ///   array with a single `ClientVersionV1` object.
+    /// - When connected to multiple execution clients via a multiplexer, the multiplexer **MUST**
+    ///   concatenate the responses from each execution client into a single,
+    /// flat array before returning the response to the consensus client.
+    #[method(name = "getClientVersionV1")]
+    async fn get_client_version_v1(
+        &self,
+        client_version: ClientVersionV1,
+    ) -> RpcResult<Vec<ClientVersionV1>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     #[method(name = "exchangeCapabilities")]
@@ -210,4 +265,14 @@ pub trait EngineEthApi {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns the account and storage values of the specified account including the Merkle-proof.
+    /// This call can be used to verify that the data you are pulling from is not tampered with.
+    #[method(name = "getProof")]
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<EIP1186AccountProofResponse>;
 }

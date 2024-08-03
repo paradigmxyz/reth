@@ -61,7 +61,7 @@ fn txpool_reordering_bench<T: BenchTxPool>(
         let mut txpool = T::default();
         txpool.reorder(base_fee);
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(tx.clone());
         }
         (txpool, new_txs.clone())
@@ -119,7 +119,7 @@ mod implementations {
     use reth_transaction_pool::PoolTransaction;
     use std::collections::BinaryHeap;
 
-    /// This implementation appends the transactions and uses [Vec::sort_by] function for sorting.
+    /// This implementation appends the transactions and uses [`Vec::sort_by`] function for sorting.
     #[derive(Default)]
     pub(crate) struct VecTxPoolSortStable {
         inner: Vec<MockTransaction>,
@@ -139,7 +139,7 @@ mod implementations {
         }
     }
 
-    /// This implementation appends the transactions and uses [Vec::sort_unstable_by] function for
+    /// This implementation appends the transactions and uses [`Vec::sort_unstable_by`] function for
     /// sorting.
     #[derive(Default)]
     pub(crate) struct VecTxPoolSortUnstable {
@@ -185,7 +185,7 @@ mod implementations {
         }
     }
 
-    /// This implementation uses BinaryHeap which is drained and reconstructed on each reordering.
+    /// This implementation uses `BinaryHeap` which is drained and reconstructed on each reordering.
     #[derive(Default)]
     pub(crate) struct BinaryHeapTxPool {
         inner: BinaryHeap<MockTransactionWithPriority>,
