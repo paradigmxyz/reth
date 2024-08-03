@@ -12,5 +12,7 @@ pub trait BlockDownloaderProvider {
     /// The client is the entrypoint for sending block requests to the network.
     fn fetch_client(
         &self,
-    ) -> impl Future<Output = Result<impl BlockClient + 'static, oneshot::error::RecvError>> + Send;
+    ) -> impl Future<
+        Output = Result<impl BlockClient + Unpin + Clone + 'static, oneshot::error::RecvError>,
+    > + Send;
 }

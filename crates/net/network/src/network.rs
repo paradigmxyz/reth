@@ -397,7 +397,9 @@ impl NetworkSyncUpdater for NetworkHandle {
 }
 
 impl BlockDownloaderProvider for NetworkHandle {
-    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
+    async fn fetch_client(
+        &self,
+    ) -> Result<impl BlockClient + Unpin + Clone + 'static, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await
