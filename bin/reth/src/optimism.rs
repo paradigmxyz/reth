@@ -135,7 +135,7 @@ impl<Node: FullNodeComponents + Unpin> Future for WallTimeExEx<Node> {
             }
 
             if let Poll::Ready(Some(tx)) = this.rpc_requests_stream.poll_next_unpin(cx) {
-                let _ = tx.send(WallTimeData{
+                let _ = tx.send(WallTimeData {
                     current_wall_time_ms: unix_epoch_ms(),
                     last_block_wall_time_ms: this.last_block_timedata.wall_time_ms.clone(),
                     last_block_timestamp: this.last_block_timedata.block_timestamp.clone(),
@@ -157,7 +157,6 @@ pub struct WallTimeData {
     /// Timestamp of last block (chain time)
     last_block_timestamp: u64,
 }
-
 
 #[cfg_attr(not(test), rpc(server, namespace = "ext"))]
 #[cfg_attr(test, rpc(server, client, namespace = "ext"))]
