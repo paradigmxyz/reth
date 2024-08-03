@@ -1,7 +1,9 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+
+use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -11,6 +13,7 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_network::BlockDownloaderProvider;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -24,8 +27,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
-    StaticFileWriter,
+    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -35,8 +38,9 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
+
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
@@ -268,12 +272,10 @@ impl Command {
                 }
 
                 if self.commit {
-                    // For unwinding it makes more sense to commit the database first, since if
-                    // this function is interrupted before the static files commit, we can just
-                    // truncate the static files according to the
-                    // checkpoints on the next start-up.
-                    provider_rw.commit()?;
-                    provider_factory.static_file_provider().commit()?;
+                    UnifiedStorageWriter::commit_unwind(
+                        provider_rw,
+                        provider_factory.static_file_provider(),
+                    )?;
                     provider_rw = provider_factory.provider_rw()?;
                 }
             }
@@ -296,8 +298,7 @@ impl Command {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                provider_factory.static_file_provider().commit()?;
-                provider_rw.commit()?;
+                UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
                 provider_rw = provider_factory.provider_rw()?;
             }
 

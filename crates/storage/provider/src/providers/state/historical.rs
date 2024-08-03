@@ -17,9 +17,12 @@ use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    StateRoot,
+    HashedStorage, StateRoot, StorageRoot,
 };
-use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
+use reth_trie_db::{
+    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
+    DatabaseTrieWitness,
+};
 use std::{collections::HashMap, fmt::Debug};
 
 /// State provider for a given block number which takes a tx reference.
@@ -274,6 +277,15 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
         StateRoot::overlay_root_with_updates(self.tx, revert_state, Default::default())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn hashed_storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        StorageRoot::overlay_root(self.tx, address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }

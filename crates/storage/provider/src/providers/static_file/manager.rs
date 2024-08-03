@@ -866,6 +866,12 @@ impl StaticFileProvider {
                             };
                             return Err(err)
                         }
+                        // There is a very small chance of hitting a deadlock if two consecutive
+                        // static files share the same bucket in the
+                        // internal dashmap and we don't drop the current provider
+                        // before requesting the next one.
+                        drop(cursor);
+                        drop(provider);
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                         retrying = true;
@@ -898,14 +904,19 @@ impl StaticFileProvider {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
-        let mut provider = get_provider(range.start)?;
 
+        let mut provider = Some(get_provider(range.start)?);
         Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
-                    provider = get_provider(number).ok()?;
-                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                    // There is a very small chance of hitting a deadlock if two consecutive static
+                    // files share the same bucket in the internal dashmap and
+                    // we don't drop the current provider before requesting the
+                    // next one.
+                    provider.take();
+                    provider = Some(get_provider(number).ok()?);
+                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
         }))

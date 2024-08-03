@@ -1,5 +1,36 @@
 //! Transactions management for the p2p network.
 
+/// Aggregation on configurable parameters for [`TransactionsManager`].
+pub mod config;
+/// Default and spec'd bounds.
+pub mod constants;
+/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
+pub mod fetcher;
+pub mod validation;
+
+pub use self::constants::{
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+};
+pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
+pub use validation::*;
+
+pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
+
+use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
+
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -21,16 +52,6 @@ use reth_transaction_pool::{
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
     TransactionPool, ValidPoolTransaction,
 };
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
@@ -49,25 +70,6 @@ use crate::{
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     NetworkEvents, NetworkHandle,
 };
-
-/// Aggregation on configurable parameters for [`TransactionsManager`].
-pub mod config;
-/// Default and spec'd bounds.
-pub mod constants;
-/// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
-pub mod fetcher;
-pub mod validation;
-pub use config::{TransactionFetcherConfig, TransactionsManagerConfig};
-
-use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
-pub use validation::*;
-
-pub use self::constants::{
-    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-};
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 
 /// The future for importing transactions into the pool.
 ///
@@ -360,6 +362,8 @@ where
                 ),
             );
 
+            trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| *tx.hash()), "Sending requested transactions to peer");
+
             // we sent a response at which point we assume that the peer is aware of the
             // transactions
             peer.seen_transactions.extend(transactions.iter().map(|tx| *tx.hash()));
@@ -578,6 +582,8 @@ where
                 propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
             }
 
+            trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
+
             // send hashes of transactions
             self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
@@ -726,7 +732,7 @@ where
             return
         }
 
-        trace!(target: "net::tx",
+        trace!(target: "net::tx::propagation",
             peer_id=format!("{peer_id:#}"),
             hashes_len=valid_announcement_data.iter().count(),
             hashes=?valid_announcement_data.keys().collect::<Vec<_>>(),
@@ -1002,7 +1008,7 @@ where
                     Entry::Vacant(entry) => {
                         if !self.bad_imports.contains(tx.hash()) {
                             // this is a new transaction that should be imported into the pool
-                            let pool_transaction: Pool::Transaction = tx.into();
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
                             new_txs.push(pool_transaction);
 
                             entry.insert(HashSet::from([peer_id]));
@@ -1035,6 +1041,7 @@ where
                 let tx_manager_info_pending_pool_imports =
                     self.pending_pool_imports_info.pending_pool_imports.clone();
 
+                trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
                 let import = Box::pin(async move {
                     let added = new_txs.len();
                     let res = pool.add_external_transactions(new_txs).await;

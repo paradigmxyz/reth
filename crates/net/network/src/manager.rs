@@ -37,7 +37,7 @@ use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::ReputationChangeKind;
+use reth_network_types::{PeerAddr, PeersHandle, ReputationChangeKind};
 use reth_primitives::ForkId;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
@@ -58,7 +58,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeerAddr, PeersHandle, PeersManager},
+    peers::PeersManager,
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,

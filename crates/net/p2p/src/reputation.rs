@@ -189,3 +189,16 @@ impl From<Reputation> for ReputationChange {
         Self(value)
     }
 }
+
+/// Outcomes when a reputation change is applied to a peer
+#[derive(Debug, Clone, Copy)]
+pub enum ReputationChangeOutcome {
+    /// Nothing to do.
+    None,
+    /// Ban the peer.
+    Ban,
+    /// Ban and disconnect
+    DisconnectAndBan,
+    /// Unban the peer
+    Unban,
+}

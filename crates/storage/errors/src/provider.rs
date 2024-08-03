@@ -147,7 +147,7 @@ pub enum ProviderError {
     StorageLockError(#[from] crate::lockfile::StorageLockError),
     /// Storage writer error.
     #[error(transparent)]
-    StorageWriterError(#[from] crate::writer::StorageWriterError),
+    UnifiedStorageWriterError(#[from] crate::writer::UnifiedStorageWriterError),
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

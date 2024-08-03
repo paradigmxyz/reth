@@ -13,8 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-db-api.workspace = true
-reth-db.workspace = true
 reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-stages-types.workspace = true
@@ -49,7 +47,6 @@ serde = { workspace = true, optional = true }
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 

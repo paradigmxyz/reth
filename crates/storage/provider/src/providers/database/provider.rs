@@ -5,7 +5,7 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    writer::StorageWriter,
+    writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -48,11 +48,10 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    trie_cursor::DatabaseStorageTrieCursor,
     updates::{StorageTrieUpdates, TrieUpdates},
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -3571,7 +3570,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         Ok(block_indices)
     }
 
-    /// TODO(joshie): this fn should be moved to `StorageWriter` eventually
+    /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
@@ -3601,7 +3600,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // Must be written after blocks because of the receipt lookup.
         // TODO: should _these_ be moved to storagewriter? seems like storagewriter should be
         // _above_ db provider
-        let mut storage_writer = StorageWriter::new(Some(self), None);
+        let mut storage_writer = UnifiedStorageWriter::from_database(self);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 

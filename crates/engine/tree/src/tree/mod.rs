@@ -551,10 +551,10 @@ where
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
             if !blocks_to_persist.is_empty() {
                 let (tx, rx) = oneshot::channel();
-                self.persistence.save_blocks(blocks_to_persist, tx);
+                let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
             } else {
-                warn!(target: "engine", "Returned empty set of blocks to persist");
+                debug!(target: "engine", "Returned empty set of blocks to persist");
             }
         }
 
@@ -568,6 +568,12 @@ where
             // Check if persistence has completed
             match rx.try_recv() {
                 Ok(last_persisted_block_hash) => {
+                    let Some(last_persisted_block_hash) = last_persisted_block_hash else {
+                        // if this happened, then we persisted no blocks because we sent an empty
+                        // vec of blocks
+                        warn!(target: "engine", "Persistence task completed but did not persist any blocks");
+                        return
+                    };
                     if let Some(block) =
                         self.state.tree_state.block_by_hash(last_persisted_block_hash)
                     {
@@ -799,7 +805,7 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block_number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >=
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
             self.config.persistence_threshold()
     }
 
@@ -1255,6 +1261,7 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
+    #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number,), target = "engine")]
     fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -1274,19 +1281,27 @@ where
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
+                    trace!(target: "engine", "appended downloaded sync target block");
                     // we just inserted the current sync target block, we can try to make it
                     // canonical
                     return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
                         block_num_hash.hash,
                     )))
                 }
+                trace!(target: "engine", "appended downloaded block");
+                self.try_connect_buffered_blocks(block_num_hash);
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
                 // its missing branch first
                 return self.on_disconnected_downloaded_block(block_num_hash, missing_ancestor, head)
             }
-            _ => {}
+            Ok(InsertPayloadOk::AlreadySeen(_)) => {
+                trace!(target: "engine", "downloaded block already executed");
+            }
+            Err(err) => {
+                debug!(target: "engine", err=%err.kind(), "failed to insert downloaded block");
+            }
         }
         None
     }
@@ -1818,6 +1833,7 @@ where
         };
 
         let target = self.lowest_buffered_ancestor_or(target);
+        trace!(target: "engine", %target, "downloading missing block");
 
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
@@ -1835,7 +1851,7 @@ pub struct PersistenceState {
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<oneshot::Receiver<B256>>,
+    rx: Option<oneshot::Receiver<Option<B256>>>,
     /// The last persisted block number.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -1850,7 +1866,7 @@ impl PersistenceState {
     }
 
     /// Sets state for a started persistence task.
-    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+    fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
         self.rx = Some(rx);
     }
 
@@ -1952,7 +1968,7 @@ mod tests {
             let mut blocks_by_hash = HashMap::new();
             let mut blocks_by_number = BTreeMap::new();
             let mut state_by_hash = HashMap::new();
-            let mut hash_by_number = HashMap::new();
+            let mut hash_by_number = BTreeMap::new();
             let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
             let mut parent_hash = B256::ZERO;
 

@@ -1,15 +1,17 @@
 //! Configuration for peering.
 
-use crate::{BackoffKind, ReputationChangeWeights};
-use reth_net_banlist::BanList;
-use reth_network_peers::{NodeRecord, TrustedPeer};
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
     time::Duration,
 };
+
+use reth_net_banlist::BanList;
+use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
+
+use crate::{BackoffKind, ReputationChangeWeights};
 
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
