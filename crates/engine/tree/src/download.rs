@@ -187,6 +187,10 @@ where
 
     /// Advances the download process.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DownloadOutcome> {
+        if let Some(pending_event) = self.pop_pending_event() {
+            return Poll::Ready(pending_event);
+        }
+
         // advance all full block requests
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
@@ -226,10 +230,6 @@ where
 
         if self.set_buffered_blocks.is_empty() {
             return Poll::Pending;
-        }
-
-        if let Some(pending_event) = self.pop_pending_event() {
-            return Poll::Ready(pending_event);
         }
 
         // drain all unique element of the block buffer if there are any
