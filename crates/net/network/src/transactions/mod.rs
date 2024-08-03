@@ -1384,7 +1384,7 @@ impl PropagateTransaction {
         tx: Arc<ValidPoolTransaction<T>>,
     ) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.into_consensus().into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
         Self { size, transaction }
     }
 }

@@ -38,7 +38,7 @@ where
         ) {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                reth_rpc_types_compat::transaction::from_recovered(tx.into_consensus()),
+                reth_rpc_types_compat::transaction::from_recovered(tx.clone().into_consensus()),
             );
         }
 
@@ -87,7 +87,7 @@ where
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx = tx.into_consensus();
+            let tx = tx.clone().into_consensus();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

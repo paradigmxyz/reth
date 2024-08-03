@@ -462,12 +462,12 @@ pub struct AllPoolTransactions<T: PoolTransaction<Consensus = TransactionSignedE
 impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 }
 
@@ -771,7 +771,7 @@ pub trait PoolTransaction:
     type Pooled: Into<Self>;
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(&self) -> Self::Consensus;
+    fn into_consensus(self) -> Self::Consensus;
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Self::Pooled) -> Self;
@@ -1016,8 +1016,8 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn into_consensus(&self) -> Self::Consensus {
-        self.clone().into()
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
     }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
