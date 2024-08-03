@@ -13,6 +13,7 @@ use reth_config::config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
 
+use crate::args::EngineArgs;
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
@@ -124,6 +125,9 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// All engine related arguments
+    pub engine: EngineArgs,
 }
 
 impl NodeConfig {
@@ -365,6 +369,11 @@ impl NodeConfig {
     pub fn datadir(&self) -> ChainPath<DataDirPath> {
         self.datadir.clone().resolve_datadir(self.chain.chain)
     }
+
+    /// Resolve the Engine Args
+    pub fn engine(&self) -> EngineArgs {
+        self.engine.clone()
+    }
 }
 
 impl Default for NodeConfig {
@@ -383,6 +392,7 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            engine: EngineArgs::default(),
         }
     }
 }

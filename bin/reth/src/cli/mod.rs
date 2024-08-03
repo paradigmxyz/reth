@@ -19,6 +19,7 @@ use reth_cli_commands::{
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::EngineArgs;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -71,6 +72,9 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     #[command(flatten)]
     logs: LogArgs,
+
+    #[command(flatten)]
+    engine: EngineArgs,
 }
 
 impl Cli {
