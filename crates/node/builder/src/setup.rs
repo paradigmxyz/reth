@@ -12,7 +12,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::HeaderDownloader,
-    BlockClient
+    BlockClient,
 };
 use reth_node_core::primitives::{BlockNumber, B256};
 use reth_provider::ProviderFactory;
