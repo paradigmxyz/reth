@@ -40,15 +40,6 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-unsafe impl<Provider, Pool, Network, EvmConfig> Send
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
-}
-unsafe impl<Provider, Pool, Network, EvmConfig> Sync
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
-}
-
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone() }
