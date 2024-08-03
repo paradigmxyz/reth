@@ -40,7 +40,7 @@ pub fn build_networked_pipeline<DB, Client, Executor>(
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Unpin + Clone + 'static,
-    Client: BlockClient + Clone + 'static,
+    Client: BlockClient + 'static,
     Executor: BlockExecutorProvider,
 {
     // building network downloaders using the fetch client
