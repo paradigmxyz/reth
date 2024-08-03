@@ -8,8 +8,21 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[cfg(all(feature = "optimism", not(test)))]
 compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
 
+/// clap [Args] for Engine related arguments.
+use clap::Args;
+
+/// Parameters for configuring the engine
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[command(next_help_heading = "Engine")]
+pub struct EngineArgs {
+    /// Enable the engine2 experimental features on reth binary
+    #[arg(long = "engine.experimental", default_value = "false")]
+    pub experimental: bool,
+}
+
 #[cfg(not(feature = "optimism"))]
 fn main() {
+    use clap::Parser;
     use reth::cli::Cli;
     use reth_node_ethereum::{launch::EthNodeLauncher, node::EthereumAddOns, EthereumNode};
     use reth_provider::providers::BlockchainProvider2;
@@ -21,8 +34,8 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = Cli::parse_args().run(|builder, _| async {
-        let enable_engine2 = builder.config().engine().experimental;
+    if let Err(err) = Cli::<EngineArgs>::parse().run(|builder, engine_args| async move {
+        let enable_engine2 = engine_args.experimental;
         match enable_engine2 {
             true => {
                 let handle = builder
@@ -47,5 +60,25 @@ fn main() {
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn test_parse_engine_args() {
+        let default_args = EngineArgs::default();
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }

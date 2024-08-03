@@ -9,7 +9,7 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
@@ -107,10 +107,6 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
-
-    /// All Engine related arguments
-    #[command(flatten)]
-    pub engine: EngineArgs,
 }
 
 impl NodeCommand {
@@ -157,7 +153,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             dev,
             pruning,
             ext,
-            engine,
         } = self;
 
         // set up node config
@@ -175,7 +170,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            engine,
         };
 
         // Register the prometheus recorder before creating the database,

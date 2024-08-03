@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
@@ -124,9 +124,6 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
-
-    /// All engine related arguments
-    pub engine: EngineArgs,
 }
 
 impl NodeConfig {
@@ -368,11 +365,6 @@ impl NodeConfig {
     pub fn datadir(&self) -> ChainPath<DataDirPath> {
         self.datadir.clone().resolve_datadir(self.chain.chain)
     }
-
-    /// Resolve the Engine Args
-    pub fn engine(&self) -> EngineArgs {
-        self.engine.clone()
-    }
 }
 
 impl Default for NodeConfig {
@@ -391,7 +383,6 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
-            engine: EngineArgs::default(),
         }
     }
 }
