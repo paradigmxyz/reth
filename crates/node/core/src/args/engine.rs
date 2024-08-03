@@ -6,7 +6,7 @@ use clap::Args;
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Engine")]
 pub struct EngineArgs {
-    /// Enable the engine2
+    /// Enable the engine2 experimental features on reth binary
     #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
 }

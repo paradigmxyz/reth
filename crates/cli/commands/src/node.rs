@@ -108,6 +108,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
 
+    /// All Engine related arguments
     #[command(flatten)]
     pub engine: EngineArgs,
 }
