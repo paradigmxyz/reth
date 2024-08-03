@@ -36,7 +36,6 @@ use crate::eth::{EthBlockBuilder, EthTxBuilder};
 #[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
-    #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
