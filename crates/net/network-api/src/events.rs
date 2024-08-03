@@ -63,7 +63,7 @@ pub enum NetworkEvent {
     PeerRemoved(PeerId),
 }
 
-/// Events produced by the [`Discovery`] manager.
+/// Events produced by the `Discovery` manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveryEvent {
     /// Discovered a node
