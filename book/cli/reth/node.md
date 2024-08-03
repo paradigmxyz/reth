@@ -527,7 +527,7 @@ Pruning:
 
 Engine:
       --engine.experimental
-         Enable the engine2 experimental features on reth binary
+          Enable the engine2 experimental features on reth binary
 
 Logging:
       --log.stdout.format <FORMAT>

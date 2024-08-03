@@ -124,4 +124,8 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Engine:
+      --engine.experimental
+          Enable the engine2 experimental features on reth binary
 ```
