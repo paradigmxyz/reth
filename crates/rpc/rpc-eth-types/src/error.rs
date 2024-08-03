@@ -41,7 +41,7 @@ pub enum EthApiError {
     #[error("unknown block number")]
     UnknownBlockNumber,
     /// When an unknown block is encountered
-    #[error("unknown block id")]
+    #[error("header not found")]
     UnknownBlockId(BlockId),
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
