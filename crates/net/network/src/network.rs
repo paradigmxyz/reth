@@ -11,7 +11,8 @@ use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
-    BlockDownloaderProvider, NetworkError, NetworkInfo, NetworkStatus, PeerInfo, Peers,
+    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersHandleProvider, PeersInfo,
 };
 use reth_network_p2p::{
@@ -30,9 +31,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    protocol::RlpxSubProtocol, swarm::NetworkConnectionState, transactions::TransactionsHandle,
-    FetchClient,
+    config::NetworkMode, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
 
 /// Helper trait that unifies network API needed to launch node.
@@ -40,7 +40,7 @@ pub trait FullNetwork:
     BlockDownloaderProvider
     + NetworkSyncUpdater
     + NetworkInfo
-    + NetworkEvents
+    + NetworkEventListenerProvider
     + PeersInfo
     + Peers
     + Clone
@@ -52,7 +52,7 @@ impl<T> FullNetwork for T where
     T: BlockDownloaderProvider
         + NetworkSyncUpdater
         + NetworkInfo
-        + NetworkEvents
+        + NetworkEventListenerProvider
         + PeersInfo
         + Peers
         + Clone
@@ -207,7 +207,7 @@ impl NetworkHandle {
 
 // === API Implementations ===
 
-impl NetworkEvents for NetworkHandle {
+impl NetworkEventListenerProvider for NetworkHandle {
     fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.inner.event_sender.new_listener()
     }
@@ -432,17 +432,6 @@ struct NetworkInner {
     discv4: Option<Discv4>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
-}
-
-/// Provides event subscription for the network.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait NetworkEvents: Send + Sync {
-    /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent>;
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
-    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
 /// Provides access to modify the network's additional protocol handlers.

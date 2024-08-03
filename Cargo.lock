@@ -7560,12 +7560,16 @@ dependencies = [
  "enr",
  "futures",
  "reth-eth-wire",
+ "reth-eth-wire-types",
+ "reth-ethereum-forks",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

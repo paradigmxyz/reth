@@ -16,6 +16,7 @@
 pub mod downloaders;
 /// Network Error
 pub mod error;
+pub mod events;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
 
@@ -25,6 +26,10 @@ pub use reth_network_types::{PeerKind, PeersHandle, Reputation, ReputationChange
 
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
+pub use events::{
+    DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
+    PeerRequestSender,
+};
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 

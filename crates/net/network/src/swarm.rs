@@ -12,12 +12,13 @@ use reth_eth_wire::{
     errors::EthStreamError,
     EthVersion, Status,
 };
+use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
 use tracing::trace;
 
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::{PeerMessage, PeerRequestSender},
+    message::PeerMessage,
     peers::InboundConnectionError,
     protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},

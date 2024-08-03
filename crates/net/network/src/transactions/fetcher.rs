@@ -39,6 +39,7 @@ use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
+use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives::{PooledTransactionsElement, TxHash};
@@ -58,7 +59,6 @@ use super::{
 use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
-    message::PeerRequest,
     metrics::TransactionFetcherMetrics,
     transactions::{validation, PartiallyFilterMessage},
 };
