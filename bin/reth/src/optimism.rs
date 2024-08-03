@@ -93,7 +93,7 @@ pub struct WallTimeExEx<Node: FullNodeComponents> {
     /// The context of the `ExEx`
     ctx: ExExContext<Node>,
     /// Incoming RPC requests.
-    rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<BlockTimeData>>,
+    rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<WallTimeData>>,
     /// Time data of last block
     last_block_timedata: BlockTimeData,
 }
@@ -101,7 +101,7 @@ pub struct WallTimeExEx<Node: FullNodeComponents> {
 impl<Node: FullNodeComponents> WallTimeExEx<Node> {
     fn new(
         ctx: ExExContext<Node>,
-        rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<BlockTimeData>>,
+        rpc_requests_stream: UnboundedReceiverStream<oneshot::Sender<WallTimeData>>,
     ) -> Self {
         Self { ctx, rpc_requests_stream, last_block_timedata: BlockTimeData::default() }
     }
@@ -135,7 +135,11 @@ impl<Node: FullNodeComponents + Unpin> Future for WallTimeExEx<Node> {
             }
 
             if let Poll::Ready(Some(tx)) = this.rpc_requests_stream.poll_next_unpin(cx) {
-                let _ = tx.send(this.last_block_timedata);
+                let _ = tx.send(WallTimeData{
+                    current_wall_time_ms: unix_epoch_ms(),
+                    last_block_wall_time_ms: this.last_block_timedata.wall_time_ms.clone(),
+                    last_block_timestamp: this.last_block_timedata.block_timestamp.clone(),
+                });
                 continue;
             }
 
@@ -144,22 +148,33 @@ impl<Node: FullNodeComponents + Unpin> Future for WallTimeExEx<Node> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WallTimeData {
+    /// Wall time right now
+    current_wall_time_ms: u64,
+    /// Wall time of last block
+    last_block_wall_time_ms: u64,
+    /// Timestamp of last block (chain time)
+    last_block_timestamp: u64,
+}
+
+
 #[cfg_attr(not(test), rpc(server, namespace = "ext"))]
 #[cfg_attr(test, rpc(server, client, namespace = "ext"))]
 trait WallTimeRpcExtApi {
     /// Return the wall time and block timestamp of the latest block.
-    #[method(name = "getTimeData")]
-    async fn get_timedata(&self) -> RpcResult<BlockTimeData>;
+    #[method(name = "getWallTimeData")]
+    async fn get_timedata(&self) -> RpcResult<WallTimeData>;
 }
 
 #[derive(Debug)]
 pub struct WallTimeRpcExt {
-    to_exex: mpsc::UnboundedSender<oneshot::Sender<BlockTimeData>>,
+    to_exex: mpsc::UnboundedSender<oneshot::Sender<WallTimeData>>,
 }
 
 #[async_trait]
 impl WallTimeRpcExtApiServer for WallTimeRpcExt {
-    async fn get_timedata(&self) -> RpcResult<BlockTimeData> {
+    async fn get_timedata(&self) -> RpcResult<WallTimeData> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_exex.send(tx).map_err(|_| rpc_internal_error())?;
         rx.await.map_err(|_| rpc_internal_error())
