@@ -24,10 +24,9 @@ pub use reth_network_p2p::reputation::{Reputation, ReputationChangeKind, Reputat
 pub use backoff::BackoffKind;
 pub use peers::{
     addr::PeerAddr,
-    handle::PeersHandle,
     kind::PeerKind,
     reputation::{is_banned_reputation, ReputationChangeOutcome, DEFAULT_REPUTATION},
     state::PeerConnectionState,
-    ConnectionsConfig, Peer, PeerCommand, PeersConfig,
+    ConnectionsConfig, Peer, PeersConfig,
 };
 pub use session::{SessionLimits, SessionsConfig};

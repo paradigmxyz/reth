@@ -13,9 +13,9 @@ use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
     HeadersDirection, NodeData, Receipts,
 };
+use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_network_types::PeersHandle;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
 use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use tokio::sync::{mpsc::Receiver, oneshot};

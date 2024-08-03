@@ -138,9 +138,7 @@ mod state;
 mod swarm;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_network_api::{
-    BlockDownloaderProvider, NetworkInfo, Peers, PeersHandleProvider, PeersInfo,
-};
+pub use reth_network_api::{BlockDownloaderProvider, NetworkInfo, Peers, PeersInfo};
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{

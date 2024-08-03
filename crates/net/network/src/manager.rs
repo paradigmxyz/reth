@@ -35,9 +35,9 @@ use reth_eth_wire::{
 };
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo};
+use reth_network_api::{test_utils::PeersHandle, EthProtocolInfo, NetworkStatus, PeerInfo};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::{PeerAddr, PeersHandle, ReputationChangeKind};
+use reth_network_types::{PeerAddr, ReputationChangeKind};
 use reth_primitives::ForkId;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
