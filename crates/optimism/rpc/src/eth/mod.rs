@@ -57,11 +57,11 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
-pub struct OpEthApi<N: FullNodeComponents, EthTxB> {
+pub struct OpEthApi<N: FullNodeComponents, Eth> {
     #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
     /// L1 RPC type builders.
-    _eth_ty_builders: PhantomData<EthTxB>,
+    _eth_ty_builders: PhantomData<Eth>,
 }
 
 impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
