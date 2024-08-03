@@ -15,7 +15,8 @@ use reth_primitives::{
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
-use reth_storage_api::StateProofProvider;
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::{StageCheckpointReader, StateProofProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -543,6 +544,20 @@ impl BlockReaderIdExt for MockEthProvider {
 impl AccountReader for MockEthProvider {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
+    }
+}
+
+impl StageCheckpointReader for MockEthProvider {
+    fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+        Ok(None)
+    }
+
+    fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        Ok(vec![])
     }
 }
 
