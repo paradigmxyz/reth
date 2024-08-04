@@ -42,7 +42,7 @@ impl<Client> FullBlockClient<Client> {
 
 impl<Client> FullBlockClient<Client>
 where
-    Client: BlockClient + Clone,
+    Client: BlockClient,
 {
     /// Returns a future that fetches the [`SealedBlock`] for the given hash.
     ///
