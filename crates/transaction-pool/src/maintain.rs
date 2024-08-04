@@ -5,7 +5,7 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPool, TransactionPoolExt},
-    BlockInfo,
+    BlockInfo, PoolTransaction,
 };
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -331,7 +331,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     )
                                     .ok()
                                 })
-                                .map(Into::into)
+                                .map(|tx| {
+                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
+                                })
                         } else {
                             tx.try_into().ok()
                         }
@@ -674,7 +676,7 @@ mod tests {
     use super::*;
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;

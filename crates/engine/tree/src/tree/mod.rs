@@ -230,6 +230,7 @@ impl TreeState {
     const fn canonical_block_hash(&self) -> B256 {
         self.canonical_head().hash
     }
+
     /// Returns the block number of the canonical head.
     const fn canonical_block_number(&self) -> BlockNumber {
         self.canonical_head().number
@@ -551,7 +552,7 @@ where
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
             if !blocks_to_persist.is_empty() {
                 let (tx, rx) = oneshot::channel();
-                self.persistence.save_blocks(blocks_to_persist, tx);
+                let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
             } else {
                 debug!(target: "engine", "Returned empty set of blocks to persist");
@@ -568,6 +569,12 @@ where
             // Check if persistence has completed
             match rx.try_recv() {
                 Ok(last_persisted_block_hash) => {
+                    let Some(last_persisted_block_hash) = last_persisted_block_hash else {
+                        // if this happened, then we persisted no blocks because we sent an empty
+                        // vec of blocks
+                        warn!(target: "engine", "Persistence task completed but did not persist any blocks");
+                        return
+                    };
                     if let Some(block) =
                         self.state.tree_state.block_by_hash(last_persisted_block_hash)
                     {
@@ -1778,6 +1785,20 @@ where
         // 1. ensure we have a new head block
         if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
             trace!(target: "engine", "fcu head hash is already canonical");
+
+            // we still need to process payload attributes if the head is already canonical
+            if let Some(attr) = attrs {
+                let tip = self
+                    .block_by_hash(self.state.tree_state.canonical_block_hash())?
+                    .ok_or_else(|| {
+                        // If we can't find the canonical block, then something is wrong and we need
+                        // to return an error
+                        ProviderError::HeaderNotFound(state.head_block_hash.into())
+                    })?;
+                let updated = self.process_payload_attributes(attr, &tip, state);
+                return Ok(TreeOutcome::new(updated))
+            }
+
             // the head block is already canonical
             return Ok(valid_outcome(state.head_block_hash))
         }
@@ -1845,7 +1866,7 @@ pub struct PersistenceState {
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<oneshot::Receiver<B256>>,
+    rx: Option<oneshot::Receiver<Option<B256>>>,
     /// The last persisted block number.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -1860,7 +1881,7 @@ impl PersistenceState {
     }
 
     /// Sets state for a started persistence task.
-    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+    fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
         self.rx = Some(rx);
     }
 
@@ -1962,7 +1983,7 @@ mod tests {
             let mut blocks_by_hash = HashMap::new();
             let mut blocks_by_number = BTreeMap::new();
             let mut state_by_hash = HashMap::new();
-            let mut hash_by_number = HashMap::new();
+            let mut hash_by_number = BTreeMap::new();
             let mut parent_to_child: HashMap<B256, HashSet<B256>> = HashMap::new();
             let mut parent_hash = B256::ZERO;
 

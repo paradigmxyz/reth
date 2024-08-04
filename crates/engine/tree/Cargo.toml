@@ -38,6 +38,7 @@ reth-trie.workspace = true
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+thiserror.workspace = true
 
 # metrics
 metrics.workspace = true

@@ -18,7 +18,7 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::StorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
+    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -155,7 +155,7 @@ impl Command {
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
