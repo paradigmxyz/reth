@@ -1,8 +1,11 @@
 //! Support for representing the version of the `eth`
 
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
+use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+use bytes::BufMut;
 use derive_more::Display;
+use reth_codecs_derive::derive_arbitrary;
 
 /// Error thrown when failed to parse a valid [`EthVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -123,6 +126,45 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth66 => "66",
             EthVersion::Eth67 => "67",
             EthVersion::Eth68 => "68",
+        }
+    }
+}
+
+/// RLPx `p2p` protocol version
+#[derive_arbitrary(rlp)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ProtocolVersion {
+    /// `p2p` version 4
+    V4 = 4,
+    /// `p2p` version 5
+    #[default]
+    V5 = 5,
+}
+
+impl fmt::Display for ProtocolVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "v{}", *self as u8)
+    }
+}
+
+impl Encodable for ProtocolVersion {
+    fn encode(&self, out: &mut dyn BufMut) {
+        (*self as u8).encode(out)
+    }
+    fn length(&self) -> usize {
+        // the version should be a single byte
+        (*self as u8).length()
+    }
+}
+
+impl Decodable for ProtocolVersion {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let version = u8::decode(buf)?;
+        match version {
+            4 => Ok(Self::V4),
+            5 => Ok(Self::V5),
+            _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }
 }

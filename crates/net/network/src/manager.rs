@@ -30,8 +30,7 @@ use std::{
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    DisconnectReason, EthVersion, Status,
+    capability::CapabilityMessage, Capabilities, DisconnectReason, EthVersion, Status,
 };
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
