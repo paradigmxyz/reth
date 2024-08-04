@@ -849,7 +849,7 @@ impl reth_codecs::Compact for MockTransaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
@@ -1020,6 +1020,41 @@ impl From<TransactionSignedNoHash> for TransactionSigned {
 impl From<TransactionSigned> for TransactionSignedNoHash {
     fn from(tx: TransactionSigned) -> Self {
         Self { signature: tx.signature, transaction: tx.transaction }
+    }
+}
+
+/// A [`TransactionSignedNoHash`] wrapper used to performs proptest tests on it,
+/// while limiting alloy TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct MockTransactionSignedNoHash(TransactionSignedNoHash);
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for MockTransactionSignedNoHash {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction_signed_no_hash = u.arbitrary::<TransactionSignedNoHash>()?;
+
+        if let Transaction::Legacy(ref mut legacy) = transaction_signed_no_hash.transaction {
+            legacy.gas_limit = (legacy.gas_limit as u64).into();
+        }
+
+        Ok(Self(transaction_signed_no_hash))
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for MockTransactionSignedNoHash {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.0.to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (transaction_signed_no_hash, buf) = TransactionSignedNoHash::from_compact(buf, len);
+
+        (Self(transaction_signed_no_hash), buf)
     }
 }
 
