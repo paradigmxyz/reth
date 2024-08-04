@@ -9,7 +9,6 @@ use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    headers::client::HeadersClient,
     BlockClient,
 };
 use reth_primitives::{BlockNumber, SealedBlock, B256};

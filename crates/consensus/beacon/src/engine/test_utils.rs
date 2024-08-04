@@ -18,10 +18,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
-use reth_network_p2p::{
-    bodies::client::BodiesClient, sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient,
-    BlockClient,
-};
+use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
