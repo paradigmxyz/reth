@@ -239,7 +239,7 @@ impl EncodableSignature for Signature {
 }
 
 /// A signature with full parity included.
-// TODO: replace by alloy Signature when there will be an easy way to instanciate them.
+// TODO: replace by alloy Signature when there will be an easy way to instantiate them.
 pub(crate) struct SignatureWithParity {
     /// The R field of the signature; the point on the curve.
     r: U256,

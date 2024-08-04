@@ -1179,7 +1179,17 @@ impl TransactionSigned {
     /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(&self.signature),
+            Transaction::Legacy(legacy_tx) => {
+                let parity = match legacy_tx.chain_id {
+                    Some(chain_id) => {
+                        EncodableSignature::v(&self.signature).with_chain_id(chain_id)
+                    }
+                    None => EncodableSignature::v(&self.signature),
+                };
+                let signature =
+                    SignatureWithParity::new(self.signature.r(), self.signature.s(), parity);
+                legacy_tx.encoded_len_with_signature(&signature)
+            }
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature(&self.signature)
             }
