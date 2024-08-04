@@ -1,8 +1,8 @@
 //! Support for representing the version of the `eth`
 
-use bytes::BufMut;
 use std::{fmt, str::FromStr};
 
+use bytes::BufMut;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use derive_more::Display;
 use reth_codecs_derive::derive_arbitrary;
