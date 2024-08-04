@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::{CanonicalInMemoryState, RangeLookupResult};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -193,19 +193,19 @@ where
             self.canonical_in_memory_state.get_canonical_block_number()
         });
 
-        for num in start..=end {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                headers.push(block_state.block().block().header.header().clone());
-            } else {
-                let mut db_headers = self.database.headers_range(num..=end)?;
+        // Perform range lookup in the in-memory state
+        match self.canonical_in_memory_state.range_lookup(start, end) {
+            RangeLookupResult::NoResult => Ok(Vec::new()),
+            RangeLookupResult::PartialResult(mut in_memory_headers) => {
+                // Retrieve remaining headers from the database
+                let mut db_headers =
+                    self.database.headers_range(start + in_memory_headers.len() as u64..=end)?;
+                headers.append(&mut in_memory_headers);
                 headers.append(&mut db_headers);
-                break;
+                Ok(headers)
             }
+            RangeLookupResult::FullResult(in_memory_headers) => Ok(in_memory_headers),
         }
-
-        Ok(headers)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
