@@ -324,7 +324,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue;
+                    continue
                 }
             }
 
