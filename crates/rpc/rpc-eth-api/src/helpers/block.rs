@@ -73,7 +73,7 @@ pub trait EthBlocks: LoadBlock {
                 return Ok(LoadBlock::provider(self)
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.len()))
+                    .map(|block| block.body.len()));
             }
 
             let block_hash = match LoadBlock::provider(self)
@@ -133,7 +133,7 @@ pub trait EthBlocks: LoadBlock {
                             .map_err(Self::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Self::Error>>();
-                return receipts.map(Some)
+                return receipts.map(Some);
             }
 
             Ok(None)
@@ -150,10 +150,18 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             if block_id.is_pending() {
-                return Ok(LoadBlock::provider(self)
+                // First, try to get the pending block from the provider
+                if let Some((block, receipts)) = LoadBlock::provider(self)
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
+                {
+                    return Ok(Some((block, Arc::new(receipts))));
+                }
+
+                // If no pending block from provider, check the local pending block
+                if let Some((block, receipts)) = self.local_pending_block().await? {
+                    return Ok(Some((block.block, Arc::new(receipts))));
+                }
             }
 
             if let Some(block_hash) = LoadBlock::provider(self)
@@ -163,7 +171,7 @@ pub trait EthBlocks: LoadBlock {
                 return LoadReceipt::cache(self)
                     .get_block_and_receipts(block_hash)
                     .await
-                    .map_err(Self::Error::from_eth_err)
+                    .map_err(Self::Error::from_eth_err);
             }
 
             Ok(None)
@@ -250,8 +258,12 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 return if maybe_pending.is_some() {
                     Ok(maybe_pending)
                 } else {
-                    self.local_pending_block().await
-                }
+                    // If no pending block from provider, try to get local pending block
+                    return match self.local_pending_block().await? {
+                        Some((block, _receipts)) => Ok(Some(block)),
+                        None => Ok(None),
+                    };
+                };
             }
 
             let block_hash = match LoadPendingBlock::provider(self)

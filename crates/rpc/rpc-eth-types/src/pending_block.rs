@@ -6,7 +6,7 @@ use std::{fmt, time::Instant};
 
 use derive_more::Constructor;
 use reth_chainspec::ChainSpec;
-use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
+use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256, Receipt};
 use reth_provider::ProviderError;
 use reth_revm::state_change::apply_blockhashes_update;
 use revm_primitives::{
@@ -42,7 +42,7 @@ pub fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + Databa
 ) -> EthResult<()>
 where
     DB::Error: fmt::Display,
-{
+{  
     apply_blockhashes_update(
         db,
         chain_spec,
@@ -120,4 +120,6 @@ pub struct PendingBlock {
     pub block: SealedBlockWithSenders,
     /// Timestamp when the pending block is considered outdated
     pub expires_at: Instant,
+    /// The receipt for the pending block
+    pub receipt: Vec<Option<Receipt>>,
 }

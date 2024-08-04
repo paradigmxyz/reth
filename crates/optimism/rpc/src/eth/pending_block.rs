@@ -21,7 +21,7 @@ where
     fn provider(
         &self,
     ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
-        self.inner.provider()
+        self.inner.provider()  
     }
 
     #[inline]
