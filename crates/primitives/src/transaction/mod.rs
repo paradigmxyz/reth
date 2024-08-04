@@ -87,7 +87,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
@@ -808,6 +808,41 @@ impl Encodable for Transaction {
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.payload_len(),
         }
+    }
+}
+
+/// A [`Transaction`] wrapper used to performs proptest tests on it, while limiting alloy
+/// TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct MockTransaction(Transaction);
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for MockTransaction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction = u.arbitrary::<Transaction>()?;
+
+        if let Transaction::Legacy(ref mut legacy) = transaction {
+            legacy.gas_limit = (legacy.gas_limit as u64).into();
+        }
+
+        Ok(Self(transaction))
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for MockTransaction {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.0.to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (transaction, buf) = Transaction::from_compact(buf, len);
+
+        (Self(transaction), buf)
     }
 }
 
