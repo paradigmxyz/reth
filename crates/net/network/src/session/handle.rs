@@ -4,9 +4,8 @@ use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    DisconnectReason, EthVersion, Status,
+    capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
+    EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
