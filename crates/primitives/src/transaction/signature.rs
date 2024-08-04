@@ -186,6 +186,19 @@ impl Signature {
     pub const fn size(&self) -> usize {
         core::mem::size_of::<Self>()
     }
+
+    /// Returns a signature with the given chain ID applied to the `v` value.
+    pub(crate) fn as_signature_with_eip155_parity(
+        &self,
+        chain_id: Option<u64>,
+    ) -> SignatureWithParity {
+        let parity = match chain_id {
+            Some(chain_id) => EncodableSignature::v(self).with_chain_id(chain_id),
+            None => EncodableSignature::v(self),
+        };
+
+        SignatureWithParity::new(self.r(), self.s(), parity)
+    }
 }
 
 /// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.

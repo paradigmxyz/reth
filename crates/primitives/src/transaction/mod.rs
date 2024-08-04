@@ -5,7 +5,7 @@ use crate::{
     B256, U256,
 };
 
-use alloy_consensus::{EncodableSignature, SignableTransaction};
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -15,7 +15,6 @@ use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use signature::SignatureWithParity;
 
 pub use access_list::{AccessList, AccessListItem, AccessListResult};
 pub use eip1559::TxEip1559;
@@ -494,13 +493,11 @@ impl Transaction {
     ) {
         match self {
             Self::Legacy(legacy_tx) => {
-                let parity = match legacy_tx.chain_id {
-                    Some(chain_id) => EncodableSignature::v(signature).with_chain_id(chain_id),
-                    None => EncodableSignature::v(signature),
-                };
-                let signature = SignatureWithParity::new(signature.r(), signature.s(), parity);
                 // do nothing w/ with_header
-                legacy_tx.encode_with_signature_fields(&signature, out)
+                legacy_tx.encode_with_signature_fields(
+                    &signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+                    out,
+                )
             }
             Self::Eip2930(access_list_tx) => {
                 access_list_tx.encode_with_signature(signature, out, with_header)
@@ -1179,17 +1176,9 @@ impl TransactionSigned {
     /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => {
-                let parity = match legacy_tx.chain_id {
-                    Some(chain_id) => {
-                        EncodableSignature::v(&self.signature).with_chain_id(chain_id)
-                    }
-                    None => EncodableSignature::v(&self.signature),
-                };
-                let signature =
-                    SignatureWithParity::new(self.signature.r(), self.signature.s(), parity);
-                legacy_tx.encoded_len_with_signature(&signature)
-            }
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+            ),
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature(&self.signature)
             }
@@ -1393,7 +1382,9 @@ impl TransactionSigned {
     pub fn length_without_header(&self) -> usize {
         // method computes the payload len without a RLP header
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(&self.signature),
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+            ),
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature_without_header(&self.signature)
             }
