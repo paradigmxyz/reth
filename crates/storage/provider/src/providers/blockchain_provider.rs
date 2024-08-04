@@ -192,8 +192,6 @@ where
         }
     }
 
-
-
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
         let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
