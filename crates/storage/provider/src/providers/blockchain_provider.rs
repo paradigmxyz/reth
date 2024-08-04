@@ -184,7 +184,12 @@ where
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.database.header_td_by_number(number)
+        if let Some(td) = self.database.header_td_by_number(number)? {
+            Ok(Some(td))
+        }else {
+            let last_persisted_block_number = self.database.last_block_number()?;
+            self.database.header_td_by_number(last_persisted_block_number)
+        }
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
