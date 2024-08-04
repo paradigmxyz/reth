@@ -172,7 +172,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
