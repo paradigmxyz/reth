@@ -11,6 +11,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
+    BlockClient,
 };
 use reth_primitives::{BlockNumber, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
@@ -35,7 +36,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<DB, Client>
 where
     DB: Database,
-    Client: HeadersClient + BodiesClient,
+    Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
