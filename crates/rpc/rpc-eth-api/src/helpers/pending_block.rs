@@ -300,7 +300,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             if pool_tx.origin.is_private() {
