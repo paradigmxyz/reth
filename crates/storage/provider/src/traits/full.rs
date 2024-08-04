@@ -52,6 +52,7 @@ pub trait FullRpcProvider:
     + BlockReaderIdExt
     + HeaderProvider
     + TransactionsProvider
+    + StageCheckpointReader
     + Clone
     + Unpin
     + 'static
@@ -65,6 +66,7 @@ impl<T> FullRpcProvider for T where
         + BlockReaderIdExt
         + HeaderProvider
         + TransactionsProvider
+        + StageCheckpointReader
         + Clone
         + Unpin
         + 'static

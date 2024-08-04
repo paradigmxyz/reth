@@ -13,14 +13,18 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod downloaders;
 /// Network Error
 pub mod error;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
-pub use error::NetworkError;
+pub use reth_network_p2p::BlockClient;
 pub use reth_network_types::{PeerKind, PeersHandle, Reputation, ReputationChangeKind};
+
+pub use downloaders::BlockDownloaderProvider;
+pub use error::NetworkError;
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
