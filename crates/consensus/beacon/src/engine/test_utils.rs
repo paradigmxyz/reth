@@ -314,7 +314,7 @@ where
         client: ClientType,
     ) -> NetworkedTestConsensusEngineBuilder<ClientType>
     where
-        ClientType: BodiesClient + 'static,
+        ClientType: BlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self.base_config, client: Some(client) }
     }
