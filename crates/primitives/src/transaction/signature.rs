@@ -1,10 +1,8 @@
-use core::hash::Hash;
-
 use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_consensus::EncodableSignature;
-use alloy_primitives::{Bytes, Parity};
+use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 use reth_codecs::Compact;
@@ -22,7 +20,7 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
@@ -32,8 +30,7 @@ pub struct Signature {
     ///
     /// WARNING: if it's deprecated in favor of `alloy_primitives::Signature` be sure that parity
     /// storage deser matches.
-    #[serde(serialize_with = "as_bool", deserialize_with = "from_bool")]
-    pub parity: Parity,
+    pub odd_y_parity: bool,
 }
 
 impl Signature {
@@ -41,21 +38,7 @@ impl Signature {
     /// signature.
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
-        Self { r: U256::ZERO, s: U256::ZERO, parity: Parity::Parity(false) }
-    }
-}
-
-impl Default for Signature {
-    fn default() -> Self {
-        Self { r: Default::default(), s: Default::default(), parity: Parity::Parity(false) }
-    }
-}
-
-impl Hash for Signature {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.r.hash(state);
-        self.s.hash(state);
-        self.parity.y_parity().hash(state);
+        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
 }
 
@@ -67,7 +50,7 @@ impl reth_codecs::Compact for Signature {
     {
         buf.put_slice(&self.r.as_le_bytes());
         buf.put_slice(&self.s.as_le_bytes());
-        self.parity.y_parity() as usize
+        self.odd_y_parity as usize
     }
 
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
@@ -76,7 +59,7 @@ impl reth_codecs::Compact for Signature {
         let r = U256::from_le_slice(&buf[0..32]);
         let s = U256::from_le_slice(&buf[32..64]);
         buf.advance(64);
-        (Self { r, s, parity: Parity::Parity(identifier != 0) }, buf)
+        (Self { r, s, odd_y_parity: identifier != 0 }, buf)
     }
 }
 
@@ -87,7 +70,7 @@ impl Signature {
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            self.parity.y_parity() as u64 + chain_id * 2 + 35
+            self.odd_y_parity as u64 + chain_id * 2 + 35
         } else {
             #[cfg(feature = "optimism")]
             // pre bedrock system transactions were sent from the zero address as legacy
@@ -97,7 +80,7 @@ impl Signature {
             if *self == Self::optimism_deposit_tx_signature() {
                 return 0
             }
-            self.parity.y_parity() as u64 + 27
+            self.odd_y_parity as u64 + 27
         }
     }
 
@@ -119,31 +102,31 @@ impl Signature {
                 //
                 // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
                 if v == 0 && r.is_zero() && s.is_zero() {
-                    return Ok((Self { r, s, parity: Parity::Parity(false) }, None))
+                    return Ok((Self { r, s, odd_y_parity: false }, None))
                 }
             }
         }
 
         let (odd_y_parity, chain_id) = extract_chain_id(v)?;
-        Ok((Self { r, s, parity: Parity::Parity(odd_y_parity) }, chain_id))
+        Ok((Self { r, s, odd_y_parity }, chain_id))
     }
 
     /// Output the length of the signature without the length of the RLP header
     pub fn payload_len(&self) -> usize {
-        self.parity.length() + self.r.length() + self.s.length()
+        self.odd_y_parity.length() + self.r.length() + self.s.length()
     }
 
-    /// Encode the `parity`, `r`, `s` values without a RLP header.
+    /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
     pub fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.parity.encode(out);
+        self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
-    /// Decodes the `parity`, `r`, `s` values without a RLP header.
+    /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
     pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self {
-            parity: Decodable::decode(buf)?,
+            odd_y_parity: Decodable::decode(buf)?,
             r: Decodable::decode(buf)?,
             s: Decodable::decode(buf)?,
         })
@@ -160,7 +143,7 @@ impl Signature {
 
         sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
         sig[32..64].copy_from_slice(&self.s.to_be_bytes::<32>());
-        sig[64] = self.parity.y_parity() as u8;
+        sig[64] = self.odd_y_parity as u8;
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
@@ -186,7 +169,7 @@ impl Signature {
         let mut sig = [0u8; 65];
         sig[..32].copy_from_slice(&self.r.to_be_bytes::<32>());
         sig[32..64].copy_from_slice(&self.s.to_be_bytes::<32>());
-        let v = u8::from(self.parity.y_parity()) + 27;
+        let v = u8::from(self.odd_y_parity) + 27;
         sig[64] = v;
         sig
     }
@@ -231,7 +214,7 @@ impl EncodableSignature for Signature {
         parity: P,
     ) -> Result<Self, alloy_primitives::SignatureError> {
         let parity: alloy_primitives::Parity = parity.try_into().map_err(Into::into)?;
-        let signature = Self { r, s, parity };
+        let signature = Self { r, s, odd_y_parity: parity.y_parity() };
 
         Ok(signature)
     }
@@ -245,59 +228,41 @@ impl EncodableSignature for Signature {
     }
 
     fn v(&self) -> alloy_primitives::Parity {
-        self.parity
+        alloy_primitives::Parity::NonEip155(self.odd_y_parity)
     }
 
     fn with_parity<T: Into<alloy_primitives::Parity>>(self, parity: T) -> Self {
-        Self { r: self.r, s: self.s, parity: parity.into() }
+        Self { r: self.r, s: self.s, odd_y_parity: parity.into().y_parity() }
     }
-}
-
-fn from_bool<'de, D>(deserializer: D) -> Result<Parity, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    bool::deserialize(deserializer).map(Parity::Parity)
-}
-
-fn as_bool<S>(v: &Parity, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_bool(v.y_parity())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
-    use alloy_primitives::{hex, hex::FromHex, Bytes, Parity};
+    use alloy_primitives::{hex, hex::FromHex, Bytes};
     use std::str::FromStr;
 
     #[test]
     fn test_v() {
         // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature =
-            Signature { r: U256::from(1), s: U256::from(1), parity: Parity::Parity(false) };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
         assert_eq!(27, signature.v(None));
         assert_eq!(37, signature.v(Some(1)));
 
-        let signature =
-            Signature { r: U256::from(1), s: U256::from(1), parity: Parity::Parity(true) };
+        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
     }
 
     #[test]
     fn test_payload_len() {
-        let signature =
-            Signature { r: U256::default(), s: U256::default(), parity: Parity::Parity(false) };
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
         assert_eq!(3, signature.payload_len());
     }
 
     #[test]
     fn test_encode_and_decode() {
-        let signature =
-            Signature { r: U256::default(), s: U256::default(), parity: Parity::Parity(false) };
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
 
         let mut encoded = Vec::new();
         signature.encode(&mut encoded);
@@ -317,7 +282,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
         };
         let hash =
             B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
@@ -338,7 +303,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
         };
 
         assert!(signature.size() >= 65);
@@ -355,7 +320,7 @@ mod tests {
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
         };
 
         let expected = Bytes::from_hex("0x28ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa63627667cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d831b").unwrap();

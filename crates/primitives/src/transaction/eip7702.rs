@@ -322,7 +322,6 @@ mod tests {
         transaction::{signature::Signature, TxKind},
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
-    use alloy_primitives::Parity;
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]
@@ -340,8 +339,7 @@ mod tests {
             access_list: Default::default(),
             authorization_list: Default::default(),
         });
-        let signature =
-            Signature { parity: Parity::Parity(true), r: U256::default(), s: U256::default() };
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
 
         let mut encoded = Vec::new();
@@ -367,8 +365,7 @@ mod tests {
             authorization_list: Default::default(),
         });
 
-        let signature =
-            Signature { parity: Parity::Parity(true), r: U256::default(), s: U256::default() };
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
 
         let tx = TransactionSigned::from_transaction_and_signature(request, signature);
 

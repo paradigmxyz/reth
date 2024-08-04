@@ -274,9 +274,9 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        alloy_primitives::Parity, hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash,
-        BlockHashOrNumber, BlockNumber, Bytes, Signature, Transaction, TransactionSigned,
-        TxEip4844, Withdrawal, Withdrawals, U256,
+        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
+        BlockNumber, Bytes, Signature, Transaction, TransactionSigned, TxEip4844, Withdrawal,
+        Withdrawals, U256,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
@@ -397,8 +397,7 @@ mod tests {
             blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
         });
 
-        let signature =
-            Signature { parity: Parity::Parity(true), r: U256::default(), s: U256::default() };
+        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
 
         TransactionSigned::from_transaction_and_signature(request, signature)
     }

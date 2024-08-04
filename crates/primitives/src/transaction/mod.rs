@@ -5,7 +5,7 @@ use crate::{
     B256, U256,
 };
 
-use alloy_consensus::{EncodableSignature, SignableTransaction};
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -493,10 +493,6 @@ impl Transaction {
     ) {
         match self {
             Self::Legacy(legacy_tx) => {
-                let signature = match legacy_tx.chain_id {
-                    Some(chain_id) => &signature.with_chain_id(chain_id),
-                    None => signature,
-                };
                 // do nothing w/ with_header
                 legacy_tx.encode_with_signature_fields(signature, out)
             }
@@ -1663,7 +1659,7 @@ mod tests {
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,
     };
-    use alloy_primitives::{address, b256, bytes, Parity};
+    use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
     use std::str::FromStr;
@@ -1766,7 +1762,7 @@ mod tests {
             input: Bytes::default(),
         });
         let signature = Signature {
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
             r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
                 .unwrap(),
             s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
@@ -1786,7 +1782,7 @@ mod tests {
             input: Default::default(),
         });
         let signature = Signature {
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
             r: U256::from_str("0xe24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0a")
                 .unwrap(),
             s: U256::from_str("0x5406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da")
@@ -1805,7 +1801,7 @@ mod tests {
             input: Bytes::default(),
         });
         let signature = Signature {
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
             r: U256::from_str("0xce6834447c0a4193c40382e6c57ae33b241379c5418caac9cdc18d786fd12071")
                 .unwrap(),
             s: U256::from_str("0x3ca3ae86580e94550d7c071e3a02eadb5a77830947c9225165cf9100901bee88")
@@ -1826,7 +1822,7 @@ mod tests {
             access_list: Default::default(),
         });
         let signature = Signature {
-            parity: Parity::Parity(true),
+            odd_y_parity: true,
             r: U256::from_str("0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd")
                 .unwrap(),
             s: U256::from_str("0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469")
@@ -1845,7 +1841,7 @@ mod tests {
             input: Bytes::default(),
         });
         let signature = Signature {
-            parity: Parity::Parity(true),
+            odd_y_parity: true,
             r: U256::from_str("0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981")
                 .unwrap(),
             s: U256::from_str("0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860")
@@ -2009,7 +2005,7 @@ mod tests {
         // will use same signature everywhere.
         // We don't need signature to match tx, just decoded to the same signature
         let signature = Signature {
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
             r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
                 .unwrap(),
             s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")

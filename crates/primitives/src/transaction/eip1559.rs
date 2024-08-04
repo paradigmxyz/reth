@@ -240,8 +240,6 @@ impl TxEip1559 {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::Parity;
-
     use super::TxEip1559;
     use crate::{
         transaction::{signature::Signature, TxKind},
@@ -274,7 +272,7 @@ mod tests {
                 .unwrap(),
             s: U256::from_str("0x25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")
                 .unwrap(),
-            parity: Parity::Parity(false),
+            odd_y_parity: false,
         };
 
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
