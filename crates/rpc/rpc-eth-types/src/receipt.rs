@@ -10,7 +10,7 @@ use revm_primitives::calc_blob_gasprice;
 use super::{EthApiError, EthResult};
 
 /// Receipt response builder.
-#[derive(Debug)]  
+#[derive(Debug)]
 pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
     base: TransactionReceipt<AnyReceiptEnvelope<Log>>,

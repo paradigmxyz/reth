@@ -191,7 +191,7 @@ pub trait LoadState: EthApiTypes {
         at: BlockId,
     ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv, BlockId), Self::Error>> + Send
     where
-        Self: LoadPendingBlock + SpawnBlocking,  
+        Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             if at.is_pending() {
