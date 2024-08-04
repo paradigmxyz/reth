@@ -8,7 +8,6 @@ use futures::FutureExt;
 use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
     BlockClient,
@@ -66,7 +65,7 @@ where
 impl<DB, Client> EngineSyncController<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -524,7 +523,7 @@ mod tests {
         ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
         where
             DB: Database + 'static,
-            Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+            Client: BlockClient + 'static,
         {
             let client = self
                 .client

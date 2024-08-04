@@ -19,8 +19,8 @@ use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{
-    bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
-    test_utils::NoopFullBlockClient,
+    bodies::client::BodiesClient, sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient,
+    BlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
@@ -232,7 +232,7 @@ impl TestConsensusEngineBuilder {
         client: Client,
     ) -> NetworkedTestConsensusEngineBuilder<Client>
     where
-        Client: HeadersClient + BodiesClient + 'static,
+        Client: BlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self, client: Some(client) }
     }
@@ -259,7 +259,7 @@ pub struct NetworkedTestConsensusEngineBuilder<Client> {
 
 impl<Client> NetworkedTestConsensusEngineBuilder<Client>
 where
-    Client: HeadersClient + BodiesClient + 'static,
+    Client: BlockClient + 'static,
 {
     /// Set the pipeline execution outputs to use for the test consensus engine.
     #[allow(dead_code)]
@@ -314,7 +314,7 @@ where
         client: ClientType,
     ) -> NetworkedTestConsensusEngineBuilder<ClientType>
     where
-        ClientType: HeadersClient + BodiesClient + 'static,
+        ClientType: BodiesClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self.base_config, client: Some(client) }
     }
@@ -442,7 +442,7 @@ pub fn spawn_consensus_engine<Client>(
     engine: TestBeaconConsensusEngine<Client>,
 ) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>>
 where
-    Client: HeadersClient + BodiesClient + 'static,
+    Client: BlockClient + 'static,
 {
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
