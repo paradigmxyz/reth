@@ -2,8 +2,8 @@
 
 use std::{fmt, str::FromStr};
 
-use bytes::BufMut;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+use bytes::BufMut;
 use derive_more::Display;
 use reth_codecs_derive::derive_arbitrary;
 
