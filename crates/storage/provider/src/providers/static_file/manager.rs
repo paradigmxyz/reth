@@ -7,7 +7,7 @@ use crate::{
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use dashmap::{mapref::entry::Entry as DashMapEntry, try_result::TryResult, DashMap};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -39,7 +39,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 use strum::IntoEnumIterator;
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -1051,22 +1051,51 @@ impl StaticFileWriter for StaticFileProvider {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
         if self.access.is_read_only() {
-            return Err(ProviderError::ReadOnlyStaticFileAccess)
+            debug!(target: "provider::static_file", ?block, ?segment, "Attempted to get writer in read-only mode");
+            return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 
-        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
-        Ok(match self.writers.entry(segment) {
-            DashMapEntry::Occupied(entry) => entry.into_ref(),
-            DashMapEntry::Vacant(entry) => {
-                let writer = StaticFileProviderRW::new(
+        debug!(target: "provider::static_file", ?block, ?segment, "Getting static file writer");
+
+        match self.writers.try_get_mut(&segment) {
+            TryResult::Present(writer) => {
+                debug!(target: "provider::static_file", ?block, ?segment, "Found existing writer");
+                Ok(writer)
+            }
+            TryResult::Absent => {
+                debug!(target: "provider::static_file", ?block, ?segment, "Creating new writer");
+                let new_writer = StaticFileProviderRW::new(
                     segment,
                     block,
                     Arc::downgrade(&self.0),
                     self.metrics.clone(),
                 )?;
-                entry.insert(writer)
+
+                // use try_entry to avoid potential deadlock
+                match self.writers.try_entry(segment) {
+                    Some(entry) => match entry {
+                        DashMapEntry::Occupied(occupied) => {
+                            debug!(target: "provider::static_file", ?block, ?segment, "Writer created by another thread, using existing");
+                            Ok(occupied.into_ref())
+                        }
+                        DashMapEntry::Vacant(vacant) => {
+                            debug!(target: "provider::static_file", ?block, ?segment, "Inserting new writer");
+                            Ok(vacant.insert(new_writer))
+                        }
+                    },
+                    None => {
+                        // if try_entry returns None, the map is locked, retry
+                        debug!(target: "provider::static_file", ?block, ?segment, "Map locked");
+                        self.get_writer(block, segment)
+                    }
+                }
             }
-        })
+            TryResult::Locked => {
+                // shard is locked, retry
+                debug!(target: "provider::static_file", ?block, ?segment, "Shard locked, retrying");
+                self.get_writer(block, segment)
+            }
+        }
     }
 
     fn latest_writer(
