@@ -1,6 +1,8 @@
+use core::fmt::Debug;
+
 use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_consensus::EncodableSignature;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, Parity};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
 
@@ -233,6 +235,53 @@ impl EncodableSignature for Signature {
 
     fn with_parity<T: Into<alloy_primitives::Parity>>(self, parity: T) -> Self {
         Self { r: self.r, s: self.s, odd_y_parity: parity.into().y_parity() }
+    }
+}
+
+/// A signature with full parity included.
+// TODO: replace by alloy Signature when there will be an easy way to instanciate them.
+pub(crate) struct SignatureWithParity {
+    /// The R field of the signature; the point on the curve.
+    r: U256,
+    /// The S field of the signature; the point on the curve.
+    s: U256,
+    /// Signature parity
+    parity: Parity,
+}
+
+impl SignatureWithParity {
+    /// Creates a new [`SignatureWithParity`].
+    pub(crate) const fn new(r: U256, s: U256, parity: Parity) -> Self {
+        Self { r, s, parity }
+    }
+}
+
+impl EncodableSignature for SignatureWithParity {
+    fn from_rs_and_parity<
+        P: TryInto<Parity, Error = E>,
+        E: Into<alloy_primitives::SignatureError>,
+    >(
+        r: U256,
+        s: U256,
+        parity: P,
+    ) -> Result<Self, alloy_primitives::SignatureError> {
+        Ok(Self { r, s, parity: parity.try_into().map_err(Into::into)? })
+    }
+
+    fn r(&self) -> U256 {
+        self.r
+    }
+
+    fn s(&self) -> U256 {
+        self.s
+    }
+
+    fn v(&self) -> Parity {
+        self.parity
+    }
+
+    fn with_parity<T: Into<Parity>>(self, parity: T) -> Self {
+        Self { r: self.r, s: self.s, parity: parity.into() }
     }
 }
 
