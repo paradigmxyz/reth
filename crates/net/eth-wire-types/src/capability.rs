@@ -9,7 +9,7 @@ use std::{borrow::Cow, fmt};
 /// A message indicating a supported capability and capability version.
 #[add_arbitrary_tests(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Capability {
     /// The name of the subprotocol
     pub name: Cow<'static, str>,
