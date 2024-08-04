@@ -8,9 +8,7 @@ use std::{
 
 use futures::Stream;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    EthVersion, Status,
+    capability::CapabilityMessage, errors::EthStreamError, Capabilities, EthVersion, Status,
 };
 use reth_network_peers::PeerId;
 use tracing::trace;

@@ -17,10 +17,10 @@ use std::{
 };
 
 use crate::{
-    capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
+    capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     p2pstream::DisconnectP2P,
-    CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
+    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};

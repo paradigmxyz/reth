@@ -7562,7 +7562,7 @@ dependencies = [
  "auto_impl",
  "enr",
  "futures",
- "reth-eth-wire",
+ "reth-eth-wire-types",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",

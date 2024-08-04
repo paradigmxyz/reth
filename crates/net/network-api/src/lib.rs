@@ -28,7 +28,7 @@ pub use error::NetworkError;
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
-use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
