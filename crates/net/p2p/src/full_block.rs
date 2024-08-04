@@ -169,7 +169,7 @@ where
 
 impl<Client> Future for FetchFullBlockFuture<Client>
 where
-    Client: BlockClient + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Output = SealedBlock;
 
@@ -540,7 +540,7 @@ where
 
 impl<Client> Future for FetchFullBlockRangeFuture<Client>
 where
-    Client: BlockClient + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Output = Vec<SealedBlock>;
 
