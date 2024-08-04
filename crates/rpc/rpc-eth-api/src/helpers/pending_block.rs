@@ -349,7 +349,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
