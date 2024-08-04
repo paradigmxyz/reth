@@ -11,6 +11,7 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::HeadersClient,
     sync::{NetworkSyncUpdater, SyncState},
+    BlockClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -171,7 +172,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database,
-    Client: HeadersClient + BodiesClient,
+    Client: BlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
