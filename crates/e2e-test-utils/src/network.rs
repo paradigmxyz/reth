@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use reth::{
-    network::{NetworkEvent, NetworkEvents, PeersHandleProvider, PeersInfo},
+    network::{NetworkEvent, NetworkEventListenerProvider, PeersHandleProvider, PeersInfo},
     rpc::types::PeerId,
 };
 use reth_network_peers::NodeRecord;
@@ -16,7 +16,7 @@ pub struct NetworkTestContext<Network> {
 
 impl<Network> NetworkTestContext<Network>
 where
-    Network: NetworkEvents + PeersInfo + PeersHandleProvider,
+    Network: NetworkEventListenerProvider + PeersInfo + PeersHandleProvider,
 {
     /// Creates a new network helper
     pub fn new(network: Network) -> Self {

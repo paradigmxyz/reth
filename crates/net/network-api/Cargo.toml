@@ -13,11 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
-reth-eth-wire-types.workspace = true
 alloy-rpc-types-admin.workspace = true
 reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-network-p2p.workspace = true
+reth-eth-wire-types.workspace = true
+reth-tokio-util.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -27,6 +29,7 @@ enr = { workspace = true, default-features = false, features = ["rust-secp256k1"
 
 # async
 futures.workspace = true
+tokio-stream.workspace = true
 
 # misc
 thiserror.workspace = true

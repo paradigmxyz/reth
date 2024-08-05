@@ -10,7 +10,9 @@ use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEvents, NetworkSyncUpdater, SyncState};
+use reth_network::{
+    BlockDownloaderProvider, NetworkEventListenerProvider, NetworkSyncUpdater, SyncState,
+};
 use reth_node_api::{FullNodeTypes, NodeAddOns};
 use reth_node_builder::{
     hooks::NodeHooks,

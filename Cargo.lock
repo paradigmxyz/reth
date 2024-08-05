@@ -7566,12 +7566,15 @@ dependencies = [
  "enr",
  "futures",
  "reth-eth-wire-types",
+ "reth-ethereum-forks",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7650,7 +7653,7 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
- "reth-network",
+ "reth-network-api",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
@@ -7684,6 +7687,7 @@ dependencies = [
  "reth-evm",
  "reth-exex",
  "reth-network",
+ "reth-network-api",
  "reth-network-p2p",
  "reth-node-api",
  "reth-node-core",
