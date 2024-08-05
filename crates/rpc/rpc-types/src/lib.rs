@@ -51,6 +51,7 @@ pub use eth::{
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    error::ToRpcError,
     transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
+#[cfg(feature = "default")]
+pub use eth::error::ToRpcError;

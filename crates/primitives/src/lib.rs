@@ -22,12 +22,6 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-#[cfg(all(feature = "reth-codec", feature = "std"))]
-use ::thread_local as _;
-
-#[cfg(all(feature = "c-kzg", feature = "std"))]
-use ::thread_local as _;
-
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 pub mod basefee;

@@ -1,6 +1,9 @@
 #[cfg(feature = "std")]
 use std::{cell::RefCell, thread_local};
+#[cfg(feature = "std")]
 use zstd::bulk::{Compressor, Decompressor};
+#[cfg(not(feature = "std"))]
+use zstd::bulk::{Decompressor};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -57,6 +60,7 @@ pub struct ReusableDecompressor {
 }
 
 impl ReusableDecompressor {
+    #[cfg(feature = "std")]
     fn new(decompressor: Decompressor<'static>) -> Self {
         Self { decompressor, buf: Vec::with_capacity(4096) }
     }

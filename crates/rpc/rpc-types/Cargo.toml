@@ -38,5 +38,5 @@ bytes.workspace = true
 serde_json.workspace = true
 
 [features]
-default = ["jsonrpsee-types"]
+default = ["dep:jsonrpsee-types"]
 arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]

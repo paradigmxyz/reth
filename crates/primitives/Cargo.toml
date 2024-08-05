@@ -46,7 +46,7 @@ once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror = { workspace = true, default-features = false, optional = true }
+thiserror = { workspace = true, optional = true }
 zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils

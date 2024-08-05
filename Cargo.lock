@@ -8013,7 +8013,6 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
- "thread_local",
  "toml",
  "triehash",
  "zstd",
