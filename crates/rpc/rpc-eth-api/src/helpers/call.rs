@@ -1,6 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
+use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
@@ -26,14 +27,13 @@ use reth_rpc_server_types::constants::gas_oracle::{
     CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
 };
 use reth_rpc_types::{
+    simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
-
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
@@ -48,6 +48,18 @@ pub trait EthCall: Call + LoadPendingBlock {
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         Call::estimate_gas_at(self, request, at, state_override)
+    }
+
+    /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
+    /// The transactions are packed into individual blocks. Overrides can be provided.
+    ///
+    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
+    fn simulate_v1(
+        &self,
+        _opts: SimBlock,
+        _block_number: Option<BlockId>,
+    ) -> impl Future<Output = Result<Vec<SimulatedBlock>, Self::Error>> + Send {
+        async move { Err(EthApiError::Unsupported("eth_simulateV1 is not supported.").into()) }
     }
 
     /// Executes the call request (`eth_call`) and returns the output
