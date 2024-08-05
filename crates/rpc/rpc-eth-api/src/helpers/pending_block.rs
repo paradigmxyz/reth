@@ -154,7 +154,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    let receipts = pending_block.receipt.clone();
+                    let receipts = pending_block.receipts.clone();
                     // Convert Vec<Option<Receipt>> to Vec<Receipt>
                     let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
                     return Ok(Some((pending_block.block.clone(), receipts)));
