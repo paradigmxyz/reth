@@ -758,6 +758,8 @@ impl From<Genesis> for ChainSpec {
             (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
             (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
+            #[cfg(feature = "optimism")]
+            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -1002,6 +1004,14 @@ impl ChainSpecBuilder {
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
         self.hardforks.insert(OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Granite at genesis
+    #[cfg(feature = "optimism")]
+    pub fn granite_activated(mut self) -> Self {
+        self = self.fjord_activated();
+        self.hardforks.insert(OptimismHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -2638,6 +2648,7 @@ Post-merge hard forks (timestamp based):
         "canyonTime": 30,
         "ecotoneTime": 40,
         "fjordTime": 50,
+        "graniteTime": 51,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -2657,6 +2668,8 @@ Post-merge hard forks (timestamp based):
         assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
+        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -2679,12 +2692,14 @@ Post-merge hard forks (timestamp based):
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
     }
 
     #[cfg(feature = "optimism")]
@@ -2698,6 +2713,7 @@ Post-merge hard forks (timestamp based):
         "canyonTime": 30,
         "ecotoneTime": 40,
         "fjordTime": 50,
+        "graniteTime": 51,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -2718,6 +2734,8 @@ Post-merge hard forks (timestamp based):
         assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
+        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -2747,12 +2765,14 @@ Post-merge hard forks (timestamp based):
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Granite, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Granite, 51));
     }
 
     #[cfg(feature = "optimism")]
