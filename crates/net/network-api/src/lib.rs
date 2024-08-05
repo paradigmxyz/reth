@@ -16,16 +16,22 @@
 pub mod downloaders;
 /// Network Error
 pub mod error;
+pub mod events;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
+use reth_network_p2p::sync::NetworkSyncUpdater;
 pub use reth_network_p2p::BlockClient;
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
+pub use events::{
+    DiscoveredEvent, DiscoveryEvent, NetworkEvent, NetworkEventListenerProvider, PeerRequest,
+    PeerRequestSender,
+};
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
@@ -34,6 +40,31 @@ use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
+
+/// Helper trait that unifies network API needed to launch node.
+pub trait FullNetwork:
+    BlockDownloaderProvider
+    + NetworkSyncUpdater
+    + NetworkInfo
+    + NetworkEventListenerProvider
+    + PeersInfo
+    + Peers
+    + Clone
+    + 'static
+{
+}
+
+impl<T> FullNetwork for T where
+    T: BlockDownloaderProvider
+        + NetworkSyncUpdater
+        + NetworkInfo
+        + NetworkEventListenerProvider
+        + PeersInfo
+        + Peers
+        + Clone
+        + 'static
+{
+}
 
 /// Provides general purpose information about the network.
 #[auto_impl::auto_impl(&, Arc)]
@@ -72,7 +103,7 @@ pub trait PeersInfo: Send + Sync {
 /// Provides an API for managing the peers of the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Peers: PeersInfo {
-    /// Adds a peer to the peer set with UDP `SocketAddr`.
+    /// Adds a peer to the peer set with TCP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
@@ -87,7 +118,7 @@ pub trait Peers: PeersInfo {
     /// This allows marking a peer as trusted without having to know the peer's address.
     fn add_trusted_peer_id(&self, peer: PeerId);
 
-    /// Adds a trusted peer to the peer set with UDP `SocketAddr`.
+    /// Adds a trusted peer to the peer set with TCP `SocketAddr`.
     fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, None);
     }

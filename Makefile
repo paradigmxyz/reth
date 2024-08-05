@@ -13,7 +13,7 @@ BUILD_PATH = "target"
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?=
+    FEATURES ?= asm-keccak
 else
     FEATURES ?= jemalloc asm-keccak
 endif
@@ -82,15 +82,12 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
-# For aarch64, disable asm-keccak optimizations and set the page size for
-# jemalloc. When cross compiling, we must compile jemalloc with a large page
-# size, otherwise it will use the current system's page size which may not work
+# For aarch64, set the page size for jemalloc.
+# When cross compiling, we must compile jemalloc with a large page size,
+# otherwise it will use the current system's page size which may not work
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
-
-op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows

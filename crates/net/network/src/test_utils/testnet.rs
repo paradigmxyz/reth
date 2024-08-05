@@ -14,7 +14,7 @@ use reth_chainspec::MAINNET;
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
-    NetworkInfo, Peers,
+    NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
 use reth_provider::test_utils::NoopProvider;
@@ -41,8 +41,7 @@ use crate::{
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
-    NetworkConfig, NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkHandle,
-    NetworkManager,
+    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 
 /// A test network consisting of multiple peers.

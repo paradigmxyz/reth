@@ -4387,9 +4387,9 @@ dependencies = [
 
 [[package]]
 name = "keccak-asm"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91ac713392e7aa54c59cafe1d6c68aa34cd4f7cf16eca8ee29c034e14e7eb322"
+checksum = "422fbc7ff2f2f5bdffeb07718e5a5324dca72b0c9293d50df4026652385e3314"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
@@ -6484,12 +6484,14 @@ version = "1.0.3"
 dependencies = [
  "auto_impl",
  "derive_more",
+ "metrics",
  "parking_lot 0.12.3",
  "pin-project",
  "rand 0.8.5",
  "reth-chainspec",
  "reth-errors",
  "reth-execution-types",
+ "reth-metrics",
  "reth-primitives",
  "reth-storage-api",
  "reth-trie",
@@ -7558,12 +7560,15 @@ dependencies = [
  "enr",
  "futures",
  "reth-eth-wire-types",
+ "reth-ethereum-forks",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7642,7 +7647,7 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
- "reth-network",
+ "reth-network-api",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
@@ -7676,6 +7681,7 @@ dependencies = [
  "reth-evm",
  "reth-exex",
  "reth-network",
+ "reth-network-api",
  "reth-network-p2p",
  "reth-node-api",
  "reth-node-core",
@@ -9611,9 +9617,9 @@ dependencies = [
 
 [[package]]
 name = "sha3-asm"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f969418d6b6619182cacdad5de5d5aa4f12f4290d3b211e2dbb5e02c93012d1e"
+checksum = "57d79b758b7cb2085612b11a235055e485605a5103faccdd633f35bd7aee69dd"
 dependencies = [
  "cc",
  "cfg-if",
