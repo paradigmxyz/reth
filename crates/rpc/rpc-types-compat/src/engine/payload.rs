@@ -121,19 +121,19 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayload`]
-pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
+pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
     if value.header.requests_root.is_some() {
-        (ExecutionPayload::V4(block_to_payload_v4(value)), None)
+        // block with requests root: V3
+        ExecutionPayload::V4(block_to_payload_v4(value))
     } else if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
-        let (payload, beacon_block_root) = block_to_payload_v3(value);
-        (ExecutionPayload::V3(payload), beacon_block_root)
+        ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.withdrawals.is_some() {
         // block with withdrawals: V2
-        (ExecutionPayload::V2(block_to_payload_v2(value)), None)
+        ExecutionPayload::V2(block_to_payload_v2(value))
     } else {
         // otherwise V1
-        (ExecutionPayload::V1(block_to_payload_v1(value)), None)
+        ExecutionPayload::V1(block_to_payload_v1(value))
     }
 }
 
@@ -184,11 +184,9 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B256>) {
+pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
     let transactions = value.raw_transactions();
-
-    let parent_beacon_block_root = value.header.parent_beacon_block_root;
-    let payload = ExecutionPayloadV3 {
+    ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: ExecutionPayloadV2 {
@@ -210,9 +208,7 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
             },
             withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
         },
-    };
-
-    (payload, parent_beacon_block_root)
+    }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
@@ -242,7 +238,7 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
         deposit_requests,
         withdrawal_requests,
         consolidation_requests,
-        payload_inner: block_to_payload_v3(value).0,
+        payload_inner: block_to_payload_v3(value),
     }
 }
 
@@ -497,7 +493,7 @@ mod tests {
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
         // ensure the payloads are the same
-        assert_eq!((new_payload, Some(parent_beacon_block_root)), converted_payload);
+        assert_eq!(new_payload, converted_payload);
     }
 
     #[test]
