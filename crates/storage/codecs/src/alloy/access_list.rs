@@ -8,7 +8,7 @@ impl Compact for AccessListItem {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = Vec::new();
+        let mut buffer = crate::Vec::new();
         self.address.to_compact(&mut buffer);
         self.storage_keys.specialized_to_compact(&mut buffer);
         buf.put(&buffer[..]);
@@ -18,7 +18,7 @@ impl Compact for AccessListItem {
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (address, new_buf) = Address::from_compact(buf, buf.len());
         buf = new_buf;
-        let (storage_keys, new_buf) = Vec::specialized_from_compact(buf, buf.len());
+        let (storage_keys, new_buf) = crate::Vec::specialized_from_compact(buf, buf.len());
         buf = new_buf;
         let access_list_item = Self { address, storage_keys };
         (access_list_item, buf)
@@ -30,14 +30,14 @@ impl Compact for AccessList {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = Vec::new();
+        let mut buffer = crate::Vec::new();
         self.0.to_compact(&mut buffer);
         buf.put(&buffer[..]);
         buffer.len()
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (access_list_items, new_buf) = Vec::from_compact(buf, buf.len());
+        let (access_list_items, new_buf) = crate::Vec::from_compact(buf, buf.len());
         buf = new_buf;
         let access_list = Self(access_list_items);
         (access_list, buf)

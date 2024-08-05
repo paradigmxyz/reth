@@ -4,6 +4,8 @@ use alloy_primitives::{Bytes, B256, U256};
 use reth_codecs_derive::reth_codec;
 use serde::{Deserialize, Serialize};
 
+use crate::Vec;
+
 /// GenesisAccount acts as bridge which simplifies Compact implementation for AlloyGenesisAccount.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
