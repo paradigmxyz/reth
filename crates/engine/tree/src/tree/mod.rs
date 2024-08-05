@@ -2187,7 +2187,7 @@ mod tests {
 
         let received_action =
             test_harness.action_rx.recv().expect("Failed to receive save blocks action");
-        if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
+        if let PersistenceAction::SaveBlocks(saved_blocks, _) = received_action {
             // only blocks.len() - tree_config.persistence_threshold() will be
             // persisted
             let expected_persist_len = blocks.len() - tree_config.persistence_threshold() as usize;
