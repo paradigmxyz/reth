@@ -173,7 +173,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
@@ -301,7 +301,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             if pool_tx.origin.is_private() {
@@ -309,7 +309,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             // convert tx to a signed transaction
@@ -325,7 +325,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue;
+                    continue
                 }
             }
 
@@ -350,7 +350,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
