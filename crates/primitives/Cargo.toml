@@ -85,6 +85,7 @@ std = ["thiserror-no-std?/std", "reth-primitives-traits/std"]
 reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
+    "std",
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-chainspec?/arbitrary",
