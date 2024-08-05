@@ -753,7 +753,7 @@ mod tests {
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
         // Generate a validated transaction and add it to the pool
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
-        pool.add_transaction(tx.clone());
+        pool.add_transaction(tx);
 
         // Define a new sender ID and submission ID
         let sender: SenderId = 11.into();
@@ -783,7 +783,7 @@ mod tests {
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
         // Generate a validated transaction and add it to the pool
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
-        pool.add_transaction(tx.clone());
+        pool.add_transaction(tx);
 
         // Define a sender ID and initial submission ID
         let sender: SenderId = 11.into();
@@ -819,8 +819,8 @@ mod tests {
         // Generate two validated transactions and add them to the pool
         let tx1 = f.validated_arc(MockTransaction::eip1559().inc_price());
         let tx2 = f.validated_arc(MockTransaction::eip1559().inc_price());
-        pool.add_transaction(tx1.clone());
-        pool.add_transaction(tx2.clone());
+        pool.add_transaction(tx1);
+        pool.add_transaction(tx2);
 
         // Define two different sender IDs and their corresponding submission IDs
         let sender1: SenderId = 11.into();
