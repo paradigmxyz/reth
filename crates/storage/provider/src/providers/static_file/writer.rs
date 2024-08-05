@@ -21,6 +21,9 @@ use std::{
 use tracing::debug;
 
 /// Static file writers for every known [`StaticFileSegment`].
+///
+/// WARNING: Trying to use more than one writer for the same segment type **will result in a
+/// deadlock**.
 #[derive(Debug, Default)]
 pub(crate) struct StaticFileWriters {
     headers: RwLock<Option<StaticFileProviderRW>>,
