@@ -163,8 +163,7 @@ where
         } else {
             UnifiedStorageWriter::from(
                 self.database(),
-                self.static_file()
-                    .get_writer(first_block.number, StaticFileSegment::Receipts)?,
+                self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
             )
         };
 
