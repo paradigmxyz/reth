@@ -36,7 +36,7 @@ contains() {
 }
 
 for crate in "${crates[@]}"; do
-  if contains "${exclude_crates[@]}" "$crate"; then
+  if contains exclude_crates "$crate"; then
     results+=("3:⏭️:$crate")
     continue
   fi
