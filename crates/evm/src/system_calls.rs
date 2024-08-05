@@ -1,5 +1,13 @@
 //! System contract call functions.
 
+#[cfg(feature = "std")]
+use std::fmt::Display;
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{boxed::Box, format, string::ToString, vec::Vec},
+    core::fmt::Display,
+};
+
 use crate::ConfigureEvm;
 use alloy_eips::{
     eip4788::BEACON_ROOTS_ADDRESS,
@@ -35,7 +43,7 @@ pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
 ) -> Result<(), BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply pre-block EIP-4788 contract call
@@ -148,7 +156,7 @@ pub fn post_block_withdrawal_requests_contract_call<EvmConfig, DB>(
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply post-block EIP-7002 contract call
@@ -278,7 +286,7 @@ pub fn post_block_consolidation_requests_contract_call<EvmConfig, DB>(
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply post-block EIP-7251 contract call
