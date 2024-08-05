@@ -894,19 +894,25 @@ where
         self.database.history_by_block_hash(block_hash)
     }
 
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
-        let mut state = self.history_by_block_hash(block);
-
-        // we failed to get the state by hash, from disk, hash block be the pending block
-        if state.is_err() {
-            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
-                // we found pending block by hash
-                state = Ok(pending)
-            }
+    fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
+        if let Ok(state) = self.history_by_block_hash(hash) {
+            // This could be tracked by a historical block
+            Ok(state)
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
+            // ... or this could be tracked by the in memory state
+            let anchor_hash = state.anchor().hash;
+            let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
+            let state_provider =
+                self.canonical_in_memory_state.state_provider(hash, latest_historical);
+            Ok(Box::new(state_provider))
+        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
+            // .. or this could be the pending state
+            Ok(pending)
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(hash))
         }
-
-        state
     }
 
     /// Returns the state provider for pending state.
