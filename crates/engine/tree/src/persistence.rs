@@ -290,7 +290,12 @@ mod tests {
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let actual_hash = rx.await.unwrap().unwrap();
+        let actual_hash = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+            .await
+            .expect("test timed out")
+            .expect("channel closed unexpectedly")
+            .expect("no hash returned");
+
         assert_eq!(block_hash, actual_hash);
     }
 
