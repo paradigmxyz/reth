@@ -42,19 +42,19 @@ pub fn make_difficulty_calculator(
     let difficulty = u64::try_from(parent.difficulty).unwrap();
     let left_side = difficulty / 2048;
 
-    let mut calculated_difficulty =
-        difficulty + left_side * std::cmp::max(factor, u64::try_from(99).unwrap());
+    let mut calculated_difficulty = difficulty + left_side * std::cmp::max(factor, 99u64);
 
     if calculated_difficulty < MINIMUM_DIFFICULTY {
         calculated_difficulty = MINIMUM_DIFFICULTY;
     }
 
+    // Calculates a fake block number for the ice-age delay
+    // Specification: https://eips.ethereum.org/EIPS/eip-1234
     if parent.number >= bomb_delay_from_parent {
-        let fake_block = parent.number - bomb_delay_from_parent;
+        let fake_block_number = parent.number - bomb_delay_from_parent;
+        let period_count = fake_block_number / EXP_DIFF_PERIOD_UINT;
 
-        let period_count = fake_block / EXP_DIFF_PERIOD_UINT;
-
-        if period_count > 1 {
+        if period_count >= 1 {
             let pow_period_count = (period_count - 2).pow(2);
 
             calculated_difficulty += pow_period_count;
