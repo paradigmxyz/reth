@@ -79,7 +79,7 @@ impl InMemoryState {
         if let Some((earliest_block_number, _)) = numbers.first_key_value() {
             self.metrics.earliest_block.set(*earliest_block_number as f64);
         }
-        if let Some((latest_block_number, _)) = numbers.first_key_value() {
+        if let Some((latest_block_number, _)) = numbers.last_key_value() {
             self.metrics.latest_block.set(*latest_block_number as f64);
         }
         self.metrics.num_blocks.set(numbers.len() as f64);
