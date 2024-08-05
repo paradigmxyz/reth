@@ -59,9 +59,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
-reth-rpc.workspace = true
 reth-tracing.workspace = true
-reth-revm.workspace = true
 reth-downloaders.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
@@ -78,5 +76,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-rpc/optimism",
+    # "reth-rpc/optimism",
 ]
