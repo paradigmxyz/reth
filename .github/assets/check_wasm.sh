@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 set +e  # Disable immediate exit on error
 
-# Array of crates 
-wasm_crates=(
-  # The following were confirmed not working in the past, but could be enabled if issues have been resolved
-  # reth-consensus
-  # reth-db
-  # reth-evm
-  # reth-evm-ethereum
-  # The following are confirmed working
-  reth-codecs
-  reth-errors
-  reth-ethereum-forks
-  reth-network-peers
-  reth-primitives
-  reth-primitives-traits
-  reth-revm
+# Array of crates to compile
+crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
+# Array of crates to exclude
+exclude_crates=(
+  # The following are not working yet
+  reth-evm-ethereum
+  reth-storage-errors
+  # The following are not supposed to be working
+  reth-mdbx # database
+  reth-mdbx-sys # database
+  reth-static-file # sucds
+  reth-transaction-pool # c-kzg
+  reth-trie-db # database
 )
 
 # Array to hold the results
@@ -23,7 +21,26 @@ results=()
 # Flag to track if any command fails
 any_failed=0
 
-for crate in "${wasm_crates[@]}"; do
+# Function to check if a value exists in an array
+contains() {
+  local array="$1[@]"
+  local seeking=$2
+  local in=1
+  for element in "${!array}"; do
+    if [[ "$element" == "$seeking" ]]; then
+      in=0
+      break
+    fi
+  done
+  return $in
+}
+
+for crate in "${crates[@]}"; do
+  if contains "${exclude_crates[@]}" "$crate"; then
+    results+=("3:⏭️:$crate")
+    continue
+  fi
+
   cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
 
   if [ -n "$CI" ]; then
@@ -38,9 +55,9 @@ for crate in "${wasm_crates[@]}"; do
 
   # Store the result in the dictionary
   if [ $ret_code -eq 0 ]; then
-    results+=("✅:$crate")
+    results+=("1:✅:$crate")
   else
-    results+=("❌:$crate")
+    results+=("2:❌:$crate")
     any_failed=1
   fi
 
@@ -56,7 +73,8 @@ unset IFS
 # Print summary
 echo -e "\nSummary of build results:"
 for result in "${sorted_results[@]}"; do
-  status="${result%%:*}"
+  status="${result#*:}"
+  status="${status%%:*}"
   crate="${result##*:}"
   echo "$status $crate"
 done
