@@ -18,7 +18,7 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 alloy-consensus = { workspace = true, optional = true }
 alloy-eips = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, default-features = false }
 alloy-trie = { workspace = true, optional = true }
 
 # misc
@@ -42,7 +42,7 @@ proptest-arbitrary-interop.workspace = true
 
 [features]
 default = ["std", "alloy"]
-std = ["alloy-primitives/std", "bytes/std", "serde/std"]
+std = ["alloy-primitives/std", "bytes/std", "serde?/std"]
 alloy = [
     "dep:alloy-consensus",
     "dep:alloy-eips",

@@ -26,7 +26,7 @@ mod trusted_setup {
     }
 
     /// Error type for loading the trusted setup.
-    #[derive(Debug, thiserror_no_std::Error)]
+    #[derive(Debug, thiserror::Error)]
     pub enum LoadKzgSettingsError {
         /// Failed to create temp file to store bytes for loading [`KzgSettings`] via
         /// [`KzgSettings::load_trusted_setup_file`].

@@ -19,6 +19,8 @@
 
 pub use reth_codecs_derive::*;
 
+// use serde as _;
+
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
 
