@@ -413,7 +413,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -839,7 +839,7 @@ impl TransactionSignedNoHash {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
 
         let signature_hash = self.signature_hash();
@@ -868,7 +868,7 @@ impl TransactionSignedNoHash {
         #[cfg(feature = "optimism")]
         {
             if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-                return Some(from)
+                return Some(from);
             }
 
             // pre bedrock system transactions were sent from the zero address as legacy
@@ -876,7 +876,7 @@ impl TransactionSignedNoHash {
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
-                return Some(Address::ZERO)
+                return Some(Address::ZERO);
             }
         }
 
@@ -898,7 +898,7 @@ impl TransactionSignedNoHash {
     /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -924,15 +924,22 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
-                let mut compressor = compressor.borrow_mut();
-                let mut tmp = Vec::with_capacity(256);
-                let tx_bits = self.transaction.to_compact(&mut tmp);
+            #[cfg(feature = "std")]
+            {
+                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let mut tmp = Vec::with_capacity(256);
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
 
-                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
 
-                tx_bits as u8
-            })
+                    tx_bits as u8
+                })
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                panic!("zstd feature is not supported in no_std environment");
+            }
         } else {
             self.transaction.to_compact(buf) as u8
         };
@@ -952,17 +959,24 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
-                let mut decompressor = decompressor.borrow_mut();
+            #[cfg(feature = "std")]
+            {
+                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
 
-                // TODO: enforce that zstd is only present at a "top" level type
+                    // TODO: enforce that zstd is only present at a "top" level type
 
-                let transaction_type = (bitflags & 0b110) >> 1;
-                let (transaction, _) =
-                    Transaction::from_compact(decompressor.decompress(buf), transaction_type);
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) =
+                        Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
-                (transaction, buf)
-            })
+                    (transaction, buf)
+                })
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                panic!("zstd feature is not supported in no_std environment");
+            }
         } else {
             let transaction_type = bitflags >> 1;
             Transaction::from_compact(buf, transaction_type)
@@ -1036,7 +1050,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -1052,7 +1066,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1064,7 +1078,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -1080,7 +1094,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer_unchecked`].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
+        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self>,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
@@ -1229,7 +1243,7 @@ impl TransactionSigned {
         let transaction_payload_len = header.payload_length;
 
         if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         let mut transaction = TxLegacy {
@@ -1247,7 +1261,7 @@ impl TransactionSigned {
         // check the new length, compared to the original length and the header length
         let decoded = remaining_len - data.len();
         if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         let tx_length = header.payload_length + header.length();
@@ -1292,7 +1306,7 @@ impl TransactionSigned {
         // decode the list header for the rest of the transaction
         let header = Header::decode(data)?;
         if !header.list {
-            return Err(RlpError::Custom("typed tx fields must be encoded as a list"))
+            return Err(RlpError::Custom("typed tx fields must be encoded as a list"));
         }
 
         let remaining_len = data.len();
@@ -1327,7 +1341,7 @@ impl TransactionSigned {
 
         let bytes_consumed = remaining_len - data.len();
         if bytes_consumed != header.payload_length {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         let hash = keccak256(&original_encoding_without_header[..tx_length]);
@@ -1354,7 +1368,7 @@ impl TransactionSigned {
     /// of bytes in input data.
     pub fn decode_enveloped(input_data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if input_data.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // Check if the tx is a list
@@ -1366,7 +1380,7 @@ impl TransactionSigned {
         };
 
         if !input_data.is_empty() {
-            return Err(RlpError::UnexpectedLength)
+            return Err(RlpError::UnexpectedLength);
         }
 
         Ok(output_data)
@@ -1447,7 +1461,7 @@ impl Decodable for TransactionSigned {
     /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         }
 
         // decode header
@@ -1465,7 +1479,7 @@ impl Decodable for TransactionSigned {
             // string Header with payload_length of 1, we need to make sure this check is only
             // performed for transactions with a string header
             if bytes_consumed != header.payload_length && original_encoding[0] > EMPTY_STRING_CODE {
-                return Err(RlpError::UnexpectedLength)
+                return Err(RlpError::UnexpectedLength);
             }
 
             Ok(tx)

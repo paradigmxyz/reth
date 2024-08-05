@@ -1,6 +1,5 @@
 #[cfg(feature = "std")]
-use std::{thread_local};
-use core::cell::RefCell;
+use std::{cell::RefCell, thread_local};
 use zstd::bulk::{Compressor, Decompressor};
 
 #[cfg(not(feature = "std"))]
@@ -9,11 +8,10 @@ use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
 
-#[cfg(not(feature = "std"))]
-use thread_local::ThreadLocal;
-
+#[cfg(feature = "std")]
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
+#[cfg(feature = "std")]
 /// Compression/Decompression dictionary for `Transaction`.
 pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_dictionary.bin");
 
@@ -47,16 +45,6 @@ thread_local! {
                 .expect("failed to initialize receipt decompressor"),
         ));
 }
-
-#[cfg(not(feature = "std"))]
-pub static TRANSACTION_COMPRESSOR: ThreadLocal<RefCell<Compressor<'static>>> = ThreadLocal::new();
-#[cfg(not(feature = "std"))]
-pub static TRANSACTION_DECOMPRESSOR: ThreadLocal<RefCell<ReusableDecompressor>> = ThreadLocal::new();
-#[cfg(not(feature = "std"))]
-pub static RECEIPT_COMPRESSOR: ThreadLocal<RefCell<Compressor<'static>>> = ThreadLocal::new();
-#[cfg(not(feature = "std"))]
-pub static RECEIPT_DECOMPRESSOR: ThreadLocal<RefCell<ReusableDecompressor>> = ThreadLocal::new();
-
 
 
 /// Reusable decompressor that uses its own internal buffer.
