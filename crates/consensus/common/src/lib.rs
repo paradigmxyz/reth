@@ -14,5 +14,5 @@ pub mod validation;
 /// Various calculation methods (e.g. block rewards)
 pub mod calc;
 
-/// Varios functions for get the difficulty in many scenarios
+/// Various functions for get the difficulty in many scenarios
 pub mod difficulty;
