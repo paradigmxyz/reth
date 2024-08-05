@@ -7,16 +7,19 @@ use std::{
 };
 
 use enr::Enr;
-use futures::Future;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
-    NetworkError, NetworkInfo, NetworkStatus, PeerInfo, Peers, PeersHandleProvider, PeersInfo,
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, NetworkError, NetworkInfo, NetworkStatus, PeerInfo, Peers, PeersInfo,
 };
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
+use reth_network_p2p::{
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
+    BlockClient,
+};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::{PeerAddr, PeerKind, PeersHandle, Reputation, ReputationChangeKind};
+use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_primitives::{Head, TransactionSigned, B256};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
@@ -393,19 +396,8 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
-/// Provides [`FetchClient`] for downloading blocks.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait BlockDownloaderProvider {
-    /// Returns a new [`FetchClient`] that can be cloned and shared.
-    ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
-    fn fetch_client(
-        &self,
-    ) -> impl Future<Output = Result<FetchClient, oneshot::error::RecvError>> + Send;
-}
-
 impl BlockDownloaderProvider for NetworkHandle {
-    async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
+    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await

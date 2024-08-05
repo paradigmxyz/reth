@@ -1,6 +1,6 @@
 //! Builder support for configuring the entire setup.
 
-use reth_network_api::PeersHandleProvider;
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 

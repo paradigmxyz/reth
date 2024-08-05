@@ -6486,12 +6486,14 @@ version = "1.0.3"
 dependencies = [
  "auto_impl",
  "derive_more",
+ "metrics",
  "parking_lot 0.12.3",
  "pin-project",
  "rand 0.8.5",
  "reth-chainspec",
  "reth-errors",
  "reth-execution-types",
+ "reth-metrics",
  "reth-primitives",
  "reth-storage-api",
  "reth-trie",
@@ -7562,8 +7564,11 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-admin",
  "auto_impl",
+ "derive_more",
  "enr",
- "reth-eth-wire",
+ "futures",
+ "reth-eth-wire-types",
+ "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
  "serde",
@@ -7609,7 +7614,6 @@ dependencies = [
 name = "reth-network-types"
 version = "1.0.3"
 dependencies = [
- "derive_more",
  "humantime-serde",
  "reth-ethereum-forks",
  "reth-net-banlist",
@@ -7617,7 +7621,6 @@ dependencies = [
  "reth-network-peers",
  "serde",
  "serde_json",
- "tokio",
  "tracing",
 ]
 

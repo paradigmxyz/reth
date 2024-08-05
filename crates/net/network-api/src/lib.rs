@@ -13,18 +13,23 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod downloaders;
 /// Network Error
 pub mod error;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
+pub mod test_utils;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
+pub use reth_network_p2p::BlockClient;
+pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
+
+pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
-pub use reth_network_types::{PeerKind, PeersHandle, Reputation, ReputationChangeKind};
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
-use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
@@ -67,7 +72,7 @@ pub trait PeersInfo: Send + Sync {
 /// Provides an API for managing the peers of the network.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Peers: PeersInfo {
-    /// Adds a peer to the peer set with UDP `SocketAddr`.
+    /// Adds a peer to the peer set with TCP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
@@ -82,7 +87,7 @@ pub trait Peers: PeersInfo {
     /// This allows marking a peer as trusted without having to know the peer's address.
     fn add_trusted_peer_id(&self, peer: PeerId);
 
-    /// Adds a trusted peer to the peer set with UDP `SocketAddr`.
+    /// Adds a trusted peer to the peer set with TCP `SocketAddr`.
     fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, None);
     }
@@ -156,15 +161,6 @@ pub trait Peers: PeersInfo {
         &self,
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<Reputation>, NetworkError>> + Send;
-}
-
-/// Provides an API for managing the peers of the network.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait PeersHandleProvider {
-    /// Returns the [`PeersHandle`] that can be cloned and shared.
-    ///
-    /// The [`PeersHandle`] can be used to interact with the network's peer set.
-    fn peers_handle(&self) -> &PeersHandle;
 }
 
 /// Info about an active peer session.
