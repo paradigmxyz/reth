@@ -347,7 +347,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(Self::Error::from_evm_err(err));
+                            return Err(Self::Error::from_evm_err(err))
                         }
                     }
                 }
