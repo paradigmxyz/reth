@@ -190,7 +190,7 @@ where
         } else if self.canonical_in_memory_state.hash_by_number(number).is_some() {
             // Otherwise, if the block exists in memory, we should return a TD for it.
             //
-            // The canonical in memory sate should only store post-merge blocks. Post-merge,
+            // The canonical in memory sate should only store post-merge blocks. Post-merge
             // blocks have zero difficulty. This means we can use the total difficulty for the last
             // persisted block number.
             let last_persisted_block_number = self.database.last_block_number()?;
