@@ -49,9 +49,11 @@ for crate in "${crates[@]}"; do
     printf "\n%s:\n  %s\n" "$crate" "$cmd"
   fi
 
+  set +e  # Disable immediate exit on error
   # Run the command and capture the return code
   $cmd
   ret_code=$?
+  set -e  # Re-enable immediate exit on error
 
   # Store the result in the dictionary
   if [ $ret_code -eq 0 ]; then
