@@ -45,7 +45,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        RethEvmBuilder::new(db, self.default_external_context()).with_optimism_support().build()
+        RethEvmBuilder::new(db, self.default_external_context()).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -57,10 +57,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        RethEvmBuilder::new(db, self.default_external_context())
-            .with_optimism_support()
-            .with_env(env.into())
-            .build()
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -94,9 +94,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         DB: Database,
         I: GetInspector<DB>,
     {
-        RethEvmBuilder::new(db, self.default_external_context())
-            .with_optimism_support()
-            .build_with_inspector(inspector)
+        RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
     }
 
     /// Provides the default external context.
