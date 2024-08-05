@@ -20,10 +20,9 @@ use reth::{
         ProviderFactory,
     },
     rpc::eth::EthApi,
-    utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::mdbx::DatabaseArguments;
+use reth_db::{mdbx::DatabaseArguments, DatabaseConfig};
 use reth_db_api::models::ClientVersion;
 
 // Bringing up the RPC
@@ -44,10 +43,8 @@ async fn main() -> eyre::Result<()> {
     // 1. Setup the DB
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
-    let db = Arc::new(open_db_read_only(
-        db_path.join("db").as_path(),
-        DatabaseArguments::new(ClientVersion::default()),
-    )?);
+    let db =
+        Arc::new(DatabaseArguments::new(db_path.join("db"), ClientVersion::default()).open_ro()?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
     let factory = ProviderFactory::new(
         db.clone(),

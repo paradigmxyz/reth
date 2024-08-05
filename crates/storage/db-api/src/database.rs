@@ -5,13 +5,27 @@ use crate::{
 };
 use std::{fmt::Debug, sync::Arc};
 
+/// A trait for database configuration, used as the main entrypoint for opening or creating a
+/// database.
+pub trait DatabaseConfig {
+    /// The database this config configures.
+    type DB: Database;
+
+    /// Open the database in read-write mode with the given options, initializing it with the given
+    /// tables if it does not already exist.
+    fn open(self) -> eyre::Result<Self::DB>;
+
+    /// Open the database in readonly mode with the given options.
+    fn open_ro(self) -> eyre::Result<Self::DB>;
+}
+
 /// Main Database trait that can open read-only and read-write transactions.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
-pub trait Database: Send + Sync {
-    /// Read-Only database transaction
+pub trait Database: Sized + Send + Sync {
+    /// A read-only database transaction
     type TX: DbTx + Send + Sync + Debug + 'static;
-    /// Read-Write database transaction
+    /// A read-write database transaction
     type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
 
     /// Create read only transaction.

@@ -1,5 +1,7 @@
 //! clap [Args](clap::Args) for database configuration
 
+use std::path::PathBuf;
+
 use crate::version::default_client_version;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
@@ -23,8 +25,8 @@ pub struct DatabaseArgs {
 
 impl DatabaseArgs {
     /// Returns default database arguments with configured log level and client version.
-    pub fn database_args(&self) -> reth_db::mdbx::DatabaseArguments {
-        reth_db::mdbx::DatabaseArguments::new(default_client_version())
+    pub fn database_args(&self, path: PathBuf) -> reth_db::mdbx::DatabaseArguments {
+        reth_db::mdbx::DatabaseArguments::new(path, default_client_version())
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
     }
