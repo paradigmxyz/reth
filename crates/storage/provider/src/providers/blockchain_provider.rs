@@ -901,8 +901,8 @@ where
             Ok(state)
         } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             // ... or this could be tracked by the in memory state
-            let anchor_num = state.anchor().number;
-            let latest_historical = self.database.history_by_block_number(anchor_num)?;
+            let anchor_hash = state.anchor().hash;
+            let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
             let state_provider =
                 self.canonical_in_memory_state.state_provider(hash, latest_historical);
             Ok(Box::new(state_provider))
