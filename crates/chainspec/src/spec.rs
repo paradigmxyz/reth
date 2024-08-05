@@ -2765,14 +2765,14 @@ Post-merge hard forks (timestamp based):
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
-        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Granite, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
-        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Granite, 51));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
     }
 
     #[cfg(feature = "optimism")]
