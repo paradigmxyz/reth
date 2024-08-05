@@ -2036,9 +2036,9 @@ mod tests {
         }
 
         async fn fcu_to(&mut self, block_hash: B256, fcu_status: impl Into<ForkchoiceStatus>) {
-            let fcu_status = fcu_status.into().clone();
+            let fcu_status = fcu_status.into();
 
-            self.send_fcu(block_hash, fcu_status.clone()).await;
+            self.send_fcu(block_hash, fcu_status).await;
 
             self.check_fcu(block_hash, fcu_status).await;
         }
@@ -2049,14 +2049,14 @@ mod tests {
             let (tx, rx) = oneshot::channel();
             self.tree.on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
-                    state: fcu_state.into(),
+                    state: fcu_state,
                     payload_attrs: None,
                     tx,
                 },
             ));
 
             let response = rx.await.unwrap().unwrap().await.unwrap();
-            let fcu_status = fcu_status.into().clone();
+            let fcu_status = fcu_status.into();
             match fcu_status {
                 ForkchoiceStatus::Valid => assert!(response.payload_status.is_valid()),
                 ForkchoiceStatus::Syncing => assert!(response.payload_status.is_syncing()),
@@ -2081,7 +2081,7 @@ mod tests {
             }
         }
 
-        fn fcu_state(&self, block_hash: B256) -> ForkchoiceState {
+        const fn fcu_state(&self, block_hash: B256) -> ForkchoiceState {
             ForkchoiceState {
                 head_block_hash: block_hash,
                 safe_block_hash: block_hash,
