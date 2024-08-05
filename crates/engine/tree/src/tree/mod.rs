@@ -695,17 +695,14 @@ where
 
         // check if we need to run backfill again by comparing the most recent finalized height to
         // the backfill height
-        debug!(target: "consensus::engine", "before checking sync state target");
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
             return
         };
-        debug!(target: "consensus::engine", "after checking sync state target");
         if sync_target_state.finalized_block_hash.is_zero() {
             // no finalized block, can't check distance
             return
         }
-        debug!(target: "consensus::engine", "after checking if we have a finalized block");
         // get the block number of the finalized block, if we have it
         let newest_finalized = self
             .state
@@ -733,7 +730,6 @@ where
         };
 
         // try to close the gap by executing buffered blocks that are child blocks of the new head
-        debug!(target: "consensus::engine", "before try_connect_buffered_blocks");
         self.try_connect_buffered_blocks(self.state.tree_state.current_canonical_head)
     }
 
@@ -1047,7 +1043,6 @@ where
         let blocks = self.state.buffer.remove_block_with_children(&parent.hash);
 
         if blocks.is_empty() {
-            debug!(target: "engine", "in try_connect_buffered_blocks nothing to append");
             // nothing to append
             return
         }
@@ -2587,14 +2582,12 @@ mod tests {
             .await;
 
         // extend main chain but don't insert the blocks
-        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 3);
+        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 10);
 
-        //test_harness.insert_chain(main_chain.iter()).await;
-        test_harness.send_fcu(main_chain.last().unwrap().hash(), ForkchoiceStatus::Syncing).await;
+        let main_chain_last_hash = main_chain.last().unwrap().hash();
+        test_harness.send_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
 
-        //test_harness.check_canon_commit(main_chain.last().unwrap().hash()).await;
-
-        test_harness.check_fcu(main_chain.last().unwrap().hash(), ForkchoiceStatus::Syncing).await;
+        test_harness.check_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
 
         // create event for backfill finished
         let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
@@ -2602,5 +2595,27 @@ mod tests {
         });
 
         test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished));
+
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+                assert_eq!(hash_set, HashSet::from([main_chain_last_hash]));
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+            .last()
+            .unwrap()
+            .clone()]));
+
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
+                assert_eq!(total_blocks, (main_chain.len() - 1) as u64);
+                assert_eq!(initial_hash, main_chain.last().unwrap().parent_hash);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
     }
 }
