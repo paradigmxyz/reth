@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use futures::Future;
 use reth_chainspec::EthereumHardforks;
-use reth_errors::RethError;
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
@@ -21,7 +20,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
-    ReceiptProvider, StateProviderFactory,
+    ReceiptProviderIdExt, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
@@ -30,7 +29,6 @@ use reth_rpc_eth_types::{
     pending_block::pre_block_blockhashes_update, EthApiError, PendingBlock, PendingBlockEnv,
     PendingBlockEnvOrigin,
 };
-use reth_rpc_types::BlockHashOrNumber;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
@@ -124,24 +122,14 @@ pub trait LoadPendingBlock: EthApiTypes {
     /// Returns the locally built pending block
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<SealedBlockWithSenders>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
             if pending.origin.is_actual_pending() {
-                if let Some(block) = pending.origin.into_actual_pending() {
-                    let receipts = self
-                        .provider()
-                        .receipts_by_block(BlockHashOrNumber::Number(block.number))
-                        .map_err(Self::Error::from_eth_err)?
-                        .ok_or_else(|| {
-                            Self::Error::from_eth_err(EthApiError::Internal(RethError::))
-                        })?;
-                    return Ok(Some((block, receipts)));
-                }
-                return Ok(None);
+                return Ok(pending.origin.into_actual_pending());
             }
 
             let mut lock = self.pending_block().lock().await;
@@ -155,15 +143,12 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    let receipts = pending_block.receipts.clone();
-                    // Convert Vec<Option<Receipt>> to Vec<Receipt>
-                    let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
-                    return Ok(Some((pending_block.block.clone(), receipts)));
+                    return Ok(Some(pending_block.block.clone()));
                 }
             }
 
             // no pending block from the CL yet, so we need to build it ourselves via txpool
-            let (sealed_block, receipts) = match self
+            let pending_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
                     this.build_block(pending)
@@ -173,21 +158,32 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 
             let now = Instant::now();
+
+            // Fetch receipts for the pending block
+            let receipts = match self.provider().receipts_by_block_id(pending_block.number.into()) {
+                Ok(Some(receipts)) => receipts,
+                Ok(None) => {
+                    debug!(target: "rpc", "No receipts found for pending block");
+                    Vec::new() // or handle this case as appropriate for your use case
+                }
+                Err(err) => {
+                    debug!(target: "rpc", "Failed to fetch receipts for pending block: {:?}", err);
+                    return Err(Self::Error::from_eth_err(EthApiError::Internal(err.into())));
+                }
+            };
+
             *lock = Some(PendingBlock::new(
-                sealed_block.clone(),
+                pending_block.clone(),
                 now + Duration::from_secs(1),
-                receipts.clone(),
+                receipts,
             ));
 
-            // Convert Vec<Option<Receipt>> to Vec<Receipt>
-            let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
-
-            Ok(Some((sealed_block, receipts)))
+            Ok(Some(pending_block))
         }
     }
 
@@ -226,10 +222,7 @@ pub trait LoadPendingBlock: EthApiTypes {
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
-    fn build_block(
-        &self,
-        env: PendingBlockEnv,
-    ) -> Result<(SealedBlockWithSenders, Vec<Option<Receipt>>), Self::Error>
+    fn build_block(&self, env: PendingBlockEnv) -> Result<SealedBlockWithSenders, Self::Error>
     where
         EthApiError: From<ProviderError>,
     {
@@ -301,7 +294,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             if pool_tx.origin.is_private() {
@@ -309,7 +302,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue
+                continue;
             }
 
             // convert tx to a signed transaction
@@ -325,7 +318,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
                     best_txs.mark_invalid(&pool_tx);
-                    continue
+                    continue;
                 }
             }
 
@@ -350,7 +343,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                                 // descendants
                                 best_txs.mark_invalid(&pool_tx);
                             }
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
@@ -404,7 +397,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
-            vec![receipts.clone()].into(),
+            vec![receipts].into(),
             block_number,
             Vec::new(),
         );
@@ -462,6 +455,6 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // seal the block
         let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
-        Ok((SealedBlockWithSenders { block: block.seal_slow(), senders }, receipts))
+        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }

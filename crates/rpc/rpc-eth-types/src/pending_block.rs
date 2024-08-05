@@ -123,5 +123,5 @@ pub struct PendingBlock {
     /// Timestamp when the pending block is considered outdated
     pub expires_at: Instant,
     /// The receipts for the pending block
-    pub receipts: Vec<Option<Receipt>>,
+    pub receipts: Vec<Receipt>,
 }

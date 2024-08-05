@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
-use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
+use reth_provider::{
+    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ReceiptProviderIdExt,
+};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
@@ -159,8 +161,15 @@ pub trait EthBlocks: LoadBlock {
                 }
 
                 // If no pending block from provider, check the local pending block
-                if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block.block, Arc::new(receipts))));
+                if let Some(block) = self.local_pending_block().await? {
+                    let receipts = match LoadPendingBlock::provider(self)
+                    .receipts_by_block_id(block_id)
+                {
+                    Ok(Some(receipts)) => receipts,
+                    Ok(None) => return Err(Self::Error::from_eth_err(EthApiError::InternalEthError)),
+                    Err(e) => return Err(Self::Error::from_eth_err(e)),
+                };
+                return Ok(Some((block.block, Arc::new(receipts))));
                 }
             }
 
@@ -260,7 +269,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 } else {
                     // If no pending block from provider, try to get local pending block
                     return match self.local_pending_block().await? {
-                        Some((block, _receipts)) => Ok(Some(block)),
+                        Some(block) => Ok(Some(block)),
                         None => Ok(None),
                     };
                 };
