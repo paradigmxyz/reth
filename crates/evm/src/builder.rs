@@ -17,6 +17,8 @@ pub struct RethEvmBuilder<DB: Database, EXT = ()> {
     env: Option<Box<EnvWithHandlerCfg>>,
     /// The external context for the EVM.
     external_context: EXT,
+    /// Whether to handle optimism.
+    enable_optimism_support: bool,
 }
 
 impl<DB, EXT> RethEvmBuilder<DB, EXT>
@@ -25,7 +27,7 @@ where
 {
     /// Create a new EVM builder with the given database.
     pub const fn new(db: DB, external_context: EXT) -> Self {
-        Self { db, env: None, external_context }
+        Self { db, env: None, external_context, enable_optimism_support: false }
     }
 
     /// Set the environment for the EVM.
@@ -36,13 +38,30 @@ where
 
     /// Set the external context for the EVM.
     pub fn with_external_context<EXT1>(self, external_context: EXT1) -> RethEvmBuilder<DB, EXT1> {
-        RethEvmBuilder { db: self.db, env: self.env, external_context }
+        RethEvmBuilder {
+            db: self.db,
+            env: self.env,
+            external_context,
+            enable_optimism_support: self.enable_optimism_support,
+        }
+    }
+
+    /// Set whether to support optimism.
+    pub fn with_optimism_support(mut self) -> Self {
+        self.enable_optimism_support = true;
+        self
     }
 
     /// Build the EVM with the given database and environment.
     pub fn build<'a>(self) -> Evm<'a, EXT, DB> {
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
+
+        #[cfg(feature = "optimism")]
+        if (self.enable_optimism_support) {
+            builder = builder.optimism();
+        }
+
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
@@ -59,6 +78,12 @@ where
     {
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
+
+        #[cfg(feature = "optimism")]
+        if (self.enable_optimism_support) {
+            builder = builder.optimism();
+        }
+
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
