@@ -162,14 +162,15 @@ pub trait EthBlocks: LoadBlock {
 
                 // If no pending block from provider, check the local pending block
                 if let Some(block) = self.local_pending_block().await? {
-                    let receipts = match LoadPendingBlock::provider(self)
-                    .receipts_by_block_id(block_id)
-                {
-                    Ok(Some(receipts)) => receipts,
-                    Ok(None) => return Err(Self::Error::from_eth_err(EthApiError::InternalEthError)),
-                    Err(e) => return Err(Self::Error::from_eth_err(e)),
-                };
-                return Ok(Some((block.block, Arc::new(receipts))));
+                    let receipts =
+                        match LoadPendingBlock::provider(self).receipts_by_block_id(block_id) {
+                            Ok(Some(receipts)) => receipts,
+                            Ok(None) => {
+                                return Err(Self::Error::from_eth_err(EthApiError::InternalEthError))
+                            }
+                            Err(e) => return Err(Self::Error::from_eth_err(e)),
+                        };
+                    return Ok(Some((block.block, Arc::new(receipts))));
                 }
             }
 
