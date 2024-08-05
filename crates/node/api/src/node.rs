@@ -7,7 +7,7 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::FullNetwork;
+use reth_network_api::FullNetwork;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_rpc_eth_api::EthApiTypes;
