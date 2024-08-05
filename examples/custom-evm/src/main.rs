@@ -24,7 +24,7 @@ use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{node::EthereumAddOns, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Header, TransactionSigned, U256,
 };
 use reth_tracing::{RethTracer, Tracer};
