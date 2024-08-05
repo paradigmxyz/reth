@@ -899,11 +899,10 @@ where
         if let Ok(state) = self.history_by_block_hash(hash) {
             // This could be tracked by a historical block
             Ok(state)
-        } else if self.canonical_in_memory_state.state_by_hash(hash).is_some() {
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             // ... or this could be tracked by the in memory state
-            let last_persisted_block_number = self.database.last_block_number()?;
-            let latest_historical =
-                self.database.history_by_block_number(last_persisted_block_number)?;
+            let anchor_num = state.anchor().number;
+            let latest_historical = self.database.history_by_block_number(anchor_num)?;
             let state_provider =
                 self.canonical_in_memory_state.state_provider(hash, latest_historical);
             Ok(Box::new(state_provider))
