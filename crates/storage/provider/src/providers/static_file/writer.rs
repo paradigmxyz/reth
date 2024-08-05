@@ -58,8 +58,8 @@ impl StaticFileWriters {
     }
 }
 
-#[derive(Debug)]
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
+#[derive(Debug)]
 pub struct StaticFileProviderRWRefMut<'a>(
     pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
 );
