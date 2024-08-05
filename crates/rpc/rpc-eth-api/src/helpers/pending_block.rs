@@ -129,7 +129,7 @@ pub trait LoadPendingBlock: EthApiTypes {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
             if pending.origin.is_actual_pending() {
-                return Ok(pending.origin.into_actual_pending());
+                return Ok(pending.origin.into_actual_pending())
             }
 
             let mut lock = self.pending_block().lock().await;
@@ -143,7 +143,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()));
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
@@ -158,7 +158,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(block) => block,
                 Err(err) => {
                     debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
@@ -169,11 +169,11 @@ pub trait LoadPendingBlock: EthApiTypes {
                 Ok(Some(receipts)) => receipts,
                 Ok(None) => {
                     debug!(target: "rpc", "No receipts found for pending block");
-                    Vec::new() // or handle this case as appropriate for your use case
+                    Vec::new() 
                 }
                 Err(err) => {
                     debug!(target: "rpc", "Failed to fetch receipts for pending block: {:?}", err);
-                    return Err(Self::Error::from_eth_err(EthApiError::Internal(err.into())));
+                    return Err(Self::Error::from_eth_err(EthApiError::Internal(err.into())))
                 }
             };
 
