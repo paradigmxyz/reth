@@ -5222,22 +5222,21 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d10e10cbbdb3931fed5109bbd570c0a6cf0ce08db1f93401cfb5cefc51998d1"
+source = "git+https://github.com/brianbland/op-alloy.git?branch=op-granite-time#47007df9ddb1d250be5542b759a93a4c54901d5e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde",
+ "derive_more",
  "serde",
 ]
 
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9978c3d449abb03526d378988ae6d51b049ef36205cc97bf284574df9f578021"
+source = "git+https://github.com/brianbland/op-alloy.git?branch=op-granite-time#47007df9ddb1d250be5542b759a93a4c54901d5e"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
@@ -8955,8 +8954,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "9.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef55228211251d7b6c7707c3ee13bb70dea4d2fd81ec4034521e4fe31010b2ea"
+source = "git+https://github.com/brianbland/revm.git?branch=op-granite-bn256pairing-input-limit#ef376fef4cf91236b94abd8967690f1f2a92effb"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8975,8 +8973,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "7.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fc4311037ee093ec50ec734e1424fcb3e12d535c6cef683b75d1c064639630c"
+source = "git+https://github.com/brianbland/revm.git?branch=op-granite-bn256pairing-input-limit#ef376fef4cf91236b94abd8967690f1f2a92effb"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",

@@ -540,3 +540,8 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
+
+[patch.crates-io]
+revm-precompile = { git = "https://github.com/brianbland/revm.git", branch = "op-granite-bn256pairing-input-limit" }
+revm-primitives = { git = "https://github.com/brianbland/revm.git", branch = "op-granite-bn256pairing-input-limit" }
+op-alloy-rpc-types = { git = "https://github.com/brianbland/op-alloy.git", branch = "op-granite-time" }
