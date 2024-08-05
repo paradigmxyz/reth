@@ -898,21 +898,20 @@ where
 
     /// Return sealed block from database or in-memory state by hash.
     fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
-        // check database first
-        let block_num = self.provider.block_number(hash)?;
-        if let Some(block_num) = block_num {
-            self.provider.sealed_header(block_num)
-        } else {
-            // Note: it's fine to return the unsealed block because the caller already has
-            // the hash
-            let block = self
-                .state
-                .tree_state
-                .block_by_hash(hash)
-                // TODO: clone for compatibility. should we return an Arc here?
-                .map(|block| block.as_ref().clone().header);
+        // check memory first
+        let block = self
+            .state
+            .tree_state
+            .block_by_hash(hash)
+            // TODO: clone for compatibility. should we return an Arc here?
+            .map(|block| block.as_ref().clone().header);
 
+        if block.is_some() {
             Ok(block)
+        } else if let Some(block_num) = self.provider.block_number(hash)? {
+            Ok(self.provider.sealed_header(block_num)?)
+        } else {
+            Ok(None)
         }
     }
 
