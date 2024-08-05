@@ -184,7 +184,8 @@ where
             } else {
                 // This should be inside the hotloop, because preferably there should only be one
                 // mutable reference to a static file writer, since there's a 3 in 100 chance that
-                // another segment shares the same shard as the `Receipts` one. Which would result in a
+                // another segment shares the same shard as the `Receipts` one. Which would result
+                // in a deadlock.
                 UnifiedStorageWriter::from(
                     self.database(),
                     self.static_file()
