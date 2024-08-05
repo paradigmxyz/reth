@@ -419,7 +419,8 @@ where
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
-                best_txs.mark_invalid(&pool_tx)
+                best_txs.mark_invalid(&pool_tx);
+                continue
             }
 
             // check if the job was cancelled, if so we can exit early
