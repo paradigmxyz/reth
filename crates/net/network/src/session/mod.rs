@@ -11,8 +11,6 @@ pub use handle::{
     SessionCommand,
 };
 
-pub use crate::message::PeerRequestSender;
-
 pub use reth_network_api::{Direction, PeerInfo};
 
 use std::{
@@ -33,6 +31,7 @@ use reth_eth_wire::{
     UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
