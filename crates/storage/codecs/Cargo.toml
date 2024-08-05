@@ -49,4 +49,5 @@ alloy = [
     "dep:alloy-genesis",
     "dep:modular-bitfield",
     "dep:alloy-trie",
+    "dep:serde"
 ]
