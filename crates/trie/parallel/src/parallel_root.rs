@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
@@ -6,21 +8,17 @@ use reth_execution_errors::StorageRootError;
 use reth_primitives::B256;
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
-    hashed_cursor::{
-        DatabaseHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
-    },
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{DatabaseTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
     HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
 };
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::*;
-
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
 
 /// Parallel incremental state root calculator.
 ///

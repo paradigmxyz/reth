@@ -45,7 +45,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
-  no-std:
+  wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -57,8 +57,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Run no_std checks
-        run: .github/assets/check_no_std.sh
+      - name: Run Wasm checks
+        run: .github/assets/check_wasm.sh
 
   crate-checks:
     runs-on: ubuntu-latest

@@ -45,6 +45,12 @@ impl ExecutionPayloadValidator {
         self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
     }
 
+    /// Returns true if the Prague harkdfork is active at the given timestamp.
+    #[inline]
+    fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.chain_spec().is_prague_active_at_timestamp(timestamp)
+    }
+
     /// Cancun specific checks for EIP-4844 blob transactions.
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
@@ -157,6 +163,12 @@ impl ExecutionPayloadValidator {
         if !shanghai_active && sealed_block.withdrawals.is_some() {
             // shanghai not active but withdrawals present
             return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
+        }
+
+        if self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
+            sealed_block.has_eip7702_transactions()
+        {
+            return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
         }
 
         // EIP-4844 checks

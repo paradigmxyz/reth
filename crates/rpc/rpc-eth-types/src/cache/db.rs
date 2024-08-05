@@ -2,9 +2,11 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use reth_primitives::{B256, U256};
+use reth_errors::ProviderResult;
+use reth_primitives::{Address, B256, U256};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_trie::HashedStorage;
 use revm::Database;
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -29,6 +31,14 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.hashed_state_root_with_updates(hashed_state)
     }
+
+    fn hashed_storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        self.0.hashed_storage_root(address, hashed_storage)
+    }
 }
 
 impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
@@ -39,6 +49,14 @@ impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> 
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
         self.0.hashed_proof(hashed_state, address, slots)
+    }
+
+    fn witness(
+        &self,
+        overlay: reth_trie::HashedPostState,
+        target: reth_trie::HashedPostState,
+    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, reth_primitives::Bytes>> {
+        self.0.witness(overlay, target)
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use eyre::OptionExt;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
 use reth_evm::execute::{
-    BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_primitives::{
@@ -82,14 +82,10 @@ where
     Ok(block_execution_output)
 }
 
-pub(crate) fn blocks_and_execution_outputs<DB>(
-    provider_factory: ProviderFactory<DB>,
+fn blocks(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
-where
-    DB: reth_db_api::database::Database,
-{
+) -> eyre::Result<(BlockWithSenders, BlockWithSenders)> {
     // First block has a transaction that transfers some ETH to zero address
     let block1 = Block {
         header: Header {
@@ -150,6 +146,19 @@ where
     .with_recovered_senders()
     .ok_or_eyre("failed to recover senders")?;
 
+    Ok((block1, block2))
+}
+
+pub(crate) fn blocks_and_execution_outputs<DB>(
+    provider_factory: ProviderFactory<DB>,
+    chain_spec: Arc<ChainSpec>,
+    key_pair: Keypair,
+) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
+where
+    DB: reth_db_api::database::Database,
+{
+    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
+
     let block_output1 =
         execute_block_and_commit_to_database(&provider_factory, chain_spec.clone(), &block1)?;
     let block_output2 =
@@ -159,4 +168,43 @@ where
     let block2 = block2.seal_slow();
 
     Ok(vec![(block1, block_output1), (block2, block_output2)])
+}
+
+pub(crate) fn blocks_and_execution_outcome<DB>(
+    provider_factory: ProviderFactory<DB>,
+    chain_spec: Arc<ChainSpec>,
+    key_pair: Keypair,
+) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
+where
+    DB: reth_db_api::database::Database,
+{
+    let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
+
+    let provider = provider_factory.provider()?;
+
+    let executor =
+        EthExecutorProvider::ethereum(chain_spec).batch_executor(StateProviderDatabase::new(
+            LatestStateProviderRef::new(provider.tx_ref(), provider.static_file_provider().clone()),
+        ));
+
+    let mut execution_outcome = executor.execute_and_verify_batch(vec![
+        (&block1, U256::ZERO).into(),
+        (&block2, U256::ZERO).into(),
+    ])?;
+    execution_outcome.state_mut().reverts.sort();
+
+    let block1 = block1.seal_slow();
+    let block2 = block2.seal_slow();
+
+    // Commit the block's execution outcome to the database
+    let provider_rw = provider_factory.provider_rw()?;
+    provider_rw.append_blocks_with_state(
+        vec![block1.clone(), block2.clone()],
+        execution_outcome.clone(),
+        Default::default(),
+        Default::default(),
+    )?;
+    provider_rw.commit()?;
+
+    Ok((vec![block1, block2], execution_outcome))
 }

@@ -1,11 +1,13 @@
 //! P2P Debugging tool
 
+use std::{path::PathBuf, sync::Arc};
+
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
-use reth_network::NetworkConfigBuilder;
+use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
     args::{
@@ -15,7 +17,8 @@ use reth_node_core::{
     utils::get_single_header,
 };
 use reth_primitives::BlockHashOrNumber;
-use std::{path::PathBuf, sync::Arc};
+
+mod rlpx;
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -68,16 +71,18 @@ pub enum Subcommands {
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
     },
+    // RLPx utilities
+    Rlpx(rlpx::Command),
 }
 impl Command {
     /// Execute `p2p` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
-        config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
+        config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
@@ -150,6 +155,9 @@ impl Command {
                 }
                 let body = result.into_iter().next().unwrap();
                 println!("Successfully downloaded body: {body:?}")
+            }
+            Subcommands::Rlpx(command) => {
+                command.execute().await?;
             }
         }
 

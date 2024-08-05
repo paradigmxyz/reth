@@ -87,9 +87,6 @@ pub enum BeaconOnNewPayloadError {
     /// Thrown when the engine task is unavailable/stopped.
     #[error("beacon consensus engine task stopped")]
     EngineUnavailable,
-    /// Thrown when a block has blob transactions, but is not after the Cancun fork.
-    #[error("block has blob transactions, but is not after the Cancun fork")]
-    PreCancunBlockWithBlobTransactions,
     /// An internal error occurred, not necessarily related to the payload.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),

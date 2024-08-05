@@ -1,15 +1,17 @@
 //! Configuration for peering.
 
-use crate::{BackoffKind, ReputationChangeWeights};
-use reth_net_banlist::BanList;
-use reth_network_peers::NodeRecord;
 use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
     time::Duration,
 };
+
+use reth_net_banlist::BanList;
+use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
+
+use crate::{BackoffKind, ReputationChangeWeights};
 
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
@@ -122,7 +124,7 @@ pub struct PeersConfig {
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
     /// Trusted nodes to connect to or accept from
-    pub trusted_nodes: HashSet<NodeRecord>,
+    pub trusted_nodes: Vec<TrustedPeer>,
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
@@ -221,7 +223,7 @@ impl PeersConfig {
     }
 
     /// Nodes to always connect to.
-    pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
+    pub fn with_trusted_nodes(mut self, nodes: Vec<TrustedPeer>) -> Self {
         self.trusted_nodes = nodes;
         self
     }

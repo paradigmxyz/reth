@@ -2,7 +2,7 @@
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
-pub use alloy_eips::eip2930::{AccessList, AccessListItem};
+pub use alloy_eips::eip2930::{AccessList, AccessListItem, AccessListResult};
 
 #[cfg(test)]
 mod tests {

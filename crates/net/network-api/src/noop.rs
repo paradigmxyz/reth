@@ -3,15 +3,15 @@
 //! This is useful for wiring components together that don't require network but still need to be
 //! generic over it.
 
-use crate::{
-    NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerKind, Peers, PeersInfo,
-    Reputation, ReputationChangeKind,
-};
+use std::net::{IpAddr, SocketAddr};
+
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
-use reth_eth_wire::{DisconnectReason, ProtocolVersion};
+use reth_eth_wire_types::{DisconnectReason, ProtocolVersion};
 use reth_network_peers::NodeRecord;
-use std::net::{IpAddr, SocketAddr};
+use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
+
+use crate::{NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, Peers, PeersInfo};
 
 /// A type that implements all network trait that does nothing.
 ///

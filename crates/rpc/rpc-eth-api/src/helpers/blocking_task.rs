@@ -3,7 +3,10 @@
 
 use futures::Future;
 use reth_rpc_eth_types::EthApiError;
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner,
+};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 use crate::EthApiTypes;
@@ -20,16 +23,23 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     /// Thread pool access in default trait method implementations.
     fn tracing_task_pool(&self) -> &BlockingTaskPool;
 
+    /// Returns handle to semaphore for pool of CPU heavy blocking tasks.
+    fn tracing_task_guard(&self) -> &BlockingTaskGuard;
+
     /// See also [`Semaphore::acquire_owned`](`tokio::sync::Semaphore::acquire_owned`).
     fn acquire_owned(
         &self,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.tracing_task_guard().clone().acquire_owned()
+    }
 
     /// See also  [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
     fn acquire_many_owned(
         &self,
         n: u32,
-    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.tracing_task_guard().clone().acquire_many_owned(n)
+    }
 
     /// Executes the future on a new blocking task.
     ///

@@ -140,25 +140,18 @@ impl<'a> Arbitrary<'a> for IntegerList {
 }
 
 /// Primitives error type.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
+    #[display(fmt = "the provided input is invalid")]
     InvalidInput,
     /// Failed to deserialize data into type.
+    #[display(fmt = "failed to deserialize data into type")]
     FailedToDeserialize,
 }
 
 #[cfg(feature = "std")]
 impl std::error::Error for RoaringBitmapError {}
-
-impl fmt::Display for RoaringBitmapError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidInput => f.write_str("the provided input is invalid"),
-            Self::FailedToDeserialize {} => f.write_str("failed to deserialize data into type"),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

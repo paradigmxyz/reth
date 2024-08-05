@@ -6,8 +6,9 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, SealedBlock, TransactionSignedEcRecovered, TxHash, B256,
+    U256,
 };
 use std::{fmt, future::Future, time::Instant};
 
@@ -152,7 +153,7 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction;
+    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -341,7 +342,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
 impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.to_recovered_transaction()
+        self.transaction.clone().into()
     }
 }
 

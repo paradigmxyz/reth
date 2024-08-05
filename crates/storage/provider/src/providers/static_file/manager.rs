@@ -39,7 +39,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 use strum::IntoEnumIterator;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -329,9 +329,12 @@ impl StaticFileProvider {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
+        trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
         let mut provider: StaticFileJarProvider<'_> = if let Some(jar) = self.map.get(&key) {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let mut jar =
                 NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -863,6 +866,12 @@ impl StaticFileProvider {
                             };
                             return Err(err)
                         }
+                        // There is a very small chance of hitting a deadlock if two consecutive
+                        // static files share the same bucket in the
+                        // internal dashmap and we don't drop the current provider
+                        // before requesting the next one.
+                        drop(cursor);
+                        drop(provider);
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                         retrying = true;
@@ -895,14 +904,19 @@ impl StaticFileProvider {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
-        let mut provider = get_provider(range.start)?;
 
+        let mut provider = Some(get_provider(range.start)?);
         Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
-                    provider = get_provider(number).ok()?;
-                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                    // There is a very small chance of hitting a deadlock if two consecutive static
+                    // files share the same bucket in the internal dashmap and
+                    // we don't drop the current provider before requesting the
+                    // next one.
+                    provider.take();
+                    provider = Some(get_provider(number).ok()?);
+                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
         }))
@@ -1040,7 +1054,7 @@ impl StaticFileWriter for StaticFileProvider {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
-        tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
+        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
@@ -1249,7 +1263,8 @@ impl TransactionsProviderExt for StaticFileProvider {
         let mut channels = Vec::new();
 
         // iterator over the chunks
-        let chunks = (tx_range.start..tx_range.end)
+        let chunks = tx_range
+            .clone()
             .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 

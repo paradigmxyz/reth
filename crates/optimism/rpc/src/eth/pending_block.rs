@@ -1,19 +1,21 @@
 //! Loads OP pending block for a RPC response.   
 
 use reth_evm::ConfigureEvm;
+use reth_node_api::FullNodeComponents;
 use reth_primitives::{revm_primitives::BlockEnv, BlockNumber, B256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
 };
-use reth_rpc_eth_api::helpers::LoadPendingBlock;
+use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::TransactionPool;
 
 use crate::OpEthApi;
 
-impl<Eth> LoadPendingBlock for OpEthApi<Eth>
+impl<N> LoadPendingBlock for OpEthApi<N>
 where
-    Eth: LoadPendingBlock,
+    Self: SpawnBlocking,
+    N: FullNodeComponents,
 {
     #[inline]
     fn provider(

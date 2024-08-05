@@ -11,10 +11,9 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
-    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
-    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
+    TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -42,7 +41,7 @@ pub type PeerId = reth_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction;
+    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -460,12 +459,12 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.to_recovered_transaction())
+        self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.to_recovered_transaction())
+        self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 }
 
@@ -540,9 +539,10 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
+    #[default]
     Local,
     /// Transaction has been received externally.
     ///
@@ -758,10 +758,19 @@ pub trait PoolTransaction:
     fmt::Debug
     + Send
     + Sync
-    + FromRecoveredPooledTransaction
-    + TryFromRecoveredTransaction
-    + IntoRecoveredTransaction
+    + Clone
+    + TryFrom<TransactionSignedEcRecovered>
+    + Into<TransactionSignedEcRecovered>
 {
+    /// Associated type representing the raw consensus variant of the transaction.
+    type Consensus: From<Self> + TryInto<Self>;
+
+    /// Associated type representing the recovered pooled variant of the transaction.
+    type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Pooled` type to `Self`
+    fn from_pooled(pooled: Self::Pooled) -> Self;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -858,7 +867,9 @@ pub trait PoolTransaction:
 
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
-pub trait EthPoolTransaction: PoolTransaction {
+pub trait EthPoolTransaction:
+    PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>
+{
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
@@ -993,6 +1004,14 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type Consensus = TransactionSignedEcRecovered;
+
+    type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
+
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -1142,12 +1161,10 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFromRecoveredTransaction for EthPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.tx_type() as u8 {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
@@ -1171,15 +1188,9 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
     }
 }
 
-impl FromRecoveredPooledTransaction for EthPooledTransaction {
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        Self::from(tx)
-    }
-}
-
-impl IntoRecoveredTransaction for EthPooledTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone()
+impl From<EthPooledTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: EthPooledTransaction) -> Self {
+        tx.transaction
     }
 }
 
@@ -1304,5 +1315,165 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
                 None => return Poll::Ready(None),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::{
+        constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned, TxEip1559, TxEip2930,
+        TxEip4844, TxEip7702, TxLegacy,
+    };
+
+    #[test]
+    fn test_pool_size_invariants() {
+        let pool_size = PoolSize {
+            pending: 10,
+            pending_size: 1000,
+            blob: 5,
+            blob_size: 500,
+            basefee: 8,
+            basefee_size: 800,
+            queued: 7,
+            queued_size: 700,
+            total: 10 + 5 + 8 + 7, // Correct total
+        };
+
+        // Call the assert_invariants method to check if the invariants are correct
+        pool_size.assert_invariants();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_pool_size_invariants_fail() {
+        let pool_size = PoolSize {
+            pending: 10,
+            pending_size: 1000,
+            blob: 5,
+            blob_size: 500,
+            basefee: 8,
+            basefee_size: 800,
+            queued: 7,
+            queued_size: 700,
+            total: 10 + 5 + 8, // Incorrect total
+        };
+
+        // Call the assert_invariants method, which should panic
+        pool_size.assert_invariants();
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_legacy() {
+        // Create a legacy transaction with specific parameters
+        let tx = Transaction::Legacy(TxLegacy {
+            gas_price: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip2930() {
+        // Create an EIP-2930 transaction with specific parameters
+        let tx = Transaction::Eip2930(TxEip2930 {
+            gas_price: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip1559() {
+        // Create an EIP-1559 transaction with specific parameters
+        let tx = Transaction::Eip1559(TxEip1559 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip4844() {
+        // Create an EIP-4844 transaction with specific parameters
+        let tx = Transaction::Eip4844(TxEip4844 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            max_fee_per_blob_gas: 5,
+            blob_versioned_hashes: vec![B256::default()],
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 300);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
+        let expected_cost =
+            U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
+        assert_eq!(pooled_tx.cost, expected_cost);
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip7702() {
+        // Init an EIP-7702 transaction with specific parameters
+        let tx = Transaction::Eip7702(TxEip7702 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 }

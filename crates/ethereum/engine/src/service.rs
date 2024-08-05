@@ -16,7 +16,7 @@ pub use reth_engine_tree::{
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
@@ -46,7 +46,7 @@ type EthServiceType<DB, Client> = ChainOrchestrator<
 pub struct EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     orchestrator: EthServiceType<DB, Client>,
 }
@@ -54,7 +54,7 @@ where
 impl<DB, Client> EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Constructor for `EthService`.
     #[allow(clippy::too_many_arguments)]
@@ -110,7 +110,7 @@ where
 impl<DB, Client> Stream for EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -159,7 +159,8 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default());
+            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
+                .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner =

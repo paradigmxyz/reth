@@ -15,7 +15,7 @@ use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkEvents, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkEvents};
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -49,7 +49,7 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Evm,
-    NetworkHandle,
+    <N as FullNodeComponents>::Network,
     TaskExecutor,
     <N as FullNodeTypes>::Provider,
 >;

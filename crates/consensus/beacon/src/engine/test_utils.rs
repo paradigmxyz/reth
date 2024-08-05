@@ -18,10 +18,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
-use reth_network_p2p::{
-    bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
-    test_utils::NoopFullBlockClient,
-};
+use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
@@ -232,7 +229,7 @@ impl TestConsensusEngineBuilder {
         client: Client,
     ) -> NetworkedTestConsensusEngineBuilder<Client>
     where
-        Client: HeadersClient + BodiesClient + 'static,
+        Client: BlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self, client: Some(client) }
     }
@@ -259,7 +256,7 @@ pub struct NetworkedTestConsensusEngineBuilder<Client> {
 
 impl<Client> NetworkedTestConsensusEngineBuilder<Client>
 where
-    Client: HeadersClient + BodiesClient + 'static,
+    Client: BlockClient + 'static,
 {
     /// Set the pipeline execution outputs to use for the test consensus engine.
     #[allow(dead_code)]
@@ -314,7 +311,7 @@ where
         client: ClientType,
     ) -> NetworkedTestConsensusEngineBuilder<ClientType>
     where
-        ClientType: HeadersClient + BodiesClient + 'static,
+        ClientType: BlockClient + 'static,
     {
         NetworkedTestConsensusEngineBuilder { base_config: self.base_config, client: Some(client) }
     }
@@ -399,9 +396,10 @@ where
             )
             .expect("failed to create tree"),
         ));
-        let latest = self.base_config.chain_spec.genesis_header().seal_slow();
+        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
+
         let blockchain_provider =
-            BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
+            BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
@@ -441,7 +439,7 @@ pub fn spawn_consensus_engine<Client>(
     engine: TestBeaconConsensusEngine<Client>,
 ) -> oneshot::Receiver<Result<(), BeaconConsensusEngineError>>
 where
-    Client: HeadersClient + BodiesClient + 'static,
+    Client: BlockClient + 'static,
 {
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {

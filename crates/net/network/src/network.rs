@@ -1,27 +1,3 @@
-use crate::{
-    config::NetworkMode,
-    discovery::DiscoveryEvent,
-    manager::NetworkEvent,
-    message::PeerRequest,
-    peers::{PeerAddr, PeersHandle},
-    protocol::RlpxSubProtocol,
-    swarm::NetworkConnectionState,
-    transactions::TransactionsHandle,
-    FetchClient,
-};
-use enr::Enr;
-use parking_lot::Mutex;
-use reth_discv4::Discv4;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_network_api::{
-    NetworkError, NetworkInfo, NetworkStatus, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
-    ReputationChangeKind,
-};
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_network_peers::{NodeRecord, PeerId};
-use reth_primitives::{Head, TransactionSigned, B256};
-use reth_tokio_util::{EventSender, EventStream};
-use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     sync::{
@@ -29,11 +5,60 @@ use std::{
         Arc,
     },
 };
+
+use enr::Enr;
+use parking_lot::Mutex;
+use reth_discv4::Discv4;
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_network_api::{
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, NetworkError, NetworkInfo, NetworkStatus, PeerInfo, Peers, PeersInfo,
+};
+use reth_network_p2p::{
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
+    BlockClient,
+};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
+use reth_primitives::{Head, TransactionSigned, B256};
+use reth_tokio_util::{EventSender, EventStream};
+use secp256k1::SecretKey;
 use tokio::sync::{
     mpsc::{self, UnboundedSender},
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+use crate::{
+    config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
+    protocol::RlpxSubProtocol, swarm::NetworkConnectionState, transactions::TransactionsHandle,
+    FetchClient,
+};
+
+/// Helper trait that unifies network API needed to launch node.
+pub trait FullNetwork:
+    BlockDownloaderProvider
+    + NetworkSyncUpdater
+    + NetworkInfo
+    + NetworkEvents
+    + PeersInfo
+    + Peers
+    + Clone
+    + 'static
+{
+}
+
+impl<T> FullNetwork for T where
+    T: BlockDownloaderProvider
+        + NetworkSyncUpdater
+        + NetworkInfo
+        + NetworkEvents
+        + PeersInfo
+        + Peers
+        + Clone
+        + 'static
+{
+}
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
@@ -85,24 +110,8 @@ impl NetworkHandle {
         &self.inner.local_peer_id
     }
 
-    /// Returns the [`PeersHandle`] that can be cloned and shared.
-    ///
-    /// The [`PeersHandle`] can be used to interact with the network's peer set.
-    pub fn peers_handle(&self) -> &PeersHandle {
-        &self.inner.peers
-    }
-
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
         &self.inner.to_manager_tx
-    }
-
-    /// Returns a new [`FetchClient`] that can be cloned and shared.
-    ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
-    pub async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
-        rx.await
     }
 
     /// Returns the mode of the network, either pow, or pos
@@ -328,6 +337,12 @@ impl Peers for NetworkHandle {
     }
 }
 
+impl PeersHandleProvider for NetworkHandle {
+    fn peers_handle(&self) -> &PeersHandle {
+        &self.inner.peers
+    }
+}
+
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
@@ -381,6 +396,14 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
+impl BlockDownloaderProvider for NetworkHandle {
+    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
+        rx.await
+    }
+}
+
 #[derive(Debug)]
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
@@ -412,6 +435,7 @@ struct NetworkInner {
 }
 
 /// Provides event subscription for the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkEvents: Send + Sync {
     /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> EventStream<NetworkEvent>;

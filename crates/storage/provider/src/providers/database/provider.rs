@@ -5,7 +5,7 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    writer::StorageWriter,
+    writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -48,11 +48,10 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    trie_cursor::DatabaseStorageTrieCursor,
     updates::{StorageTrieUpdates, TrieUpdates},
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -2764,6 +2763,45 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
 
         Ok(())
     }
+
+    fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor =
+            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage.storage_slots_sorted() {
+                let entry = StorageEntry { key: hashed_slot, value };
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
+                {
+                    if db_entry.key == entry.key {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx> TrieWriter for DatabaseProvider<TX> {
@@ -3189,7 +3227,7 @@ impl<TX: DbTx> BlockExecutionReader for DatabaseProvider<TX> {
     }
 }
 
-impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
+impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3367,7 +3405,7 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
     }
 }
 
-impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
+impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3532,6 +3570,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         Ok(block_indices)
     }
 
+    /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
@@ -3561,15 +3600,13 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         // Must be written after blocks because of the receipt lookup.
         // TODO: should _these_ be moved to storagewriter? seems like storagewriter should be
         // _above_ db provider
-        let mut storage_writer = StorageWriter::new(Some(self), None);
+        let mut storage_writer = UnifiedStorageWriter::from_database(self);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
-        {
-            storage_writer.write_hashed_state(&hashed_state)?;
-            self.write_trie_updates(&trie_updates)?;
-        }
+        self.write_hashed_state(&hashed_state)?;
+        self.write_trie_updates(&trie_updates)?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         self.update_history_indices(first_number..=last_block_number)?;

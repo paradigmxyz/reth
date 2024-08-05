@@ -13,25 +13,30 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod downloaders;
+/// Network Error
+pub mod error;
+/// Implementation of network traits for that does nothing.
+pub mod noop;
+pub mod test_utils;
+
 pub use alloy_rpc_types_admin::EthProtocolInfo;
+pub use reth_network_p2p::BlockClient;
+pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
+
+pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
-pub use reputation::{Reputation, ReputationChangeKind};
-use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
-use reth_network_peers::NodeRecord;
+
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
+
+use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
-/// Network Error
-pub mod error;
-/// Reputation score
-pub mod reputation;
-
-/// Implementation of network traits for that does nothing.
-pub mod noop;
-
 /// Provides general purpose information about the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait NetworkInfo: Send + Sync {
     /// Returns the [`SocketAddr`] that listens for incoming connections.
     fn local_addr(&self) -> SocketAddr;
@@ -50,6 +55,7 @@ pub trait NetworkInfo: Send + Sync {
 }
 
 /// Provides general purpose information about Peers in the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait PeersInfo: Send + Sync {
     /// Returns how many peers the network is currently connected to.
     ///
@@ -64,6 +70,7 @@ pub trait PeersInfo: Send + Sync {
 }
 
 /// Provides an API for managing the peers of the network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set with UDP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
@@ -154,35 +161,6 @@ pub trait Peers: PeersInfo {
         &self,
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<Reputation>, NetworkError>> + Send;
-}
-
-/// Represents the kind of peer
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub enum PeerKind {
-    /// Basic peer kind.
-    #[default]
-    Basic,
-    /// Static peer, added via JSON-RPC.
-    Static,
-    /// Trusted peer.
-    Trusted,
-}
-
-impl PeerKind {
-    /// Returns `true` if the peer is trusted.
-    pub const fn is_trusted(&self) -> bool {
-        matches!(self, Self::Trusted)
-    }
-
-    /// Returns `true` if the peer is static.
-    pub const fn is_static(&self) -> bool {
-        matches!(self, Self::Static)
-    }
-
-    /// Returns `true` if the peer is basic.
-    pub const fn is_basic(&self) -> bool {
-        matches!(self, Self::Basic)
-    }
 }
 
 /// Info about an active peer session.
