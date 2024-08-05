@@ -10,6 +10,7 @@ use reth_primitives::{
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
+    simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
@@ -199,6 +200,15 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
     /// Returns the block's header at given hash.
     #[method(name = "getHeaderByHash")]
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>>;
+
+    /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
+    /// The transactions are packed into individual blocks. Overrides can be provided.
+    #[method(name = "simulateV1")]
+    async fn simulate_v1(
+        &self,
+        opts: SimBlock,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<SimulatedBlock>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -581,6 +591,16 @@ where
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
         Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
+    }
+
+    /// Handler for: `eth_simulateV1`
+    async fn simulate_v1(
+        &self,
+        opts: SimBlock,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<SimulatedBlock>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        Ok(EthCall::simulate_v1(self, opts, block_number).await?)
     }
 
     /// Handler for: `eth_call`
