@@ -467,3 +467,11 @@ pr:
 	make lint && \
 	make update-book-cli && \
 	make test
+
+check-features:
+	cargo hack check \
+		--package reth-primitives-traits \
+		--package reth-primitives \
+		--package reth-rpc-types \
+		--package reth-codecs \
+		--feature-powerset
