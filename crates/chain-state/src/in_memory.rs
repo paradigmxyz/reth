@@ -95,6 +95,11 @@ impl InMemoryState {
         self.numbers.read().get(&number).and_then(|hash| self.blocks.read().get(hash).cloned())
     }
 
+    /// Returns the hash for a specific block number
+    pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
+        self.numbers.read().get(&number).cloned()
+    }
+
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState>> {
         self.numbers
@@ -202,7 +207,12 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns in the header corresponding to the given hash.
+    /// Returns the block hash corresponding to the given number
+    pub fn hash_by_number(&self, number: u64) -> Option<B256> {
+        self.inner.in_memory_state.hash_by_number(number)
+    }
+
+    /// Returns the header corresponding to the given hash.
     pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader> {
         self.state_by_hash(hash).map(|block| block.block().block.header.clone())
     }
