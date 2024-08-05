@@ -33,4 +33,7 @@ parking_lot.workspace = true
 default = ["std"]
 std = []
 test-utils = ["dep:parking_lot"]
-optimism = []
+optimism = [
+    "reth-primitives/optimism",
+    "reth-execution-types/optimism",
+]

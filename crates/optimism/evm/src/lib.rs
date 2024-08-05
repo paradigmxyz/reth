@@ -16,8 +16,8 @@ use reth_primitives::{
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
-// use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-// use revm_primitives::EnvWithHandlerCfg;
+use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm_primitives::EnvWithHandlerCfg;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -118,29 +118,30 @@ impl ConfigureEvm for OptimismEvmConfig {
     //     EvmBuilder::default().with_db(db).optimism().build()
     // }
 
-    // fn evm_with_env<DB: Database>(
-    //     &self,
-    //     db: DB,
-    //     env: EnvWithHandlerCfg,
-    // ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-    //     let mut evm = self.evm(db);
-    //     evm.modify_spec_id(env.spec_id());
-    //     evm.context.evm.env = env.env;
-    //     evm
-    // }
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        // let mut evm = self.evm(db);
+        let mut evm = EvmBuilder::default().with_db(db).optimism().build();
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
 
-    // fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
-    // where
-    //     DB: Database,
-    //     I: GetInspector<DB>,
-    // {
-    //     EvmBuilder::default()
-    //         .with_db(db)
-    //         .with_external_context(inspector)
-    //         .optimism()
-    //         .append_handler_register(inspector_handle_register)
-    //         .build()
-    // }
+    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    where
+        DB: Database,
+        I: GetInspector<DB>,
+    {
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .optimism()
+            .append_handler_register(inspector_handle_register)
+            .build()
+    }
 
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
