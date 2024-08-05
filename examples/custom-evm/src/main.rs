@@ -117,17 +117,6 @@ impl ConfigureEvm for MyEvmConfig {
             .build()
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        evm
-    }
-
     fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
     where
         DB: Database,
