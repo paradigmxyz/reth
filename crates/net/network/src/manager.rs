@@ -29,15 +29,14 @@ use std::{
 
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    DisconnectReason,
-};
+use reth_eth_wire::{capability::CapabilityMessage, Capabilities, DisconnectReason};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest};
+use reth_network_api::{
+    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
+};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::{PeersHandle, ReputationChangeKind};
+use reth_network_types::ReputationChangeKind;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;

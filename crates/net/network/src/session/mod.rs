@@ -26,11 +26,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    multiplex::RlpxProtocolMultiplexer,
-    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    capability::CapabilityMessage, errors::EthStreamError, multiplex::RlpxProtocolMultiplexer,
+    Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, Status,
+    UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequestSender;

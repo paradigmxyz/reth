@@ -140,8 +140,7 @@ mod swarm;
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use reth_network_api::{
     BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
-    NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers,
-    PeersHandleProvider, PeersInfo,
+    NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,
 };
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};

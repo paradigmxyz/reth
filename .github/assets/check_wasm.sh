@@ -6,12 +6,12 @@ wasm_crates=(
   # The following were confirmed not working in the past, but could be enabled if issues have been resolved
   # reth-consensus
   # reth-db
-  # reth-evm
   # reth-evm-ethereum
   # The following are confirmed working
   reth-codecs
   reth-errors
   reth-ethereum-forks
+  reth-evm
   reth-network-peers
   reth-primitives
   reth-primitives-traits
