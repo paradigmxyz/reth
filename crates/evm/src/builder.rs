@@ -43,12 +43,10 @@ where
     pub fn build<'a>(self) -> Evm<'a, EXT, DB> {
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
-
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
         }
-
         builder.build()
     }
 
@@ -60,12 +58,10 @@ where
     {
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
-
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
         }
-
         builder
             .with_external_context(inspector)
             .append_handler_register(inspector_handle_register)
