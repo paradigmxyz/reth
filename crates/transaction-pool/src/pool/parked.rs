@@ -3,6 +3,7 @@ use crate::{
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
+use reth_primitives::TransactionSignedEcRecovered;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
@@ -268,7 +269,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 }
 
-impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ParkedPool<BasefeeOrd<T>> {
     /// Returns all transactions that satisfy the given basefee.
     ///
     /// Note: this does _not_ remove the transactions
@@ -425,32 +426,36 @@ pub trait ParkedOrd:
     + Deref<Target = Arc<ValidPoolTransaction<Self::Transaction>>>
 {
     /// The wrapper transaction type.
-    type Transaction: PoolTransaction;
+    type Transaction: PoolTransaction<Consensus = TransactionSignedEcRecovered>;
 }
 
 /// Helper macro to implement necessary conversions for `ParkedOrd` trait
 macro_rules! impl_ord_wrapper {
     ($name:ident) => {
-        impl<T: PoolTransaction> Clone for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Clone for $name<T> {
             fn clone(&self) -> Self {
                 Self(self.0.clone())
             }
         }
 
-        impl<T: PoolTransaction> Eq for $name<T> {}
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Eq for $name<T> {}
 
-        impl<T: PoolTransaction> PartialEq<Self> for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PartialEq<Self>
+            for $name<T>
+        {
             fn eq(&self, other: &Self) -> bool {
                 self.cmp(other) == Ordering::Equal
             }
         }
 
-        impl<T: PoolTransaction> PartialOrd<Self> for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PartialOrd<Self>
+            for $name<T>
+        {
             fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
                 Some(self.cmp(other))
             }
         }
-        impl<T: PoolTransaction> Deref for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Deref for $name<T> {
             type Target = Arc<ValidPoolTransaction<T>>;
 
             fn deref(&self) -> &Self::Target {
@@ -458,17 +463,21 @@ macro_rules! impl_ord_wrapper {
             }
         }
 
-        impl<T: PoolTransaction> ParkedOrd for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ParkedOrd for $name<T> {
             type Transaction = T;
         }
 
-        impl<T: PoolTransaction> From<Arc<ValidPoolTransaction<T>>> for $name<T> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>
+            From<Arc<ValidPoolTransaction<T>>> for $name<T>
+        {
             fn from(value: Arc<ValidPoolTransaction<T>>) -> Self {
                 Self(value)
             }
         }
 
-        impl<T: PoolTransaction> From<$name<T>> for Arc<ValidPoolTransaction<T>> {
+        impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> From<$name<T>>
+            for Arc<ValidPoolTransaction<T>>
+        {
             fn from(value: $name<T>) -> Arc<ValidPoolTransaction<T>> {
                 value.0
             }
@@ -482,11 +491,13 @@ macro_rules! impl_ord_wrapper {
 ///
 /// Caution: This assumes all transaction in the `BaseFee` sub-pool have a fee value.
 #[derive(Debug)]
-pub struct BasefeeOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+pub struct BasefeeOrd<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+    Arc<ValidPoolTransaction<T>>,
+);
 
 impl_ord_wrapper!(BasefeeOrd);
 
-impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Ord for BasefeeOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.transaction.max_fee_per_gas().cmp(&other.0.transaction.max_fee_per_gas())
     }
@@ -502,12 +513,14 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
 /// The primary order function always compares the transaction costs first. In case these
 /// are equal, it compares the timestamps when the transactions were created.
 #[derive(Debug)]
-pub struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
+pub struct QueuedOrd<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+    Arc<ValidPoolTransaction<T>>,
+);
 
 impl_ord_wrapper!(QueuedOrd);
 
 // TODO: temporary solution for ordering the queued pool.
-impl<T: PoolTransaction> Ord for QueuedOrd<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Ord for QueuedOrd<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Higher price is better
         self.max_fee_per_gas().cmp(&self.max_fee_per_gas()).then_with(||
