@@ -3,6 +3,9 @@ use reth_primitives::{alloy_primitives::BlockTimestamp, Header, U256};
 /// Exponential difficulty period
 const EXP_DIFF_PERIOD_UINT: u64 = 100_000;
 
+/// The minimum that the difficulty may ever be.
+const MINIMUM_DIFFICULTY: u64 = 131_072;
+
 /// Bomb delays
 #[derive(Copy, Clone, Debug)]
 pub enum BombDelay {
@@ -20,9 +23,6 @@ impl From<&BombDelay> for u64 {
 /// This differs from the Homestead rules in how uncle blocks affect the difficulty calculation.
 ///
 /// The difficulty adjustment algorithm used here is defined in [EIP-100](https://eips.ethereum.org/EIPS/eip-100).
-///
-/// Formula:
-/// adj_factor = max(1 + len(parent.uncles) - ((timestamp - parent.timestamp) // 9), -99)
 ///
 /// Reference:
 /// - https://github.com/ethereum/EIPs/issues/100
@@ -48,8 +48,8 @@ pub fn make_difficulty_calculator(
     let mut calculated_difficulty =
         difficulty + left_side * std::cmp::max(factor, u64::try_from(99).unwrap());
 
-    if calculated_difficulty < 131072 {
-        calculated_difficulty = 131072;
+    if calculated_difficulty < MINIMUM_DIFFICULTY {
+        calculated_difficulty = MINIMUM_DIFFICULTY;
     }
 
     if parent.number >= bomb_delay_from_parent {
