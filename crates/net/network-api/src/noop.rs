@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
-use reth_eth_wire::{DisconnectReason, ProtocolVersion};
+use reth_eth_wire_types::{DisconnectReason, ProtocolVersion};
 use reth_network_peers::NodeRecord;
 use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
