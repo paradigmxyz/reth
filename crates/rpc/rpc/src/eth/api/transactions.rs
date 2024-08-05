@@ -1291,7 +1291,7 @@ where
             .cache()
             .get_block_and_receipts(meta.block_hash)
             .await?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(meta.block_hash.into()))?;
 
         let block = block.unseal();
         let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();

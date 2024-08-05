@@ -105,7 +105,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         let block_number = LoadState::provider(self)
             .block_number_for_id(block_id)
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
             return Err(EthApiError::ExceedsMaxProofWindow.into())

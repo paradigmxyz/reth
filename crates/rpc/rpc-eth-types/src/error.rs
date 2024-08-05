@@ -37,12 +37,9 @@ pub enum EthApiError {
     /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(RpcPoolError),
-    /// When an unknown block number is encountered
-    #[error("unknown block number")]
-    UnknownBlockNumber,
-    /// When an unknown block is encountered
+    /// Header not found for block hash/number
     #[error("header not found")]
-    UnknownBlockId(BlockId),
+    HeaderNotFound(BlockId),
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
     ///
@@ -171,10 +168,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EvmCustom(_) |
             EthApiError::EvmPrecompile(_) |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::UnknownBlockId(id) => {
+            EthApiError::HeaderNotFound(id) => {
                 let arg = match id {
                     BlockId::Hash(h) => {
                         if h.require_canonical == Some(true) {
@@ -232,12 +229,13 @@ impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
         use reth_errors::ProviderError;
         match error {
-            ProviderError::HeaderNotFound(_) |
-            ProviderError::BlockHashNotFound(_) |
-            ProviderError::BestBlockNotFound |
-            ProviderError::BlockNumberForTransactionIndexNotFound |
-            ProviderError::TotalDifficultyNotFound { .. } |
-            ProviderError::UnknownBlockHash(_) => Self::UnknownBlockNumber,
+            ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
+            ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
+                Self::HeaderNotFound(hash.into())
+            }
+            ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
+            ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
+            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
             ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
                 Self::UnknownSafeOrFinalizedBlock
             }

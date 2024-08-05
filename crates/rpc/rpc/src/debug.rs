@@ -564,7 +564,7 @@ where
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
         )?;
-        let block = maybe_block.ok_or(EthApiError::UnknownBlockNumber)?;
+        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let this = self.clone();
 

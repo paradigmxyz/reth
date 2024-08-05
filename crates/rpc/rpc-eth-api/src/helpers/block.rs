@@ -53,7 +53,7 @@ pub trait EthBlocks: LoadBlock {
             let total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
                 .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block.into()))
