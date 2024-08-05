@@ -16,8 +16,8 @@ use reth_primitives::{
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::EnvWithHandlerCfg;
+// use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+// use revm_primitives::EnvWithHandlerCfg;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};

@@ -47,7 +47,7 @@ where
     }
 
     /// Set whether to support optimism.
-    pub fn with_optimism_support(mut self) -> Self {
+    pub const fn with_optimism_support(mut self) -> Self {
         self.enable_optimism_support = true;
         self
     }
@@ -57,17 +57,24 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
 
-        #[cfg(feature = "optimism")]
-        if (self.enable_optimism_support) {
-            builder = builder.optimism();
-        }
-
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
         }
 
-        builder.build()
+        #[cfg(feature = "optimism")]
+        {
+            if self.enable_optimism_support {
+                return builder.optimism().build();
+            }
+
+            return builder.build();
+        }
+
+        #[cfg(not(feature = "optimism"))]
+        {
+            builder.build()
+        }
     }
 
     /// Build the EVM with the given database and environment, using the given inspector.
@@ -79,19 +86,34 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
 
-        #[cfg(feature = "optimism")]
-        if (self.enable_optimism_support) {
-            builder = builder.optimism();
-        }
-
         if let Some(env) = self.env {
             builder = builder.with_spec_id(env.clone().spec_id());
             builder = builder.with_env(env.env);
         }
-        builder
-            .with_external_context(inspector)
-            .append_handler_register(inspector_handle_register)
-            .build()
+
+        #[cfg(feature = "optimism")]
+        {
+            if self.enable_optimism_support {
+                return builder
+                    .with_external_context(inspector)
+                    .optimism()
+                    .append_handler_register(inspector_handle_register)
+                    .build();
+            }
+
+            return builder
+                .with_external_context(inspector)
+                .append_handler_register(inspector_handle_register)
+                .build();
+        }
+
+        #[cfg(not(feature = "optimism"))]
+        {
+            builder
+                .with_external_context(inspector)
+                .append_handler_register(inspector_handle_register)
+                .build()
+        }
     }
 }
 
