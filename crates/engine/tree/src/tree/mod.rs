@@ -1424,7 +1424,7 @@ where
             ))
         })?;
         if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
-            error!(?block, "Failed to validate header {} against parent: {e}", block.header.hash());
+            warn!(?block, "Failed to validate header {} against parent: {e}", block.header.hash());
             return Err(e.into())
         }
 
