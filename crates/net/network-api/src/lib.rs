@@ -18,10 +18,11 @@ pub mod downloaders;
 pub mod error;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
+pub mod test_utils;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
 pub use reth_network_p2p::BlockClient;
-pub use reth_network_types::{PeerKind, PeersHandle, Reputation, ReputationChangeKind};
+pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
 pub use downloaders::BlockDownloaderProvider;
 pub use error::NetworkError;
@@ -160,15 +161,6 @@ pub trait Peers: PeersInfo {
         &self,
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<Reputation>, NetworkError>> + Send;
-}
-
-/// Provides an API for managing the peers of the network.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait PeersHandleProvider {
-    /// Returns the [`PeersHandle`] that can be cloned and shared.
-    ///
-    /// The [`PeersHandle`] can be used to interact with the network's peer set.
-    fn peers_handle(&self) -> &PeersHandle;
 }
 
 /// Info about an active peer session.
