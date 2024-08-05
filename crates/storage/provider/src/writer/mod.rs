@@ -155,16 +155,6 @@ where
         let first_number = first_block.number;
         let last_block_number = last_block.number;
 
-        // Only write receipts to static files if there is no receipt pruning configured.
-        let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
-            UnifiedStorageWriter::from_database(self.database())
-        } else {
-            UnifiedStorageWriter::from(
-                self.database(),
-                self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
-            )
-        };
-
         debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
         // TODO: remove all the clones and do performant / batched writes for each type of object
@@ -187,6 +177,20 @@ where
 
             debug!(target: "provider::storage_writer", "Writing state and changesets");
             let execution_outcome = block.execution_outcome().clone();
+
+            // Only write receipts to static files if there is no receipt pruning configured.
+            let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
+                UnifiedStorageWriter::from_database(self.database())
+            } else {
+                // This should be inside the hotloop, because preferably there should only be one
+                // mutable reference to a static file writer, since there's a 3 in 100 chance that
+                // another segment shares the same shard as the `Receipts` one. Which would result in a
+                UnifiedStorageWriter::from(
+                    self.database(),
+                    self.static_file()
+                        .get_writer(first_block.number, StaticFileSegment::Receipts)?,
+                )
+            };
             state_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
 
             debug!(target: "provider::storage_writer", "Writing hashed state and trie updates");
