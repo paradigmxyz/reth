@@ -1,8 +1,12 @@
-use std::{cell::RefCell, thread_local};
+use std::{thread_local};
+use core::cell::RefCell;
 use zstd::bulk::{Compressor, Decompressor};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+
+#[cfg(not(feature = "std"))]
+use alloc::string::ToString;
 
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
@@ -74,7 +78,7 @@ impl ReusableDecompressor {
                     reserved_upper_bound = true;
                     if let Some(upper_bound) = Decompressor::upper_bound(src) {
                         if let Some(additional) = upper_bound.checked_sub(self.buf.capacity()) {
-                            break 'b additional
+                            break 'b additional;
                         }
                     }
                 }

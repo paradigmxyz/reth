@@ -11,6 +11,9 @@ use alloy_rlp::Error as RlpError;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+#[cfg(not(feature = "std"))]
+use crate::alloc::string::ToString;
+
 impl TryFrom<alloy_rpc_types::Block> for Block {
     type Error = alloy_rpc_types::ConversionError;
 
@@ -43,7 +46,7 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                     // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
                     // root is the empty root then we can just return an empty vec.
                     if block.header.transactions_root == EMPTY_TRANSACTIONS {
-                        Ok(vec![])
+                        Ok(Vec::new())
                     } else {
                         Err(ConversionError::MissingFullTransactions)
                     }
