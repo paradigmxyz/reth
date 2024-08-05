@@ -23,9 +23,6 @@ impl From<&BombDelay> for u64 {
 /// This differs from the Homestead rules in how uncle blocks affect the difficulty calculation.
 ///
 /// The difficulty adjustment algorithm used here is defined in [EIP-100](https://eips.ethereum.org/EIPS/eip-100).
-///
-/// Reference:
-/// - https://github.com/ethereum/EIPs/issues/100
 pub fn make_difficulty_calculator(
     block_timestamp: BlockTimestamp,
     parent: &Header,
