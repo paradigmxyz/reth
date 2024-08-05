@@ -122,6 +122,6 @@ pub struct PendingBlock {
     pub block: SealedBlockWithSenders,
     /// Timestamp when the pending block is considered outdated
     pub expires_at: Instant,
-    /// The receipt for the pending block
-    pub receipt: Vec<Option<Receipt>>,
+    /// The receipts for the pending block
+    pub receipts: Vec<Option<Receipt>>,
 }

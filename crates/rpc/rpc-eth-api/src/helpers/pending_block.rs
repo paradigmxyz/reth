@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use futures::Future;
 use reth_chainspec::EthereumHardforks;
+use reth_errors::RethError;
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
@@ -136,7 +137,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                         .receipts_by_block(BlockHashOrNumber::Number(block.number))
                         .map_err(Self::Error::from_eth_err)?
                         .ok_or_else(|| {
-                            Self::Error::from_eth_err(EthApiError::UnknownBlockNumber)
+                            Self::Error::from_eth_err(EthApiError::Internal(RethError::))
                         })?;
                     return Ok(Some((block, receipts)));
                 }
@@ -154,7 +155,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    let receipts = pending_block.receipt.clone();
+                    let receipts = pending_block.receipts.clone();
                     // Convert Vec<Option<Receipt>> to Vec<Receipt>
                     let receipts: Vec<Receipt> = receipts.into_iter().flatten().collect();
                     return Ok(Some((pending_block.block.clone(), receipts)));
