@@ -12,7 +12,7 @@ use std::sync::{
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
-use tracing::{debug, error};
+use tracing::debug;
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -72,31 +72,22 @@ where
                     let _ = sender.send(());
                 }
                 PersistenceAction::SaveBlocks((blocks, sender)) => {
-                    debug!("Received SaveBlocks action");
                     let Some(last_block) = blocks.last() else {
-                        debug!("No blocks to save");
                         let _ = sender.send(None);
                         continue
                     };
 
                     let last_block_hash = last_block.block().hash();
-                    debug!("Last block hash: {:?}", last_block_hash);
 
                     let provider_rw = self.provider.provider_rw()?;
                     let static_file_provider = self.provider.static_file_provider();
 
-                    debug!("Saving blocks");
                     UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
                         .save_blocks(&blocks)?;
-                    debug!("Committing changes");
                     UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
-                    debug!("Changes committed");
 
-                    debug!("Sending response");
-                    if let Err(e) = sender.send(Some(last_block_hash)) {
-                        error!("Failed to send response: {:?}", e);
-                    }
-                    debug!("Response sent");
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(Some(last_block_hash));
                 }
                 PersistenceAction::PruneBefore((block_num, sender)) => {
                     let res = self.prune_before(block_num)?;
@@ -297,17 +288,14 @@ mod tests {
         let blocks = vec![executed];
         let (tx, rx) = oneshot::channel();
 
-        debug!("Sending save_blocks request");
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        debug!("Waiting for response");
         let actual_hash = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
             .await
             .expect("test timed out")
             .expect("channel closed unexpectedly")
             .expect("no hash returned");
 
-        debug!("Received response");
         assert_eq!(block_hash, actual_hash);
     }
 

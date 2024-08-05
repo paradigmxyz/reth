@@ -167,15 +167,13 @@ where
         //  * indices (already done basically)
         // Insert the blocks
         for block in blocks {
-            debug!(target: "provider::storage_writer", block_number = %block.block().number, "Processing block");
             let sealed_block =
                 block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
-            debug!(target: "provider::storage_writer", "Inserting block");
             self.database().insert_block(sealed_block)?;
-            debug!(target: "provider::storage_writer", "Saving header and transactions");
             self.save_header_and_transactions(block.block.clone())?;
 
-            debug!(target: "provider::storage_writer", "Writing state and changesets");
+            // Write state and changesets to the database.
+            // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
 
             // Only write receipts to static files if there is no receipt pruning configured.
@@ -194,7 +192,7 @@ where
             };
             state_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
 
-            debug!(target: "provider::storage_writer", "Writing hashed state and trie updates");
+            // insert hashes and intermediate merkle nodes
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
@@ -204,11 +202,9 @@ where
         }
 
         // update history indices
-        debug!(target: "provider::storage_writer", "Updating history indices");
         self.database().update_history_indices(first_number..=last_block_number)?;
 
         // Update pipeline progress
-        debug!(target: "provider::storage_writer", "Updating pipeline stages");
         self.database().update_pipeline_stages(last_block_number, false)?;
 
         debug!(target: "provider::storage_writer", range = ?first_number..=last_block_number, "Appended block data");
@@ -223,47 +219,37 @@ where
         debug!(target: "provider::storage_writer", "Writing headers and transactions.");
 
         {
-            debug!(target: "provider::storage_writer", "Getting header writer");
             let header_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Headers)?;
-            debug!(target: "provider::storage_writer", "Creating storage writer for headers");
             let mut storage_writer = UnifiedStorageWriter::from(self.database(), header_writer);
-            debug!(target: "provider::storage_writer", "Appending headers");
             let td = storage_writer.append_headers_from_blocks(
                 block.header().number,
                 std::iter::once(&(block.header(), block.hash())),
             )?;
 
-            debug!(target: "provider::storage_writer", "Updating header terminal difficulties");
+            debug!(target: "provider::storage_writer", block_num=block.number, "Updating transaction metadata after writing");
             self.database()
                 .tx_ref()
                 .put::<tables::HeaderTerminalDifficulties>(block.number, CompactU256(td))?;
-            debug!(target: "provider::storage_writer", "Saving stage checkpoint for headers");
             self.database()
                 .save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block.number))?;
         }
 
         {
-            debug!(target: "provider::storage_writer", "Getting transactions writer");
             let transactions_writer =
                 self.static_file().get_writer(block.number, StaticFileSegment::Transactions)?;
-            debug!(target: "provider::storage_writer", "Creating storage writer for transactions");
             let mut storage_writer =
                 UnifiedStorageWriter::from(self.database(), transactions_writer);
-            debug!(target: "provider::storage_writer", "Preparing transactions");
             let no_hash_transactions =
                 block.body.clone().into_iter().map(TransactionSignedNoHash::from).collect();
-            debug!(target: "provider::storage_writer", "Appending transactions");
             storage_writer.append_transactions_from_blocks(
                 block.header().number,
                 std::iter::once(&no_hash_transactions),
             )?;
-            debug!(target: "provider::storage_writer", "Saving stage checkpoint for bodies");
             self.database()
                 .save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block.number))?;
         }
 
-        debug!(target: "provider::storage_writer", "Finished save_header_and_transactions");
         Ok(())
     }
 
