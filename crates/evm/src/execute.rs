@@ -1,18 +1,15 @@
 //! Traits for execution.
 
 // Re-export execution types
+pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+pub use reth_storage_errors::provider::ProviderError;
+
+use core::fmt::Display;
 
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use revm_primitives::db::Database;
-use std::fmt::Display;
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
-pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-pub use reth_storage_errors::provider::ProviderError;
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).

@@ -16,11 +16,12 @@ workspace = true
 reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
+reth-metrics.workspace = true
 reth-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
-revm = { workspace = true, optional = true}
+revm = { workspace = true, optional = true }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -32,6 +33,7 @@ tracing.workspace = true
 # misc
 auto_impl.workspace = true
 derive_more.workspace = true
+metrics.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
 rand = { workspace = true, optional = true }
@@ -41,7 +43,4 @@ rand.workspace = true
 revm.workspace = true
 
 [features]
-test-utils = [
-  "rand",
-  "revm"
-]
+test-utils = ["rand", "revm"]

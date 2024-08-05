@@ -13,10 +13,9 @@ use std::{
 
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use reth_eth_wire::{
-    capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectP2P, DisconnectReason, EthMessage,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_p2p::error::RequestError;

@@ -4,9 +4,8 @@ use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use futures::FutureExt;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    headers::client::HeadersClient,
+    BlockClient,
 };
 use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
 use std::{
@@ -47,7 +46,7 @@ pub enum DownloadOutcome {
 /// Basic [`BlockDownloader`].
 pub struct BasicBlockDownloader<Client>
 where
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -66,7 +65,7 @@ where
 
 impl<Client> BasicBlockDownloader<Client>
 where
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Create a new instance
     pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
@@ -175,7 +174,7 @@ where
 
 impl<Client> BlockDownloader for BasicBlockDownloader<Client>
 where
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Handles incoming download actions.
     fn on_action(&mut self, action: DownloadAction) {

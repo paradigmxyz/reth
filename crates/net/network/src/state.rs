@@ -13,9 +13,7 @@ use std::{
 };
 
 use rand::seq::SliceRandom;
-use reth_eth_wire::{
-    capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
-};
+use reth_eth_wire::{BlockHashNumber, Capabilities, DisconnectReason, NewBlockHashes, Status};
 use reth_network_peers::PeerId;
 use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives::{ForkId, B256};
@@ -553,10 +551,7 @@ mod tests {
         state::{BlockNumReader, NetworkState},
         PeerRequest,
     };
-    use reth_eth_wire::{
-        capability::{Capabilities, Capability},
-        BlockBodies, EthVersion,
-    };
+    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthVersion};
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_peers::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
