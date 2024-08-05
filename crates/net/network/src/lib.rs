@@ -157,6 +157,6 @@ pub use fetch::FetchClient;
 pub use flattened_response::FlattenedResponse;
 pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
-pub use network::{FullNetwork, NetworkHandle, NetworkProtocols};
+pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};

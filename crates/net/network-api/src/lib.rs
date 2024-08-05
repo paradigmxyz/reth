@@ -22,6 +22,7 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
+use reth_network_p2p::sync::NetworkSyncUpdater;
 pub use reth_network_p2p::BlockClient;
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
@@ -39,6 +40,31 @@ use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
+
+/// Helper trait that unifies network API needed to launch node.
+pub trait FullNetwork:
+    BlockDownloaderProvider
+    + NetworkSyncUpdater
+    + NetworkInfo
+    + NetworkEventListenerProvider
+    + PeersInfo
+    + Peers
+    + Clone
+    + 'static
+{
+}
+
+impl<T> FullNetwork for T where
+    T: BlockDownloaderProvider
+        + NetworkSyncUpdater
+        + NetworkInfo
+        + NetworkEventListenerProvider
+        + PeersInfo
+        + Peers
+        + Clone
+        + 'static
+{
+}
 
 /// Provides general purpose information about the network.
 #[auto_impl::auto_impl(&, Arc)]
