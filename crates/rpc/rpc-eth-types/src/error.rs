@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
-use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
+use reth_primitives::{revm_primitives::InvalidHeader, Address, BlockId, Bytes};
 use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -37,9 +37,9 @@ pub enum EthApiError {
     /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(RpcPoolError),
-    /// When an unknown block number is encountered
-    #[error("unknown block number")]
-    UnknownBlockNumber,
+    /// Header not found for block hash/number
+    #[error("header not found")]
+    HeaderNotFound(BlockId),
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
     ///
@@ -168,8 +168,24 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EvmCustom(_) |
             EthApiError::EvmPrecompile(_) |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+            }
+            EthApiError::HeaderNotFound(id) => {
+                let arg = match id {
+                    BlockId::Hash(h) => {
+                        if h.require_canonical == Some(true) {
+                            format!("canonical hash {}", h.block_hash)
+                        } else {
+                            format!("hash {}", h.block_hash)
+                        }
+                    }
+                    BlockId::Number(n) => format!("number {}", n),
+                };
+                rpc_error_with_code(
+                    EthRpcErrorCode::ResourceNotFound.code(),
+                    format!("{}: {}", error, arg),
+                )
             }
             EthApiError::UnknownSafeOrFinalizedBlock => {
                 rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())
@@ -213,12 +229,13 @@ impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
         use reth_errors::ProviderError;
         match error {
-            ProviderError::HeaderNotFound(_) |
-            ProviderError::BlockHashNotFound(_) |
-            ProviderError::BestBlockNotFound |
-            ProviderError::BlockNumberForTransactionIndexNotFound |
-            ProviderError::TotalDifficultyNotFound { .. } |
-            ProviderError::UnknownBlockHash(_) => Self::UnknownBlockNumber,
+            ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
+            ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
+                Self::HeaderNotFound(hash.into())
+            }
+            ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
+            ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
+            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
             ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
                 Self::UnknownSafeOrFinalizedBlock
             }

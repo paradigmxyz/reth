@@ -564,7 +564,7 @@ where
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
         )?;
-        let block = maybe_block.ok_or(EthApiError::UnknownBlockNumber)?;
+        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let this = self.clone();
 
@@ -918,11 +918,11 @@ where
     async fn debug_trace_call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
+        Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
