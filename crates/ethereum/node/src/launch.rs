@@ -256,7 +256,7 @@ where
         let chainspec = ctx.chain_spec();
         let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
+        ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 eth_service.orchestrator_mut().start_backfill_sync(initial_target);
