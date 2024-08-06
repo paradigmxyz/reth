@@ -127,7 +127,16 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for ConsensusError {}
+impl std::error::Error for ConsensusError {
+    fn source(&self) -> std::option::Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidTransaction(err) => {
+                std::error::Error::source(err)
+            },
+            _ => std::option::Option::None,
+        }
+    }
+}
 
 /// Consensus Errors
 #[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
