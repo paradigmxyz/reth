@@ -3,9 +3,10 @@ use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
 };
 use bytes::Buf;
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::{reth_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::mem;
+use core::mem;
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codec)]

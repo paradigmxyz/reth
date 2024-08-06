@@ -471,4 +471,5 @@ pr:
 check-features:
 	cargo hack check \
 		--package reth-codecs \
+		--package reth-primitives \
 		--feature-powerset
