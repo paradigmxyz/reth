@@ -121,8 +121,11 @@ where
             .header_by_number(best.best_number)?
             .ok_or(ProviderError::HeaderNotFound(best.best_number.into()))?;
 
-        let finalized_block_number = provider.last_finalized_block_number()?;
-        let finalized_header = provider.sealed_header(finalized_block_number)?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
 
         Ok(Self::with_blocks(database, tree, latest_header.seal(best.best_hash), finalized_header))
     }
