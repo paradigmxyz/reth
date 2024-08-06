@@ -258,7 +258,6 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
     }
 }
 
-
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
