@@ -661,7 +661,7 @@ where
         state
     }
 
-    /// Returns a [`StateProvider`] indexed by the given block number or tag.
+    /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
     ///
     /// Note: if a number is provided this will only look at historical(canonical) state.
     fn state_by_block_number_or_tag(
