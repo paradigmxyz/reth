@@ -16,11 +16,9 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
     validate_header_extradata, validate_header_gas,
 };
-use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH, U256,
-};
+use reth_primitives::{constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256, GotExpected};
 use std::{sync::Arc, time::SystemTime};
+use reth_consensus_common::difficulty::{BombDelay, calc_difficulty_frontier, calc_difficulty_generic, calc_difficulty_homestead};
 
 mod validation;
 pub use validation::validate_block_post_execution;
@@ -83,6 +81,39 @@ impl EthBeaconConsensus {
 
         Ok(())
     }
+
+    fn validate_difficuty_increment(
+        &self,
+        header: &Header,
+        parent: &Header
+    ) -> Result<(), ConsensusError> {
+        // Check difficulty for the block base on the current hardfork
+        let calculated_difficulty;
+
+        if self.chain_spec.fork(EthereumHardfork::Byzantium).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Byzantium).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::Constantinople).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Constantinople).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::MuirGlacier).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip2384).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip3554).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::ArrowGlacier).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip4345).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::GrayGlacier).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip5133).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::Homestead).active_at_block(header.number) {
+            calculated_difficulty = calc_difficulty_homestead(header.timestamp, parent).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else {
+            calculated_difficulty = calc_difficulty_frontier(header.timestamp, parent).map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        }
+
+        if !header.difficulty.cmp(&calculated_difficulty) {
+            return Err(ConsensusError::DifficultyDiff(GotExpected::new(header.difficulty, calculated_difficulty)));
+        }
+
+        Ok(())
+    }
 }
 
 impl Consensus for EthBeaconConsensus {
@@ -132,8 +163,8 @@ impl Consensus for EthBeaconConsensus {
 
         validate_against_parent_timestamp(header, parent)?;
 
-        // TODO Check difficulty increment between parent and self
-        // Ace age did increment it by some formula that we need to follow.
+        self.validate_difficuty_increment(header, parent)?;
+
         self.validate_against_parent_gas_limit(header, parent)?;
 
         validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;

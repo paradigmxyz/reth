@@ -58,7 +58,7 @@ pub fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256,
     // int(2^((num // 100000) - 2))
     let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
     if exponent > 1 {
-        let exponent = exponent.saturating_sub(2).try_into()?;
+        let exponent = exponent.saturating_sub(2).try_into().map_err(|_| ())?;
         let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
         pdiff = pdiff + period_count;
     }
@@ -120,7 +120,7 @@ pub fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256
 
     let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
     if exponent > 1 {
-        let exponent = exponent.saturating_sub(2).try_into()?;
+        let exponent = exponent.saturating_sub(2).try_into().map_err(|_| ())?;
         let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
         pdiff = pdiff + period_count;
     }
@@ -139,7 +139,7 @@ pub fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256
 pub fn calc_difficulty_generic(
     timestamp: u64,
     parent: &Header,
-    bomb_delay: &BombDelay,
+    bomb_delay: BombDelay,
 ) -> Result<U256, ()> {
     /*
         https://github.com/ethereum/EIPs/issues/100
@@ -188,7 +188,7 @@ pub fn calc_difficulty_generic(
         let fake_block_num = parent.number - bomb_delay_from_parent;
         if fake_block_num >= 2 * EXP_DIFF_PERIOD_UINT {
             let mut exponent = (fake_block_num / EXP_DIFF_PERIOD_UINT);
-            let exponent = exponent.saturating_sub(2).try_into()?;
+            let exponent = exponent.saturating_sub(2).try_into().map_err(|_| ())?;
             let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
             pdiff = pdiff.checked_add(period_count).ok_or(Err(()))?;
         }
