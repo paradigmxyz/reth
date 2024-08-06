@@ -25,7 +25,7 @@ use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
-    sync::{mpsc::channel, Arc},
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -73,20 +73,17 @@ where
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let (to_tree_tx, to_tree_rx) = channel();
-
         let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
         let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
         let executor_factory = EthExecutorProvider::ethereum(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let from_tree = EngineApiTreeHandler::spawn_new(
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             executor_factory,
             consensus,
             payload_validator,
-            to_tree_rx,
             persistence_handle,
             payload_builder,
             canonical_in_memory_state,
