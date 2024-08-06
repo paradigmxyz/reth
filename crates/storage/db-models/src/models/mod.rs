@@ -1,5 +1,5 @@
 /// Account
 pub use accounts::AccountBeforeTx;
 
-/// daw
+/// Accounts
 pub mod accounts;
