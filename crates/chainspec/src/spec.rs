@@ -262,7 +262,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Debug)]
 pub enum EngineApiKind {
     Ethereum,
-    OpStack
+    OpStack,
 }
 
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
@@ -378,7 +378,7 @@ impl ChainSpec {
     pub fn get_engine_api_kind(&self) -> EngineApiKind {
         match self.chain.is_optimism() {
             true => EngineApiKind::OpStack,
-            false => EngineApiKind::Ethereum
+            false => EngineApiKind::Ethereum,
         }
     }
 
