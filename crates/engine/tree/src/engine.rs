@@ -16,6 +16,15 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
+/// The type for specify which is kind of engine api
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineApiKind {
+    /// The chain contains Ethereum configuration.
+    Ethereum,
+    /// The chain contains Optimism configuration.
+    OpStack,
+}
+
 /// Advances the chain based on incoming requests.
 ///
 /// This is a general purpose request handler with network access.
