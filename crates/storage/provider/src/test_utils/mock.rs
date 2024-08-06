@@ -698,9 +698,28 @@ impl StateProviderFactory for MockEthProvider {
 
     fn state_by_block_number_or_tag(
         &self,
-        _number_or_tag: BlockNumberOrTag,
+        number_or_tag: BlockNumberOrTag,
     ) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(self.clone()))
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+
+                // only look at historical state
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+        }
     }
 
     fn pending(&self) -> ProviderResult<StateProviderBox> {
