@@ -328,7 +328,7 @@ impl<T> TreeOutcome<T> {
     }
 }
 
-/// Events that can be emitted by the [`EngineApiTreeHandler`].
+/// Events that are triggered by Tree Chain
 #[derive(Debug)]
 pub enum TreeEvent {
     /// Tree action is needed.
@@ -498,6 +498,7 @@ where
         }
     }
 
+    /// Invoked when previously requested blocks were downloaded.
     fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
         trace!(target: "engine", block_count = %blocks.len(), "received downloaded blocks");
         for block in blocks {
@@ -513,6 +514,18 @@ where
         None
     }
 
+    /// When the Consensus layer receives a new block via the consensus gossip protocol,
+    /// the transactions in the block are sent to the execution layer in the form of a
+    /// [`ExecutionPayload`]. The Execution layer executes the transactions and validates the
+    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// adds the block to the head of its own blockchain and attests to it. The block is then
+    /// broadcast over the consensus p2p network in the form of a "Beacon block".
+    ///
+    /// These responses should adhere to the [Engine API Spec for
+    /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
+    ///
+    /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
+    /// returns an error if an internal error occurred.
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine")]
     fn on_new_payload(
         &mut self,
@@ -624,6 +637,14 @@ where
         Ok(outcome)
     }
 
+    /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
+    /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
+    /// chain.
+    ///
+    /// These responses should adhere to the [Engine API Spec for
+    /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
+    ///
+    /// Returns an error if an internal error occurred like a database error.
     #[instrument(level = "trace", skip_all, fields(head = % state.head_block_hash, safe = % state.safe_block_hash,finalized = % state.finalized_block_hash), target = "engine")]
     fn on_forkchoice_updated(
         &mut self,
