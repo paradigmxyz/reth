@@ -38,7 +38,8 @@ bytes.workspace = true
 serde_json.workspace = true
 
 [features]
-default = [
+default = ["jsonrpsee-types-tree"]
+jsonrpsee-types-tree = [
     "dep:jsonrpsee-types",
     "dep:alloy-rpc-types-beacon",
     "dep:alloy-rpc-types-engine",
