@@ -101,7 +101,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
 
-    /// Returns a [StateProvider] indexed by the given [BlockId].
+    /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///
     /// Note: if a number or hash is provided this will __only__ look at historical(canonical)
     /// state.
