@@ -33,7 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Alias for Ethereum chain orchestrator.
 type EthServiceType<DB, Client> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<EthEngineTypes>,
+        EngineApiRequestHandler<BeaconEngineMessage<EthEngineTypes>>,
         UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         BasicBlockDownloader<Client>,
     >,
