@@ -1,6 +1,5 @@
 use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
-use std::ops::{Add, Div, Mul};
 
 /// Calculates the base block reward.
 ///
