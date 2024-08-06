@@ -44,6 +44,7 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 rayon.workspace = true
 serde.workspace = true
+once_cell.workspace = true
 tempfile = { workspace = true, optional = true }
 thiserror-no-std = { workspace = true, default-features = false, optional = true }
 zstd = { workspace = true, features = ["experimental"], optional = true }
