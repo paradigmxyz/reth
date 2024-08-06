@@ -48,26 +48,8 @@ where
 
     /// Returns the locally built pending block
     async fn local_pending_block(&self) -> Result<Option<SealedBlockWithSenders>, Self::Error> {
-        let pending = self.pending_block_env_and_cfg()?;
-        if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending())
-        }
-
+        // ref https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375
         let mut lock = self.pending_block().lock().await;
-
-        let now = Instant::now();
-
-        // check if the block is still good
-        if let Some(pending_block) = lock.as_ref() {
-            // this is guaranteed to be the `latest` header
-            if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                pending.origin.header().hash() == pending_block.block.parent_hash &&
-                now <= pending_block.expires_at
-            {
-                return Ok(Some(pending_block.block.clone()))
-            }
-        }
-
         let latest = self
             .provider()
             .latest_header()
