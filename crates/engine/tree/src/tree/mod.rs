@@ -1336,6 +1336,9 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine", child =?child_num_hash, ?res, "connected buffered block");
+                    if self.is_sync_target_head(child_num_hash.hash) {
+                        self.make_canonical(child_num_hash.hash);
+                    }
                 }
                 Err(err) => {
                     debug!(target: "engine", ?err, "failed to connect buffered block to tree");
@@ -2739,10 +2742,12 @@ mod tests {
             _ => panic!("Unexpected event: {:#?}", event),
         }
 
+        // tell engine main chain tip downloaded
         test_harness
             .tree
             .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain_last.clone()]));
 
+        // check download range request
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
@@ -2751,6 +2756,33 @@ mod tests {
                     (main_chain.len() - MIN_BLOCKS_FOR_PIPELINE_RUN as usize - 2) as u64
                 );
                 assert_eq!(initial_hash, main_chain_last.parent_hash);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        let remaining: Vec<_> = main_chain
+            .clone()
+            .drain((MIN_BLOCKS_FOR_PIPELINE_RUN + 1) as usize..main_chain.len())
+            .collect();
+
+        // setting up execution outcomes for the chain, the blocks will be
+        // executed starting from the oldest, so we need to reverse.
+        let mut remaining_rev = remaining.clone();
+        remaining_rev.reverse();
+        test_harness.setup_range_insertion_for_chain(remaining_rev.to_vec());
+
+        // tell engine block range downloaded
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone()));
+
+        test_harness.check_fork_chain_insertion(remaining).await;
+
+        // check canonical chain commited event with the hash of the latest block
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(
+                BeaconConsensusEngineEvent::CanonicalChainCommitted(header, ..),
+            ) => {
+                assert_eq!(header.hash(), main_chain_last_hash);
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
