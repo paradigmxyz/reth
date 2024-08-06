@@ -525,6 +525,10 @@ Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
 
+Engine:
+      --engine.experimental
+          Enable the engine2 experimental features on reth binary
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
