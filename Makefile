@@ -467,3 +467,8 @@ pr:
 	make lint && \
 	make update-book-cli && \
 	make test
+
+check-features:
+	cargo hack check \
+		--package reth-codecs \
+		--feature-powerset
