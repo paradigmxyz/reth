@@ -965,7 +965,7 @@ where
         Ok(None)
     }
 
-    /// Returns a [StateProvider] indexed by the given block number or tag.
+    /// Returns a [`StateProvider`] indexed by the given block number or tag.
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
