@@ -2670,6 +2670,58 @@ mod tests {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        test_harness
+            .fcu_to(base_chain.last().unwrap().block().hash(), ForkchoiceStatus::Valid)
+            .await;
+
+        // extend main chain but don't insert the blocks
+        let main_chain = test_harness.block_builder.create_fork(base_chain[0].block(), 10);
+
+        let main_chain_last_hash = main_chain.last().unwrap().hash();
+        test_harness.send_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
+
+        test_harness.check_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
+
+        // create event for backfill finished
+        let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
+            block_number: MIN_BLOCKS_FOR_PIPELINE_RUN + 1,
+        });
+
+        test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished));
+
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::Download(DownloadRequest::BlockSet(hash_set)) => {
+                assert_eq!(hash_set, HashSet::from([main_chain_last_hash]));
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+            .last()
+            .unwrap()
+            .clone()]));
+
+        let event = test_harness.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
+                assert_eq!(total_blocks, (main_chain.len() - 1) as u64);
+                assert_eq!(initial_hash, main_chain.last().unwrap().parent_hash);
+            }
+            _ => panic!("Unexpected event: {:#?}", event),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_live_sync_transition_eventually_canonical() {
+        reth_tracing::init_test_tracing();
+
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
         // create base chain and setup test harness with it
         let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
         test_harness = test_harness.with_blocks(base_chain.clone());
