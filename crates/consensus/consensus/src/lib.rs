@@ -126,18 +126,6 @@ pub trait Consensus: Debug + Send + Sync {
     ) -> Result<(), ConsensusError>;
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ConsensusError {
-    fn source(&self) -> std::option::Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidTransaction(err) => {
-                std::error::Error::source(err)
-            },
-            _ => std::option::Option::None,
-        }
-    }
-}
-
 /// Consensus Errors
 #[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
 pub enum ConsensusError {
@@ -399,6 +387,18 @@ pub enum ConsensusError {
     },
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for ConsensusError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidTransaction(err) => {
+                std::error::Error::source(err)
+            },
+            _ => std::option::Option::None,
+        }
+    }
+}
+
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
     pub const fn is_state_root_error(&self) -> bool {
@@ -412,10 +412,10 @@ impl From<InvalidTransactionError> for ConsensusError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for HeaderConsensusError {}
-
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
 #[derive(derive_more::Display, Debug)]
 #[display(fmt = "Consensus error: {_0}, Invalid header: {_1:?}")]
 pub struct HeaderConsensusError(ConsensusError, SealedHeader);
+
+#[cfg(feature = "std")]
+impl std::error::Error for HeaderConsensusError {}
