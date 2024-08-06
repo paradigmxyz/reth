@@ -100,13 +100,6 @@ impl TreeState {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
     }
 
-    fn block_by_number(&self, number: BlockNumber) -> Option<Arc<SealedBlock>> {
-        self.blocks_by_number
-            .get(&number)
-            .and_then(|blocks| blocks.last())
-            .map(|executed_block| executed_block.block.clone())
-    }
-
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
     /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
     ///
@@ -192,31 +185,6 @@ impl TreeState {
                 }
             }
         }
-    }
-
-    /// Returns the maximum block number stored.
-    ///
-    /// If no blocks are currently buffered this returns the block number of the canonical head.
-    pub(crate) fn max_block_number(&self) -> BlockNumber {
-        self.blocks_by_number
-            .last_key_value()
-            .map(|e| *e.0)
-            .unwrap_or_else(|| self.canonical_block_number())
-    }
-
-    /// Returns the minimum block number stored.
-    ///
-    /// If no blocks are currently buffered this returns the block number of the canonical head.
-    pub(crate) fn min_block_number(&self) -> BlockNumber {
-        self.blocks_by_number
-            .first_key_value()
-            .map(|e| *e.0)
-            .unwrap_or_else(|| self.canonical_block_number())
-    }
-
-    /// Returns the block number of the pending block: `head + 1`
-    const fn pending_block_number(&self) -> BlockNumber {
-        self.current_canonical_head.number + 1
     }
 
     /// Updates the canonical head to the given block.
@@ -457,6 +425,7 @@ where
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
+    /// Creates a new `EngineApiTreeHandlerImpl`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -550,7 +519,7 @@ where
                 Ok(None) => {
                     debug!(target: "engine", "received no engine message for some time, while waiting for persistence task to complete");
                 }
-                Err(err) => {
+                Err(_err) => {
                     error!(target: "engine", "Engine channel disconnected");
                     return
                 }
@@ -1975,7 +1944,6 @@ mod tests {
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_payload_builder::PayloadServiceCommand;
     use reth_primitives::{Address, Bytes};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
@@ -1991,8 +1959,6 @@ mod tests {
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
         action_rx: Receiver<PersistenceAction>,
-        payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
-        chain_spec: Arc<ChainSpec>,
         executor_provider: MockExecutorProvider,
         block_builder: TestBlockBuilder,
     }
@@ -2016,7 +1982,7 @@ mod tests {
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 
-            let (to_payload_service, payload_command_rx) = unbounded_channel();
+            let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
             let tree = EngineApiTreeHandlerImpl::new(
@@ -2043,8 +2009,6 @@ mod tests {
                 from_tree_rx,
                 blocks: vec![],
                 action_rx,
-                payload_command_rx,
-                chain_spec,
                 executor_provider,
                 block_builder,
             }
@@ -2231,12 +2195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let tree_config = TreeConfig::default();
-
         let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(0..10).collect();
-        let head_block = blocks.last().unwrap().block();
-        let first_block = blocks.first().unwrap().block();
-
         let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
 
         for executed_block in blocks {
@@ -2312,7 +2271,6 @@ mod tests {
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
-        let hash = sealed.hash();
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
@@ -2609,14 +2567,14 @@ mod tests {
         let fork_chain = test_harness.block_builder.create_fork(main_chain[2].block(), 3);
 
         // add fork blocks to the tree
-        for (index, block) in fork_chain.iter().enumerate() {
+        for block in &fork_chain {
             test_harness.insert_block(block.clone()).unwrap();
         }
 
         test_harness.send_fcu(fork_chain.last().unwrap().hash(), ForkchoiceStatus::Valid).await;
 
         // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
-        for index in 0..fork_chain.len() {
+        for _ in 0..fork_chain.len() {
             let event = test_harness.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
