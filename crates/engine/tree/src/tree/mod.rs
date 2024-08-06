@@ -393,7 +393,6 @@ where
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
-
     /// Creates a new `EngineApiTreeHandlerImpl`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
