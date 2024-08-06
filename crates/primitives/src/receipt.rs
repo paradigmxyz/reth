@@ -21,7 +21,7 @@ use alloc::{vec, vec::Vec};
     reth_codecs::reth_codec(no_arbitrary, zstd)
 )]
 #[cfg_attr(
-    any(test, all(feature = "reth-codec", not(feature = "std"))),
+    all(not(test), feature = "reth-codec", not(feature = "std")),
     reth_codecs::reth_codec(no_arbitrary)
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
