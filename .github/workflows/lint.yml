@@ -169,6 +169,23 @@ jobs:
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
+  # Checks that selected rates can compile with power set of features
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - run: make check-features
+        env:
+          RUSTFLAGS: -D warnings
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
@@ -183,6 +200,7 @@ jobs:
       - codespell
       - grafana
       - no-test-deps
+      - features
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

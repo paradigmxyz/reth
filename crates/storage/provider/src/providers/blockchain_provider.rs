@@ -83,8 +83,11 @@ where
         latest: SealedHeader,
     ) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let finalized_block_number = provider.last_finalized_block_number()?;
-        let finalized_header = provider.sealed_header(finalized_block_number)?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         Ok(Self {
             database,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
@@ -960,6 +963,35 @@ where
             }
         }
         Ok(None)
+    }
+
+    /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                let hash = self
+                    .block_hash(num)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
+                self.state_by_block_hash(hash)
+            }
+        }
     }
 }
 
