@@ -260,7 +260,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 } else {
                     // If no pending block from provider, try to get local pending block
                     return match self.local_pending_block().await? {
-                        Some((block, _receipts)) => Ok(Some(block)),
+                        Some((block, _)) => Ok(Some(block)),
                         None => Ok(None),
                     };
                 };
