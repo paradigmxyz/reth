@@ -131,7 +131,7 @@ where
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
-        // If we haven't written the finalized block, asssume it's zero
+        // If we haven't written the finalized block, assume it's zero
         let last_finalized_block_number =
             externals.fetch_latest_finalized_block_number()?.unwrap_or_default();
 
