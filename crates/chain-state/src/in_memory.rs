@@ -42,11 +42,11 @@ pub(crate) struct InMemoryState {
 #[derive(Debug)]
 pub enum RangeLookupResult<T> {
     /// No results were found for the specified range.
-    NoResult,
+    None,
     /// Partial results were found for the specified range.
-    PartialResult(Vec<T>),
+    Partial(Vec<T>),
     /// Full results were found for the specified range.
-    FullResult(Vec<T>),
+    Full(Vec<T>),
 }
 
 impl InMemoryState {
@@ -285,17 +285,17 @@ impl CanonicalInMemoryState {
         let mut headers = Vec::new();
 
         if start > end {
-            return RangeLookupResult::NoResult;
+            return RangeLookupResult::None;
         }
-
+        
         for num in start..=end {
             if let Some(block_state) = self.state_by_number(num) {
                 headers.push(block_state.block().block().header.header().clone());
             } else {
-                return RangeLookupResult::PartialResult(headers);
+                return RangeLookupResult::Partial(headers);
             }
         }
-        RangeLookupResult::FullResult(headers)
+        RangeLookupResult::Full(headers)
     }
 
     /// Returns in memory state corresponding the given hash.
