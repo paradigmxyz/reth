@@ -21,7 +21,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
@@ -393,6 +393,7 @@ where
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
+
     /// Creates a new `EngineApiTreeHandlerImpl`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -628,7 +629,7 @@ where
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
+        attrs: Option<T::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
         self.metrics.forkchoice_updated_messages.increment(1);
