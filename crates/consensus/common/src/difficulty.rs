@@ -52,7 +52,7 @@ pub fn make_difficulty_calculator(
 
     let mut diff = parent_diff + parent_diff / 2048 * timestamp_factor;
 
-    if diff < MINIMUM_DIFFICULTY.try_into().unwrap() {
+    if diff < MINIMUM_DIFFICULTY {
         diff = MINIMUM_DIFFICULTY;
     }
 
