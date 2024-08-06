@@ -6,3 +6,10 @@ pub trait ToRpcError: std::error::Error + Send + Sync + 'static {
     /// Converts the error to a JSON-RPC error object.
     fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static>;
 }
+
+#[cfg(feature = "default")]
+impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+        self.clone()
+    }
+}
