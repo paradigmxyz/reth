@@ -9,10 +9,10 @@ use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
-    TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
+    BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -436,6 +436,13 @@ impl StateProviderFactory for NoopProvider {
     }
 
     fn pending(&self) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(*self))
+    }
+
+    fn state_by_block_number_or_tag(
+        &self,
+        _number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }
 

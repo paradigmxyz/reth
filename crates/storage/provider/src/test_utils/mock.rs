@@ -11,9 +11,10 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StageCheckpointReader, StateProofProvider};
@@ -692,6 +693,13 @@ impl StateProviderFactory for MockEthProvider {
     }
 
     fn state_by_block_hash(&self, _block: BlockHash) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    fn state_by_block_number_or_tag(
+        &self,
+        _number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
