@@ -473,4 +473,5 @@ check-features:
 		--package reth-codecs \
 		--package reth-primitives-traits \
 		--package reth-primitives \
+		--package reth-rpc-types \
 		--feature-powerset
