@@ -258,7 +258,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
     }
 }
 
-/// The type for specifiy which is kind of engine api
+/// The type for specify which is kind of engine api
 #[derive(Debug)]
 pub enum EngineApiKind {
     Ethereum,
@@ -375,7 +375,7 @@ impl ChainSpec {
 
     #[inline]
     /// Returns [`EngineApiKind`]
-    pub fn get_engine_api_kind(&self) -> EngineApiKind {
+    pub const fn get_engine_api_kind(&self) -> EngineApiKind {
         match self.chain.is_optimism() {
             true => EngineApiKind::OpStack,
             false => EngineApiKind::Ethereum,
