@@ -1,4 +1,4 @@
-use crate::Compact;
+use crate::{Compact, Vec};
 use alloy_eips::eip2930::{AccessList, AccessListItem};
 use alloy_primitives::Address;
 

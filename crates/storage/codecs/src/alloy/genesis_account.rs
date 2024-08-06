@@ -1,4 +1,4 @@
-use crate::Compact;
+use crate::{Compact, Vec};
 use alloy_genesis::GenesisAccount as AlloyGenesisAccount;
 use alloy_primitives::{Bytes, B256, U256};
 use reth_codecs_derive::reth_codec;
