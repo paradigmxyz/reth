@@ -17,7 +17,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
-use std::time::{Duration, Instant};
 
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
@@ -49,7 +48,6 @@ where
     /// Returns the locally built pending block
     async fn local_pending_block(&self) -> Result<Option<SealedBlockWithSenders>, Self::Error> {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
-        let mut lock = self.pending_block().lock().await;
         let latest = self
             .provider()
             .latest_header()
@@ -68,9 +66,6 @@ where
                 return Ok(None)
             }
         };
-
-        let now = Instant::now();
-        *lock = Some(PendingBlock::new(pending_block.clone(), now + Duration::from_secs(1)));
 
         Ok(Some(pending_block))
     }
