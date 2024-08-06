@@ -896,6 +896,25 @@ where
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
     }
 
+    /// Return sealed block from database or in-memory state by hash.
+    fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
+        // check memory first
+        let block = self
+            .state
+            .tree_state
+            .block_by_hash(hash)
+            // TODO: clone for compatibility. should we return an Arc here?
+            .map(|block| block.as_ref().clone().header);
+
+        if block.is_some() {
+            Ok(block)
+        } else if let Some(block_num) = self.provider.block_number(hash)? {
+            Ok(self.provider.sealed_header(block_num)?)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Return block from database or in-memory state by hash.
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Block>> {
         // check database first
@@ -1375,6 +1394,7 @@ where
         }
 
         let start = Instant::now();
+
         // validate block consensus rules
         self.validate_block(&block)?;
 
@@ -1395,6 +1415,17 @@ where
                 missing_ancestor,
             }))
         };
+
+        // now validate against the parent
+        let parent_block = self.sealed_header_by_hash(block.parent_hash)?.ok_or_else(|| {
+            InsertBlockErrorKindTwo::Provider(ProviderError::HeaderNotFound(
+                block.parent_hash.into(),
+            ))
+        })?;
+        if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
+            warn!(?block, "Failed to validate header {} against parent: {e}", block.header.hash());
+            return Err(e.into())
+        }
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
