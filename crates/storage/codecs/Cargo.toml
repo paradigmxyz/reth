@@ -18,7 +18,7 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 alloy-consensus = { workspace = true, optional = true }
 alloy-eips = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
-alloy-primitives = { workspace = true, default-features = false }
+alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
 
 # misc
