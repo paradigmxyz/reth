@@ -16,16 +16,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
-/// The type for specify which is kind of engine api
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineApiKind {
-    /// The chain contains Ethereum configuration.
-    Ethereum,
-    /// The chain contains Optimism configuration.
-    OpStack,
-}
-
-/// Advances the chain based on incoming requests.
+/// A [`ChainHandler`] that advances the chain based on incoming requests (CL engine API).
 ///
 /// This is a general purpose request handler with network access.
 /// This type listens for incoming messages and processes them via the configured request handler.
@@ -48,14 +39,15 @@ pub struct EngineHandler<T, S, D> {
     ///
     /// This type is responsible for processing incoming requests.
     handler: T,
-    /// Receiver for incoming requests that need to be processed.
+    /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: S,
     /// A downloader to download blocks on demand.
     downloader: D,
 }
 
 impl<T, S, D> EngineHandler<T, S, D> {
-    /// Creates a new [`EngineHandler`] with the given handler and downloader.
+    /// Creates a new [`EngineHandler`] with the given handler and downloader and incoming stream of
+    /// requests.
     pub const fn new(handler: T, downloader: D, incoming_requests: S) -> Self
     where
         T: EngineRequestHandler,
@@ -214,6 +206,15 @@ where
     }
 }
 
+/// The type for specify which is kind of engine api
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineApiKind {
+    /// The chain contains Ethereum configuration.
+    Ethereum,
+    /// The chain contains Optimism configuration.
+    OpStack,
+}
+
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
 pub enum EngineApiEvent {
@@ -244,7 +245,7 @@ impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
 pub enum FromEngine<Req> {
     /// Event from the top level orchestrator.
     Event(FromOrchestrator),
-    /// Request from the engine
+    /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
     DownloadedBlocks(Vec<SealedBlockWithSenders>),
