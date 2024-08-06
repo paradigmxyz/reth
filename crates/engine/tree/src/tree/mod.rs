@@ -687,6 +687,12 @@ where
         if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
             trace!(target: "engine", "fcu head hash is already canonical");
 
+            // update the safe and finalized blocks and ensure their values are valid
+            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                // safe or finalized hashes are invalid
+                return Ok(TreeOutcome::new(outcome))
+            }
+
             // we still need to process payload attributes if the head is already canonical
             if let Some(attr) = attrs {
                 let tip = self
@@ -709,8 +715,7 @@ where
             let tip = chain_update.tip().header.clone();
             self.on_canonical_chain_update(chain_update);
 
-            // update the safe and finalized blocks and ensure their values are valid, but only
-            // after the head block is made canonical
+            // update the safe and finalized blocks and ensure their values are valid
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
                 // safe or finalized hashes are invalid
                 return Ok(TreeOutcome::new(outcome))
