@@ -53,7 +53,16 @@ pub enum DatabaseError {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for DatabaseError {}
+impl std::error::Error for DatabaseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Write(err) => {
+                std::error::Error::source(err)
+            },
+            _ => Option::None
+        }
+    }
+}
 
 /// Common error struct to propagate implementation-specific error information.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
