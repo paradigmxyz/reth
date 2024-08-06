@@ -36,13 +36,10 @@ derive_more.workspace = true
 
 [dev-dependencies]
 # eth
-nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-genesis.workspace = true
-reth-rpc-types.workspace = true
-rand.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true

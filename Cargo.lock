@@ -6375,8 +6375,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
- "reth-rpc",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
@@ -6514,14 +6512,11 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "derive_more",
- "nybbles",
  "once_cell",
  "op-alloy-rpc-types",
- "rand 0.8.5",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
- "reth-rpc-types",
  "reth-trie-common",
  "serde",
  "serde_json",
@@ -6772,7 +6767,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "serde",
- "serde_json",
  "test-fuzz",
 ]
 
@@ -6814,7 +6808,6 @@ dependencies = [
  "generic-array",
  "parking_lot 0.12.3",
  "rand 0.8.5",
- "reth-chainspec",
  "reth-ethereum-forks",
  "reth-net-banlist",
  "reth-net-nat",
@@ -7279,7 +7272,6 @@ name = "reth-evm-optimism"
 version = "1.0.3"
 dependencies = [
  "reth-chainspec",
- "reth-consensus-common",
  "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-errors",
@@ -8033,7 +8025,6 @@ dependencies = [
  "reth-rpc-types",
  "reth-transaction-pool",
  "revm",
- "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -8073,7 +8064,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
- "alloy-trie",
  "arbitrary",
  "assert_matches",
  "bytes",
@@ -8082,7 +8072,6 @@ dependencies = [
  "derive_more",
  "k256",
  "modular-bitfield",
- "nybbles",
  "once_cell",
  "pprof",
  "proptest",
@@ -8099,12 +8088,10 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
- "sucds",
  "tempfile",
  "test-fuzz",
  "thiserror-no-std",
  "toml",
- "triehash",
  "zstd",
 ]
 
@@ -8483,13 +8470,11 @@ name = "reth-rpc-layer"
 version = "1.0.3"
 dependencies = [
  "alloy-rpc-types-engine",
- "assert_matches",
  "http",
  "jsonrpsee",
  "jsonrpsee-http-client",
  "pin-project",
  "reqwest",
- "tempfile",
  "tokio",
  "tower",
  "tracing",
@@ -8530,7 +8515,6 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "serde_json",
- "similar-asserts",
 ]
 
 [[package]]
@@ -8831,7 +8815,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
- "assert_matches",
  "bytes",
  "derive_more",
  "hash-db",
@@ -8844,7 +8827,6 @@ dependencies = [
  "reth-primitives-traits",
  "revm-primitives",
  "serde",
- "serde_json",
  "test-fuzz",
  "toml",
 ]

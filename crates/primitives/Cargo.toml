@@ -59,8 +59,6 @@ reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
-nybbles = { workspace = true, features = ["arbitrary"] }
-alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 
 assert_matches.workspace = true
@@ -71,10 +69,8 @@ rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
-triehash = "0.8"
 modular-bitfield.workspace = true
 
-sucds = "0.8.1"
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
@@ -93,8 +89,6 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "reth-chainspec?/arbitrary",
     "reth-ethereum-forks/arbitrary",
-    "nybbles/arbitrary",
-    "alloy-trie/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
