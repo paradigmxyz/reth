@@ -1973,6 +1973,7 @@ mod tests {
         action_rx: Receiver<PersistenceAction>,
         executor_provider: MockExecutorProvider,
         block_builder: TestBlockBuilder,
+        provider: MockEthProvider,
     }
 
     impl TestHarness {
@@ -1997,7 +1998,7 @@ mod tests {
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
             let tree = EngineApiTreeHandler::new(
-                provider,
+                provider.clone(),
                 executor_provider.clone(),
                 consensus,
                 payload_validator,
@@ -2021,6 +2022,7 @@ mod tests {
                 action_rx,
                 executor_provider,
                 block_builder,
+                provider,
             }
         }
 
@@ -2056,7 +2058,9 @@ mod tests {
             self.tree.canonical_in_memory_state =
                 CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending, None);
 
-            self.blocks = blocks;
+            self.blocks = blocks.clone();
+            self.persist_blocks(blocks);
+
             self
         }
 
@@ -2166,6 +2170,50 @@ mod tests {
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
+        }
+
+        async fn check_fork_chain_insertion(
+            &mut self,
+            mut chain: impl Iterator<Item = &SealedBlockWithSenders> + Clone,
+        ) {
+            for _ in chain.clone() {
+                let event = self.from_tree_rx.recv().await.unwrap();
+                match event {
+                    EngineApiEvent::BeaconConsensus(
+                        BeaconConsensusEngineEvent::ForkBlockAdded(block),
+                    ) => {
+                        assert!(chain.any(|b| b.hash() == block.hash()));
+                    }
+                    _ => panic!("Unexpected event: {:#?}", event),
+                }
+            }
+        }
+
+        fn persist_blocks(&mut self, blocks: Vec<ExecutedBlock>) {
+            self.setup_range_insertion_for_chain(
+                blocks.clone().into_iter().map(|b| b.sealed_block_with_senders()).collect(),
+            );
+
+            let block_data: Vec<_> = blocks
+                .into_iter()
+                .map(|b| {
+                    let sealed_block = (*b.block).clone();
+
+                    (sealed_block.hash(), sealed_block.unseal())
+                })
+                .collect();
+
+            self.provider.extend_blocks(block_data);
+        }
+
+        fn setup_range_insertion_for_chain(&mut self, chain: Vec<SealedBlockWithSenders>) {
+            let mut execution_outcomes = Vec::new();
+            for block in &chain {
+                let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
+                self.tree.provider.add_state_root(block.state_root);
+                execution_outcomes.push(execution_outcome);
+            }
+            self.extend_execution_outcome(execution_outcomes);
         }
     }
 
@@ -2584,17 +2632,7 @@ mod tests {
         test_harness.send_fcu(fork_chain.last().unwrap().hash(), ForkchoiceStatus::Valid).await;
 
         // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
-        for _ in 0..fork_chain.len() {
-            let event = test_harness.from_tree_rx.recv().await.unwrap();
-            match event {
-                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
-                    block,
-                )) => {
-                    assert!(fork_chain.iter().any(|b| b.hash() == block.hash()));
-                }
-                _ => panic!("Unexpected event: {:#?}", event),
-            }
-        }
+        test_harness.check_fork_chain_insertion(fork_chain.clone().iter()).await;
 
         // check for CanonicalChainCommitted event
         test_harness.check_canon_commit(fork_chain.last().unwrap().hash()).await;
@@ -2658,5 +2696,16 @@ mod tests {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
+
+        // setting up execution outcomes for the chain, the blocks will be
+        // executed starting from the oldest, so we need to reverse.
+        let mut main_chain_rev = main_chain.clone();
+        main_chain_rev.reverse();
+        test_harness.setup_range_insertion_for_chain(main_chain_rev);
+
+        let remaining = &main_chain[..main_chain.len()];
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.to_vec()));
+
+        test_harness.check_fork_chain_insertion(main_chain.clone().iter()).await;
     }
 }
