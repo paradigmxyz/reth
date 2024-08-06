@@ -1,7 +1,6 @@
 //! Loads OP pending block for a RPC response.   
 
 use crate::OpEthApi;
-use jsonrpsee::tracing::debug;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
@@ -54,20 +53,9 @@ where
             .map_err(Self::Error::from_eth_err)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let (_, block_hash) = latest.split();
-        let last_block = self
-            .provider()
+        self.provider()
             .sealed_block_with_senders(BlockHashOrNumber::from(block_hash), Default::default())
-            .map_err(Self::Error::from_eth_err)?;
-
-        let pending_block = match last_block {
-            Some(pending_block) => pending_block,
-            None => {
-                debug!(target: "rpc", "Failed to build pending block get latest block");
-                return Ok(None)
-            }
-        };
-
-        Ok(Some(pending_block))
+            .map_err(Self::Error::from_eth_err)
     }
 
     fn receipts_root(
