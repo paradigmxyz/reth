@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
-/// A [`ChainHandler`] that advances the chain based on incoming requests.
+/// A [`ChainHandler`] that advances the chain based on incoming requests (CL engine API).
 ///
 /// This is a general purpose request handler with network access.
 /// This type listens for incoming messages and processes them via the configured request handler.
