@@ -394,7 +394,7 @@ impl std::error::Error for ConsensusError {
             Self::InvalidTransaction(err) => {
                 std::error::Error::source(err)
             },
-            _ => std::option::Option::None,
+            _ => Option::None,
         }
     }
 }
