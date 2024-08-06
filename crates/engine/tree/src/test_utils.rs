@@ -11,7 +11,7 @@ use std::{collections::VecDeque, ops::Range, sync::Arc};
 use tokio::sync::watch;
 
 /// Test pipeline builder.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TestPipelineBuilder {
     pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
     executor_results: Vec<ExecutionOutcome>,
@@ -58,7 +58,9 @@ impl TestPipelineBuilder {
     }
 }
 
-pub(crate) fn insert_headers_into_client(
+/// Starting from the given genesis header, inserts headers from the given
+/// range in the given test full block client.
+pub fn insert_headers_into_client(
     client: &TestFullBlockClient,
     genesis_header: SealedHeader,
     range: Range<usize>,
