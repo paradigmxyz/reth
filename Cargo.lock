@@ -8090,7 +8090,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "test-fuzz",
- "thiserror-no-std",
+ "thiserror",
  "toml",
  "zstd",
 ]
