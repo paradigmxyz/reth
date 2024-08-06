@@ -4,7 +4,7 @@ use reth_primitives::{alloy_primitives::BlockTimestamp, Header, U256};
 const EXP_DIFF_PERIOD_UINT: u64 = 100_000;
 
 /// The minimum that the difficulty may ever be.
-const MINIMUM_DIFFICULTY: u64 = 131_072;
+const MINIMUM_DIFFICULTY: i64 = 131_072;
 
 /// Bomb delays
 #[derive(Copy, Clone, Debug)]
@@ -23,6 +23,12 @@ impl From<&BombDelay> for u64 {
 /// This differs from the Homestead rules in how uncle blocks affect the difficulty calculation.
 ///
 /// The difficulty adjustment algorithm used here is defined in [EIP-100](https://eips.ethereum.org/EIPS/eip-100).
+/// new_diff = (
+/// parent_diff +
+/// (parent_diff // 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) //
+/// 9), -99))
+/// + 2 ** (periodCount - 2)
+/// )
 pub fn make_difficulty_calculator(
     block_timestamp: BlockTimestamp,
     parent: &Header,
@@ -34,18 +40,20 @@ pub fn make_difficulty_calculator(
     // the block number. Thus, we remove one from the delay given
     let bomb_delay_from_parent = u64::from(bomb_delay).saturating_sub(1);
 
-    let diff_time = block_timestamp - parent.timestamp;
-    let uncles = if parent.ommers_hash_is_empty() { 1 } else { 2 };
+    let uncles_factor = if parent.ommers_hash_is_empty() { 1 } else { 2 };
+    let parent_diff = i64::try_from(parent.difficulty).unwrap();
 
-    let factor = uncles + diff_time / 9;
+    let mut timestamp_factor: i64 =
+        (uncles_factor + (block_timestamp - parent.timestamp) / 9).try_into().unwrap();
 
-    let difficulty = u64::try_from(parent.difficulty).unwrap();
-    let left_side = difficulty / 2048;
+    if timestamp_factor < -99 {
+        timestamp_factor = -99;
+    }
 
-    let mut calculated_difficulty = difficulty + left_side * std::cmp::max(factor, 99u64);
+    let mut diff = parent_diff + parent_diff / 2048 * timestamp_factor;
 
-    if calculated_difficulty < MINIMUM_DIFFICULTY {
-        calculated_difficulty = MINIMUM_DIFFICULTY;
+    if diff < MINIMUM_DIFFICULTY.try_into().unwrap() {
+        diff = MINIMUM_DIFFICULTY;
     }
 
     // Calculates a fake block number for the ice-age delay
@@ -55,11 +63,9 @@ pub fn make_difficulty_calculator(
         let period_count = fake_block_number / EXP_DIFF_PERIOD_UINT;
 
         if period_count >= 1 {
-            let pow_period_count = (period_count - 2).pow(2);
-
-            calculated_difficulty += pow_period_count;
+            diff += (period_count - 2).pow(2) as i64;
         }
     }
 
-    Ok(U256::from(calculated_difficulty))
+    Ok(U256::from(diff))
 }
