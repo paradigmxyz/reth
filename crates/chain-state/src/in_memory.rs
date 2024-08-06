@@ -53,6 +53,17 @@ pub(crate) struct InMemoryState {
     metrics: InMemoryStateMetrics,
 }
 
+/// Represents the result of a range lookup in the in-memory state.
+#[derive(Debug)]
+pub enum RangeLookupResult<T> {
+    /// No results were found for the specified range.
+    None,
+    /// Partial results were found for the specified range.
+    Partial(Vec<T>),
+    /// Full results were found for the specified range.
+    Full(Vec<T>),
+}
+
 impl InMemoryState {
     pub(crate) fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
@@ -327,6 +338,25 @@ impl CanonicalInMemoryState {
             }
         }
         self.inner.in_memory_state.update_metrics();
+    }
+
+    /// Performs a range lookup for block headers in the in-memory state and returns partial or full
+    /// results.
+    pub fn range_lookup(&self, start: u64, end: u64) -> RangeLookupResult<Header> {
+        let mut headers = Vec::new();
+
+        if start > end {
+            return RangeLookupResult::None;
+        }
+        
+        for num in start..=end {
+            if let Some(block_state) = self.state_by_number(num) {
+                headers.push(block_state.block().block().header.header().clone());
+            } else {
+                return RangeLookupResult::Partial(headers);
+            }
+        }
+        RangeLookupResult::Full(headers)
     }
 
     /// Returns in memory state corresponding the given hash.
