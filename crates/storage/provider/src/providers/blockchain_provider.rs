@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -118,6 +118,17 @@ where
         };
 
         (start, end)
+    }
+
+    /// This uses a given [`BlockState`] to initialize a state provider for that block.
+    fn block_state_provider(
+        &self,
+        state: impl AsRef<BlockState>,
+    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        let state = state.as_ref();
+        let anchor_hash = state.anchor().hash;
+        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
+        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
     }
 }
 
@@ -877,7 +888,14 @@ where
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
-        self.database.latest()
+        // use latest state provider if the head state exists
+        if let Some(state) = self.canonical_in_memory_state.head_state() {
+            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            Ok(self.block_state_provider(state)?.boxed())
+        } else {
+            trace!(target: "providers::blockchain", "Using database state for latest state provider");
+            self.database.latest()
+        }
     }
 
     fn history_by_block_number(
@@ -901,10 +919,7 @@ where
             Ok(state)
         } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             // ... or this could be tracked by the in memory state
-            let anchor_hash = state.anchor().hash;
-            let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-            let state_provider =
-                self.canonical_in_memory_state.state_provider(hash, latest_historical);
+            let state_provider = self.block_state_provider(state)?;
             Ok(Box::new(state_provider))
         } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
             // .. or this could be the pending state
@@ -1098,6 +1113,8 @@ where
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        self.database.provider()?.basic_account(address)
+        // use latest state provider
+        let state_provider = self.latest()?;
+        state_provider.basic_account(address)
     }
 }
