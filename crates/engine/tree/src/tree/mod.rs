@@ -58,6 +58,8 @@ use tokio::sync::{
 use tracing::*;
 
 mod config;
+mod metrics;
+use crate::tree::metrics::EngineApiMetrics;
 pub use config::TreeConfig;
 
 /// Keeps track of the state of the tree.
@@ -93,6 +95,11 @@ impl TreeState {
             current_canonical_head,
             parent_to_child: HashMap::new(),
         }
+    }
+
+    /// Returns the number of executed blocks stored.
+    fn block_count(&self) -> usize {
+        self.blocks_by_hash.len()
     }
 
     /// Returns the block by hash.
@@ -417,6 +424,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     payload_builder: PayloadBuilderHandle<T>,
     /// Configuration settings.
     config: TreeConfig,
+    /// Metrics for the engine api.
+    metrics: EngineApiMetrics,
 }
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
@@ -455,6 +464,7 @@ where
             canonical_in_memory_state,
             payload_builder,
             config,
+            metrics: Default::default(),
         }
     }
 
@@ -688,6 +698,8 @@ where
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
         self.state.tree_state.remove_before(Bound::Included(backfill_height));
+        self.metrics.executed_blocks.set(self.state.tree_state.block_count() as f64);
+
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         // we remove all entries because now we're synced to the backfill target and consider this
@@ -796,6 +808,7 @@ where
             }
 
             self.backfill_sync_state = BackfillSyncState::Pending;
+            self.metrics.pipeline_runs.increment(1);
             debug!(target: "engine", "emitting backfill action event");
         }
 
@@ -1439,6 +1452,7 @@ where
         }
 
         self.state.tree_state.insert_executed(executed);
+        self.metrics.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
         let engine_event = if self.state.tree_state.is_fork(block_hash) {
@@ -1686,6 +1700,8 @@ where
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine", "invoked new payload");
+        self.metrics.new_payload_messages.increment(1);
+
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
         //    - missing or invalid base fee
@@ -1795,6 +1811,7 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine", ?attrs, "invoked forkchoice update");
+        self.metrics.forkchoice_updated_messages.increment(1);
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
