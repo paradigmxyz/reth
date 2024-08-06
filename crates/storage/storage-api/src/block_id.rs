@@ -42,7 +42,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 
 /// Client trait for transforming [`BlockId`] into block numbers or hashes.
 ///
-/// Types that implement this trait must be able to resolve all variants of [BlockNumberOrTag] to
+/// Types that implement this trait must be able to resolve all variants of [`BlockNumberOrTag`] to
 /// block numbers or hashes. Automatic implementations for resolving [BlockNumberOrTag] variants
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
