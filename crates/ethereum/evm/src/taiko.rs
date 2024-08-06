@@ -79,7 +79,10 @@ sol! {
 
     function anchorV2(
         uint64 _anchorBlockId,
-        bytes32 _anchorStateRoot
+        bytes32 _anchorStateRoot,
+        uint32 _parentGasUsed,
+        uint32 _gasIssuancePerSecond,
+        uint8 _basefeeAdjustmentQuotient
     )
         external
         nonReentrant
@@ -139,7 +142,7 @@ pub fn check_anchor_tx(
     Ok(())
 }
 
-fn decode_anchor_ontake(bytes: &[u8]) -> Result<anchorV2Call> {
+pub fn decode_anchor_ontake(bytes: &[u8]) -> Result<anchorV2Call> {
     anchorV2Call::abi_decode(bytes, true).map_err(|e| anyhow!(e))
 }
 
@@ -173,8 +176,11 @@ pub fn check_anchor_tx_ontake(
     );
 
     /*
-    uint64 _anchorBlockId,
-    bytes32 _anchorStateRoot,
+        uint64 _anchorBlockId,
+        bytes32 _anchorStateRoot,
+        uint32 _parentGasUsed,
+        uint32 _gasIssuancePerSecond,
+        uint8 _basefeeAdjustmentQuotient
     */
 
     // Okay now let's decode the anchor tx to verify the inputs
@@ -184,6 +190,12 @@ pub fn check_anchor_tx_ontake(
         "L1 state root mismatch"
     );
     ensure!(anchor_call._anchorBlockId == taiko_data.l1_header.number, "L1 block number mismatch");
+    ensure!(anchor_call._anchorStateRoot == taiko_data.l1_header.state_root, "L1 state root mismatch");
+    // The parent gas used input needs to match the gas used value of the parent block
+    ensure!(
+        anchor_call.parentGasUsed == taiko_data.parent_header.gas_used as u32,
+        "parentGasUsed mismatch"
+    );
 
     Ok(())
 }
