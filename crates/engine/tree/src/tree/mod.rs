@@ -2828,7 +2828,7 @@ mod tests {
 
         test_harness.check_fork_chain_insertion(remaining).await;
 
-        // check canonical chain commited event with the hash of the latest block
+        // check canonical chain committed event with the hash of the latest block
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
             EngineApiEvent::BeaconConsensus(
