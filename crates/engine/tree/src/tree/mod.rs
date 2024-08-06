@@ -358,7 +358,7 @@ pub enum TreeAction {
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
 #[derive(Debug)]
-pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
+pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
@@ -387,7 +387,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     metrics: EngineApiMetrics,
 }
 
-impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
+impl<P, E, T> EngineApiTreeHandler<P, E, T>
 where
     P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
@@ -1942,7 +1942,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     struct TestHarness {
-        tree: EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
+        tree: EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
         to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,
@@ -1973,7 +1973,7 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let tree = EngineApiTreeHandlerImpl::new(
+            let tree = EngineApiTreeHandler::new(
                 provider,
                 executor_provider.clone(),
                 consensus,
