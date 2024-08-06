@@ -134,6 +134,12 @@ pub struct AccountProof {
     pub storage_proofs: Vec<StorageProof>,
 }
 
+impl Default for AccountProof {
+    fn default() -> Self {
+        Self::new(Address::default())
+    }
+}
+
 impl AccountProof {
     /// Create new account proof entity.
     pub const fn new(address: Address) -> Self {
