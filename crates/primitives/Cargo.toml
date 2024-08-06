@@ -46,7 +46,7 @@ once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror-no-std = { workspace = true, default-features = false, optional = true }
+thiserror = { workspace = true, optional = true }
 zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
@@ -81,8 +81,8 @@ pprof = { workspace = true, features = [
 
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
-std = ["thiserror-no-std?/std", "reth-primitives-traits/std"]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield"]
+std = ["thiserror", "reth-primitives-traits/std"]
+reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
@@ -95,7 +95,7 @@ arbitrary = [
     "reth-codec",
 ]
 secp256k1 = ["dep:secp256k1"]
-c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "dep:thiserror-no-std"]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
