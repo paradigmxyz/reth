@@ -8,7 +8,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandlerImpl, TreeConfig},
+    tree::{EngineApiTreeHandler, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -81,7 +81,7 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let from_tree = EngineApiTreeHandlerImpl::spawn_new(
+        let from_tree = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             executor_factory,
             consensus,
