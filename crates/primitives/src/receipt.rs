@@ -6,18 +6,24 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodab
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
+#[cfg(all(feature = "reth-codec", not(feature = "std")))]
+use reth_codecs::Compact;
 #[cfg(all(feature = "reth-codec", feature = "std"))]
 use reth_codecs::{Compact, CompactZstd};
-#[cfg(all(feature = "reth-codec", not(feature = "std")))]
-use reth_codecs::{Compact};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
-#[cfg_attr(any(test, all(feature = "reth-codec", feature = "std")), reth_codecs::reth_codec(no_arbitrary, zstd))]
-#[cfg_attr(any(test, all(feature = "reth-codec", not(feature = "std"))), reth_codecs::reth_codec(no_arbitrary))]
+#[cfg_attr(
+    any(test, all(feature = "reth-codec", feature = "std")),
+    reth_codecs::reth_codec(no_arbitrary, zstd)
+)]
+#[cfg_attr(
+    any(test, all(feature = "reth-codec", not(feature = "std"))),
+    reth_codecs::reth_codec(no_arbitrary)
+)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
@@ -132,7 +138,7 @@ impl From<Vec<Receipt>> for Receipts {
 }
 
 impl FromIterator<Vec<Option<Receipt>>> for Receipts {
-    fn from_iter<I: IntoIterator<Item=Vec<Option<Receipt>>>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
         iter.into_iter().collect::<Vec<_>>().into()
     }
 }
@@ -177,8 +183,8 @@ impl ReceiptWithBloom {
 }
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-pub fn gas_spent_by_transactions<T: Deref<Target=Receipt>>(
-    receipts: impl IntoIterator<Item=T>,
+pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
+    receipts: impl IntoIterator<Item = T>,
 ) -> Vec<(u64, u64)> {
     receipts
         .into_iter()

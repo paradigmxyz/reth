@@ -1,7 +1,6 @@
 use crate::{Address, Transaction, TransactionSigned, TxKind, U256};
 use revm_primitives::{AuthorizationList, TxEnv};
 
-
 #[cfg(all(not(feature = "std"), feature = "optimism"))]
 use alloc::vec::Vec;
 

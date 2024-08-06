@@ -46,6 +46,8 @@ pub use alloy_rpc_types_beacon as beacon;
 pub use alloy_rpc_types_txpool as txpool;
 
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
+#[cfg(feature = "default")]
+pub use eth::error::ToRpcError;
 pub use eth::{
     engine,
     engine::{
@@ -53,5 +55,3 @@ pub use eth::{
     },
     transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
-#[cfg(feature = "default")]
-pub use eth::error::ToRpcError;

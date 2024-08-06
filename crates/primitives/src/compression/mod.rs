@@ -1,9 +1,9 @@
 #[cfg(feature = "std")]
 use std::{cell::RefCell, thread_local};
+#[cfg(not(feature = "std"))]
+use zstd::bulk::Decompressor;
 #[cfg(feature = "std")]
 use zstd::bulk::{Compressor, Decompressor};
-#[cfg(not(feature = "std"))]
-use zstd::bulk::{Decompressor};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -48,7 +48,6 @@ thread_local! {
                 .expect("failed to initialize receipt decompressor"),
         ));
 }
-
 
 /// Reusable decompressor that uses its own internal buffer.
 #[allow(missing_debug_implementations)]

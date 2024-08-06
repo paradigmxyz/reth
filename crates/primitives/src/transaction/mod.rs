@@ -898,7 +898,7 @@ impl TransactionSignedNoHash {
     /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -1078,7 +1078,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self> + Send,
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -1094,7 +1094,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer_unchecked`].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item=&'a Self> + IntoIterator<Item=&'a Self>,
+        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
