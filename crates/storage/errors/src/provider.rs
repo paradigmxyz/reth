@@ -145,6 +145,26 @@ pub enum ProviderError {
     /// Storage writer error.
     StorageWriterError(StorageWriterError),
 }
+#[cfg(feature = "std")]
+impl std::error::Error for ProviderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(source) => {
+                std::error::Error::source(source)
+            },
+            Self::Rlp(source) => {
+                std::error::Error::source(source)
+            },
+            Self::StorageLockError(source) => {
+                std::error::Error::source(source)
+            },
+            Self::StorageWriterError(source) => {
+                std::error::Error::source(source)
+            },
+            _ => Option::None
+        }
+    }
+}
 
 impl From<DatabaseError> for ProviderError {
     fn from(value: DatabaseError) -> Self {

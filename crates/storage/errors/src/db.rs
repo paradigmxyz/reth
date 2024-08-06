@@ -1,15 +1,9 @@
-// #[cfg(feature = "std")]
-// use std::{fmt::Display, str::FromStr, string::String};
-
-// #[cfg(not(feature = "std"))]
 use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-
-// #[cfg(not(feature = "std"))]
 use core::{fmt, fmt::{Display, Debug}, str::FromStr};
 
 /// Database error type.
