@@ -2713,6 +2713,17 @@ mod tests {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
+
+        // setting up execution outcomes for the chain, the blocks will be
+        // executed starting from the oldest, so we need to reverse.
+        let mut main_chain_rev = main_chain.clone();
+        main_chain_rev.reverse();
+        test_harness.setup_range_insertion_for_chain(main_chain_rev);
+
+        let remaining = &main_chain[..main_chain.len()];
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.to_vec()));
+
+        test_harness.check_fork_chain_insertion(main_chain.clone().iter()).await;
     }
 
     #[tokio::test]
