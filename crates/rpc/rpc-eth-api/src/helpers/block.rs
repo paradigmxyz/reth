@@ -171,7 +171,7 @@ pub trait EthBlocks: LoadBlock {
                 return LoadReceipt::cache(self)
                     .get_block_and_receipts(block_hash)
                     .await
-                    .map_err(Self::Error::from_eth_err);
+                    .map_err(Self::Error::from_eth_err)
             }
 
             Ok(None)
