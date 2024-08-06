@@ -81,8 +81,8 @@ pprof = { workspace = true, features = [
 
 [features]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
-std = ["thiserror-no-std?/std", "reth-primitives-traits/std"]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield"]
+std = ["reth-primitives-traits/std"]
+reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "std",
@@ -96,7 +96,7 @@ arbitrary = [
     "reth-codec",
 ]
 secp256k1 = ["dep:secp256k1"]
-c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "dep:thiserror-no-std", "std"]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "dep:thiserror", "std"]
 optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",

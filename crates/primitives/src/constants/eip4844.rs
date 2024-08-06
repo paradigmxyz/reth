@@ -1,5 +1,5 @@
 //! [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) protocol constants and utils for shard Blob Transactions.
-#[cfg(feature = "c-kzg")]
+#[cfg(all(feature = "c-kzg", feature = "std"))]
 pub use trusted_setup::*;
 
 pub use alloy_eips::eip4844::{
