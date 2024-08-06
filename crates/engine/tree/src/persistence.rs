@@ -95,7 +95,7 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::WriteTransactions(block, sender) => {
+                PersistenceAction::WriteTransactions(_block, _sender) => {
                     unimplemented!()
                     // let (block_num, td) =
                     //     self.write_transactions(block).expect("todo: handle errors");
@@ -246,7 +246,7 @@ mod tests {
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
 
-        let (finished_exex_height_tx, finished_exex_height_rx) =
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(

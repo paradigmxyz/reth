@@ -166,6 +166,7 @@ impl<T> EngineApiRequestHandler<T>
 where
     T: EngineTypes,
 {
+    /// Creates a new `EngineApiRequestHandler`.
     pub const fn new(
         to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
         from_tree: UnboundedReceiver<EngineApiEvent>,
@@ -229,6 +230,7 @@ impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
     }
 }
 
+/// Events received from the engine.
 #[derive(Debug)]
 pub enum FromEngine<Req> {
     /// Event from the top level orchestrator.
