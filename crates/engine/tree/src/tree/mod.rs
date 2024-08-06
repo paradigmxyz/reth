@@ -494,7 +494,10 @@ where
                 }
             }
 
-            self.advance_persistence();
+            if let Err(err) = self.advance_persistence() {
+                error!(target: "engine", %err, "Advancing persistence failed");
+                break
+            }
         }
     }
 
@@ -783,7 +786,7 @@ where
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
-    fn advance_persistence(&mut self) {
+    fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
         if self.should_persist() && !self.persistence_state.in_progress() {
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
             if !blocks_to_persist.is_empty() {
@@ -796,10 +799,10 @@ where
         }
 
         if self.persistence_state.in_progress() {
-            let rx = self
+            let mut rx = self
                 .persistence_state
                 .rx
-                .as_mut()
+                .take()
                 .expect("if a persistence task is in progress Receiver must be Some");
 
             // Check if persistence has completed
@@ -809,7 +812,7 @@ where
                         // if this happened, then we persisted no blocks because we sent an empty
                         // vec of blocks
                         warn!(target: "engine", "Persistence task completed but did not persist any blocks");
-                        return
+                        return Ok(())
                     };
                     if let Some(block) =
                         self.state.tree_state.block_by_hash(last_persisted_block_hash)
@@ -820,12 +823,11 @@ where
                         error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                     }
                 }
-                Err(TryRecvError::Closed) => {
-                    panic!("persistence task has been terminated");
-                }
-                _ => {}
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Empty) => self.persistence_state.rx = Some(rx),
             }
         }
+        Ok(())
     }
 
     /// Handles a message from the engine.
