@@ -987,8 +987,7 @@ where
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => {
                 let hash = self
-                    .canonical_in_memory_state
-                    .hash_by_number(num)
+                    .block_hash(num)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
                 self.state_by_block_hash(hash)
             }
