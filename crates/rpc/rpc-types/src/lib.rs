@@ -40,6 +40,7 @@ pub use alloy_rpc_types_anvil as anvil;
 pub use alloy_rpc_types_mev as mev;
 
 // re-export beacon
+#[cfg(feature = "default")]
 pub use alloy_rpc_types_beacon as beacon;
 
 // re-export txpool
@@ -48,10 +49,11 @@ pub use alloy_rpc_types_txpool as txpool;
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "default")]
 pub use eth::error::ToRpcError;
+pub use eth::transaction::{self, TransactionRequest, TypedTransactionRequest};
+#[cfg(feature = "default")]
 pub use eth::{
     engine,
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
