@@ -608,7 +608,8 @@ where
                         error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                     }
                 }
-                Err(err) => return Err(err),
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Empty) => self.persistence_state.rx = Some(rx),
             }
         }
         Ok(())
