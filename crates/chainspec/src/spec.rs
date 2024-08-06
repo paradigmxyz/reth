@@ -258,6 +258,13 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
     }
 }
 
+/// The type for specifiy which is kind of engine api
+#[derive(Debug)]
+pub enum EngineApiKind {
+    Ethereum,
+    OpStack
+}
+
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
@@ -364,6 +371,15 @@ impl ChainSpec {
     #[cfg(not(feature = "optimism"))]
     pub const fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
+    }
+
+    #[inline]
+    /// Returns [`EngineApiKind`]
+    pub fn get_engine_api_kind(&self) -> EngineApiKind {
+        match self.chain.is_optimism() {
+            true => EngineApiKind::OpStack,
+            false => EngineApiKind::Ethereum
+        }
     }
 
     /// Returns `true` if this chain is Optimism mainnet.
