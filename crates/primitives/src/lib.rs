@@ -26,7 +26,7 @@ extern crate alloc;
 mod alloy_compat;
 pub mod basefee;
 mod block;
-#[cfg(feature = "reth-codec")]
+#[cfg(all(feature = "reth-codec", feature = "std"))]
 mod compression;
 pub mod constants;
 pub mod eip4844;

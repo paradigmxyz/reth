@@ -1,26 +1,14 @@
-#[cfg(feature = "std")]
 use std::{cell::RefCell, thread_local};
-#[cfg(not(feature = "std"))]
-use zstd::bulk::Decompressor;
-#[cfg(feature = "std")]
+
 use zstd::bulk::{Compressor, Decompressor};
 
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-use alloc::string::ToString;
-
-#[cfg(feature = "std")]
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
-#[cfg(feature = "std")]
 /// Compression/Decompression dictionary for `Transaction`.
 pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_dictionary.bin");
 
 // We use `thread_local` compressors and decompressors because dictionaries can be quite big, and
 // zstd-rs recommends to use one context/compressor per thread
-#[cfg(feature = "std")]
 thread_local! {
     /// Thread Transaction compressor.
     pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
@@ -59,7 +47,6 @@ pub struct ReusableDecompressor {
 }
 
 impl ReusableDecompressor {
-    #[cfg(feature = "std")]
     fn new(decompressor: Decompressor<'static>) -> Self {
         Self { decompressor, buf: Vec::with_capacity(4096) }
     }
