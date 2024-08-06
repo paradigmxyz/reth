@@ -48,7 +48,7 @@ where
 
     /// Returns the locally built pending block
     async fn local_pending_block(&self) -> Result<Option<SealedBlockWithSenders>, Self::Error> {
-        // ref https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375
+        // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let mut lock = self.pending_block().lock().await;
         let latest = self
             .provider()
