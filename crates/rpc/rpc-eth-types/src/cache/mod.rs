@@ -8,9 +8,8 @@ use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TransactionSignedEcRecovered, B256,
 };
-use reth_provider::{
-    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
-};
+use reth_provider::{CanonStateNotification, EvmEnvProvider, TransactionVariant};
+use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use schnellru::{ByLength, Limiter};

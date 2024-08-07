@@ -1,6 +1,7 @@
 //! Context required for building `eth` namespace APIs.
 
-use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
+use reth_provider::{CanonStateSubscriptions, ChainSpecProvider};
+use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 
 use crate::{

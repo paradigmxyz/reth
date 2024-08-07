@@ -17,8 +17,9 @@ use reth_primitives::{
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     Receipt, SealedBlock, TransactionSigned, B256,
 };
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
+use reth_provider::{CanonStateNotification, ChainSpecProvider};
 use reth_rpc_types::TxGasAndReward;
+use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
