@@ -318,11 +318,13 @@ where
         }
 
         cumulative_gas_used += exec_result.result.gas_used();
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
         receipts.push(Some(Receipt {
             tx_type: tx.tx_type(),
             success: exec_result.result.is_success(),
             cumulative_gas_used,
             logs: exec_result.result.into_logs().into_iter().map(Into::into).collect(),
+            ..Default::default()
         }));
 
         // append transaction to the list of executed transactions
@@ -396,9 +398,8 @@ where
     }
     .seal_slow();
 
-    let (payload, _) = block_to_payload(reorg_block);
     Ok((
-        payload,
+        block_to_payload(reorg_block),
         reorg_target
             .header
             .parent_beacon_block_root
