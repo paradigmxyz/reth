@@ -266,7 +266,7 @@ where
         &mut block_env,
         chain_spec,
         &reorg_target.header,
-        U256::MAX, // TODO:
+        U256::MAX,
     );
     let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
     let mut evm = evm_config.evm_with_env(&mut state, env);
