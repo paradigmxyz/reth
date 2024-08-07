@@ -18,8 +18,7 @@ pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 mod state;
 pub use state::{StateChangeWriter, StateWriter};
 
-mod spec;
-pub use spec::ChainSpecProvider;
+pub use reth_chainspec::ChainSpecProvider;
 
 mod hashing;
 pub use hashing::HashingWriter;

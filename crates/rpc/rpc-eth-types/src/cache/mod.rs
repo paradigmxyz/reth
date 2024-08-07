@@ -1,16 +1,15 @@
 //! Async caching support for eth RPC
 
 use futures::{future::Either, Stream, StreamExt};
+use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TransactionSignedEcRecovered, B256,
 };
-use reth_provider::{
-    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
-};
+use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use schnellru::{ByLength, Limiter};
@@ -265,10 +264,11 @@ impl EthStateCache {
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
 ///
-/// It provides a caching layer on top of the given [`StateProvider`](reth_provider::StateProvider)
-/// and keeps data fetched via the provider in memory in an LRU cache. If the requested data is
-/// missing in the cache it is fetched and inserted into the cache afterwards. While fetching data
-/// from disk is sync, this service is async since requests and data is shared via channels.
+/// It provides a caching layer on top of the given
+/// [`StateProvider`](reth_storage_api::StateProvider) and keeps data fetched via the provider in
+/// memory in an LRU cache. If the requested data is missing in the cache it is fetched and inserted
+/// into the cache afterwards. While fetching data from disk is sync, this service is async since
+/// requests and data is shared via channels.
 ///
 /// This type is an endless future that listens for incoming messages from the user facing
 /// [`EthStateCache`] via a channel. If the requested data is not cached then it spawns a new task

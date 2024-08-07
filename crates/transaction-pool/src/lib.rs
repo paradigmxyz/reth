@@ -79,8 +79,8 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_chainspec::MAINNET;
-//! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
+//! use reth_chainspec::{MAINNET, ChainSpecProvider};
+//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
@@ -107,8 +107,9 @@
 //!
 //! ```
 //! use futures_util::Stream;
-//! use reth_chainspec::MAINNET;
-//! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
+//! use reth_chain_state::CanonStateNotification;
+//! use reth_chainspec::{MAINNET, ChainSpecProvider};
+//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
 //! use reth_tasks::TaskManager;
@@ -153,7 +154,7 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
-use reth_provider::StateProviderFactory;
+use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
@@ -275,7 +276,7 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
+    Client: StateProviderFactory + reth_storage_api::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -285,7 +286,7 @@ where
     ///
     /// ```
     /// use reth_chainspec::MAINNET;
-    /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+    /// use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
