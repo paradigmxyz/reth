@@ -441,6 +441,7 @@ where
                 .database
                 .block_body_indices(anchor_num)?
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+            stored_indices.first_tx_num += 1;
 
             for state in parent_chain {
                 let txs = state.block().block.body.len() as u64;
