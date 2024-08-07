@@ -61,6 +61,10 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
+.PHONY: build-debug
+build-debug: ## Build the reth binary into `target/debug` directory.
+	cargo build --bin reth --features "$(FEATURES)"
+
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
@@ -300,9 +304,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build ## Update book cli documentation.
+update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
+	@./book/cli/update.sh $(BUILD_PATH)/debug/reth
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
