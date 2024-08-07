@@ -194,7 +194,11 @@ where
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.database.header_td(hash)
+        if let Some(num) = self.block_number(*hash)? {
+            self.header_td_by_number(num)
+        } else {
+            Ok(None)
+        }
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
