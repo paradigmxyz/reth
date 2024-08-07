@@ -1,11 +1,11 @@
 //! Optimism payload builder implementation.
 
-use std::sync::Arc;
 use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
@@ -24,8 +24,8 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
-use reth_chain_state::ExecutedBlock;
 
 /// Optimism's payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,7 +217,7 @@ where
             U256::ZERO,
             chain_spec,
             attributes,
-            None
+            None,
         ))
     }
 }
@@ -530,7 +530,6 @@ where
         .expect("Number is in range");
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
-
     // calculate the state root
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
@@ -614,7 +613,7 @@ where
         total_fees,
         chain_spec,
         attributes,
-        Some(executed)
+        Some(executed),
     );
 
     // extend the payload with the blob sidecars from the executed txs
