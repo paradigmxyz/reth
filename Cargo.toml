@@ -542,6 +542,6 @@ tempfile = "3.8"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm-precompile = { git = "https://github.com/brianbland/revm.git", branch = "op-granite-bn256pairing-input-limit" }
-revm-primitives = { git = "https://github.com/brianbland/revm.git", branch = "op-granite-bn256pairing-input-limit" }
-op-alloy-rpc-types = { git = "https://github.com/brianbland/op-alloy.git", branch = "op-granite-time" }
+revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "ab42581" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "ab42581" }
+op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy.git", rev = "8dde493" }

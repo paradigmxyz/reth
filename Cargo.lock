@@ -5222,7 +5222,7 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.1.4"
-source = "git+https://github.com/brianbland/op-alloy.git?branch=op-granite-time#47007df9ddb1d250be5542b759a93a4c54901d5e"
+source = "git+https://github.com/alloy-rs/op-alloy.git?rev=8dde493#8dde493b423d8e2ef9c41c9f7bd7200973f00ea5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5236,7 +5236,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.4"
-source = "git+https://github.com/brianbland/op-alloy.git?branch=op-granite-time#47007df9ddb1d250be5542b759a93a4c54901d5e"
+source = "git+https://github.com/alloy-rs/op-alloy.git?rev=8dde493#8dde493b423d8e2ef9c41c9f7bd7200973f00ea5"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
@@ -8954,7 +8954,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "9.2.0"
-source = "git+https://github.com/brianbland/revm.git?branch=op-granite-bn256pairing-input-limit#ef376fef4cf91236b94abd8967690f1f2a92effb"
+source = "git+https://github.com/bluealloy/revm.git?rev=ab42581#ab42581b7462a4b71a88fa5708859071ceaabf8e"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8973,7 +8973,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "7.1.0"
-source = "git+https://github.com/brianbland/revm.git?branch=op-granite-bn256pairing-input-limit#ef376fef4cf91236b94abd8967690f1f2a92effb"
+source = "git+https://github.com/bluealloy/revm.git?rev=ab42581#ab42581b7462a4b71a88fa5708859071ceaabf8e"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
