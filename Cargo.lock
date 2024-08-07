@@ -8035,6 +8035,7 @@ dependencies = [
 name = "reth-payload-primitives"
 version = "1.0.4"
 dependencies = [
+ "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-primitives",
