@@ -2010,11 +2010,15 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+        // it may not have corresponding ommers in the database.
+        self.tx
+            .get::<tables::BlockOmmers>(number)
+            .map(|opt_ommers| opt_ommers.map(|ommers_data| ommers_data.ommers).unwrap_or_else(Vec::new))
+            .map(Some)
+            .map_err(ProviderError::Database)
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
