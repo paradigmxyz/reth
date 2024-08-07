@@ -6,7 +6,7 @@ use reth_db_api::database::Database;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
-    engine::{EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, TreeConfig},
 };
@@ -33,7 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Alias for Ethereum chain orchestrator.
 type EthServiceType<DB, Client> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<BeaconEngineMessage<EthEngineTypes>>,
+        EngineApiRequestHandler<EngineApiRequest<EthEngineTypes>>,
         UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         BasicBlockDownloader<Client>,
     >,
