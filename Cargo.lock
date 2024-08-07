@@ -8016,6 +8016,7 @@ version = "1.0.4"
 dependencies = [
  "futures-util",
  "metrics",
+ "pin-project",
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",

@@ -25,6 +25,7 @@ reth-ethereum-engine-primitives.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
+pin-project.workspace = true
 
 # metrics
 reth-metrics.workspace = true
