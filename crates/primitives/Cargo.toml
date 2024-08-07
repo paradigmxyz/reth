@@ -68,7 +68,6 @@ proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
-toml.workspace = true
 modular-bitfield.workspace = true
 
 

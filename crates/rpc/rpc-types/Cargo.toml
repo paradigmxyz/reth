@@ -32,10 +32,7 @@ jsonrpsee-types = { workspace = true, optional = true }
 # misc
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
 rand.workspace = true
-bytes.workspace = true
-serde_json.workspace = true
 
 [features]
 default = ["jsonrpsee-types"]

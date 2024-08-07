@@ -8040,7 +8040,6 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-transaction-pool",
- "revm",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -8108,7 +8107,6 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
- "toml",
  "zstd",
 ]
 
@@ -8296,7 +8294,6 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -8528,11 +8525,8 @@ dependencies = [
  "alloy-rpc-types-txpool",
  "alloy-serde",
  "arbitrary",
- "bytes",
  "jsonrpsee-types",
- "proptest",
  "rand 0.8.5",
- "serde_json",
 ]
 
 [[package]]

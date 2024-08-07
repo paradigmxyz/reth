@@ -35,8 +35,5 @@ metrics.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
-revm.workspace = true
-
 [features]
 test-utils = []
