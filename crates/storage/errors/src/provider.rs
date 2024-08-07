@@ -145,6 +145,7 @@ pub enum ProviderError {
     /// Storage writer error.
     UnifiedStorageWriterError(crate::writer::UnifiedStorageWriterError),
 }
+
 #[cfg(feature = "std")]
 impl std::error::Error for ProviderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
