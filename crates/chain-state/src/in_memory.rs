@@ -207,7 +207,7 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns the block hash corresponding to the given number
+    /// Returns the block hash corresponding to the given number.
     pub fn hash_by_number(&self, number: u64) -> Option<B256> {
         self.inner.in_memory_state.hash_by_number(number)
     }
