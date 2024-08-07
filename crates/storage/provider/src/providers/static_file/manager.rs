@@ -1,13 +1,14 @@
 use super::{
-    metrics::StaticFileProviderMetrics, LoadedJar, StaticFileJarProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
+    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
+    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -114,8 +115,8 @@ pub struct StaticFileProviderInner {
     /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
     /// won't be able to be queried directly.
     load_filters: bool,
-    /// Maintains a map of `StaticFile` writers for each [`StaticFileSegment`]
-    writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
+    /// Maintains a writer set of [`StaticFileSegment`].
+    writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
@@ -1055,17 +1056,8 @@ impl StaticFileWriter for StaticFileProvider {
         }
 
         trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
-        Ok(match self.writers.entry(segment) {
-            DashMapEntry::Occupied(entry) => entry.into_ref(),
-            DashMapEntry::Vacant(entry) => {
-                let writer = StaticFileProviderRW::new(
-                    segment,
-                    block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-                entry.insert(writer)
-            }
+        self.writers.get_or_create(segment, || {
+            StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
         })
     }
 
@@ -1077,10 +1069,7 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn commit(&self) -> ProviderResult<()> {
-        for mut writer in self.writers.iter_mut() {
-            writer.commit()?;
-        }
-        Ok(())
+        self.writers.commit()
     }
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
