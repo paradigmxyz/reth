@@ -433,25 +433,18 @@ where
         } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
             // we have to construct the stored indices for the in memory blocks
             //
-            // To calculate this we will:
-            // * Fetch the anchor block's stored block body indices
-            // * Walk forward from the block, until `number`
+            // To calculate this we will fetch the anchor block and walk forward from all parents
+            let mut parent_chain = state.parent_state_chain();
+            parent_chain.reverse();
             let anchor_num = state.anchor().number;
             let mut stored_indices = self
                 .database
                 .block_body_indices(anchor_num)?
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
 
-            for block_num in anchor_num + 1..=number {
-                let txs = self
-                    .canonical_in_memory_state
-                    .state_by_number(number)
-                    .ok_or_else(|| ProviderError::StateForNumberNotFound(block_num))?
-                    .block()
-                    .block
-                    .body
-                    .len() as u64;
-                if block_num == number {
+            for state in parent_chain {
+                let txs = state.block().block.body.len() as u64;
+                if state.block().block().number == number {
                     stored_indices.tx_count = txs;
                 } else {
                     stored_indices.first_tx_num += txs;
