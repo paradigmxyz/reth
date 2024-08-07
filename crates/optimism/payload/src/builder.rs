@@ -496,7 +496,7 @@ where
                 .expect("fee is always valid; execution succeeded");
             total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-            // append transaction to the list of executed transactions
+            // append sender and transaction to the respective lists
             executed_senders.push(tx.signer());
             executed_txs.push(tx.into_signed());
         }
