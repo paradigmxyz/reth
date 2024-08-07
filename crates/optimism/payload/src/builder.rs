@@ -407,7 +407,7 @@ where
                 .then_some(1),
         }));
 
-        // append transaction to the list of executed transactions
+        // append sender and transaction to the respective lists
         executed_senders.push(sequencer_tx.signer());
         executed_txs.push(sequencer_tx.into_signed());
     }
