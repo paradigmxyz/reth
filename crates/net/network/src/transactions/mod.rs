@@ -33,7 +33,7 @@ use std::{
 
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, NetworkTypes,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     PooledTransactions, RequestTxHashes, Transactions,
 };
@@ -83,20 +83,23 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 /// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
-pub struct TransactionsHandle {
+pub struct TransactionsHandle<T: NetworkTypes> {
     /// Command channel to the [`TransactionsManager`]
-    manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    manager_tx: mpsc::UnboundedSender<TransactionsCommand<T>>,
 }
 
 /// Implementation of the `TransactionsHandle` API for use in testnet via type
 /// [`PeerHandle`](crate::test_utils::PeerHandle).
-impl TransactionsHandle {
-    fn send(&self, cmd: TransactionsCommand) {
+impl<T: NetworkTypes> TransactionsHandle<T> {
+    fn send(&self, cmd: TransactionsCommand<T>) {
         let _ = self.manager_tx.send(cmd);
     }
 
     /// Fetch the [`PeerRequestSender`] for the given peer.
-    async fn peer_handle(&self, peer_id: PeerId) -> Result<Option<PeerRequestSender>, RecvError> {
+    async fn peer_handle(
+        &self,
+        peer_id: PeerId,
+    ) -> Result<Option<PeerRequestSender<T>>, RecvError> {
         let (tx, rx) = oneshot::channel();
         self.send(TransactionsCommand::GetPeerSender { peer_id, peer_request_sender: tx });
         rx.await
@@ -191,15 +194,15 @@ impl TransactionsHandle {
 /// propagate new transactions over the network.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool> {
+pub struct TransactionsManager<Pool, T: NetworkTypes> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
-    network: NetworkHandle,
+    network: NetworkHandle<T>,
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: EventStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent<T>>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -224,16 +227,16 @@ pub struct TransactionsManager<Pool> {
     /// Bad imports.
     bad_imports: LruCache<TxHash>,
     /// All the connected peers.
-    peers: HashMap<PeerId, PeerMetadata>,
+    peers: HashMap<PeerId, PeerMetadata<T>>,
     /// Send half for the command channel.
     ///
     /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
-    command_tx: mpsc::UnboundedSender<TransactionsCommand>,
+    command_tx: mpsc::UnboundedSender<TransactionsCommand<T>>,
     /// Incoming commands from [`TransactionsHandle`].
     ///
     /// This will only receive commands if a user manually sends a command to the manager through
     /// the [`TransactionsHandle`] to interact with this type directly.
-    command_rx: UnboundedReceiverStream<TransactionsCommand>,
+    command_rx: UnboundedReceiverStream<TransactionsCommand<T>>,
     /// A stream that yields new __pending__ transactions.
     ///
     /// A transaction is considered __pending__ if it is executable on the current state of the
@@ -244,19 +247,19 @@ pub struct TransactionsManager<Pool> {
     ///   - account has enough balance to cover the transaction's gas
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
-    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
+    transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<T>>,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
 
-impl<Pool: TransactionPool> TransactionsManager<Pool> {
+impl<Pool: TransactionPool, T: NetworkTypes> TransactionsManager<Pool, T> {
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
     pub fn new(
-        network: NetworkHandle,
+        network: NetworkHandle<T>,
         pool: Pool,
-        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
+        from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<T>>,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
@@ -302,19 +305,21 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
 
 // === impl TransactionsManager ===
 
-impl<Pool> TransactionsManager<Pool>
+impl<Pool, T> TransactionsManager<Pool, T>
 where
     Pool: TransactionPool,
+    T: NetworkTypes,
 {
     /// Returns a new handle that can send commands to this type.
-    pub fn handle(&self) -> TransactionsHandle {
+    pub fn handle(&self) -> TransactionsHandle<T> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 }
 
-impl<Pool> TransactionsManager<Pool>
+impl<Pool, T> TransactionsManager<Pool, T>
 where
     Pool: TransactionPool + 'static,
+    T: NetworkTypes,
 {
     #[inline]
     fn update_poll_metrics(&self, start: Instant, poll_durations: TxManagerPollDurations) {
@@ -814,7 +819,7 @@ where
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
-    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent<T>) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 // ensure we didn't receive any blob transactions as these are disallowed to be
@@ -849,7 +854,7 @@ where
     }
 
     /// Handles a command received from a detached [`TransactionsHandle`]
-    fn on_command(&mut self, cmd: TransactionsCommand) {
+    fn on_command(&mut self, cmd: TransactionsCommand<T>) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => {
                 self.on_new_pending_transactions(vec![hash])
@@ -886,7 +891,7 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event_result: NetworkEvent) {
+    fn on_network_event(&mut self, event_result: NetworkEvent<T>) {
         match event_result {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
@@ -1207,9 +1212,10 @@ where
 //
 // spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
 // `NetworkConfig::start_network`(reth_network::NetworkConfig)
-impl<Pool> Future for TransactionsManager<Pool>
+impl<Pool, T> Future for TransactionsManager<Pool, T>
 where
     Pool: TransactionPool + Unpin + 'static,
+    T: NetworkTypes,
 {
     type Output = ();
 
@@ -1491,22 +1497,26 @@ impl TransactionSource {
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
-pub struct PeerMetadata {
+pub struct PeerMetadata<T: NetworkTypes> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.
     seen_transactions: LruCache<TxHash>,
     /// A communication channel directly to the peer's session task.
-    request_tx: PeerRequestSender,
+    request_tx: PeerRequestSender<T>,
     /// negotiated version of the session.
     version: EthVersion,
     /// The peer's client version.
     client_version: Arc<str>,
 }
 
-impl PeerMetadata {
+impl<T: NetworkTypes> PeerMetadata<T> {
     /// Returns a new instance of [`PeerMetadata`].
-    fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
+    fn new(
+        request_tx: PeerRequestSender<T>,
+        version: EthVersion,
+        client_version: Arc<str>,
+    ) -> Self {
         Self {
             seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
             request_tx,
@@ -1518,7 +1528,7 @@ impl PeerMetadata {
 
 /// Commands to send to the [`TransactionsManager`]
 #[derive(Debug)]
-enum TransactionsCommand {
+enum TransactionsCommand<T: NetworkTypes> {
     /// Propagate a transaction hash to the network.
     PropagateHash(B256),
     /// Propagate transaction hashes to a specific peer.
@@ -1535,13 +1545,13 @@ enum TransactionsCommand {
     /// Requests a clone of the sender sender channel to the peer.
     GetPeerSender {
         peer_id: PeerId,
-        peer_request_sender: oneshot::Sender<Option<PeerRequestSender>>,
+        peer_request_sender: oneshot::Sender<Option<PeerRequestSender<T>>>,
     },
 }
 
 /// All events related to transactions emitted by the network.
 #[derive(Debug)]
-pub enum NetworkTransactionEvent {
+pub enum NetworkTransactionEvent<T: NetworkTypes> {
     /// Represents the event of receiving a list of transactions from a peer.
     ///
     /// This indicates transactions that were broadcasted to us from the peer.
@@ -1568,7 +1578,7 @@ pub enum NetworkTransactionEvent {
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
     /// Represents the event of receiving a `GetTransactionsHandle` request.
-    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<T>>>),
 }
 
 /// Tracks stats about the [`TransactionsManager`].

@@ -540,3 +540,8 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
+
+[patch.crates-io]
+alloy-primitives = { git = "https://github.com/alloy-rs/core", rev = "6761a25" }
+alloy-sol-types = { git = "https://github.com/alloy-rs/core", rev = "6761a25" }
+alloy-dyn-abi = { git = "https://github.com/alloy-rs/core", rev = "6761a25" }

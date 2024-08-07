@@ -11,16 +11,16 @@ use reth_eth_wire::{
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthStream, EthVersion, P2PStream,
+    EthMessage, EthStream, EthVersion, NetworkTypes, P2PStream,
 };
 use tokio::net::TcpStream;
 
 /// The type of the underlying peer network connection.
-pub type EthPeerConnection = EthStream<P2PStream<ECIESStream<TcpStream>>>;
+pub type EthPeerConnection<T> = EthStream<P2PStream<ECIESStream<TcpStream>>, T>;
 
 /// Various connection types that at least support the ETH protocol.
-pub type EthSatelliteConnection =
-    RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy>>;
+pub type EthSatelliteConnection<T> =
+    RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy, T>>;
 
 /// Connection types that support the ETH protocol.
 ///
@@ -30,14 +30,14 @@ pub type EthSatelliteConnection =
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
 #[derive(Debug)]
-pub enum EthRlpxConnection {
+pub enum EthRlpxConnection<T: NetworkTypes> {
     /// A connection that only supports the ETH protocol.
-    EthOnly(Box<EthPeerConnection>),
+    EthOnly(Box<EthPeerConnection<T>>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
-    Satellite(Box<EthSatelliteConnection>),
+    Satellite(Box<EthSatelliteConnection<T>>),
 }
 
-impl EthRlpxConnection {
+impl<T: NetworkTypes> EthRlpxConnection<T> {
     /// Returns the negotiated ETH version.
     #[inline]
     pub(crate) const fn version(&self) -> EthVersion {
@@ -78,7 +78,7 @@ impl EthRlpxConnection {
     #[inline]
     pub fn start_send_broadcast(
         &mut self,
-        item: EthBroadcastMessage,
+        item: EthBroadcastMessage<T>,
     ) -> Result<(), EthStreamError> {
         match self {
             Self::EthOnly(conn) => conn.start_send_broadcast(item),
@@ -87,16 +87,16 @@ impl EthRlpxConnection {
     }
 }
 
-impl From<EthPeerConnection> for EthRlpxConnection {
+impl<T: NetworkTypes> From<EthPeerConnection<T>> for EthRlpxConnection<T> {
     #[inline]
-    fn from(conn: EthPeerConnection) -> Self {
+    fn from(conn: EthPeerConnection<T>) -> Self {
         Self::EthOnly(Box::new(conn))
     }
 }
 
-impl From<EthSatelliteConnection> for EthRlpxConnection {
+impl<T: NetworkTypes> From<EthSatelliteConnection<T>> for EthRlpxConnection<T> {
     #[inline]
-    fn from(conn: EthSatelliteConnection) -> Self {
+    fn from(conn: EthSatelliteConnection<T>) -> Self {
         Self::Satellite(Box::new(conn))
     }
 }
@@ -112,22 +112,22 @@ macro_rules! delegate_call {
     }
 }
 
-impl Stream for EthRlpxConnection {
-    type Item = Result<EthMessage, EthStreamError>;
+impl<T: NetworkTypes> Stream for EthRlpxConnection<T> {
+    type Item = Result<EthMessage<T>, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         delegate_call!(self.poll_next(cx))
     }
 }
 
-impl Sink<EthMessage> for EthRlpxConnection {
+impl<T: NetworkTypes> Sink<EthMessage<T>> for EthRlpxConnection<T> {
     type Error = EthStreamError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         delegate_call!(self.poll_ready(cx))
     }
 
-    fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: EthMessage<T>) -> Result<(), Self::Error> {
         delegate_call!(self.start_send(item))
     }
 

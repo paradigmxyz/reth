@@ -11,12 +11,12 @@ use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
-    HeadersDirection, NodeData, Receipts,
+    HeadersDirection, NetworkTypes, NodeData, Receipts,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
+use reth_primitives::{BlockBody, BlockHashOrNumber};
 use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -52,7 +52,7 @@ const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C> {
+pub struct EthRequestHandler<C, T: NetworkTypes> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.
@@ -60,15 +60,15 @@ pub struct EthRequestHandler<C> {
     #[allow(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
-    incoming_requests: ReceiverStream<IncomingEthRequest>,
+    incoming_requests: ReceiverStream<IncomingEthRequest<T>>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,
 }
 
 // === impl EthRequestHandler ===
-impl<C> EthRequestHandler<C> {
+impl<C, T: NetworkTypes> EthRequestHandler<C, T> {
     /// Create a new instance
-    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest>) -> Self {
+    pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest<T>>) -> Self {
         Self {
             client,
             peers,
@@ -78,12 +78,13 @@ impl<C> EthRequestHandler<C> {
     }
 }
 
-impl<C> EthRequestHandler<C>
+impl<C, T> EthRequestHandler<C, T>
 where
     C: BlockReader + HeaderProvider + ReceiptProvider,
+    T: NetworkTypes,
 {
     /// Returns the list of requested headers
-    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
+    fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<T::BlockHeader> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 
         let mut headers = Vec::new();
@@ -129,7 +130,7 @@ where
                 }
 
                 total_bytes += header.length();
-                headers.push(header);
+                headers.push(header.into());
 
                 if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
@@ -146,7 +147,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<T::BlockHeader>>>,
     ) {
         self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
@@ -157,7 +158,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<T::BlockBody>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
@@ -169,7 +170,7 @@ where
                 let body: BlockBody = block.into();
 
                 total_bytes += body.length();
-                bodies.push(body);
+                bodies.push(body.into());
 
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
@@ -221,9 +222,10 @@ where
 /// An endless future.
 ///
 /// This should be spawned or used as part of `tokio::select!`.
-impl<C> Future for EthRequestHandler<C>
+impl<C, T> Future for EthRequestHandler<C, T>
 where
     C: BlockReader + HeaderProvider + Unpin,
+    T: NetworkTypes,
 {
     type Output = ();
 
@@ -270,7 +272,7 @@ where
 
 /// All `eth` request related to blocks delegated by the network.
 #[derive(Debug)]
-pub enum IncomingEthRequest {
+pub enum IncomingEthRequest<T: NetworkTypes> {
     /// Request Block headers from the peer.
     ///
     /// The response should be sent through the channel.
@@ -280,7 +282,7 @@ pub enum IncomingEthRequest {
         /// The specific block headers requested.
         request: GetBlockHeaders,
         /// The channel sender for the response containing block headers.
-        response: oneshot::Sender<RequestResult<BlockHeaders>>,
+        response: oneshot::Sender<RequestResult<BlockHeaders<T::BlockHeader>>>,
     },
     /// Request Block bodies from the peer.
     ///
@@ -291,7 +293,7 @@ pub enum IncomingEthRequest {
         /// The specific block bodies requested.
         request: GetBlockBodies,
         /// The channel sender for the response containing block bodies.
-        response: oneshot::Sender<RequestResult<BlockBodies>>,
+        response: oneshot::Sender<RequestResult<BlockBodies<T::BlockBody>>>,
     },
     /// Request Node Data from the peer.
     ///

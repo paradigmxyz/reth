@@ -14,7 +14,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
+use reth_eth_wire::{GetBlockBodies, GetBlockHeaders, NetworkTypes};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
@@ -23,7 +23,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header, B256};
+use reth_primitives::B256;
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -36,13 +36,13 @@ use crate::message::BlockRequest;
 ///
 /// This type maintains a list of connected peers that are available for requests.
 #[derive(Debug)]
-pub struct StateFetcher {
+pub struct StateFetcher<T: NetworkTypes> {
     /// Currently active [`GetBlockHeaders`] requests
     inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
+        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<T::BlockHeader>>>>,
     /// Currently active [`GetBlockBodies`] requests
     inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
+        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<T::BlockBody>>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -50,16 +50,16 @@ pub struct StateFetcher {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest>,
+    queued_requests: VecDeque<DownloadRequest<T>>,
     /// Receiver for new incoming download requests
-    download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
+    download_requests_rx: UnboundedReceiverStream<DownloadRequest<T>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
-    download_requests_tx: UnboundedSender<DownloadRequest>,
+    download_requests_tx: UnboundedSender<DownloadRequest<T>>,
 }
 
 // === impl StateSyncer ===
 
-impl StateFetcher {
+impl<T: NetworkTypes> StateFetcher<T> {
     pub(crate) fn new(peers_handle: PeersHandle, num_active_peers: Arc<AtomicUsize>) -> Self {
         let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
         Self {
@@ -216,7 +216,7 @@ impl StateFetcher {
     /// Handles a new request to a peer.
     ///
     /// Caution: this assumes the peer exists and is idle
-    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest) -> BlockRequest {
+    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<T>) -> BlockRequest {
         // update the peer's state
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.state = req.peer_state();
@@ -259,7 +259,7 @@ impl StateFetcher {
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
-        res: RequestResult<Vec<Header>>,
+        res: RequestResult<Vec<T::BlockHeader>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
@@ -297,7 +297,7 @@ impl StateFetcher {
     pub(crate) fn on_block_bodies_response(
         &mut self,
         peer_id: PeerId,
-        res: RequestResult<Vec<BlockBody>>,
+        res: RequestResult<Vec<T::BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |bodies| bodies.is_empty());
 
@@ -316,7 +316,7 @@ impl StateFetcher {
     }
 
     /// Returns a new [`FetchClient`] that can send requests to this type.
-    pub(crate) fn client(&self) -> FetchClient {
+    pub(crate) fn client(&self) -> FetchClient<T> {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
             peers_handle: self.peers_handle.clone(),
@@ -406,24 +406,24 @@ struct Request<Req, Resp> {
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 #[derive(Debug)]
-pub(crate) enum DownloadRequest {
+pub(crate) enum DownloadRequest<T: NetworkTypes> {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
-        response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<T::BlockHeader>>>,
         priority: Priority,
     },
     /// Download the requested headers and send response through channel
     GetBlockBodies {
         request: Vec<B256>,
-        response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<T::BlockBody>>>,
         priority: Priority,
     },
 }
 
 // === impl DownloadRequest ===
 
-impl DownloadRequest {
+impl<T: NetworkTypes> DownloadRequest<T> {
     /// Returns the corresponding state for a peer that handles the request.
     const fn peer_state(&self) -> PeerState {
         match self {

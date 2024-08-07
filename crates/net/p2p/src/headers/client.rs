@@ -1,7 +1,7 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
 pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
-use reth_primitives::{BlockHashOrNumber, Header};
+use reth_primitives::BlockHashOrNumber;
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -21,13 +21,15 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
+pub type HeadersFut<H> = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
+    /// The block header type being fetched.
+    type Header: Send + Sync + Unpin;
     /// The headers future type
-    type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Self::Header>>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -44,7 +46,10 @@ pub trait HeadersClient: DownloadClient {
     ) -> Self::Output;
 
     /// Fetches a single header for the requested number or hash.
-    fn get_header(&self, start: BlockHashOrNumber) -> SingleHeaderRequest<Self::Output> {
+    fn get_header(
+        &self,
+        start: BlockHashOrNumber,
+    ) -> SingleHeaderRequest<Self::Output, Self::Header> {
         self.get_header_with_priority(start, Priority::Normal)
     }
 
@@ -53,7 +58,7 @@ pub trait HeadersClient: DownloadClient {
         &self,
         start: BlockHashOrNumber,
         priority: Priority,
-    ) -> SingleHeaderRequest<Self::Output> {
+    ) -> SingleHeaderRequest<Self::Output, Self::Header> {
         let req = HeadersRequest {
             start,
             limit: 1,
@@ -61,22 +66,24 @@ pub trait HeadersClient: DownloadClient {
             direction: HeadersDirection::Rising,
         };
         let fut = self.get_headers_with_priority(req, priority);
-        SingleHeaderRequest { fut }
+        SingleHeaderRequest { fut, _phantom: std::marker::PhantomData }
     }
 }
 
 /// A Future that resolves to a single block body.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
-pub struct SingleHeaderRequest<Fut> {
+pub struct SingleHeaderRequest<Fut, H> {
     fut: Fut,
+    _phantom: std::marker::PhantomData<H>,
 }
 
-impl<Fut> Future for SingleHeaderRequest<Fut>
+impl<Fut, H> Future for SingleHeaderRequest<Fut, H>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    H: Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<H>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<Header>>;
+    type Output = PeerRequestResult<Option<H>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));

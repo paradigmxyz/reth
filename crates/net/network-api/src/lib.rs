@@ -35,18 +35,20 @@ pub use events::{
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
-use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_eth_wire_types::{
+    capability::Capabilities, DisconnectReason, EthVersion, NetworkTypes, Status,
+};
 use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
 /// Helper trait that unifies network API needed to launch node.
-pub trait FullNetwork:
-    BlockDownloaderProvider
+pub trait FullNetwork<T: NetworkTypes>:
+    BlockDownloaderProvider<T>
     + NetworkSyncUpdater
     + NetworkInfo
-    + NetworkEventListenerProvider
+    + NetworkEventListenerProvider<T>
     + PeersInfo
     + Peers
     + Clone
@@ -54,11 +56,11 @@ pub trait FullNetwork:
 {
 }
 
-impl<T> FullNetwork for T where
-    T: BlockDownloaderProvider
+impl<T, Types: NetworkTypes> FullNetwork<Types> for T where
+    T: BlockDownloaderProvider<Types>
         + NetworkSyncUpdater
         + NetworkInfo
-        + NetworkEventListenerProvider
+        + NetworkEventListenerProvider<Types>
         + PeersInfo
         + Peers
         + Clone

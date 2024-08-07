@@ -5,16 +5,18 @@ use std::{
 
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
-use reth_primitives::{BlockBody, B256};
+use reth_primitives::B256;
 
 /// The bodies future type
-pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
+pub type BodiesFut<B> = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<B>>> + Send + Sync>>;
 
 /// A client capable of downloading block bodies.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
+    /// The block body type being fetched.
+    type Body;
     /// The output of the request future for querying block bodies.
-    type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Self::Body>>> + Sync + Send + Unpin;
 
     /// Fetches the block body for the requested block.
     fn get_block_bodies(&self, hashes: Vec<B256>) -> Self::Output {
@@ -26,7 +28,7 @@ pub trait BodiesClient: DownloadClient {
         -> Self::Output;
 
     /// Fetches a single block body for the requested hash.
-    fn get_block_body(&self, hash: B256) -> SingleBodyRequest<Self::Output> {
+    fn get_block_body(&self, hash: B256) -> SingleBodyRequest<Self::Output, Self::Body> {
         self.get_block_body_with_priority(hash, Priority::Normal)
     }
 
@@ -35,24 +37,26 @@ pub trait BodiesClient: DownloadClient {
         &self,
         hash: B256,
         priority: Priority,
-    ) -> SingleBodyRequest<Self::Output> {
+    ) -> SingleBodyRequest<Self::Output, Self::Body> {
         let fut = self.get_block_bodies_with_priority(vec![hash], priority);
-        SingleBodyRequest { fut }
+        SingleBodyRequest { fut, _phantom: std::marker::PhantomData }
     }
 }
 
 /// A Future that resolves to a single block body.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
-pub struct SingleBodyRequest<Fut> {
+pub struct SingleBodyRequest<Fut, B> {
     fut: Fut,
+    _phantom: std::marker::PhantomData<B>,
 }
 
-impl<Fut> Future for SingleBodyRequest<Fut>
+impl<Fut, B> Future for SingleBodyRequest<Fut, B>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin,
+    B: Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<B>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<BlockBody>>;
+    type Output = PeerRequestResult<Option<B>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));

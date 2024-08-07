@@ -6,7 +6,7 @@ use reth_chainspec::{ChainSpec, MAINNET};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
+use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, NetworkTypes, Status};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
@@ -32,7 +32,7 @@ pub fn rng_secret_key() -> SecretKey {
 
 /// All network related initialization settings.
 #[derive(Debug)]
-pub struct NetworkConfig<C> {
+pub struct NetworkConfig<C, T: NetworkTypes> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -66,7 +66,7 @@ pub struct NetworkConfig<C> {
     /// first hardfork, `Frontier` for mainnet.
     pub fork_filter: ForkFilter,
     /// The block importer type.
-    pub block_import: Box<dyn BlockImport>,
+    pub block_import: Box<dyn BlockImport<T::Block>>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -85,19 +85,19 @@ pub struct NetworkConfig<C> {
 
 // === impl NetworkConfig ===
 
-impl NetworkConfig<()> {
+impl<T: NetworkTypes> NetworkConfig<(), T> {
     /// Convenience method for creating the corresponding builder type
-    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
+    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder<T> {
         NetworkConfigBuilder::new(secret_key)
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<T> {
         NetworkConfigBuilder::with_rng_secret_key()
     }
 }
 
-impl<C> NetworkConfig<C> {
+impl<C, T: NetworkTypes> NetworkConfig<C, T> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
     pub fn new(client: C, secret_key: SecretKey) -> Self {
         NetworkConfig::builder(secret_key).build(client)
@@ -121,22 +121,24 @@ impl<C> NetworkConfig<C> {
     }
 }
 
-impl<C> NetworkConfig<C>
+impl<C, T> NetworkConfig<C, T>
 where
     C: BlockNumReader + 'static,
+    T: NetworkTypes,
 {
     /// Convenience method for calling [`NetworkManager::new`].
-    pub async fn manager(self) -> Result<NetworkManager, NetworkError> {
+    pub async fn manager(self) -> Result<NetworkManager<T>, NetworkError> {
         NetworkManager::new(self).await
     }
 }
 
-impl<C> NetworkConfig<C>
+impl<C, T> NetworkConfig<C, T>
 where
     C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
+    T: NetworkTypes,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
-    pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
+    pub async fn start_network(self) -> Result<NetworkHandle<T>, NetworkError> {
         let client = self.client.clone();
         let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
             .await?
@@ -152,7 +154,7 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-pub struct NetworkConfigBuilder {
+pub struct NetworkConfigBuilder<T: NetworkTypes> {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -186,7 +188,7 @@ pub struct NetworkConfigBuilder {
     /// Whether tx gossip is disabled
     tx_gossip_disabled: bool,
     /// The block importer type
-    block_import: Option<Box<dyn BlockImport>>,
+    block_import: Option<Box<dyn BlockImport<T::Block>>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
 }
@@ -194,7 +196,7 @@ pub struct NetworkConfigBuilder {
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl NetworkConfigBuilder {
+impl<T: NetworkTypes> NetworkConfigBuilder<T> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {
         Self::new(rng_secret_key())
@@ -388,7 +390,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the boot nodes to use to bootstrap the configured discovery services (discv4 + discv5).
-    pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
+    pub fn boot_nodes<P: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = P>) -> Self {
         self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
     }
@@ -455,7 +457,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the block import type.
-    pub fn block_import(mut self, block_import: Box<dyn BlockImport>) -> Self {
+    pub fn block_import(mut self, block_import: Box<dyn BlockImport<T::Block>>) -> Self {
         self.block_import = Some(block_import);
         self
     }
@@ -464,7 +466,7 @@ impl NetworkConfigBuilder {
     /// nothing.
     pub fn build_with_noop_provider(
         self,
-    ) -> NetworkConfig<reth_storage_api::noop::NoopBlockReader> {
+    ) -> NetworkConfig<reth_storage_api::noop::NoopBlockReader, T> {
         self.build(Default::default())
     }
 
@@ -474,7 +476,7 @@ impl NetworkConfigBuilder {
     /// The given client is to be used for interacting with the chain, for example fetching the
     /// corresponding block for a given block hash we receive from a peer in the status message when
     /// establishing a connection.
-    pub fn build<C>(self, client: C) -> NetworkConfig<C> {
+    pub fn build<C>(self, client: C) -> NetworkConfig<C, T> {
         let peer_id = self.get_peer_id();
         let Self {
             secret_key,
