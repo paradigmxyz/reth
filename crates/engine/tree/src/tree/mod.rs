@@ -1706,7 +1706,11 @@ where
         let block_hash = block.hash();
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
+
+        let exec_time = Instant::now();
         let output = executor.execute((&block, U256::MAX).into())?;
+        debug!(target: "engine", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
         self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -1714,6 +1718,7 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
+        let root_time = Instant::now();
         let (state_root, trie_output) =
             state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
@@ -1722,6 +1727,8 @@ where
             )
             .into())
         }
+
+        debug!(target: "engine", elapsed=?root_time.elapsed(), ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {
             block: sealed_block.clone(),
