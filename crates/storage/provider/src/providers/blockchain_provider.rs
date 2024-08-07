@@ -428,7 +428,34 @@ where
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
+        if let Some(indices) = self.database.block_body_indices(number)? {
+            Ok(Some(indices))
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
+            // we have to construct the stored indices for the in memory blocks
+            //
+            // To calculate this we will fetch the anchor block and walk forward from all parents
+            let mut parent_chain = state.parent_state_chain();
+            parent_chain.reverse();
+            let anchor_num = state.anchor().number;
+            let mut stored_indices = self
+                .database
+                .block_body_indices(anchor_num)?
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+            stored_indices.first_tx_num = stored_indices.next_tx_num();
+
+            for state in parent_chain {
+                let txs = state.block().block.body.len() as u64;
+                if state.block().block().number == number {
+                    stored_indices.tx_count = txs;
+                } else {
+                    stored_indices.first_tx_num += txs;
+                }
+            }
+
+            Ok(Some(stored_indices))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns the block with senders with matching number or hash from database.
