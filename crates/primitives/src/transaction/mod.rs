@@ -11,9 +11,9 @@ use alloy_rlp::{
 use bytes::Buf;
 use core::mem;
 use derive_more::{AsRef, Deref};
+use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use once_cell::sync::Lazy;
 
 pub use access_list::{AccessList, AccessListItem, AccessListResult};
 pub use eip1559::TxEip1559;
