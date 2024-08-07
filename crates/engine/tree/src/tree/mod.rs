@@ -518,19 +518,34 @@ where
     }
 
     /// Invoked when previously requested blocks were downloaded.
-    fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+    ///
+    /// If the block count exceeds the configured batch size we're allowed to execute at once, this
+    /// will execute the first batch and send the remaining blocks back through the channel so that
+    /// don't block request processing for a long time.
+    fn on_downloaded(&mut self, mut blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        if blocks.is_empty() {
+            // nothing to execute
+            return None
+        }
+
         trace!(target: "engine", block_count = %blocks.len(), "received downloaded blocks");
-        // TODO(mattsse): on process a certain number of blocks sequentially
-        for block in blocks {
+        let batch = self.config.max_execute_block_batch_size().min(blocks.len());
+        for block in blocks.drain(..batch) {
             if let Some(event) = self.on_downloaded_block(block) {
                 let needs_backfill = event.is_backfill_action();
                 self.on_tree_event(event);
                 if needs_backfill {
                     // can exit early if backfill is needed
-                    break
+                    return None
                 }
             }
         }
+
+        // if we still have blocks to execute, send them as a followup request
+        if !blocks.is_empty() {
+            let _ = self.incoming_tx.send(FromEngine::DownloadedBlocks(blocks));
+        }
+
         None
     }
 
@@ -2166,6 +2181,41 @@ mod tests {
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
+        }
+    }
+
+    #[test]
+    fn test_tree_persist_block_batch() {
+        let tree_config = TreeConfig::default();
+        let chain_spec = MAINNET.clone();
+        let mut test_block_builder =
+            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+
+        // we need more than tree_config.persistence_threshold() +1 blocks to
+        // trigger the persistence task.
+        let blocks: Vec<_> = test_block_builder
+            .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
+            .collect();
+        let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+
+        let mut blocks = vec![];
+        for idx in 0..tree_config.max_execute_block_batch_size() * 2 {
+            blocks.push(test_block_builder.generate_random_block(idx as u64, B256::random()));
+        }
+
+        test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(blocks)).unwrap();
+
+        // process the message
+        let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
+        test_harness.tree.on_engine_message(msg);
+
+        // we now should receive the other batch
+        let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
+        match msg {
+            FromEngine::DownloadedBlocks(blocks) => {
+                assert_eq!(blocks.len(), tree_config.max_execute_block_batch_size());
+            }
+            _ => panic!("unexpected message: {:#?}", msg),
         }
     }
 
