@@ -12,7 +12,7 @@ use std::sync::{
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, error};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -178,7 +178,11 @@ impl PersistenceHandle {
         let db_service = PersistenceService::new(provider_factory, db_service_rx, pruner);
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
-            .spawn(|| db_service.run())
+            .spawn(|| {
+                if let Err(err) = db_service.run() {
+                    error!(target: "engine::persistence", ?err, "Persistence service failed");
+                }
+            })
             .unwrap();
 
         persistence_handle
