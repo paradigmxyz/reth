@@ -11,16 +11,15 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::ChainSpecProvider;
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
     PooledTransactionsElementEcRecovered, TransactionSigned,
 };
-use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
-    StateProviderFactory,
-};
+use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
