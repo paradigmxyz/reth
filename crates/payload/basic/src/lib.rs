@@ -184,6 +184,7 @@ where
             pool: self.pool.clone(),
             executor: self.executor.clone(),
             deadline,
+            // ticks immediately
             interval: tokio::time::interval(self.config.interval),
             best_payload: None,
             pending_block: None,
