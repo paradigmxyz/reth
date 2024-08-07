@@ -2771,6 +2771,7 @@ mod tests {
 
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec.clone());
+        test_harness.tree.config = test_harness.tree.config.with_max_execute_block_batch_size(100);
 
         // create base chain and setup test harness with it
         let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
