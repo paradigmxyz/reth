@@ -6,9 +6,9 @@ use reth_db_api::database::Database;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
-    engine::{EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandlerImpl, TreeConfig},
+    tree::{EngineApiTreeHandler, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -16,7 +16,7 @@ pub use reth_engine_tree::{
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
@@ -25,7 +25,7 @@ use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
-    sync::{mpsc::channel, Arc},
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -33,7 +33,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// Alias for Ethereum chain orchestrator.
 type EthServiceType<DB, Client> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<EthEngineTypes>,
+        EngineApiRequestHandler<EngineApiRequest<EthEngineTypes>>,
         UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         BasicBlockDownloader<Client>,
     >,
@@ -46,7 +46,7 @@ type EthServiceType<DB, Client> = ChainOrchestrator<
 pub struct EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     orchestrator: EthServiceType<DB, Client>,
 }
@@ -54,7 +54,7 @@ where
 impl<DB, Client> EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Constructor for `EthService`.
     #[allow(clippy::too_many_arguments)]
@@ -73,20 +73,17 @@ where
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let (to_tree_tx, to_tree_rx) = channel();
-
         let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
         let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
         let executor_factory = EthExecutorProvider::ethereum(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let from_tree = EngineApiTreeHandlerImpl::spawn_new(
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             executor_factory,
             consensus,
             payload_validator,
-            to_tree_rx,
             persistence_handle,
             payload_builder,
             canonical_in_memory_state,
@@ -110,7 +107,7 @@ where
 impl<DB, Client> Stream for EthService<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 

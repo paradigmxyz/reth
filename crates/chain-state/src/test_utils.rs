@@ -138,6 +138,8 @@ impl TestBlockBuilder {
                     EMPTY_ROOT_HASH,
                 ),
             )])),
+            // use the number as the timestamp so it is monotonically increasing
+            timestamp: number,
             ..Default::default()
         };
 

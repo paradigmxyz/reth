@@ -38,7 +38,9 @@ use reth_eth_wire::{
     PooledTransactions, RequestTxHashes, Transactions,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
-use reth_network_api::Peers;
+use reth_network_api::{
+    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
+};
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
     sync::SyncStateProvider,
@@ -63,12 +65,9 @@ use crate::{
         DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
-    duration_metered_exec,
-    manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
-    metered_poll_nested_stream_with_budget,
+    duration_metered_exec, metered_poll_nested_stream_with_budget,
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
+    NetworkHandle,
 };
 
 /// The future for importing transactions into the pool.

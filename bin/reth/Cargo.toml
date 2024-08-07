@@ -157,10 +157,6 @@ name = "reth"
 path = "src/main.rs"
 
 [[bin]]
-name = "engine2"
-path = "src/engine2.rs"
-
-[[bin]]
 name = "op-reth"
 path = "src/optimism.rs"
 required-features = ["optimism"]

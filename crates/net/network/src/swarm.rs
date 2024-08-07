@@ -8,16 +8,15 @@ use std::{
 
 use futures::Stream;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    EthVersion, Status,
+    capability::CapabilityMessage, errors::EthStreamError, Capabilities, EthVersion, Status,
 };
+use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
 use tracing::trace;
 
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::{PeerMessage, PeerRequestSender},
+    message::PeerMessage,
     peers::InboundConnectionError,
     protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},

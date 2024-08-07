@@ -349,8 +349,9 @@ mod tests {
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         hello::DEFAULT_TCP_PORT,
-        p2pstream::{ProtocolVersion, UnauthedP2PStream},
-        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec, Status,
+        p2pstream::UnauthedP2PStream,
+        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
+        ProtocolVersion, Status,
     };
     use futures::{SinkExt, StreamExt};
     use reth_chainspec::NamedChain;

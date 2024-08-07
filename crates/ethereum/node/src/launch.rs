@@ -10,7 +10,9 @@ use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEvents, NetworkSyncUpdater, SyncState};
+use reth_network::{
+    BlockDownloaderProvider, NetworkEventListenerProvider, NetworkSyncUpdater, SyncState,
+};
 use reth_node_api::{FullNodeTypes, NodeAddOns};
 use reth_node_builder::{
     hooks::NodeHooks,
@@ -170,8 +172,6 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
-        let tree_config = TreeConfig::default().with_persistence_threshold(120);
-
         // Configure the consensus engine
         let mut eth_service = EthService::new(
             ctx.chain_spec(),
@@ -183,7 +183,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder().clone(),
-            tree_config,
+            TreeConfig::default(),
         );
 
         let event_sender = EventSender::default();
@@ -254,7 +254,7 @@ where
         let chainspec = ctx.chain_spec();
         let (exit, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
+        ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 eth_service.orchestrator_mut().start_backfill_sync(initial_target);

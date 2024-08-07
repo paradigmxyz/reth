@@ -60,7 +60,7 @@ pub async fn connect_passthrough(
 /// A Rplx subprotocol for testing
 pub mod proto {
     use super::*;
-    use crate::{capability::Capability, protocol::Protocol};
+    use crate::{protocol::Protocol, Capability};
     use bytes::{Buf, BufMut, BytesMut};
 
     /// Returns a new testing `HelloMessage` with eth and the test protocol

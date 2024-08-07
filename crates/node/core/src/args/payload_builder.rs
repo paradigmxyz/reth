@@ -3,7 +3,7 @@ use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_cli_util::parse_duration_from_secs;
+use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
 use reth_primitives::constants::{
     ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION,
 };
@@ -21,8 +21,12 @@ pub struct PayloadBuilderArgs {
     #[arg(long = "builder.gaslimit", default_value = "30000000", value_name = "GAS_LIMIT")]
     pub max_gas_limit: u64,
 
-    /// The interval at which the job should build a new payload after the last (in seconds).
-    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs, default_value = "1", value_name = "SECONDS")]
+    /// The interval at which the job should build a new payload after the last.
+    ///
+    /// Interval is specified in seconds or in milliseconds if the value ends with `ms`:
+    ///   * `50ms` -> 50 milliseconds
+    ///   * `1` -> 1 second
+    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs_or_ms, default_value = "1", value_name = "DURATION")]
     pub interval: Duration,
 
     /// The deadline for when the payload builder job should resolve.
@@ -153,5 +157,21 @@ mod tests {
         let default_args = PayloadBuilderArgs::default();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_args_with_s_interval() {
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50"])
+                .args;
+        assert_eq!(args.interval, Duration::from_secs(50));
+    }
+
+    #[test]
+    fn test_args_with_ms_interval() {
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50ms"])
+                .args;
+        assert_eq!(args.interval, Duration::from_millis(50));
     }
 }

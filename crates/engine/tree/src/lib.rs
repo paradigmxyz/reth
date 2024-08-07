@@ -11,7 +11,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(missing_docs, dead_code, missing_debug_implementations, unused_variables)] // TODO rm
 
 /// Re-export of the blockchain tree API.
 pub use reth_blockchain_tree_api::*;
@@ -31,5 +30,6 @@ pub mod persistence;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
 
+/// Test utilities.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

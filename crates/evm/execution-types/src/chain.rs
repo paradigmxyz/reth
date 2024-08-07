@@ -1,5 +1,11 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::Cow, collections::BTreeMap};
+use core::{fmt, ops::RangeInclusive};
+#[cfg(feature = "std")]
+use std::{borrow::Cow, collections::BTreeMap};
+
 use crate::ExecutionOutcome;
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
@@ -8,7 +14,6 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///

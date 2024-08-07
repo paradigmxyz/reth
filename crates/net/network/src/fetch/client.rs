@@ -6,6 +6,7 @@ use std::sync::{
 };
 
 use futures::{future, future::Either};
+use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -14,7 +15,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_network_types::{PeersHandle, ReputationChangeKind};
+use reth_network_types::ReputationChangeKind;
 use reth_primitives::{Header, B256};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 

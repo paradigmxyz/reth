@@ -7,16 +7,21 @@ use std::{
 };
 
 use enr::Enr;
-use futures::Future;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
-    NetworkError, NetworkInfo, NetworkStatus, PeerInfo, Peers, PeersHandleProvider, PeersInfo,
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
+    PeersInfo,
 };
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
+use reth_network_p2p::{
+    sync::{NetworkSyncUpdater, SyncState, SyncStateProvider},
+    BlockClient,
+};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_network_types::{PeerAddr, PeerKind, PeersHandle, Reputation, ReputationChangeKind};
+use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_primitives::{Head, TransactionSigned, B256};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
@@ -27,35 +32,9 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    config::NetworkMode, discovery::DiscoveryEvent, manager::NetworkEvent, message::PeerRequest,
-    protocol::RlpxSubProtocol, swarm::NetworkConnectionState, transactions::TransactionsHandle,
-    FetchClient,
+    config::NetworkMode, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
+    transactions::TransactionsHandle, FetchClient,
 };
-
-/// Helper trait that unifies network API needed to launch node.
-pub trait FullNetwork:
-    BlockDownloaderProvider
-    + NetworkSyncUpdater
-    + NetworkInfo
-    + NetworkEvents
-    + PeersInfo
-    + Peers
-    + Clone
-    + 'static
-{
-}
-
-impl<T> FullNetwork for T where
-    T: BlockDownloaderProvider
-        + NetworkSyncUpdater
-        + NetworkInfo
-        + NetworkEvents
-        + PeersInfo
-        + Peers
-        + Clone
-        + 'static
-{
-}
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
@@ -204,7 +183,7 @@ impl NetworkHandle {
 
 // === API Implementations ===
 
-impl NetworkEvents for NetworkHandle {
+impl NetworkEventListenerProvider for NetworkHandle {
     fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.inner.event_sender.new_listener()
     }
@@ -393,19 +372,8 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
-/// Provides [`FetchClient`] for downloading blocks.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait BlockDownloaderProvider {
-    /// Returns a new [`FetchClient`] that can be cloned and shared.
-    ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
-    fn fetch_client(
-        &self,
-    ) -> impl Future<Output = Result<FetchClient, oneshot::error::RecvError>> + Send;
-}
-
 impl BlockDownloaderProvider for NetworkHandle {
-    async fn fetch_client(&self) -> Result<FetchClient, oneshot::error::RecvError> {
+    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await
@@ -440,17 +408,6 @@ struct NetworkInner {
     discv4: Option<Discv4>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
-}
-
-/// Provides event subscription for the network.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait NetworkEvents: Send + Sync {
-    /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> EventStream<NetworkEvent>;
-    /// Returns a new [`DiscoveryEvent`] stream.
-    ///
-    /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
-    fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent>;
 }
 
 /// Provides access to modify the network's additional protocol handlers.
