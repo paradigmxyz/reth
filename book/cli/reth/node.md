@@ -482,6 +482,9 @@ Debug:
       --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
           If provided, the engine will skip `n` consecutive new payloads
 
+      --debug.reorg-frequency <REORG_FREQUENCY>
+          If provided, the chain will be reorged at specified frequency
+
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 

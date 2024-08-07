@@ -50,6 +50,7 @@ reth-engine-util.workspace = true
 reth-cli-util.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-network-api.workspace = true
+reth-payload-validator.workspace = true
 
 ## async
 futures.workspace = true
