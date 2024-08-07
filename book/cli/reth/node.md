@@ -441,8 +441,10 @@ Builder:
 
           [default: 30000000]
 
-      --builder.interval <SECONDS>
-          The interval at which the job should build a new payload after the last (in seconds)
+      --builder.interval <DURATION>
+          The interval at which the job should build a new payload after the last.
+
+          Interval is specified in seconds or in milliseconds if the value ends with `ms`: * `50ms` -> 50 milliseconds * `1` -> 1 second
 
           [default: 1]
 
