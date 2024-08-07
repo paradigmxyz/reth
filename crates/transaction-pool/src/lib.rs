@@ -276,7 +276,7 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
+    Client: StateProviderFactory + reth_storage_api::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
