@@ -7959,6 +7959,7 @@ version = "1.0.4"
 dependencies = [
  "alloy-rlp",
  "reth-basic-payload-builder",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
@@ -7971,6 +7972,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
+ "reth-trie",
  "revm",
  "sha2 0.10.8",
  "thiserror",
