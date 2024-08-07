@@ -764,7 +764,19 @@ where
         // 3. check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine", head = canonical_header.number, "fcu head block is already canonical");
-            // the head block is already canonical
+
+            // TODO(mattsse): for optimism we'd need to trigger a build job as well because on
+            // Optimism, the proposers are allowed to reorg their own chain at will.
+
+            // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
+            //    payload build process if `forkchoiceState.headBlockHash` references a `VALID`
+            //    ancestor of the head of canonical chain, i.e. the ancestor passed payload
+            //    validation process and deemed `VALID`. In the case of such an event, client
+            //    software MUST return `{payloadStatus: {status: VALID, latestValidHash:
+            //    forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
+
+            // the head block is already canonical, so we're not triggering a payload job and can
+            // return right away
             return Ok(valid_outcome(state.head_block_hash))
         }
 
