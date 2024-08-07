@@ -470,5 +470,8 @@ pr:
 
 check-features:
 	cargo hack check \
-		--package reth-provider \
+		--package reth-codecs \
+		--package reth-primitives-traits \
+		--package reth-primitives \
+		--package reth-rpc-types \
 		--feature-powerset
