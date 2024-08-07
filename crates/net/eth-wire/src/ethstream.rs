@@ -6,6 +6,7 @@ use crate::{
 };
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
+use reth_eth_wire_types::{NetworkTypes, PrimitiveNetworkTypes};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkFilter, GotExpected,
@@ -27,15 +28,16 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// `Status` handshake is completed.
 #[pin_project]
 #[derive(Debug)]
-pub struct UnauthedEthStream<S> {
+pub struct UnauthedEthStream<S, T> {
     #[pin]
     inner: S,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<S> UnauthedEthStream<S> {
+impl<S, T> UnauthedEthStream<S, T> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
     pub const fn new(inner: S) -> Self {
-        Self { inner }
+        Self { inner, _phantom: std::marker::PhantomData }
     }
 
     /// Consumes the type and returns the wrapped stream
@@ -44,9 +46,10 @@ impl<S> UnauthedEthStream<S> {
     }
 }
 
-impl<S, E> UnauthedEthStream<S>
+impl<S, T, E> UnauthedEthStream<S, T>
 where
     S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Unpin,
+    T: NetworkTypes,
     EthStreamError: From<E> + From<<S as Sink<Bytes>>::Error>,
 {
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
@@ -56,7 +59,7 @@ where
         self,
         status: Status,
         fork_filter: ForkFilter,
-    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, T>, Status), EthStreamError> {
         self.handshake_with_timeout(status, fork_filter, HANDSHAKE_TIMEOUT).await
     }
 
@@ -66,7 +69,7 @@ where
         status: Status,
         fork_filter: ForkFilter,
         timeout_limit: Duration,
-    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, T>, Status), EthStreamError> {
         timeout(timeout_limit, Self::handshake_without_timeout(self, status, fork_filter))
             .await
             .map_err(|_| EthStreamError::StreamTimeout)?
@@ -77,7 +80,7 @@ where
         mut self,
         status: Status,
         fork_filter: ForkFilter,
-    ) -> Result<(EthStream<S>, Status), EthStreamError> {
+    ) -> Result<(EthStream<S, T>, Status), EthStreamError> {
         trace!(
             %status,
             "sending eth status to peer"
@@ -85,8 +88,9 @@ where
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
-        let message: ProtocolMessage = EthMessage::Status(status).into();
-        self.inner.send(alloy_rlp::encode(message).into()).await?;
+        self.inner
+            .send(alloy_rlp::encode(ProtocolMessage::<T>::from(EthMessage::Status(status))).into())
+            .await?;
 
         let their_msg_res = self.inner.next().await;
 
@@ -104,15 +108,14 @@ where
         }
 
         let version = EthVersion::try_from(status.version)?;
-        let msg: ProtocolMessage =
-            match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
-                Ok(m) => m,
-                Err(err) => {
-                    debug!("decode error in eth handshake: msg={their_msg:x}");
-                    self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                    return Err(EthStreamError::InvalidMessage(err))
-                }
-            };
+        let msg = match ProtocolMessage::<T>::decode_message(version, &mut their_msg.as_ref()) {
+            Ok(m) => m,
+            Err(err) => {
+                debug!("decode error in eth handshake: msg={their_msg:x}");
+                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
+                return Err(EthStreamError::InvalidMessage(err))
+            }
+        };
 
         // The following checks should match the checks in go-ethereum:
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
@@ -186,19 +189,20 @@ where
 /// compatible with eth-networking protocol messages, which get RLP encoded/decoded.
 #[pin_project]
 #[derive(Debug)]
-pub struct EthStream<S> {
+pub struct EthStream<S, T = PrimitiveNetworkTypes> {
     /// Negotiated eth version.
     version: EthVersion,
     #[pin]
     inner: S,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<S> EthStream<S> {
+impl<S, T: NetworkTypes> EthStream<S, T> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
     #[inline]
     pub const fn new(version: EthVersion, inner: S) -> Self {
-        Self { version, inner }
+        Self { version, inner, _phantom: std::marker::PhantomData }
     }
 
     /// Returns the eth version.
@@ -226,30 +230,32 @@ impl<S> EthStream<S> {
     }
 }
 
-impl<S, E> EthStream<S>
+impl<S, T, E> EthStream<S, T>
 where
     S: Sink<Bytes, Error = E> + Unpin,
+    T: NetworkTypes,
     EthStreamError: From<E>,
 {
     /// Same as [`Sink::start_send`] but accepts a [`EthBroadcastMessage`] instead.
     pub fn start_send_broadcast(
         &mut self,
-        item: EthBroadcastMessage,
+        item: EthBroadcastMessage<T>,
     ) -> Result<(), EthStreamError> {
         self.inner.start_send_unpin(Bytes::from(alloy_rlp::encode(
-            ProtocolBroadcastMessage::from(item),
+            ProtocolBroadcastMessage::<T>::from(item),
         )))?;
 
         Ok(())
     }
 }
 
-impl<S, E> Stream for EthStream<S>
+impl<S, T, E> Stream for EthStream<S, T>
 where
     S: Stream<Item = Result<BytesMut, E>> + Unpin,
+    T: NetworkTypes,
     EthStreamError: From<E>,
 {
-    type Item = Result<EthMessage, EthStreamError>;
+    type Item = Result<EthMessage<T>, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -291,9 +297,10 @@ where
     }
 }
 
-impl<S> Sink<EthMessage> for EthStream<S>
+impl<S, T> Sink<EthMessage<T>> for EthStream<S, T>
 where
     S: CanDisconnect<Bytes> + Unpin,
+    T: NetworkTypes,
     EthStreamError: From<<S as Sink<Bytes>>::Error>,
 {
     type Error = EthStreamError;
@@ -302,7 +309,7 @@ where
         self.project().inner.poll_ready(cx).map_err(Into::into)
     }
 
-    fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: EthMessage<T>) -> Result<(), Self::Error> {
         if matches!(item, EthMessage::Status(_)) {
             // TODO: to disconnect here we would need to do something similar to P2PStream's
             // start_disconnect, which would ideally be a part of the CanDisconnect trait, or at
@@ -332,9 +339,10 @@ where
     }
 }
 
-impl<S> CanDisconnect<EthMessage> for EthStream<S>
+impl<S, T> CanDisconnect<EthMessage<T>> for EthStream<S, T>
 where
     S: CanDisconnect<Bytes> + Send,
+    T: NetworkTypes,
     EthStreamError: From<<S as Sink<Bytes>>::Error>,
 {
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
