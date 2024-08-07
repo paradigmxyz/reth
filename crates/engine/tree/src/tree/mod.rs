@@ -1336,7 +1336,14 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine", child =?child_num_hash, ?res, "connected buffered block");
-                    if self.is_sync_target_head(child_num_hash.hash) {
+                    if self.is_sync_target_head(child_num_hash.hash) &&
+                        matches!(
+                            res,
+                            InsertPayloadOk::Inserted(BlockStatus::Valid(
+                                BlockAttachment::Canonical
+                            ))
+                        )
+                    {
                         self.make_canonical(child_num_hash.hash);
                     }
                 }
