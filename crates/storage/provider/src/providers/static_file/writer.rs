@@ -70,7 +70,7 @@ pub struct StaticFileProviderRWRefMut<'a>(
 impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
-        self.0.as_mut().expect("should exist")
+        self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
@@ -79,7 +79,7 @@ impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
 
     fn deref(&self) -> &Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
-        self.0.as_ref().expect("should exist")
+        self.0.as_ref().expect("static file writer provider should be init")
     }
 }
 
