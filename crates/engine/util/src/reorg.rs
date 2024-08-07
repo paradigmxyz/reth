@@ -70,7 +70,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
 }
 
 impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm> {
-    /// Creates new [EngineReorg] stream wrapper.
+    /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
         provider: Provider,
@@ -264,7 +264,7 @@ where
     evm_config.fill_cfg_and_block_env(
         &mut cfg,
         &mut block_env,
-        &chain_spec,
+        chain_spec,
         &reorg_target.header,
         U256::MAX, // TODO:
     );
@@ -274,7 +274,7 @@ where
     // apply eip-4788 pre block contract call
     apply_beacon_root_contract_call(
         evm_config,
-        &chain_spec,
+        chain_spec,
         reorg_target.timestamp,
         reorg_target.number,
         reorg_target.parent_beacon_block_root,
@@ -296,7 +296,7 @@ where
         let tx_recovered = tx.clone().try_into_ecrecovered().map_err(|_| {
             BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
         })?;
-        evm_config.fill_tx_env(&mut evm.tx_mut(), &tx_recovered, tx_recovered.signer());
+        evm_config.fill_tx_env(evm.tx_mut(), &tx_recovered, tx_recovered.signer());
         let exec_result = match evm.transact() {
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
