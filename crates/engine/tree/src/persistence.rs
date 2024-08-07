@@ -180,7 +180,7 @@ impl PersistenceHandle {
             .name("Persistence Service".to_string())
             .spawn(|| {
                 if let Err(err) = db_service.run() {
-                    error!(?err, "Persistence service failed");
+                    error!(target: "engine::persistence", ?err, "Persistence service failed");
                 }
             })
             .unwrap();
