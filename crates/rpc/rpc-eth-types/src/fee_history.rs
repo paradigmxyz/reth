@@ -12,13 +12,12 @@ use futures::{
 };
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_primitives::{
     basefee::calc_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     Receipt, SealedBlock, TransactionSigned, B256,
 };
-use reth_provider::ChainSpecProvider;
 use reth_rpc_types::TxGasAndReward;
 use reth_storage_api::BlockReaderIdExt;
 use serde::{Deserialize, Serialize};

@@ -4,8 +4,8 @@
 
 use reth_errors::ProviderResult;
 use reth_primitives::{Address, B256, U256};
-use reth_storage_api::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_storage_api::StateProvider;
 use reth_trie::HashedStorage;
 use revm::Database;
 
