@@ -2838,5 +2838,8 @@ mod tests {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
+
+        // new head is the tip of the main chain
+        assert_eq!(test_harness.tree.state.tree_state.canonical_head().hash, main_chain_last_hash);
     }
 }
