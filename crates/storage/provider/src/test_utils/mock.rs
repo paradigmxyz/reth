@@ -19,7 +19,10 @@ use reth_primitives::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StageCheckpointReader, StateProofProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -568,6 +571,15 @@ impl StateRootProvider for MockEthProvider {
         Ok(state_root)
     }
 
+    fn hashed_state_root_from_nodes(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
+
     fn hashed_state_root_with_updates(
         &self,
         _state: HashedPostState,
@@ -582,6 +594,15 @@ impl StateRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok((B256::default(), Default::default()))
     }
 }
 
