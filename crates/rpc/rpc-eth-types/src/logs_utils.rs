@@ -4,10 +4,10 @@
 
 use reth_chainspec::ChainInfo;
 use reth_primitives::{BlockNumHash, Receipt, TxHash};
-use reth_provider::ProviderError;
 use reth_rpc_server_types::result::rpc_error_with_code;
 use reth_rpc_types::{FilterId, FilteredParams, Log};
 use reth_storage_api::{BlockReader};
+use reth_storage_api::errors::provider::ProviderError;
 
 use crate::EthApiError;
 

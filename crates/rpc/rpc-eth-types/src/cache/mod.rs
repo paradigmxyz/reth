@@ -8,8 +8,8 @@ use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TransactionSignedEcRecovered, B256,
 };
-use reth_provider::{CanonStateNotification, EvmEnvProvider, TransactionVariant};
-use reth_storage_api::{BlockReader, StateProviderFactory};
+use reth_provider::{CanonStateNotification, EvmEnvProvider};
+use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use schnellru::{ByLength, Limiter};
@@ -264,7 +264,7 @@ impl EthStateCache {
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
 ///
-/// It provides a caching layer on top of the given [`StateProvider`](reth_provider::StateProvider)
+/// It provides a caching layer on top of the given [`StateProvider`](reth_storage_api::StateProvider)
 /// and keeps data fetched via the provider in memory in an LRU cache. If the requested data is
 /// missing in the cache it is fetched and inserted into the cache afterwards. While fetching data
 /// from disk is sync, this service is async since requests and data is shared via channels.
