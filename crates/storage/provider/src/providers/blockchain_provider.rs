@@ -934,12 +934,25 @@ where
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
-        self.database.history_by_block_number(block_number)
+        let hash = self
+            .block_hash(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        self.history_by_block_hash(hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        self.database.history_by_block_hash(block_hash)
+        if let Ok(state) = self.database.history_by_block_hash(block_hash) {
+            // This could be tracked by a block in the database block
+            Ok(state)
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            // ... or this could be tracked by the in memory state
+            let state_provider = self.block_state_provider(state)?;
+            Ok(Box::new(state_provider))
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(block_hash))
+        }
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -947,10 +960,6 @@ where
         if let Ok(state) = self.history_by_block_hash(hash) {
             // This could be tracked by a historical block
             Ok(state)
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            // ... or this could be tracked by the in memory state
-            let state_provider = self.block_state_provider(state)?;
-            Ok(Box::new(state_provider))
         } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
             // .. or this could be the pending state
             Ok(pending)
