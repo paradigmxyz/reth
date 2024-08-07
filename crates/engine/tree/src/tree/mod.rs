@@ -1391,11 +1391,14 @@ where
                 }
                 Err(err) => {
                     debug!(target: "engine", ?err, "failed to connect buffered block to tree");
+                    if let Err(fatal) = self.on_insert_block_error(err) {
+                        warn!(target: "engine", ?fatal, "fatal error occurred while connecting buffered blocks");
+                    }
                 }
             }
         }
 
-        debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
+        debug!(target: "engine", elapsed = ?now.elapsed(), %block_count, "connected buffered blocks");
     }
 
     /// Attempts to recover the block's senders and then buffers it.
@@ -1634,6 +1637,9 @@ where
             }
             Err(err) => {
                 debug!(target: "engine", err=%err.kind(), "failed to insert downloaded block");
+                if let Err(fatal) = self.on_insert_block_error(err) {
+                    warn!(target: "engine", ?fatal, "fatal error occurred while inserting downloaded block");
+                }
             }
         }
         None
