@@ -8040,6 +8040,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-transaction-pool",
+ "revm",
  "thiserror",
  "tokio",
  "tokio-stream",
