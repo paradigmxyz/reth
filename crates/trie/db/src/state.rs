@@ -93,12 +93,9 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
     ///
-    /// // Initialize intermediate nodes if any.
-    /// let intermediate_nodes = TrieUpdates::default();
-    ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = StateRoot::overlay_root(&tx, hashed_state, intermediate_nodes);
+    /// let state_root = StateRoot::overlay_root(&tx, hashed_state);
     /// ```
     ///
     /// # Returns
