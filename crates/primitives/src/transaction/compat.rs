@@ -100,6 +100,8 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.data = tx.input.clone();
                 tx_env.chain_id = None;
                 tx_env.nonce = None;
+                tx_env.authorization_list = None;
+
                 tx_env.optimism = revm_primitives::OptimismFields {
                     source_hash: Some(tx.source_hash),
                     mint: tx.mint,
