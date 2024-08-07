@@ -85,9 +85,8 @@ where
 
         // we need to encode and decode here on our own because we don't have an `EthStream` yet
         // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
-        self.inner
-            .send(alloy_rlp::encode(ProtocolMessage::from(EthMessage::Status(status))).into())
-            .await?;
+        let message: ProtocolMessage = EthMessage::Status(status).into();
+        self.inner.send(alloy_rlp::encode(message).into()).await?;
 
         let their_msg_res = self.inner.next().await;
 
@@ -105,14 +104,15 @@ where
         }
 
         let version = EthVersion::try_from(status.version)?;
-        let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
-            Ok(m) => m,
-            Err(err) => {
-                debug!("decode error in eth handshake: msg={their_msg:x}");
-                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(EthStreamError::InvalidMessage(err))
-            }
-        };
+        let msg: ProtocolMessage =
+            match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
+                Ok(m) => m,
+                Err(err) => {
+                    debug!("decode error in eth handshake: msg={their_msg:x}");
+                    self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
+                    return Err(EthStreamError::InvalidMessage(err))
+                }
+            };
 
         // The following checks should match the checks in go-ethereum:
         // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89

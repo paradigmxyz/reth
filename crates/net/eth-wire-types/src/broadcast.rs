@@ -1,6 +1,6 @@
 //! Types for broadcasting new data.
 
-use crate::{EthMessage, EthVersion};
+use crate::{EthMessage, EthVersion, NetworkTypes};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
@@ -74,9 +74,9 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive_arbitrary(rlp, 25)]
-pub struct NewBlock {
+pub struct NewBlock<B = Block> {
     /// A new block.
-    pub block: Block,
+    pub block: B,
     /// The current total difficulty.
     pub td: U128,
 }
@@ -265,7 +265,7 @@ impl NewPooledTransactionHashes {
     }
 }
 
-impl From<NewPooledTransactionHashes> for EthMessage {
+impl<T: NetworkTypes> From<NewPooledTransactionHashes> for EthMessage<T> {
     fn from(value: NewPooledTransactionHashes) -> Self {
         match value {
             NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),

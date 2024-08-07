@@ -39,13 +39,13 @@ pub struct GetBlockHeaders {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(rlp, 10)]
-pub struct BlockHeaders(
+pub struct BlockHeaders<H = Header>(
     /// The requested headers.
-    pub Vec<Header>,
+    pub Vec<H>,
 );
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
+impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders<Header> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let headers_count: usize = u.int_in_range(0..=10)?;
         let mut headers = Vec::with_capacity(headers_count);
@@ -64,8 +64,8 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
     }
 }
 
-impl From<Vec<Header>> for BlockHeaders {
-    fn from(headers: Vec<Header>) -> Self {
+impl<H> From<Vec<H>> for BlockHeaders<H> {
+    fn from(headers: Vec<H>) -> Self {
         Self(headers)
     }
 }
@@ -90,13 +90,13 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockBodies(
+pub struct BlockBodies<B = BlockBody>(
     /// The requested block bodies, each of which should correspond to a hash in the request.
-    pub Vec<BlockBody>,
+    pub Vec<B>,
 );
 
-impl From<Vec<BlockBody>> for BlockBodies {
-    fn from(bodies: Vec<BlockBody>) -> Self {
+impl<B> From<Vec<B>> for BlockBodies<B> {
+    fn from(bodies: Vec<B>) -> Self {
         Self(bodies)
     }
 }

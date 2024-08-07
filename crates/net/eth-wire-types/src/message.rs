@@ -11,7 +11,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthVersion, SharedTransactions};
+use crate::{EthVersion, NetworkTypes, PrimitiveNetworkTypes, SharedTransactions};
 
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_primitives::bytes::{Buf, BufMut};
@@ -33,16 +33,16 @@ pub enum MessageError {
 }
 
 /// An `eth` protocol message, containing a message ID and payload.
-#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ProtocolMessage {
+#[derive(Debug)]
+pub struct ProtocolMessage<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
     /// The content of the message, including specific data based on the message type.
-    pub message: EthMessage,
+    pub message: EthMessage<T>,
 }
 
-impl ProtocolMessage {
+impl<T: NetworkTypes> ProtocolMessage<T> {
     /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
@@ -70,7 +70,7 @@ impl ProtocolMessage {
                 EthMessage::GetBlockHeaders(request_pair)
             }
             EthMessageID::BlockHeaders => {
-                let request_pair = RequestPair::<BlockHeaders>::decode(buf)?;
+                let request_pair = RequestPair::<BlockHeaders<T::BlockHeader>>::decode(buf)?;
                 EthMessage::BlockHeaders(request_pair)
             }
             EthMessageID::GetBlockBodies => {
@@ -78,7 +78,7 @@ impl ProtocolMessage {
                 EthMessage::GetBlockBodies(request_pair)
             }
             EthMessageID::BlockBodies => {
-                let request_pair = RequestPair::<BlockBodies>::decode(buf)?;
+                let request_pair = RequestPair::<BlockBodies<T::BlockBody>>::decode(buf)?;
                 EthMessage::BlockBodies(request_pair)
             }
             EthMessageID::GetPooledTransactions => {
@@ -116,7 +116,7 @@ impl ProtocolMessage {
     }
 }
 
-impl Encodable for ProtocolMessage {
+impl<T: NetworkTypes> Encodable for ProtocolMessage<T> {
     /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
     /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
@@ -128,23 +128,23 @@ impl Encodable for ProtocolMessage {
     }
 }
 
-impl From<EthMessage> for ProtocolMessage {
-    fn from(message: EthMessage) -> Self {
+impl<T: NetworkTypes> From<EthMessage<T>> for ProtocolMessage<T> {
+    fn from(message: EthMessage<T>) -> Self {
         Self { message_type: message.message_id(), message }
     }
 }
 
 /// Represents messages that can be sent to multiple peers.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProtocolBroadcastMessage {
+pub struct ProtocolBroadcastMessage<T: NetworkTypes> {
     /// The unique identifier representing the type of the Ethereum message.
     pub message_type: EthMessageID,
     /// The content of the message to be broadcasted, including specific data based on the message
     /// type.
-    pub message: EthBroadcastMessage,
+    pub message: EthBroadcastMessage<T>,
 }
 
-impl Encodable for ProtocolBroadcastMessage {
+impl<T: NetworkTypes> Encodable for ProtocolBroadcastMessage<T> {
     /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
     /// prepended to the message.
     fn encode(&self, out: &mut dyn BufMut) {
@@ -156,8 +156,8 @@ impl Encodable for ProtocolBroadcastMessage {
     }
 }
 
-impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
-    fn from(message: EthBroadcastMessage) -> Self {
+impl<T: NetworkTypes> From<EthBroadcastMessage<T>> for ProtocolBroadcastMessage<T> {
+    fn from(message: EthBroadcastMessage<T>) -> Self {
         Self { message_type: message.message_id(), message }
     }
 }
@@ -181,13 +181,13 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 /// [`NewPooledTransactionHashes68`] is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum EthMessage {
+pub enum EthMessage<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Represents a Status message required for the protocol handshake.
     Status(Status),
     /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
     /// Represents a `NewBlock` message broadcast to the network.
-    NewBlock(Box<NewBlock>),
+    NewBlock(Box<NewBlock<T::Block>>),
     /// Represents a Transactions message broadcast to the network.
     Transactions(Transactions),
     /// Represents a `NewPooledTransactionHashes` message for eth/66 version.
@@ -198,11 +198,11 @@ pub enum EthMessage {
     /// Represents a `GetBlockHeaders` request-response pair.
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
     /// Represents a `BlockHeaders` request-response pair.
-    BlockHeaders(RequestPair<BlockHeaders>),
+    BlockHeaders(RequestPair<BlockHeaders<T::BlockHeader>>),
     /// Represents a `GetBlockBodies` request-response pair.
     GetBlockBodies(RequestPair<GetBlockBodies>),
     /// Represents a `BlockBodies` request-response pair.
-    BlockBodies(RequestPair<BlockBodies>),
+    BlockBodies(RequestPair<BlockBodies<T::BlockBody>>),
     /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
     /// Represents a `PooledTransactions` request-response pair.
@@ -217,7 +217,7 @@ pub enum EthMessage {
     Receipts(RequestPair<Receipts>),
 }
 
-impl EthMessage {
+impl<T: NetworkTypes> EthMessage<T> {
     /// Returns the message's ID.
     pub const fn message_id(&self) -> EthMessageID {
         match self {
@@ -242,7 +242,7 @@ impl EthMessage {
     }
 }
 
-impl Encodable for EthMessage {
+impl<T: NetworkTypes> Encodable for EthMessage<T> {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::Status(status) => status.encode(out),
@@ -293,16 +293,16 @@ impl Encodable for EthMessage {
 ///
 /// Note: This is only useful for outgoing messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EthBroadcastMessage {
+pub enum EthBroadcastMessage<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Represents a new block broadcast message.
-    NewBlock(Arc<NewBlock>),
+    NewBlock(Arc<NewBlock<T::Block>>),
     /// Represents a transactions broadcast message.
     Transactions(SharedTransactions),
 }
 
 // === impl EthBroadcastMessage ===
 
-impl EthBroadcastMessage {
+impl<T: NetworkTypes> EthBroadcastMessage<T> {
     /// Returns the message's ID.
     pub const fn message_id(&self) -> EthMessageID {
         match self {
@@ -312,7 +312,7 @@ impl EthBroadcastMessage {
     }
 }
 
-impl Encodable for EthBroadcastMessage {
+impl<T: NetworkTypes> Encodable for EthBroadcastMessage<T> {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::NewBlock(new_block) => new_block.encode(out),
