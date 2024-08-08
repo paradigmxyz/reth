@@ -41,8 +41,7 @@ impl TryFrom<RpcHeader> for Header {
             timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
-            // TODO: requests_root: header.requests_root,
-            requests_root: None,
+            requests_root: header.requests_root,
         })
     }
 }
