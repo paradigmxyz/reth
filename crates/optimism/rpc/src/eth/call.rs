@@ -98,8 +98,6 @@ where
             // EIP-4844 fields
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
-            // EIP-7702 fields
-            // authorization_list: TODO
             authorization_list: Default::default(),
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };

@@ -101,7 +101,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
 
-    /// Returns a [StateProvider] indexed by the given [BlockId].
+    /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///
     /// Note: if a number or hash is provided this will __only__ look at historical(canonical)
     /// state.
@@ -118,31 +118,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     fn state_by_block_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<StateProviderBox> {
-        match number_or_tag {
-            BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Finalized => {
-                // we can only get the finalized state by hash, not by num
-                let hash =
-                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
-
-                // only look at historical state
-                self.history_by_block_hash(hash)
-            }
-            BlockNumberOrTag::Safe => {
-                // we can only get the safe state by hash, not by num
-                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
-
-                self.history_by_block_hash(hash)
-            }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
-            BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                // Note: The `BlockchainProvider` could also lookup the tree for the given block number, if for example the block number is `latest + 1`, however this should only support canonical state: <https://github.com/paradigmxyz/reth/issues/4515>
-                self.history_by_block_number(num)
-            }
-        }
-    }
+    ) -> ProviderResult<StateProviderBox>;
 
     /// Returns a historical [StateProvider] indexed by the given historic block number.
     ///

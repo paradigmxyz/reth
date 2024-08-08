@@ -200,12 +200,12 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
         self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
     }
 
-    /// Returns the block with the matching [BlockId] from the database.
+    /// Returns the block with the matching [`BlockId`] from the database.
     ///
     /// Returns `None` if block is not found.
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block>>;
 
-    /// Returns the block with senders with matching [BlockId].
+    /// Returns the block with senders with matching [`BlockId`].
     ///
     /// Returns the block's transactions in the requested variant.
     ///

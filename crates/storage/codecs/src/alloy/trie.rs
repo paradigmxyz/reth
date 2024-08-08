@@ -5,6 +5,9 @@ use alloy_primitives::B256;
 use alloy_trie::{hash_builder::HashBuilderValue, BranchNodeCompact, TrieMask};
 use bytes::{Buf, BufMut};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 impl Compact for HashBuilderValue {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

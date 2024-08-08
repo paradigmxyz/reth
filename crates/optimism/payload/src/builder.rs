@@ -5,6 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
@@ -17,11 +18,13 @@ use reth_primitives::{
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -214,6 +217,7 @@ where
             U256::ZERO,
             chain_spec,
             attributes,
+            None,
         ))
     }
 }
@@ -262,6 +266,7 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
+    let mut executed_senders = Vec::with_capacity(attributes.transactions.len());
 
     let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
@@ -402,7 +407,8 @@ where
                 .then_some(1),
         }));
 
-        // append transaction to the list of executed transactions
+        // append sender and transaction to the respective lists
+        executed_senders.push(sequencer_tx.signer());
         executed_txs.push(sequencer_tx.into_signed());
     }
 
@@ -490,7 +496,8 @@ where
                 .expect("fee is always valid; execution succeeded");
             total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-            // append transaction to the list of executed transactions
+            // append sender and transaction to the respective lists
+            executed_senders.push(tx.signer());
             executed_txs.push(tx.into_signed());
         }
     }
@@ -524,9 +531,18 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = {
+    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+    let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider.db.hashed_state_root_with_updates(hashed_state.clone()).inspect_err(
+            |err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+            },
+        )?
     };
 
     // create the block header
@@ -582,12 +598,22 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
+    // create the executed block data
+    let executed = ExecutedBlock {
+        block: Arc::new(sealed_block.clone()),
+        senders: Arc::new(executed_senders),
+        execution_output: Arc::new(execution_outcome),
+        hashed_state: Arc::new(hashed_state),
+        trie: Arc::new(trie_output),
+    };
+
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
         chain_spec,
         attributes,
+        Some(executed),
     );
 
     // extend the payload with the blob sidecars from the executed txs

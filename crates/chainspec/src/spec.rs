@@ -808,6 +808,13 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
+/// A trait for reading the current [`ChainSpec`].
+#[auto_impl::auto_impl(&, Arc)]
+pub trait ChainSpecProvider: Send + Sync {
+    /// Get an [`Arc`] to the [`ChainSpec`].
+    fn chain_spec(&self) -> Arc<ChainSpec>;
+}
+
 /// A helper to build custom chain specs
 #[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {

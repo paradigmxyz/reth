@@ -13,12 +13,13 @@ workspace = true
 
 [dependencies]
 reth-chainspec.workspace = true
+reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
-reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-revm.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-types.workspace = true
@@ -26,11 +27,12 @@ reth-rpc-types-compat.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie.workspace = true
+reth-provider.workspace = true
 
 # ethereum
 alloy-sol-types.workspace = true
 revm.workspace = true
-revm-inspectors = { workspace = true, features = ["js-tracer"] }
+revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
 
 # rpc
@@ -55,3 +57,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+
+[features]
+default = ["js-tracer"]
+js-tracer = ["revm-inspectors/js-tracer"]
