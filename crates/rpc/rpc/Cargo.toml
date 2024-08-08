@@ -30,7 +30,7 @@ reth-rpc-types-compat.workspace = true
 revm-inspectors = { workspace = true, features = ["js-tracer"] }
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
-reth-rpc-eth-types.workspace = true
+reth-rpc-eth-types = { workspace = true, features = ["js-tracer"] }
 reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-network-types.workspace = true
