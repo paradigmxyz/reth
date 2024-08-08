@@ -37,6 +37,10 @@ reth-node-core.workspace = true
 reth-exex.workspace = true
 reth-blockchain-tree.workspace = true
 reth-engine-tree.workspace = true
+reth-revm = { workspace = true, features = ["std", "c-kzg"] }
+
+# revm
+revm = { workspace = true, features = ["secp256k1", "blst"] }
 
 # misc
 eyre.workspace = true
