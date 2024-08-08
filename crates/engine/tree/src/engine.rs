@@ -234,6 +234,12 @@ impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
     }
 }
 
+impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T>> {
+    fn from(req: EngineApiRequest<T>) -> Self {
+        Self::Request(req)
+    }
+}
+
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
 pub enum EngineApiEvent {
