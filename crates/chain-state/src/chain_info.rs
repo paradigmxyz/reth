@@ -20,8 +20,8 @@ impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head and finalized header if it
     /// exists.
     pub fn new(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
-        let (finalized_block, _) = watch::channel(finalized.clone());
-        let (safe_block, _) = watch::channel(finalized);
+        let (finalized_block, _) = watch::channel(finalized);
+        let (safe_block, _) = watch::channel(None);
 
         Self {
             inner: Arc::new(ChainInfoInner {
@@ -88,14 +88,12 @@ impl ChainInfoTracker {
     }
 
     /// Returns the safe header of the chain.
-    #[allow(dead_code)]
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
         let h = self.inner.safe_block.borrow();
         h.as_ref().map(|h| h.num_hash())
     }
 
     /// Returns the finalized header of the chain.
-    #[allow(dead_code)]
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
         let h = self.inner.finalized_block.borrow();
         h.as_ref().map(|h| h.num_hash())

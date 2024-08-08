@@ -2,7 +2,7 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
-use dashmap::mapref::one::RefMut;
+use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
@@ -20,8 +20,68 @@ use std::{
 };
 use tracing::debug;
 
-/// Mutable reference to a dashmap element of [`StaticFileProviderRW`].
-pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFileProviderRW>;
+/// Static file writers for every known [`StaticFileSegment`].
+///
+/// WARNING: Trying to use more than one writer for the same segment type **will result in a
+/// deadlock**.
+#[derive(Debug, Default)]
+pub(crate) struct StaticFileWriters {
+    headers: RwLock<Option<StaticFileProviderRW>>,
+    transactions: RwLock<Option<StaticFileProviderRW>>,
+    receipts: RwLock<Option<StaticFileProviderRW>>,
+}
+
+impl StaticFileWriters {
+    pub(crate) fn get_or_create(
+        &self,
+        segment: StaticFileSegment,
+        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW>,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
+        let mut write_guard = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+        };
+
+        if write_guard.is_none() {
+            *write_guard = Some(create_fn()?);
+        }
+
+        Ok(StaticFileProviderRWRefMut(write_guard))
+    }
+
+    pub(crate) fn commit(&self) -> ProviderResult<()> {
+        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+            let mut writer = writer_lock.write();
+            if let Some(writer) = writer.as_mut() {
+                writer.commit()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
+#[derive(Debug)]
+pub struct StaticFileProviderRWRefMut<'a>(
+    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
+);
+
+impl<'a> std::ops::DerefMut for StaticFileProviderRWRefMut<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // This is always created by [`StaticFileWriters::get_or_create`]
+        self.0.as_mut().expect("static file writer provider should be init")
+    }
+}
+
+impl<'a> std::ops::Deref for StaticFileProviderRWRefMut<'a> {
+    type Target = StaticFileProviderRW;
+
+    fn deref(&self) -> &Self::Target {
+        // This is always created by [`StaticFileWriters::get_or_create`]
+        self.0.as_ref().expect("static file writer provider should be init")
+    }
+}
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities

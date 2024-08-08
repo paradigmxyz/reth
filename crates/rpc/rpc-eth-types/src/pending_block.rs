@@ -9,8 +9,8 @@ use reth_chainspec::ChainSpec;
 use reth_primitives::{
     BlockId, BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader, B256,
 };
-use reth_provider::ProviderError;
 use reth_revm::state_change::apply_blockhashes_update;
+use reth_storage_api::errors::provider::ProviderError;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg,

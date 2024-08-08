@@ -28,9 +28,9 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 revm-inspectors = { workspace = true, features = ["js-tracer"] }
-reth-network-peers.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm.workspace = true
-reth-rpc-eth-types.workspace = true
+reth-rpc-eth-types = { workspace = true, features = ["js-tracer"] }
 reth-rpc-server-types.workspace = true
 reth-node-api.workspace = true
 reth-network-types.workspace = true
@@ -83,7 +83,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
-tempfile.workspace = true
 
 [features]
 optimism = [

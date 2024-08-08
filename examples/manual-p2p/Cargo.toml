@@ -20,4 +20,3 @@ futures.workspace = true
 tokio.workspace = true
 
 eyre.workspace = true
-once_cell.workspace = true

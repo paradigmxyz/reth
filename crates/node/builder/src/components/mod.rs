@@ -23,7 +23,8 @@ pub use pool::*;
 
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::{FullNetwork, NetworkHandle};
+use reth_network::NetworkHandle;
+use reth_network_api::FullNetwork;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
 
