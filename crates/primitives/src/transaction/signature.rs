@@ -1,5 +1,8 @@
+use core::fmt::Debug;
+
 use crate::{transaction::util::secp256k1, Address, B256, U256};
-use alloy_primitives::Bytes;
+use alloy_consensus::EncodableSignature;
+use alloy_primitives::{Bytes, Parity};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
 
@@ -63,24 +66,6 @@ impl reth_codecs::Compact for Signature {
 }
 
 impl Signature {
-    /// Output the length of the signature without the length of the RLP header, using the legacy
-    /// scheme with EIP-155 support depends on `chain_id`.
-    pub(crate) fn payload_len_with_eip155_chain_id(&self, chain_id: Option<u64>) -> usize {
-        self.v(chain_id).length() + self.r.length() + self.s.length()
-    }
-
-    /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on `chain_id`.
-    pub(crate) fn encode_with_eip155_chain_id(
-        &self,
-        out: &mut dyn alloy_rlp::BufMut,
-        chain_id: Option<u64>,
-    ) {
-        self.v(chain_id).encode(out);
-        self.r.encode(out);
-        self.s.encode(out);
-    }
-
     /// Output the `v` of the signature depends on `chain_id`
     #[inline]
     #[allow(clippy::missing_const_for_fn)]
@@ -201,6 +186,19 @@ impl Signature {
     pub const fn size(&self) -> usize {
         core::mem::size_of::<Self>()
     }
+
+    /// Returns a signature with the given chain ID applied to the `v` value.
+    pub(crate) fn as_signature_with_eip155_parity(
+        &self,
+        chain_id: Option<u64>,
+    ) -> SignatureWithParity {
+        let parity = match chain_id {
+            Some(chain_id) => EncodableSignature::v(self).with_chain_id(chain_id),
+            None => EncodableSignature::v(self),
+        };
+
+        SignatureWithParity::new(self.r(), self.s(), parity)
+    }
 }
 
 /// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
@@ -221,21 +219,90 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
     }
 }
 
+impl EncodableSignature for Signature {
+    fn from_rs_and_parity<
+        P: TryInto<alloy_primitives::Parity, Error = E>,
+        E: Into<alloy_primitives::SignatureError>,
+    >(
+        r: U256,
+        s: U256,
+        parity: P,
+    ) -> Result<Self, alloy_primitives::SignatureError> {
+        let parity: alloy_primitives::Parity = parity.try_into().map_err(Into::into)?;
+        let signature = Self { r, s, odd_y_parity: parity.y_parity() };
+
+        Ok(signature)
+    }
+
+    fn r(&self) -> U256 {
+        self.r
+    }
+
+    fn s(&self) -> U256 {
+        self.s
+    }
+
+    fn v(&self) -> alloy_primitives::Parity {
+        alloy_primitives::Parity::NonEip155(self.odd_y_parity)
+    }
+
+    fn with_parity<T: Into<alloy_primitives::Parity>>(self, parity: T) -> Self {
+        Self { r: self.r, s: self.s, odd_y_parity: parity.into().y_parity() }
+    }
+}
+
+/// A signature with full parity included.
+// TODO: replace by alloy Signature when there will be an easy way to instantiate them.
+pub(crate) struct SignatureWithParity {
+    /// The R field of the signature; the point on the curve.
+    r: U256,
+    /// The S field of the signature; the point on the curve.
+    s: U256,
+    /// Signature parity
+    parity: Parity,
+}
+
+impl SignatureWithParity {
+    /// Creates a new [`SignatureWithParity`].
+    pub(crate) const fn new(r: U256, s: U256, parity: Parity) -> Self {
+        Self { r, s, parity }
+    }
+}
+
+impl EncodableSignature for SignatureWithParity {
+    fn from_rs_and_parity<
+        P: TryInto<Parity, Error = E>,
+        E: Into<alloy_primitives::SignatureError>,
+    >(
+        r: U256,
+        s: U256,
+        parity: P,
+    ) -> Result<Self, alloy_primitives::SignatureError> {
+        Ok(Self { r, s, parity: parity.try_into().map_err(Into::into)? })
+    }
+
+    fn r(&self) -> U256 {
+        self.r
+    }
+
+    fn s(&self) -> U256 {
+        self.s
+    }
+
+    fn v(&self) -> Parity {
+        self.parity
+    }
+
+    fn with_parity<T: Into<Parity>>(self, parity: T) -> Self {
+        Self { r: self.r, s: self.s, parity: parity.into() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
     use alloy_primitives::{hex, hex::FromHex, Bytes};
     use std::str::FromStr;
-
-    #[test]
-    fn test_payload_len_with_eip155_chain_id() {
-        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
-
-        assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
-        assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
-        assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
-    }
 
     #[test]
     fn test_v() {
@@ -247,26 +314,6 @@ mod tests {
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
-    }
-
-    #[test]
-    fn test_encode_and_decode_with_eip155_chain_id() {
-        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
-
-        let mut encoded = Vec::new();
-        signature.encode_with_eip155_chain_id(&mut encoded, None);
-        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(None));
-        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
-        assert_eq!(signature, decoded);
-        assert_eq!(None, chain_id);
-
-        let mut encoded = Vec::new();
-        signature.encode_with_eip155_chain_id(&mut encoded, Some(1));
-        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(Some(1)));
-        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
-        assert_eq!(signature, decoded);
-        assert_eq!(Some(1), chain_id);
     }
 
     #[test]

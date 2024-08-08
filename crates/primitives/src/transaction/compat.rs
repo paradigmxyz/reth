@@ -22,7 +22,7 @@ impl FillTxEnv for TransactionSigned {
         tx_env.caller = sender;
         match self.as_ref() {
             Transaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_limit = tx.gas_limit as u64;
                 tx_env.gas_price = U256::from(tx.gas_price);
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
