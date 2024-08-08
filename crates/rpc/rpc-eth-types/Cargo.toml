@@ -31,7 +31,7 @@ reth-trie.workspace = true
 # ethereum
 alloy-sol-types.workspace = true
 revm.workspace = true
-revm-inspectors = { workspace = true, features = ["js-tracer"] }
+revm-inspectors = { workspace = true }
 revm-primitives = { workspace = true, features = ["dev"] }
 
 # rpc
@@ -56,3 +56,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+
+[features]
+default = ["js_tracer_errors"]
+js_tracer_errors = ["revm-inspectors/js-tracer"]
