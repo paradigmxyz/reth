@@ -6797,6 +6797,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-db-models"
+version = "1.0.4"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "reth-codecs",
+ "reth-primitives",
+ "serde",
+]
+
+[[package]]
 name = "reth-discv4"
 version = "1.0.4"
 dependencies = [
