@@ -11,7 +11,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthStream, EthVersion, NetworkTypes, P2PStream,
+    EthMessage, EthStream, EthVersion, NetworkTypes, P2PStream, PrimitiveNetworkTypes,
 };
 use tokio::net::TcpStream;
 
@@ -19,7 +19,7 @@ use tokio::net::TcpStream;
 pub type EthPeerConnection<T> = EthStream<P2PStream<ECIESStream<TcpStream>>, T>;
 
 /// Various connection types that at least support the ETH protocol.
-pub type EthSatelliteConnection<T> =
+pub type EthSatelliteConnection<T = PrimitiveNetworkTypes> =
     RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy, T>>;
 
 /// Connection types that support the ETH protocol.
@@ -30,7 +30,7 @@ pub type EthSatelliteConnection<T> =
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
 #[derive(Debug)]
-pub enum EthRlpxConnection<T: NetworkTypes> {
+pub enum EthRlpxConnection<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// A connection that only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection<T>>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.

@@ -31,6 +31,13 @@ pub struct RawCapabilityMessage {
 /// network.
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "EthMessage<T>: Serialize",
+        deserialize = "EthMessage<T>: Deserialize<'de>"
+    ))
+)]
 pub enum CapabilityMessage<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Eth sub-protocol message.
     Eth(EthMessage<T>),

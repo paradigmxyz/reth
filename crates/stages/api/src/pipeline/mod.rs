@@ -940,11 +940,9 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Block {
-                        block: Box::new(random_header(
-                            &mut generators::rng(),
-                            5,
-                            Default::default(),
-                        )),
+                        block: Box::new(
+                            random_header(&mut generators::rng(), 5, Default::default()).into(),
+                        ),
                         error: BlockErrorKind::Validation(ConsensusError::BaseFeeMissing),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))

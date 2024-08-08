@@ -1497,7 +1497,7 @@ impl TransactionSource {
 
 /// Tracks a single peer in the context of [`TransactionsManager`].
 #[derive(Debug)]
-pub struct PeerMetadata<T: NetworkTypes> {
+pub struct PeerMetadata<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Optimistically keeps track of transactions that we know the peer has seen. Optimistic, in
     /// the sense that transactions are preemptively marked as seen by peer when they are sent to
     /// the peer.

@@ -6,7 +6,7 @@ use reth_primitives::BlockNumber;
 use std::ops::RangeInclusive;
 
 /// Body downloader return type.
-pub type BodyDownloaderResult<T> = DownloadResult<Vec<BlockResponse<T>>>;
+pub type BodyDownloaderResult<T = PrimitiveNetworkTypes> = DownloadResult<Vec<BlockResponse<T>>>;
 
 /// A downloader capable of fetching and yielding block bodies from block headers.
 ///

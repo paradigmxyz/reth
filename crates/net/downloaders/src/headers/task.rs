@@ -208,7 +208,7 @@ mod tests {
 
         let mut downloader = TaskDownloader::spawn(downloader);
         downloader.update_local_head(p3.clone());
-        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+        downloader.update_sync_target(SyncTarget::Tip(p0.seal()));
 
         client
             .extend(vec![

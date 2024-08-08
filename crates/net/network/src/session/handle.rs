@@ -5,7 +5,7 @@ use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
     capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
-    EthVersion, NetworkTypes, Status,
+    EthVersion, NetworkTypes, PrimitiveNetworkTypes, Status,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
@@ -222,7 +222,7 @@ pub enum PendingSessionEvent<T: NetworkTypes> {
 
 /// Commands that can be sent to the spawned session.
 #[derive(Debug)]
-pub enum SessionCommand<T: NetworkTypes> {
+pub enum SessionCommand<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Disconnect the connection
     Disconnect {
         /// Why the disconnect was initiated
@@ -235,7 +235,7 @@ pub enum SessionCommand<T: NetworkTypes> {
 /// Message variants an active session can produce and send back to the
 /// [`SessionManager`](crate::session::SessionManager)
 #[derive(Debug)]
-pub enum ActiveSessionMessage<T: NetworkTypes> {
+pub enum ActiveSessionMessage<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Session was gracefully disconnected.
     Disconnected {
         /// The remote node's public key

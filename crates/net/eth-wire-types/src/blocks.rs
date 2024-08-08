@@ -3,7 +3,7 @@
 
 use crate::HeadersDirection;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -38,7 +38,6 @@ pub struct GetBlockHeaders {
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders<H = Header>(
     /// The requested headers.
     pub Vec<H>,
@@ -87,7 +86,6 @@ impl From<Vec<B256>> for GetBlockBodies {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockBodies<B = BlockBody>(

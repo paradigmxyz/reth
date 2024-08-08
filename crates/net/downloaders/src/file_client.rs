@@ -477,6 +477,7 @@ mod tests {
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
+    use reth_primitives::alloy_primitives::{Sealable, Sealed};
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
@@ -510,7 +511,7 @@ mod tests {
     async fn download_headers_at_fork_head() {
         reth_tracing::init_test_tracing();
 
-        let p3 = SealedHeader::default();
+        let p3 = Sealable::seal_slow(Header::default());
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
@@ -530,7 +531,7 @@ mod tests {
             .request_limit(3)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
-        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+        downloader.update_sync_target(SyncTarget::Tip(p0.seal()));
 
         let headers = downloader.next().await.unwrap();
         assert_eq!(headers, Ok(vec![p0, p1, p2]));
@@ -551,7 +552,7 @@ mod tests {
         let mut header_downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         header_downloader.update_local_head(headers.first().unwrap().clone());
-        header_downloader.update_sync_target(SyncTarget::Tip(headers.last().unwrap().hash()));
+        header_downloader.update_sync_target(SyncTarget::Tip(headers.last().unwrap().seal()));
 
         // get headers first
         let mut downloaded_headers = header_downloader.next().await.unwrap().unwrap();
@@ -611,7 +612,7 @@ mod tests {
         while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target: Sealed<Header> = client.tip_header().unwrap().into();
 
-            let sync_target_hash = sync_target.hash();
+            let sync_target_hash = sync_target.seal();
 
             // construct headers downloader and use first header
             let mut header_downloader = ReverseHeadersDownloaderBuilder::default()

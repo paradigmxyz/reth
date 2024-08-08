@@ -20,7 +20,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Provides event subscription for the network.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait NetworkEventListenerProvider<T: NetworkTypes>: Send + Sync {
+pub trait NetworkEventListenerProvider<T: NetworkTypes = PrimitiveNetworkTypes>:
+    Send + Sync
+{
     /// Creates a new [`NetworkEvent`] listener channel.
     fn event_listener(&self) -> EventStream<NetworkEvent<T>>;
     /// Returns a new [`DiscoveryEvent`] stream.
@@ -101,7 +103,7 @@ pub enum DiscoveredEvent {
 
 /// Protocol related request messages that expect a response
 #[derive(Debug)]
-pub enum PeerRequest<T: NetworkTypes> {
+pub enum PeerRequest<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Requests block headers from the peer.
     ///
     /// The response should be sent through the channel.

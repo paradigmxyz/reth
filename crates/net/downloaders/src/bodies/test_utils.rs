@@ -5,9 +5,7 @@
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{
-    alloy_primitives::Sealed, Block, BlockBody, Header, SealedBlock, SealedHeader, B256,
-};
+use reth_primitives::{alloy_primitives::Sealed, Block, BlockBody, Header, SealedBlock, B256};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
@@ -47,10 +45,10 @@ pub(crate) fn create_raw_bodies(
 }
 
 #[inline]
-pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
+pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[Sealed<Header>]) {
     db.update(|tx| {
         for header in headers {
-            tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
+            tx.put::<tables::CanonicalHeaders>(header.number, header.seal()).unwrap();
             tx.put::<tables::Headers>(header.number, header.clone().unseal()).unwrap();
         }
     })

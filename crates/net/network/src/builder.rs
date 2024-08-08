@@ -1,6 +1,7 @@
 //! Builder support for configuring the entire setup.
 
 use reth_eth_wire::{NetworkTypes, PrimitiveNetworkTypes};
+use reth_network_api::test_utils::PeersHandleProvider;
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 

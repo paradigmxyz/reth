@@ -617,7 +617,7 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{BlockBody, B256};
+    use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
     use reth_testing_utils::{generators, generators::random_block_range};
     use std::collections::HashMap;
@@ -664,7 +664,8 @@ mod tests {
         let mut rng = generators::rng();
         let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
 
-        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
+        let headers =
+            blocks.iter().map(|block| block.header.clone().into()).collect::<Vec<Sealed<Header>>>();
         let bodies = blocks
             .into_iter()
             .map(|block| {
@@ -686,16 +687,17 @@ mod tests {
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader =
-            BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
-                client.clone(),
-                Arc::new(TestConsensus::default()),
-                ProviderFactory::new(
-                    db,
-                    MAINNET.clone(),
-                    StaticFileProvider::read_write(static_dir_path).unwrap(),
-                ),
-            );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(request_limit)
+            .build::<_, _, PrimitiveNetworkTypes>(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            ProviderFactory::new(
+                db,
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
+        );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
         let _ = downloader.collect::<Vec<_>>().await;

@@ -10,8 +10,8 @@ use reth_eth_wire::{DisconnectReason, HeadersDirection};
 use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
-    NetworkManager, PeersConfig,
+    BlockDownloaderProvider, NetworkConfig, NetworkConfigBuilder, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_network_p2p::{
@@ -202,7 +202,7 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config =
+    let config: NetworkConfig<_> =
         NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
@@ -224,7 +224,8 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config: NetworkConfig<_> =
+        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -260,7 +261,8 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config: NetworkConfig<_> =
+        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -462,7 +464,7 @@ async fn test_geth_disconnect() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
             .disable_discovery()
             .build(NoopProvider::default());
@@ -570,7 +572,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)

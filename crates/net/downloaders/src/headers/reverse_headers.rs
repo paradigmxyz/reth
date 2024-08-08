@@ -20,7 +20,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_primitives::{
     alloy_primitives::{Sealable, Sealed},
-    BlockHashOrNumber, BlockNumber, GotExpected, B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, Header, B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -927,7 +927,7 @@ impl<H> HeadersRequestOutcome<H> {
 
 /// Wrapper type to order responses
 #[derive(Debug)]
-struct OrderedHeadersResponse<H> {
+struct OrderedHeadersResponse<H = Header> {
     headers: Vec<H>,
     request: HeadersRequest,
     peer_id: PeerId,
@@ -1378,7 +1378,7 @@ mod tests {
 
     #[test]
     fn test_resp_order() {
-        let mut heap = BinaryHeap::new();
+        let mut heap: BinaryHeap<OrderedHeadersResponse> = BinaryHeap::new();
         let hi = 1u64;
         heap.push(OrderedHeadersResponse {
             headers: vec![],
@@ -1488,7 +1488,7 @@ mod tests {
             .request_limit(3)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
-        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+        downloader.update_sync_target(SyncTarget::Tip(p0.seal()));
 
         client
             .extend(vec![

@@ -4,7 +4,7 @@
 
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use futures::SinkExt;
-use reth_primitives::{alloy_primitives::Sealed, BlockBody, Header, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealed, BlockBody, Header, B256};
 use reth_testing_utils::{generators, generators::random_block_range};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};

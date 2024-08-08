@@ -15,7 +15,8 @@ use std::{
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
     types::{Block, BlockHeader},
-    BlockHashNumber, Capabilities, DisconnectReason, NetworkTypes, NewBlockHashes, Status,
+    BlockHashNumber, Capabilities, DisconnectReason, NetworkTypes, NewBlockHashes,
+    PrimitiveNetworkTypes, Status,
 };
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
@@ -71,7 +72,7 @@ impl Deref for BlockNumReader {
 ///
 /// This type is also responsible for responding for received request.
 #[derive(Debug)]
-pub struct NetworkState<T: NetworkTypes> {
+pub struct NetworkState<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer<T>>,
     /// Manages connections to peers.
@@ -557,7 +558,7 @@ mod tests {
 
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthVersion};
     use reth_network_api::PeerRequestSender;
-    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_p2p::{error::RequestError, BodiesClient};
     use reth_network_peers::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;

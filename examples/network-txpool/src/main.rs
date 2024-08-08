@@ -7,7 +7,9 @@
 //! cargo run --release -p network-txpool -- node
 //! ```
 
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+use reth_network::{
+    config::rng_secret_key, transactions::TransactionsHandle, NetworkConfig, NetworkManager,
+};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
@@ -43,7 +45,7 @@ async fn main() -> eyre::Result<()> {
         .split_with_handle();
 
     // this can be used to interact with the `txpool` service directly
-    let _txs_handle = txpool.handle();
+    let _txs_handle: TransactionsHandle = txpool.handle();
 
     // spawn the network task
     tokio::task::spawn(network);

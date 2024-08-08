@@ -73,7 +73,7 @@ mod tests {
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let start = input.checkpoint().block_number;
             let mut rng = generators::rng();
-            let head = random_header(&mut rng, start, None);
+            let head = random_header(&mut rng, start, None).into();
             self.db.insert_headers_with_td(std::iter::once(&head))?;
 
             // use previous progress as seed size
@@ -83,7 +83,10 @@ mod tests {
                 return Ok(Vec::default())
             }
 
-            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
+            let mut headers = random_header_range(&mut rng, start + 1..end, head.hash())
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>();
             self.db.insert_headers_with_td(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)

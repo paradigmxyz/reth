@@ -90,24 +90,8 @@ impl<T: NetworkTypes> NetworkHandle<T> {
         &self.inner.local_peer_id
     }
 
-    /// Returns the [`PeersHandle`] that can be cloned and shared.
-    ///
-    /// The [`PeersHandle`] can be used to interact with the network's peer set.
-    pub fn peers_handle(&self) -> &PeersHandle {
-        &self.inner.peers
-    }
-
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage<T>> {
         &self.inner.to_manager_tx
-    }
-
-    /// Returns a new [`FetchClient`] that can be cloned and shared.
-    ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
-    pub async fn fetch_client(&self) -> Result<FetchClient<T>, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
-        rx.await
     }
 
     /// Returns the mode of the network, either pow, or pos

@@ -273,7 +273,7 @@ mod tests {
         let headers = random_header_range(&mut rng, 0..20, B256::ZERO);
 
         let client = Arc::new(TestBodiesClient::default());
-        let fut = BodiesRequestFuture::new(
+        let fut = BodiesRequestFuture::<_>::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
             BodyDownloaderMetrics::default(),

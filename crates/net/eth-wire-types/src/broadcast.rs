@@ -73,7 +73,6 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive_arbitrary(rlp, 25)]
 pub struct NewBlock<B = Block> {
     /// A new block.
     pub block: B,

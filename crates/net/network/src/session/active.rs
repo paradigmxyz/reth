@@ -16,7 +16,7 @@ use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
     types::Block,
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkTypes,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkTypes, PrimitiveNetworkTypes,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
@@ -63,7 +63,7 @@ const TIMEOUT_SCALING: u32 = 3;
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(dead_code)]
-pub(crate) struct ActiveSession<T: NetworkTypes> {
+pub(crate) struct ActiveSession<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.

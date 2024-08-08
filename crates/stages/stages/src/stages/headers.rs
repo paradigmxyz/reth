@@ -399,6 +399,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
+        use reth_primitives::{alloy_primitives::Sealed, Header};
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;
 
@@ -449,12 +450,15 @@ mod tests {
         }
 
         impl<D: HeaderDownloader + 'static> ExecuteStageTestRunner for HeadersTestRunner<D> {
-            type Seed = Vec<SealedHeader>;
+            type Seed = Vec<Sealed<Header>>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let mut rng = generators::rng();
                 let start = input.checkpoint().block_number;
-                let headers = random_header_range(&mut rng, 0..start + 1, B256::ZERO);
+                let headers = random_header_range(&mut rng, 0..start + 1, B256::ZERO)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>();
                 let head = headers.last().cloned().unwrap();
                 self.db.insert_headers_with_td(headers.iter())?;
 
@@ -466,7 +470,7 @@ mod tests {
                 }
 
                 let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
-                headers.insert(0, head);
+                headers.insert(0, head.into());
                 Ok(headers)
             }
 
@@ -513,9 +517,9 @@ mod tests {
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
                 self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
                 let tip = if !headers.is_empty() {
-                    headers.last().unwrap().hash()
+                    headers.last().unwrap().seal()
                 } else {
-                    let tip = random_header(&mut generators::rng(), 0, None);
+                    let tip = random_header(&mut generators::rng(), 0, None).into();
                     self.db.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
@@ -588,7 +592,7 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner.send_tip(tip.hash());
+        runner.send_tip(tip.seal());
 
         let result = rx.await.unwrap();
         runner.db().factory.static_file_provider().commit().unwrap();
@@ -615,14 +619,14 @@ mod tests {
 
         // let's insert some blocks using append_blocks_with_state
         let sealed_headers =
-            random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.hash());
+            random_header_range(&mut generators::rng(), tip.number..tip.number + 10, tip.seal());
 
         // make them sealed blocks with senders by converting them to empty blocks
         let sealed_blocks = sealed_headers
             .iter()
             .map(|header| {
                 SealedBlockWithSenders::new(
-                    SealedBlock::new(header.clone(), BlockBody::default()),
+                    SealedBlock::new(header.clone().into(), BlockBody::default()),
                     vec![],
                 )
                 .unwrap()
@@ -671,7 +675,7 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner.send_tip(tip.hash());
+        runner.send_tip(tip.seal());
 
         let result = rx.await.unwrap();
         runner.db().factory.static_file_provider().commit().unwrap();

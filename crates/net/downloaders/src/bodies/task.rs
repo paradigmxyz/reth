@@ -1,7 +1,7 @@
 use futures::Stream;
 use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::NetworkTypes;
+use reth_eth_wire_types::{NetworkTypes, PrimitiveNetworkTypes};
 use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
@@ -24,7 +24,7 @@ pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
-pub struct TaskDownloader<T: NetworkTypes> {
+pub struct TaskDownloader<T: NetworkTypes = PrimitiveNetworkTypes> {
     #[pin]
     from_downloader: ReceiverStream<BodyDownloaderResult<T>>,
     to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
@@ -215,7 +215,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             factory,
         );
-        let mut downloader = TaskDownloader::spawn(downloader);
+        let mut downloader: TaskDownloader = TaskDownloader::spawn(downloader);
 
         downloader.set_download_range(1..=0).expect("failed to set download range");
         assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));
