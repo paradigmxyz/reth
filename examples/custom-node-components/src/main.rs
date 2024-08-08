@@ -55,7 +55,7 @@ where
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
-            .with_additional_tasks(5)
+            .with_additional_tasks(ctx.pool_config().additioanl_tasks_size)
             .build_with_tasks(
                 ctx.provider().clone(),
                 ctx.task_executor().clone(),

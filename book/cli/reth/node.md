@@ -430,6 +430,11 @@ TxPool:
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
 
+      --txpool.additional-tasks-size <ADDITIONAL_TASKS_SIZE>
+          Flag to additional tasks size
+
+          [default: 1]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder

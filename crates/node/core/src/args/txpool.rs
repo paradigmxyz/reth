@@ -6,7 +6,7 @@ use reth_primitives::Address;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS, validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    REPLACE_BLOB_PRICE_BUMP, TXPOOL_ADDITIONAL_TASKS_SIZE, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 /// Parameters for debugging purposes
@@ -63,6 +63,9 @@ pub struct TxPoolArgs {
     /// Flag to toggle local transaction propagation.
     #[arg(long = "txpool.no-local-transactions-propagation")]
     pub no_local_transactions_propagation: bool,
+    /// Flag to additional tasks size
+    #[arg(long = "txpool.additional-tasks-size", alias = "txpool.additional_tasks_size", default_value_t = TXPOOL_ADDITIONAL_TASKS_SIZE)]
+    pub additional_tasks_size: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -82,6 +85,7 @@ impl Default for TxPoolArgs {
             no_locals: false,
             locals: Default::default(),
             no_local_transactions_propagation: false,
+            additional_tasks_size: TXPOOL_ADDITIONAL_TASKS_SIZE,
         }
     }
 }
@@ -116,6 +120,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 default_price_bump: self.price_bump,
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
+            additioanl_tasks_size: self.additional_tasks_size,
         }
     }
 }

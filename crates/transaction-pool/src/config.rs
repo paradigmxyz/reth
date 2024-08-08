@@ -10,6 +10,9 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
+/// The default additional validation tasks size.
+pub const TXPOOL_ADDITIONAL_TASKS_SIZE: usize = 1;
+
 /// Default price bump (in %) for the transaction pool underpriced check.
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
 
@@ -36,6 +39,8 @@ pub struct PoolConfig {
     /// How to handle locally received transactions:
     /// [`TransactionOrigin::Local`](crate::TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
+    /// additional tasks size
+    pub additioanl_tasks_size: usize,
 }
 
 impl PoolConfig {
@@ -59,6 +64,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
+            additioanl_tasks_size: TXPOOL_ADDITIONAL_TASKS_SIZE,
         }
     }
 }
