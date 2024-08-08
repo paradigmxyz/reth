@@ -64,7 +64,7 @@ pub struct TxPoolArgs {
     /// Flag to toggle local transaction propagation.
     #[arg(long = "txpool.no-local-transactions-propagation")]
     pub no_local_transactions_propagation: bool,
-    /// Flag to additional validation tasks size
+    /// Number of additional transaction validation tasks to spawn.
     #[arg(long = "txpool.additional-validation-tasks", alias = "txpool.additional_validation_tasks", default_value_t = DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS)]
     pub additional_validation_tasks: usize,
 }
