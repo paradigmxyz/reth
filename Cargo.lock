@@ -6664,8 +6664,8 @@ name = "reth-consensus"
 version = "1.0.4"
 dependencies = [
  "auto_impl",
+ "derive_more",
  "reth-primitives",
- "thiserror-no-std",
 ]
 
 [[package]]

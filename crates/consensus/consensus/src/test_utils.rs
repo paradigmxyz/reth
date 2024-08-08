@@ -1,6 +1,6 @@
 use crate::{Consensus, ConsensusError, PostExecutionInput};
 use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader, U256};
-use std::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
