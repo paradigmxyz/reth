@@ -46,16 +46,20 @@ impl<T: NetworkTypes> TaskDownloader<T> {
     /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_network_p2p::bodies::client::BodiesClient;
+    /// use reth_primitives::BlockBody;
     /// use reth_storage_api::HeaderProvider;
     /// use std::sync::Arc;
     ///
-    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + Unpin + 'static>(
+    /// fn t<
+    ///     B: BodiesClient<Body = BlockBody> + 'static,
+    ///     Provider: HeaderProvider + Unpin + 'static,
+    /// >(
     ///     client: Arc<B>,
     ///     consensus: Arc<dyn Consensus>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
-    ///     let downloader = TaskDownloader::spawn(downloader);
+    ///     let downloader: TaskDownloader = TaskDownloader::spawn(downloader);
     /// }
     /// ```
     pub fn spawn<D>(downloader: D) -> Self

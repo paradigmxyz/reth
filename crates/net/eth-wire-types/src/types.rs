@@ -42,6 +42,7 @@ pub trait Block:
 }
 
 /// Block header
+/// TODO: remove `From` and `Into` trait requirements
 pub trait BlockHeader:
     Send
     + Sync
@@ -68,6 +69,7 @@ pub trait BlockHeader:
 }
 
 /// Block body
+/// TODO: remove `From` and `Into` trait requirements
 pub trait BlockBody:
     Encodable
     + Decodable

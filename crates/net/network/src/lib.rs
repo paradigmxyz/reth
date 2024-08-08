@@ -59,7 +59,7 @@
 //! let config = NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client);
 //!
 //! // create the network instance
-//! let network = NetworkManager::new(config).await.unwrap();
+//! let network: NetworkManager = NetworkManager::new(config).await.unwrap();
 //!
 //! // keep a handle to the network and spawn it
 //! let handle = network.handle().clone();
@@ -82,7 +82,7 @@
 //!     // The key that's used for encrypting sessions and to identify our node.
 //!     let local_key = rng_secret_key();
 //!
-//!     let config =
+//!     let config: NetworkConfig<_> =
 //!         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
 //!     let transactions_manager_config = config.transactions_manager_config.clone();
 //!
