@@ -2010,10 +2010,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                 return Ok(Some(Vec::new()))
             }
 
-            return self
-                .tx
+            self.tx
                 .get::<tables::BlockOmmers>(number)
-                .map(|ommers| ommers.map(|data| data.ommers).unwrap_or_else(Vec::new))
+                .map(|ommers| ommers.map(|data| data.ommers).unwrap_or_default())
                 .map(Some)
                 .map_err(ProviderError::Database)
         } else {
