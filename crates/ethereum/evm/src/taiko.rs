@@ -17,6 +17,10 @@ pub struct TaikoData {
     pub l2_contract: Address,
     /// base fee sharing ratio
     pub basefee_ratio: u8,
+    /// base fee adjustment quotient
+    pub basefee_adj_quotient: u8,
+    /// gas issuance per second
+    pub gas_issue_per_sec: u32,
 }
 
 /// Anchor tx gas limit
@@ -190,11 +194,22 @@ pub fn check_anchor_tx_ontake(
         "L1 state root mismatch"
     );
     ensure!(anchor_call._anchorBlockId == taiko_data.l1_header.number, "L1 block number mismatch");
-    ensure!(anchor_call._anchorStateRoot == taiko_data.l1_header.state_root, "L1 state root mismatch");
+    ensure!(
+        anchor_call._anchorStateRoot == taiko_data.l1_header.state_root,
+        "L1 state root mismatch"
+    );
     // The parent gas used input needs to match the gas used value of the parent block
     ensure!(
-        anchor_call.parentGasUsed == taiko_data.parent_header.gas_used as u32,
+        anchor_call._parentGasUsed == taiko_data.parent_header.gas_used as u32,
         "parentGasUsed mismatch"
+    );
+    ensure!(
+        anchor_call._gasIssuancePerSecond == taiko_data.gas_issue_per_sec,
+        "gas issuance per second mismatch"
+    );
+    ensure!(
+        anchor_call._basefeeAdjustmentQuotient == taiko_data.basefee_adj_quotient,
+        "basefee adjustment quotient mismatch"
     );
 
     Ok(())

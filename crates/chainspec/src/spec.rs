@@ -155,7 +155,7 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
             #[cfg(feature = "taiko")]
-            (Hardfork::Ontake, ForkCondition::Block(9999999)), //todo
+            (Hardfork::Ontake, ForkCondition::Block(20)), //todo
         ]),
         deposit_contract: None,
         ..Default::default()
