@@ -8,6 +8,7 @@ use reth_db_api::{
     database::Database,
     transaction::DbTxMut,
 };
+use reth_eth_wire_types::types::BlockHeader;
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
@@ -227,18 +228,18 @@ where
         let local_head_number = gap.local_head.number;
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(gap.local_head, gap.target);
+        self.downloader.update_sync_gap(gap.local_head.into(), gap.target);
 
         // We only want to stop once we have all the headers on ETL filespace (disk).
         loop {
             match ready!(self.downloader.poll_next_unpin(cx)) {
                 Some(Ok(headers)) => {
-                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number), to_block = headers.last().map(|h| h.number), "Received headers");
+                    info!(target: "sync::stages::headers", total = headers.len(), from_block = headers.first().map(|h| h.number()), to_block = headers.last().map(|h| h.number()), "Received headers");
                     for header in headers {
-                        let header_number = header.number;
+                        let header_number = header.number();
 
-                        self.hash_collector.insert(header.hash(), header_number)?;
-                        self.header_collector.insert(header_number, header)?;
+                        self.hash_collector.insert(header.seal(), header_number)?;
+                        self.header_collector.insert(header_number, header.into())?;
 
                         // Headers are downloaded in reverse, so if we reach here, we know we have
                         // filled the gap.
@@ -250,7 +251,11 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
+                    return Poll::Ready(Err(StageError::DetachedHead {
+                        local_head: Box::new((*local_head).into()),
+                        header: Box::new((*header).into()),
+                        error,
+                    }))
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }

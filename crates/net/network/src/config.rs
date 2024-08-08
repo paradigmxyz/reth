@@ -6,7 +6,9 @@ use reth_chainspec::{ChainSpec, MAINNET};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, NetworkTypes, Status};
+use reth_eth_wire::{
+    HelloMessage, HelloMessageWithProtocols, NetworkTypes, PrimitiveNetworkTypes, Status,
+};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
@@ -32,7 +34,7 @@ pub fn rng_secret_key() -> SecretKey {
 
 /// All network related initialization settings.
 #[derive(Debug)]
-pub struct NetworkConfig<C, T: NetworkTypes> {
+pub struct NetworkConfig<C, T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -154,7 +156,7 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-pub struct NetworkConfigBuilder<T: NetworkTypes> {
+pub struct NetworkConfigBuilder<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.

@@ -2,7 +2,7 @@ use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priori
 use futures::{Future, FutureExt};
 use reth_eth_wire_types::types::BlockHeader;
 pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
-use reth_primitives::BlockHashOrNumber;
+use reth_primitives::{BlockHashOrNumber, Header};
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -22,7 +22,8 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut<H> = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> + Send + Sync>>;
+pub type HeadersFut<H = Header> =
+    Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]

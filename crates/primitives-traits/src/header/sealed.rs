@@ -137,15 +137,15 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     }
 }
 
-impl From<SealedHeader> for Sealed<Header> {
-    fn from(value: SealedHeader) -> Sealed<Header> {
-        Sealed::new_unchecked(value.header, value.hash)
-    }
-}
-
 impl<T: Into<Header>> From<Sealed<T>> for SealedHeader {
     fn from(value: Sealed<T>) -> Self {
         let (header, hash) = value.into_parts();
         Self { hash, header: header.into() }
+    }
+}
+
+impl<T: From<Header>> From<SealedHeader> for Sealed<T> {
+    fn from(value: SealedHeader) -> Self {
+        Sealed::new_unchecked(value.header.into(), value.hash)
     }
 }

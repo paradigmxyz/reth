@@ -2,6 +2,7 @@ use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
 use futures::Stream;
 use reth_consensus::Consensus;
+use reth_eth_wire_types::types::BlockHeader;
 use reth_primitives::{alloy_primitives::Sealed, BlockHashOrNumber, SealedHeader, B256};
 /// A downloader capable of fetching and yielding block headers.
 ///
@@ -17,7 +18,7 @@ pub trait HeaderDownloader:
     + Unpin
 {
     /// Header type being downloaded.
-    type Header: Send + Sync;
+    type Header: BlockHeader;
 
     /// Updates the gap to sync which ranges from local head to the sync target
     ///

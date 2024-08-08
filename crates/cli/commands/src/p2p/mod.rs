@@ -136,7 +136,7 @@ impl Command {
                         .retry(&backoff)
                         .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                         .await?;
-                        header.hash()
+                        header.seal()
                     }
                 };
                 let (_, result) = (move || {

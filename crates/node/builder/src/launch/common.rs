@@ -34,7 +34,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_primitives::{BlockNumber, Head, B256};
+use reth_primitives::{BlockNumber, Head, Header, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, FullProvider, ProviderFactory, ProviderResult,

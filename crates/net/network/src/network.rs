@@ -11,7 +11,8 @@ use parking_lot::Mutex;
 use reth_chainspec::Head;
 use reth_discv4::Discv4;
 use reth_eth_wire::{
-    DisconnectReason, NetworkTypes, NewBlock, NewPooledTransactionHashes, SharedTransactions,
+    DisconnectReason, NetworkTypes, NewBlock, NewPooledTransactionHashes, PrimitiveNetworkTypes,
+    SharedTransactions,
 };
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -43,7 +44,7 @@ use crate::{
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
 #[derive(Clone, Debug)]
-pub struct NetworkHandle<T: NetworkTypes> {
+pub struct NetworkHandle<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The Arc'ed delegate that contains the state.
     inner: Arc<NetworkInner<T>>,
 }

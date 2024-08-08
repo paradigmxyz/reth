@@ -3,9 +3,7 @@
 use std::{fmt, net::SocketAddr, sync::Arc};
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
-    EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NetworkTypes, NodeData, PooledTransactions, Receipts, Status,
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NetworkTypes, NodeData, PooledTransactions, PrimitiveNetworkTypes, Receipts, Status
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -34,7 +32,7 @@ pub trait NetworkEventListenerProvider<T: NetworkTypes>: Send + Sync {
 /// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
 /// etc.
 #[derive(Debug, Clone)]
-pub enum NetworkEvent<T: NetworkTypes> {
+pub enum NetworkEvent<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.

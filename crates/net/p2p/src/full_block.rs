@@ -6,7 +6,9 @@ use crate::{
     BlockClient,
 };
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{types::BlockHeader, HeadersDirection, NetworkTypes};
+use reth_eth_wire_types::{
+    types::BlockHeader, HeadersDirection, NetworkTypes, PrimitiveNetworkTypes,
+};
 use reth_network_peers::WithPeerId;
 use reth_primitives::{
     alloy_primitives::{Sealable, Sealed},
@@ -25,7 +27,7 @@ use tracing::debug;
 
 /// A Client that can fetch full blocks from the network.
 #[derive(Debug, Clone)]
-pub struct FullBlockClient<Client, T: NetworkTypes> {
+pub struct FullBlockClient<Client, T: NetworkTypes = PrimitiveNetworkTypes> {
     client: Client,
     consensus: Arc<dyn Consensus>,
     phantom: std::marker::PhantomData<T>,
@@ -110,7 +112,7 @@ where
 /// This will attempt to fetch both the header and body for the given block hash at the same time.
 /// When both requests succeed, the future will yield the full block.
 #[must_use = "futures do nothing unless polled"]
-pub struct FetchFullBlockFuture<Client, T>
+pub struct FetchFullBlockFuture<Client, T = PrimitiveNetworkTypes>
 where
     T: NetworkTypes,
     Client: BlockClient<T>,
@@ -314,7 +316,7 @@ enum BodyResponse<B> {
 /// hash array used to request them.
 #[must_use = "futures do nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct FetchFullBlockRangeFuture<Client, T>
+pub struct FetchFullBlockRangeFuture<Client, T = PrimitiveNetworkTypes>
 where
     T: NetworkTypes,
     Client: BlockClient<T>,

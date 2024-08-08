@@ -1,6 +1,6 @@
 //! Builder support for configuring the entire setup.
 
-use reth_eth_wire::NetworkTypes;
+use reth_eth_wire::{NetworkTypes, PrimitiveNetworkTypes};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 
@@ -16,7 +16,7 @@ pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
 #[allow(missing_debug_implementations)]
-pub struct NetworkBuilder<Tx, Eth, T: NetworkTypes> {
+pub struct NetworkBuilder<Tx, Eth, T: NetworkTypes = PrimitiveNetworkTypes> {
     pub(crate) network: NetworkManager<T>,
     pub(crate) transactions: Tx,
     pub(crate) request_handler: Eth,

@@ -29,7 +29,7 @@ use std::{
 
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{capability::CapabilityMessage, Capabilities, DisconnectReason, NetworkTypes};
+use reth_eth_wire::{capability::CapabilityMessage, Capabilities, DisconnectReason, NetworkTypes, PrimitiveNetworkTypes};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -76,7 +76,7 @@ use crate::{
 /// include_mmd!("docs/mermaid/network-manager.mmd")
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
-pub struct NetworkManager<T: NetworkTypes> {
+pub struct NetworkManager<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The type that manages the actual network part, which includes connections.
     swarm: Swarm<T>,
     /// Underlying network handle that can be shared.

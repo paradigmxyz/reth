@@ -13,8 +13,10 @@ use reth_config::config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
 
+use reth_eth_wire_types::types::BlockHeader;
 use reth_primitives::{
-    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
+    alloy_primitives::Sealed, revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber,
+    Head, B256,
 };
 use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
@@ -314,7 +316,7 @@ impl NodeConfig {
             return Ok(header.number)
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
+        Ok(self.fetch_tip_from_network(client, tip.into()).await.number())
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -324,7 +326,7 @@ impl NodeConfig {
         &self,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> SealedHeader
+    ) -> Sealed<Client::Header>
     where
         Client: HeadersClient,
     {

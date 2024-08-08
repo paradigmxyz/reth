@@ -1,6 +1,7 @@
 use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
+use reth_eth_wire_types::types::BlockHeader;
 use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderResult,
@@ -81,7 +82,7 @@ impl<H: Send + Sync> TaskDownloader<H> {
     }
 }
 
-impl<H: Send + Sync> HeaderDownloader for TaskDownloader<H> {
+impl<H: BlockHeader> HeaderDownloader for TaskDownloader<H> {
     type Header = H;
 
     fn update_sync_gap(&mut self, head: Sealed<H>, target: SyncTarget) {
