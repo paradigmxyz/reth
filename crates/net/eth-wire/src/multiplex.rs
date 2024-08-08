@@ -675,6 +675,7 @@ mod tests {
         },
         UnauthedP2PStream,
     };
+    use reth_eth_wire_types::PrimitiveNetworkTypes;
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
@@ -693,7 +694,7 @@ mod tests {
             let (p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
-            let (_eth_stream, _) = UnauthedEthStream::new(p2p_stream)
+            let (_eth_stream, _) = UnauthedEthStream::<_>::new(p2p_stream)
                 .handshake(other_status, other_fork_filter)
                 .await
                 .unwrap();
@@ -709,7 +710,7 @@ mod tests {
             .into_satellite_stream_with_handshake(
                 eth.capability().as_ref(),
                 move |proxy| async move {
-                    UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
+                    UnauthedEthStream::<_>::new(proxy).handshake(status, fork_filter).await
                 },
             )
             .await
@@ -732,7 +733,7 @@ mod tests {
             let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
-                .into_eth_satellite_stream(other_status, other_fork_filter)
+                .into_eth_satellite_stream::<PrimitiveNetworkTypes>(other_status, other_fork_filter)
                 .await
                 .unwrap();
 
@@ -763,7 +764,7 @@ mod tests {
 
         let conn = connect_passthrough(local_addr, test_hello().0).await;
         let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
-            .into_eth_satellite_stream(status, fork_filter)
+            .into_eth_satellite_stream::<PrimitiveNetworkTypes>(status, fork_filter)
             .await
             .unwrap();
 

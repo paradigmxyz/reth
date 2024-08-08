@@ -12,10 +12,7 @@ use reth_primitives::{alloy_primitives::Sealed, BlockHashOrNumber, SealedHeader,
 ///
 /// A [`HeaderDownloader`] is a [Stream] that returns batches of headers.
 pub trait HeaderDownloader:
-    Send
-    + Sync
-    + Stream<Item = HeadersDownloaderResult<Vec<Sealed<Self::Header>>, Self::Header>>
-    + Unpin
+    Send + Sync + Stream<Item = HeadersDownloaderResult<Self::Header>> + Unpin
 {
     /// Header type being downloaded.
     type Header: BlockHeader;

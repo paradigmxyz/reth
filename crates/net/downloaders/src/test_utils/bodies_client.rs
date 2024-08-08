@@ -77,7 +77,8 @@ impl DownloadClient for TestBodiesClient {
 }
 
 impl BodiesClient for TestBodiesClient {
-    type Output = BodiesFut;
+    type Body = BlockBody;
+    type Output = BodiesFut<Self::Body>;
 
     fn get_block_bodies_with_priority(
         &self,

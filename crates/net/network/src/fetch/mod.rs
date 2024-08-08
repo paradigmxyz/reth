@@ -29,6 +29,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::message::BlockRequest;
 
+type PeerRequest<Req, Resp> = Request<Req, PeerRequestResult<Resp>>;
+
 /// Manages data fetching operations.
 ///
 /// This type is hooked into the staged sync pipeline and delegates download request to available
@@ -38,11 +40,9 @@ use crate::message::BlockRequest;
 #[derive(Debug)]
 pub struct StateFetcher<T: NetworkTypes> {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<T::BlockHeader>>>>,
+    inflight_headers_requests: HashMap<PeerId, PeerRequest<HeadersRequest, Vec<T::BlockHeader>>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<T::BlockBody>>>>,
+    inflight_bodies_requests: HashMap<PeerId, PeerRequest<Vec<B256>, Vec<T::BlockBody>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager

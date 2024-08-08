@@ -11,7 +11,7 @@ use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
-    HeadersDirection, NetworkTypes, NodeData, Receipts,
+    HeadersDirection, NetworkTypes, NodeData, PrimitiveNetworkTypes, Receipts,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -52,7 +52,7 @@ const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 /// This can be spawned to another task and is supposed to be run as background service.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct EthRequestHandler<C, T: NetworkTypes> {
+pub struct EthRequestHandler<C, T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The client type that can interact with the chain.
     client: C,
     /// Used for reporting peers.

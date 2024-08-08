@@ -4,7 +4,7 @@ use reth_eth_wire_types::{types::BlockHeader, NetworkTypes, PrimitiveNetworkType
 use reth_primitives::{alloy_primitives::Sealed, BlockNumber, SealedBlock, B256};
 
 /// The block response
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum BlockResponse<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock),
@@ -30,3 +30,15 @@ impl<T: NetworkTypes> BlockResponse<T> {
         }
     }
 }
+
+impl<T: NetworkTypes> PartialEq for BlockResponse<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Full(block), Self::Full(other)) => block == other,
+            (Self::Empty(header), Self::Empty(other)) => header == other,
+            _ => false,
+        }
+    }
+}
+
+impl<T: NetworkTypes> Eq for BlockResponse<T> {}

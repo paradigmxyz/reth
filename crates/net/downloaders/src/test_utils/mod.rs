@@ -4,7 +4,7 @@
 
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use futures::SinkExt;
-use reth_primitives::{BlockBody, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealed, BlockBody, Header, SealedHeader, B256};
 use reth_testing_utils::{generators, generators::random_block_range};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};
@@ -19,11 +19,11 @@ pub(crate) const TEST_SCOPE: &str = "downloaders.test";
 /// Generate a set of bodies and their corresponding block hashes
 pub(crate) fn generate_bodies(
     range: RangeInclusive<u64>,
-) -> (Vec<SealedHeader>, HashMap<B256, BlockBody>) {
+) -> (Vec<Sealed<Header>>, HashMap<B256, BlockBody>) {
     let mut rng = generators::rng();
     let blocks = random_block_range(&mut rng, range, B256::ZERO, 0..2);
 
-    let headers = blocks.iter().map(|block| block.header.clone()).collect();
+    let headers = blocks.iter().map(|block| block.header.clone().into()).collect();
     let bodies = blocks
         .into_iter()
         .map(|block| {
@@ -46,7 +46,7 @@ pub(crate) fn generate_bodies(
 /// bodies and corresponding block hashes
 pub(crate) async fn generate_bodies_file(
     range: RangeInclusive<u64>,
-) -> (tokio::fs::File, Vec<SealedHeader>, HashMap<B256, BlockBody>) {
+) -> (tokio::fs::File, Vec<Sealed<Header>>, HashMap<B256, BlockBody>) {
     let (headers, bodies) = generate_bodies(range);
     let raw_block_bodies = create_raw_bodies(headers.iter().cloned(), &mut bodies.clone());
 

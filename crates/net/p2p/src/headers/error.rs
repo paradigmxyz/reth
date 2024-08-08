@@ -3,7 +3,7 @@ use reth_primitives::alloy_primitives::Sealed;
 use thiserror::Error;
 
 /// Header downloader result
-pub type HeadersDownloaderResult<T, H> = Result<T, HeadersDownloaderError<H>>;
+pub type HeadersDownloaderResult<H> = Result<Vec<Sealed<H>>, HeadersDownloaderError<H>>;
 
 /// Error variants that can happen when sending requests to a session.
 #[derive(Debug, Error, Clone, Eq, PartialEq)]

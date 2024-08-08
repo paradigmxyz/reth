@@ -603,13 +603,13 @@ mod tests {
         // init reader
         let mut reader = ChunkedFileReader::from_file(file, chunk_byte_len as u64).await.unwrap();
 
-        let mut downloaded_headers: Vec<SealedHeader> = vec![];
+        let mut downloaded_headers = vec![];
 
         let mut local_header = headers.first().unwrap().clone();
 
         // test
         while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
-            let sync_target = client.tip_header().unwrap();
+            let sync_target: Sealed<Header> = client.tip_header().unwrap().into();
 
             let sync_target_hash = sync_target.hash();
 

@@ -282,7 +282,7 @@ mod tests {
 
         assert_eq!(
             fut.await.unwrap(),
-            headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>()
+            headers.into_iter().map(Into::into).map(BlockResponse::Empty).collect::<Vec<_>>()
         );
         assert_eq!(client.times_requested(), 0);
     }

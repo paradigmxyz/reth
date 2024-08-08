@@ -75,6 +75,8 @@ pub trait BlockBody:
     + Unpin
     + Send
     + Sync
+    + PartialEq
+    + Eq
     + From<reth_primitives::BlockBody>
     + Into<reth_primitives::BlockBody>
 {

@@ -208,6 +208,8 @@ impl From<DatabaseError> for DownloadError {
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::Header;
+
     use super::*;
 
     #[test]

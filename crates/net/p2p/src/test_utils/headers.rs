@@ -14,7 +14,7 @@ use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{Header, SealedHeader};
+use reth_primitives::{alloy_primitives::Sealed, Header, SealedHeader};
 use std::{
     fmt,
     pin::Pin,
@@ -33,7 +33,7 @@ pub struct TestHeaderDownloader {
     consensus: Arc<TestConsensus>,
     limit: u64,
     download: Option<TestDownload>,
-    queued_headers: Vec<SealedHeader>,
+    queued_headers: Vec<Sealed<Header>>,
     batch_size: usize,
 }
 
@@ -61,7 +61,9 @@ impl TestHeaderDownloader {
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
-    fn update_local_head(&mut self, _head: SealedHeader) {}
+    type Header = Header;
+
+    fn update_local_head(&mut self, _head: Sealed<Header>) {}
 
     fn update_sync_target(&mut self, _target: SyncTarget) {}
 
@@ -71,7 +73,7 @@ impl HeaderDownloader for TestHeaderDownloader {
 }
 
 impl Stream for TestHeaderDownloader {
-    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
+    type Item = HeadersDownloaderResult<Header>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -85,7 +87,7 @@ impl Stream for TestHeaderDownloader {
 
             match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
                 None => return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers)))),
-                Some(header) => this.queued_headers.push(header.unwrap()),
+                Some(header) => this.queued_headers.push(header.unwrap().into()),
             }
         }
     }
@@ -218,6 +220,7 @@ impl DownloadClient for TestHeadersClient {
 }
 
 impl HeadersClient for TestHeadersClient {
+    type Header = Header;
     type Output = TestHeadersFut;
 
     fn get_headers_with_priority(

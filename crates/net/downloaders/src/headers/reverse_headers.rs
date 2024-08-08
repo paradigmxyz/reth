@@ -748,7 +748,7 @@ impl<H> Stream for ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
-    type Item = HeadersDownloaderResult<Vec<Sealed<H::Header>>, H::Header>;
+    type Item = HeadersDownloaderResult<H::Header>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -1223,6 +1223,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
+    use reth_primitives::Header;
 
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
@@ -1288,7 +1289,7 @@ mod tests {
     fn test_sync_target_update() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let genesis = SealedHeader::default();
+        let genesis = Sealable::seal_slow(Header::default());
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
@@ -1316,7 +1317,7 @@ mod tests {
     fn test_head_update() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let header = SealedHeader::default();
+        let header = Sealable::seal_slow(Header::default());
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
@@ -1326,7 +1327,7 @@ mod tests {
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(next.seal(B256::random()));
+        downloader.update_local_head(next.seal_unchecked(B256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 
@@ -1354,7 +1355,7 @@ mod tests {
     fn test_next_request() {
         let client = Arc::new(TestHeadersClient::default());
 
-        let genesis = SealedHeader::default();
+        let genesis = Sealable::seal_slow(Header::default());
 
         let batch_size = 99;
         let start = 1000;
@@ -1402,7 +1403,7 @@ mod tests {
 
         let client = Arc::new(TestHeadersClient::default());
 
-        let p3 = SealedHeader::default();
+        let p3 = Sealable::seal_slow(Header::default());
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
@@ -1412,7 +1413,7 @@ mod tests {
             .request_limit(3)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
-        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+        downloader.update_sync_target(SyncTarget::Tip(p0.seal()));
 
         client
             .extend(vec![
@@ -1433,7 +1434,7 @@ mod tests {
     #[tokio::test]
     async fn download_one_by_one() {
         reth_tracing::init_test_tracing();
-        let p3 = SealedHeader::default();
+        let p3 = Sealable::seal_slow(Header::default());
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
@@ -1444,7 +1445,7 @@ mod tests {
             .request_limit(1)
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
-        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+        downloader.update_sync_target(SyncTarget::Tip(p0.seal()));
 
         client
             .extend(vec![
@@ -1476,7 +1477,7 @@ mod tests {
     #[tokio::test]
     async fn download_one_by_one_larger_request_limit() {
         reth_tracing::init_test_tracing();
-        let p3 = SealedHeader::default();
+        let p3 = Sealable::seal_slow(Header::default());
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);

@@ -88,8 +88,8 @@ mod tests {
         let tx = provider_rw.tx_mut();
         let mut td = U256::ZERO;
         for header in headers.clone() {
-            td += header.header().difficulty;
-            let hash = header.hash();
+            td += header.difficulty;
+            let hash = header.seal();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
             tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
@@ -105,8 +105,8 @@ mod tests {
             let mut td = U256::ZERO;
 
             for header in headers.clone() {
-                td += header.header().difficulty;
-                let hash = header.hash();
+                td += header.difficulty;
+                let hash = header.seal();
                 writer.append_header(&header.unseal(), td, &hash).unwrap();
             }
             writer.commit().unwrap();
@@ -126,7 +126,7 @@ mod tests {
             headers.shuffle(&mut generators::rng());
 
             for header in headers {
-                let header_hash = header.hash();
+                let header_hash = header.seal();
                 let header = header.unseal();
 
                 // Compare Header

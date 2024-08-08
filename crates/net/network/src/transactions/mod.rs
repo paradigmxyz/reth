@@ -35,7 +35,7 @@ use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData, NetworkTypes,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
-    PooledTransactions, RequestTxHashes, Transactions,
+    PooledTransactions, PrimitiveNetworkTypes, RequestTxHashes, Transactions,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
@@ -83,7 +83,7 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 /// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
-pub struct TransactionsHandle<T: NetworkTypes> {
+pub struct TransactionsHandle<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Command channel to the [`TransactionsManager`]
     manager_tx: mpsc::UnboundedSender<TransactionsCommand<T>>,
 }
@@ -194,7 +194,7 @@ impl<T: NetworkTypes> TransactionsHandle<T> {
 /// propagate new transactions over the network.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, T: NetworkTypes> {
+pub struct TransactionsManager<Pool, T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.

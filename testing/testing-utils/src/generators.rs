@@ -5,8 +5,9 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
+    alloy_primitives::{Sealable, Sealed},
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
+    StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -39,13 +40,13 @@ pub fn random_header_range<R: Rng>(
     rng: &mut R,
     range: Range<u64>,
     head: B256,
-) -> Vec<SealedHeader> {
+) -> Vec<Sealed<Header>> {
     let mut headers = Vec::with_capacity(range.end.saturating_sub(range.start) as usize);
     for idx in range {
         headers.push(random_header(
             rng,
             idx,
-            Some(headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(head)),
+            Some(headers.last().map(|h: &Sealed<Header>| h.seal()).unwrap_or(head)),
         ));
     }
     headers
@@ -54,7 +55,7 @@ pub fn random_header_range<R: Rng>(
 /// Generate a random [`SealedHeader`].
 ///
 /// The header is assumed to not be correct if validated.
-pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
+pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> Sealed<Header> {
     let header = reth_primitives::Header {
         number,
         nonce: rng.gen(),
@@ -62,7 +63,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.seal_slow()
+    Sealable::seal_slow(header)
 }
 
 /// Generates a random legacy [Transaction].

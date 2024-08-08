@@ -646,6 +646,8 @@ enum RangeResponseResult<T: NetworkTypes> {
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::BlockBody;
+
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use std::ops::Range;
@@ -656,7 +658,7 @@ mod tests {
         let header = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
-        let client = FullBlockClient::test_client(client);
+        let client = FullBlockClient::<_>::test_client(client);
 
         let received = client.get_full_block(header.hash()).await;
         assert_eq!(received, SealedBlock::new(header, body));
@@ -668,7 +670,7 @@ mod tests {
         let header = SealedHeader::default();
         let body = BlockBody::default();
         client.insert(header.clone(), body.clone());
-        let client = FullBlockClient::test_client(client);
+        let client = FullBlockClient::<_>::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
@@ -699,7 +701,7 @@ mod tests {
     async fn download_full_block_range() {
         let client = TestFullBlockClient::default();
         let (header, body) = insert_headers_into_client(&client, 0..50);
-        let client = FullBlockClient::test_client(client);
+        let client = FullBlockClient::<_>::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
@@ -718,7 +720,7 @@ mod tests {
         // default soft limit is 20, so we will request 50 blocks
         let client = TestFullBlockClient::default();
         let (header, body) = insert_headers_into_client(&client, 0..50);
-        let client = FullBlockClient::test_client(client);
+        let client = FullBlockClient::<_>::test_client(client);
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");

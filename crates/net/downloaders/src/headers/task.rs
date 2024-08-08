@@ -25,7 +25,7 @@ pub const HEADERS_TASK_BUFFER_SIZE: usize = 8;
 #[pin_project]
 pub struct TaskDownloader<H> {
     #[pin]
-    from_downloader: ReceiverStream<HeadersDownloaderResult<Vec<Sealed<H>>, H>>,
+    from_downloader: ReceiverStream<HeadersDownloaderResult<H>>,
     to_downloader: UnboundedSender<DownloaderUpdates<H>>,
 }
 
@@ -103,7 +103,7 @@ impl<H: BlockHeader> HeaderDownloader for TaskDownloader<H> {
 }
 
 impl<H> Stream for TaskDownloader<H> {
-    type Item = HeadersDownloaderResult<Vec<Sealed<H>>, H>;
+    type Item = HeadersDownloaderResult<H>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().from_downloader.poll_next(cx)
@@ -113,7 +113,7 @@ impl<H> Stream for TaskDownloader<H> {
 /// A [`HeaderDownloader`] that runs on its own task
 struct SpawnedDownloader<T: HeaderDownloader> {
     updates: UnboundedReceiverStream<DownloaderUpdates<T::Header>>,
-    headers_tx: PollSender<HeadersDownloaderResult<Vec<Sealed<T::Header>>, T::Header>>,
+    headers_tx: PollSender<HeadersDownloaderResult<T::Header>>,
     downloader: T,
 }
 
@@ -188,13 +188,14 @@ mod tests {
     };
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
+    use reth_primitives::{alloy_primitives::Sealable, Header};
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn download_one_by_one_on_task() {
         reth_tracing::init_test_tracing();
 
-        let p3 = SealedHeader::default();
+        let p3 = Sealable::seal_slow(Header::default());
         let p2 = child_header(&p3);
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);

@@ -5,22 +5,24 @@
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
+use reth_primitives::{
+    alloy_primitives::Sealed, Block, BlockBody, Header, SealedBlock, SealedHeader, B256,
+};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
-    headers: impl Iterator<Item = &'a SealedHeader>,
+    headers: impl Iterator<Item = &'a Sealed<Header>>,
     bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<BlockResponse> {
     headers
         .into_iter()
         .map(|header| {
-            let body = bodies.remove(&header.hash()).expect("body exists");
+            let body = bodies.remove(&header.seal()).expect("body exists");
             if header.is_empty() {
                 BlockResponse::Empty(header.clone())
             } else {
                 BlockResponse::Full(SealedBlock {
-                    header: header.clone(),
+                    header: header.clone().into(),
                     body: body.transactions,
                     ommers: body.ommers,
                     withdrawals: body.withdrawals,
@@ -32,13 +34,13 @@ pub(crate) fn zip_blocks<'a>(
 }
 
 pub(crate) fn create_raw_bodies(
-    headers: impl IntoIterator<Item = SealedHeader>,
+    headers: impl IntoIterator<Item = Sealed<Header>>,
     bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<Block> {
     headers
         .into_iter()
         .map(|header| {
-            let body = bodies.remove(&header.hash()).expect("body exists");
+            let body = bodies.remove(&header.seal()).expect("body exists");
             body.create_block(header.unseal())
         })
         .collect()
