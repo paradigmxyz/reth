@@ -430,8 +430,8 @@ TxPool:
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
 
-      --txpool.additional-tasks-size <ADDITIONAL_TASKS_SIZE>
-          Flag to additional tasks size
+      --txpool.additional-validation-tasks <ADDITIONAL_VALIDATION_TASKS>
+          Flag to additional validation tasks size
 
           [default: 1]
 

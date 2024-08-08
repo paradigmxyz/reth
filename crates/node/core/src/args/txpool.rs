@@ -66,7 +66,7 @@ pub struct TxPoolArgs {
     pub no_local_transactions_propagation: bool,
     /// Flag to additional validation tasks size
     #[arg(long = "txpool.additional-validation-tasks", alias = "txpool.additional_validation_tasks", default_value_t = DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS)]
-    pub additional_tasks_size: usize,
+    pub additional_validation_tasks: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -86,7 +86,7 @@ impl Default for TxPoolArgs {
             no_locals: false,
             locals: Default::default(),
             no_local_transactions_propagation: false,
-            additional_tasks_size: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
+            additional_validation_tasks: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
         }
     }
 }
