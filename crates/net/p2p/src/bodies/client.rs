@@ -5,6 +5,7 @@ use std::{
 
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
+use reth_eth_wire_types::types::BlockBody;
 use reth_primitives::B256;
 
 /// The bodies future type
@@ -14,7 +15,7 @@ pub type BodiesFut<B> = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<B>>> +
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
     /// The block body type being fetched.
-    type Body;
+    type Body: BlockBody;
     /// The output of the request future for querying block bodies.
     type Output: Future<Output = PeerRequestResult<Vec<Self::Body>>> + Sync + Send + Unpin;
 

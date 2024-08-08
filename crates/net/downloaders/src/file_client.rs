@@ -253,7 +253,8 @@ impl FromReader for FileClient {
 }
 
 impl HeadersClient for FileClient {
-    type Output = HeadersFut;
+    type Header = Header;
+    type Output = HeadersFut<Self::Header>;
 
     fn get_headers_with_priority(
         &self,
@@ -303,7 +304,8 @@ impl HeadersClient for FileClient {
 }
 
 impl BodiesClient for FileClient {
-    type Output = BodiesFut;
+    type Body = BlockBody;
+    type Output = BodiesFut<Self::Body>;
 
     fn get_block_bodies_with_priority(
         &self,

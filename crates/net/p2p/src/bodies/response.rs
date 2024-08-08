@@ -1,42 +1,32 @@
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
+use std::mem;
+
+use reth_eth_wire_types::{types::BlockHeader, NetworkTypes, PrimitiveNetworkTypes};
+use reth_primitives::{alloy_primitives::Sealed, BlockNumber, SealedBlock, B256};
 
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum BlockResponse {
+pub enum BlockResponse<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock),
     /// The empty block response
-    Empty(SealedHeader),
+    Empty(Sealed<T::BlockHeader>),
 }
 
-impl BlockResponse {
-    /// Return the reference to the response header
-    pub const fn header(&self) -> &SealedHeader {
-        match self {
-            Self::Full(block) => &block.header,
-            Self::Empty(header) => header,
-        }
-    }
-
+impl<T: NetworkTypes> BlockResponse<T> {
     /// Calculates a heuristic for the in-memory size of the [`BlockResponse`].
     #[inline]
     pub fn size(&self) -> usize {
         match self {
-            Self::Full(block) => SealedBlock::size(block),
-            Self::Empty(header) => SealedHeader::size(header),
+            Self::Full(block) => block.size(),
+            Self::Empty(header) => header.size() + mem::size_of::<B256>(),
         }
     }
 
     /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
-        self.header().number
-    }
-
-    /// Return the reference to the response header
-    pub fn difficulty(&self) -> U256 {
         match self {
-            Self::Full(block) => block.difficulty,
-            Self::Empty(header) => header.difficulty,
+            Self::Full(block) => block.header().number,
+            Self::Empty(header) => header.number(),
         }
     }
 }

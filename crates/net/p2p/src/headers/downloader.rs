@@ -2,7 +2,7 @@ use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
 use futures::Stream;
 use reth_consensus::Consensus;
-use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealed, BlockHashOrNumber, SealedHeader, B256};
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
@@ -11,19 +11,25 @@ use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};
 ///
 /// A [`HeaderDownloader`] is a [Stream] that returns batches of headers.
 pub trait HeaderDownloader:
-    Send + Sync + Stream<Item = HeadersDownloaderResult<Vec<SealedHeader>>> + Unpin
+    Send
+    + Sync
+    + Stream<Item = HeadersDownloaderResult<Vec<Sealed<Self::Header>>, Self::Header>>
+    + Unpin
 {
+    /// Header type being downloaded.
+    type Header: Send + Sync;
+
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
     /// See also [`HeaderDownloader::update_sync_target`] and
     /// [`HeaderDownloader::update_local_head`]
-    fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
+    fn update_sync_gap(&mut self, head: Sealed<Self::Header>, target: SyncTarget) {
         self.update_local_head(head);
         self.update_sync_target(target);
     }
 
     /// Updates the block number of the local database
-    fn update_local_head(&mut self, head: SealedHeader);
+    fn update_local_head(&mut self, head: Sealed<Self::Header>);
 
     /// Updates the target we want to sync to
     fn update_sync_target(&mut self, target: SyncTarget);

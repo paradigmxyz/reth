@@ -120,7 +120,7 @@ impl Command {
 
         let client = fetch_client.clone();
         let chain = provider_factory.chain_spec();
-        let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header.clone()))
+        let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header))
             .retry(&backoff)
             .notify(
                 |err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."),

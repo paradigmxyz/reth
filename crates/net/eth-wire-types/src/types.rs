@@ -4,7 +4,7 @@ use alloy_rlp::{Decodable, Encodable};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     alloy_primitives::{Sealable, Sealed},
-    BlockBody, GotExpected, Header, SealedBlock,
+    GotExpected, Header, SealedBlock,
 };
 use std::{fmt::Debug, hash::Hash};
 
@@ -13,7 +13,7 @@ pub trait NetworkTypes: Send + Sync + Debug + Clone + Unpin + 'static {
     /// The block type. Expected to hold header and body.
     type Block: Block<Header = Self::BlockHeader>;
     /// The block body type.
-    type BlockBody: Encodable + Decodable + Debug + Unpin + Send + Sync + From<BlockBody>;
+    type BlockBody: BlockBody;
     /// The block header type.
     type BlockHeader: BlockHeader;
 
@@ -59,6 +59,27 @@ pub trait BlockHeader:
 {
     /// Block number.
     fn number(&self) -> u64;
+
+    /// Returns whether the block is empty.
+    fn is_empty(&self) -> bool;
+
+    /// Size of the header in memory
+    fn size(&self) -> usize;
+}
+
+/// Block body
+pub trait BlockBody:
+    Encodable
+    + Decodable
+    + Debug
+    + Unpin
+    + Send
+    + Sync
+    + From<reth_primitives::BlockBody>
+    + Into<reth_primitives::BlockBody>
+{
+    /// Body size used for collecting metrics.
+    fn size(&self) -> usize;
 }
 
 /// Default networking types
@@ -139,6 +160,14 @@ impl BlockHeader for reth_primitives::Header {
     fn number(&self) -> u64 {
         self.number
     }
+
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    fn size(&self) -> usize {
+        self.size()
+    }
 }
 
 impl Block for reth_primitives::Block {
@@ -146,5 +175,11 @@ impl Block for reth_primitives::Block {
 
     fn header(&self) -> &Self::Header {
         &self.header
+    }
+}
+
+impl BlockBody for reth_primitives::BlockBody {
+    fn size(&self) -> usize {
+        self.size()
     }
 }

@@ -1,5 +1,6 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
+use reth_eth_wire_types::types::BlockHeader;
 pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
 use reth_primitives::BlockHashOrNumber;
 use std::{
@@ -27,7 +28,7 @@ pub type HeadersFut<H> = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> 
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The block header type being fetched.
-    type Header: Send + Sync + Unpin;
+    type Header: BlockHeader;
     /// The headers future type
     type Output: Future<Output = PeerRequestResult<Vec<Self::Header>>> + Sync + Send + Unpin;
 
