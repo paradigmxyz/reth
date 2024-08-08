@@ -55,4 +55,5 @@ optimism = [
     "reth-primitives/optimism",
     "revm/optimism",
     "reth-provider/optimism",
+    "reth-rpc-eth-types/js-tracer",
 ]
