@@ -16,9 +16,9 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-use revm_inspectors::tracing::MuxError;
 #[cfg(feature = "js_tracer_errors")]
-use revm_inspectors::tracing::{js::JsInspectorError};
+use revm_inspectors::tracing::js::JsInspectorError;
+use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
 /// Result alias
