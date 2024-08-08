@@ -26,7 +26,7 @@ pub use builder::{
 };
 
 mod launch;
-pub use launch::*;
+pub use launch::{engine::EngineNodeLauncher, *};
 
 mod handle;
 pub use handle::NodeHandle;

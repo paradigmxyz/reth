@@ -1,5 +1,14 @@
-//! Launch the Ethereum node.
+//! Engine node related functionality.
 
+use crate::{
+    components::NodeComponents,
+    hooks::NodeHooks,
+    launch::{LaunchContext, LaunchNode},
+    rpc::{launch_rpc_servers, EthApiBuilderProvider},
+    setup::build_networked_pipeline,
+    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
+    NodeHandle, NodeTypesAdapter,
+};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -11,18 +20,10 @@ use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
     tree::TreeConfig,
 };
-use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
-use reth_network::{
-    BlockDownloaderProvider, NetworkEventListenerProvider, NetworkSyncUpdater, SyncState,
-};
+use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
 use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns};
-use reth_node_builder::{
-    hooks::NodeHooks,
-    rpc::{launch_rpc_servers, EthApiBuilderProvider},
-    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
-};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -40,26 +41,23 @@ use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// The Ethereum node launcher.
+/// The engine node launcher.
 #[derive(Debug)]
-pub struct EthNodeLauncher {
+pub struct EngineNodeLauncher {
     /// The task executor for the node.
     pub ctx: LaunchContext,
 }
 
-impl EthNodeLauncher {
+impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
     pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EthNodeLauncher
+impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<
-        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
-        Engine = EthEngineTypes,
-    >,
+    T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi:
@@ -149,7 +147,7 @@ where
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-        let pipeline = reth_node_builder::setup::build_networked_pipeline(
+        let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
             ctx.consensus(),
