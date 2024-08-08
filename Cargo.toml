@@ -350,7 +350,7 @@ reth-primitives-traits = { path = "crates/primitives-traits", default-features =
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
-reth-revm = { path = "crates/revm" }
+reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
@@ -382,8 +382,6 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 # revm
 revm = { version = "12.1.0", features = [
     "std",
-    "secp256k1",
-    "blst",
 ], default-features = false }
 revm-inspectors = "0.5"
 revm-primitives = { version = "7.1.0", features = [
