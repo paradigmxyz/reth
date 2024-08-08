@@ -288,7 +288,6 @@ impl Command {
                 let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
                     provider_factory.provider()?.tx_ref(),
                     hashed_post_state.clone(),
-                    Default::default(),
                 )?;
 
                 if state_root != block_with_senders.state_root {

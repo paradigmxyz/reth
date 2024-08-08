@@ -154,7 +154,6 @@ impl Command {
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             execution_outcome.hash_state_slow(),
-            Default::default(),
         )?;
 
         if in_memory_state_root == block.state_root {
