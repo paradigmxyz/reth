@@ -36,7 +36,8 @@ pub use events::{
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 use reth_eth_wire_types::{
-    capability::Capabilities, DisconnectReason, EthVersion, NetworkTypes, PrimitiveNetworkTypes, Status
+    capability::Capabilities, DisconnectReason, EthVersion, NetworkTypes, PrimitiveNetworkTypes,
+    Status,
 };
 use reth_network_peers::NodeRecord;
 

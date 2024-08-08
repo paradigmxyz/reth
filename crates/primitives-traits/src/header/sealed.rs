@@ -146,6 +146,6 @@ impl<T: Into<Header>> From<Sealed<T>> for SealedHeader {
 
 impl<T: From<Header>> From<SealedHeader> for Sealed<T> {
     fn from(value: SealedHeader) -> Self {
-        Sealed::new_unchecked(value.header.into(), value.hash)
+        Self::new_unchecked(value.header.into(), value.hash)
     }
 }

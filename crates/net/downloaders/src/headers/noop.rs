@@ -14,6 +14,7 @@ pub struct NoopHeaderDownloader<H = Header> {
 }
 
 impl<H> NoopHeaderDownloader<H> {
+    /// Creates new instance of downloader
     pub fn new() -> Self {
         Self { _phantom: Default::default() }
     }

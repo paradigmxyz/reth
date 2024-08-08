@@ -3,7 +3,9 @@
 use std::{fmt, net::SocketAddr, sync::Arc};
 
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NetworkTypes, NodeData, PooledTransactions, PrimitiveNetworkTypes, Receipts, Status
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
+    NetworkTypes, NodeData, PooledTransactions, PrimitiveNetworkTypes, Receipts, Status,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
