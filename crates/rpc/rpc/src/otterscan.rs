@@ -1,9 +1,10 @@
+use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_api::{helpers::TraceExt, Block, EthApiTypes, Transaction};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
@@ -59,7 +60,11 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + TraceExt + 'static,
+    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>>
+        + EthApiTypes
+        + TraceExt
+        + 'static,
+    Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {

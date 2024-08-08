@@ -13,7 +13,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{
     BlockDownloaderProvider, NetworkEventListenerProvider, NetworkSyncUpdater, SyncState,
 };
-use reth_node_api::{FullNodeTypes, NodeAddOns};
+use reth_node_api::{EthApiTypes, FullNodeTypes, NodeAddOns};
 use reth_node_builder::{
     hooks::NodeHooks,
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
@@ -61,6 +61,8 @@ where
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi:
         EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    <AO::EthApi as EthApiTypes>::NetworkTypes:
+        alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

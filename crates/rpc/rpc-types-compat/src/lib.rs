@@ -14,3 +14,6 @@ pub mod block;
 pub mod engine;
 pub mod proof;
 pub mod transaction;
+
+pub use block::BlockBuilder;
+pub use transaction::TransactionBuilder;

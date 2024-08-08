@@ -5233,6 +5233,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-alloy-network"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3cbfa664a74fe4577a78d1c4bce18fa93be56756730782283df8ff3241c7118"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+]
+
+[[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6923,6 +6937,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "jsonrpsee",
+ "jsonrpsee-types",
  "reth",
  "reth-chainspec",
  "reth-db",
@@ -6934,6 +6949,8 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-stages-types",
  "reth-tokio-util",
  "reth-tracing",
@@ -7662,6 +7679,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
+ "reth-rpc-eth-api",
  "reth-tasks",
  "reth-transaction-pool",
 ]
@@ -7670,6 +7688,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.0.4"
 dependencies = [
+ "alloy-network",
  "aquamarine",
  "confy",
  "eyre",
@@ -7775,6 +7794,7 @@ name = "reth-node-ethereum"
 version = "1.0.4"
 dependencies = [
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
  "eyre",
  "futures",
@@ -7999,14 +8019,17 @@ name = "reth-optimism-rpc"
 version = "1.0.4"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types",
  "derive_more",
  "jsonrpsee",
  "jsonrpsee-types",
+ "op-alloy-network",
  "parking_lot 0.12.3",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",
  "reth-node-api",
+ "reth-node-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -8014,6 +8037,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
@@ -8249,6 +8273,7 @@ version = "1.0.4"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
@@ -8320,6 +8345,7 @@ version = "1.0.4"
 dependencies = [
  "futures",
  "jsonrpsee",
+ "jsonrpsee-http-client",
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-eth-api",
@@ -8333,6 +8359,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.0.4"
 dependencies = [
+ "alloy-network",
  "clap",
  "http",
  "jsonrpsee",
@@ -8413,6 +8440,8 @@ name = "reth-rpc-eth-api"
 version = "1.0.4"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-json-rpc",
+ "alloy-network",
  "async-trait",
  "auto_impl",
  "dyn-clone",
@@ -8459,6 +8488,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-provider",
  "reth-revm",
  "reth-rpc-server-types",
  "reth-rpc-types",

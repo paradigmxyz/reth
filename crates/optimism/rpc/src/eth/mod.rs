@@ -7,33 +7,36 @@ mod block;
 mod call;
 mod pending_block;
 
-use std::{fmt, sync::Arc};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
+use op_alloy_network::{Network, Optimism};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_rpc::eth::{core::EthApiInner, DevSigner, EthBlockBuilder};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthState, LoadBlock, LoadFee, LoadState, SpawnBlocking,
-        Trace,
+        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
+        SpawnBlocking, Trace,
     },
     EthApiTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskExecutor, TaskSpawner,
+    TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::OpEthApiError;
+use crate::{OpEthApiError, OpTxBuilder};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -41,16 +44,6 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
->;
-
-/// Adapter for [`EthApiBuilderCtx`].
-pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
-    TaskExecutor,
-    <N as FullNodeTypes>::Provider,
 >;
 
 /// OP-Reth `Eth` API implementation.
@@ -64,14 +57,17 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
-pub struct OpEthApi<N: FullNodeComponents> {
+pub struct OpEthApi<N: FullNodeComponents, Eth> {
+    #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
+    /// L1 RPC type builders.
+    _eth_ty_builders: PhantomData<Eth>,
 }
 
-impl<N: FullNodeComponents> OpEthApi<N> {
+impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
-    pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
+    pub fn with_spawner(ctx: &EthApiBuilderCtx<N, Self>) -> Self {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
@@ -91,20 +87,26 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), _eth_ty_builders: PhantomData }
     }
 }
 
-impl<N> EthApiTypes for OpEthApi<N>
+impl<N, Eth> EthApiTypes for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
     N: FullNodeComponents,
+    // todo: replace constraint when op and l1 don't use same tx type in alloy
+    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     type Error = OpEthApiError;
+    type NetworkTypes = Optimism;
+    type TransactionBuilder = OpTxBuilder<Eth>;
+    type BlockBuilder = EthBlockBuilder<OpTxBuilder<Eth>>;
 }
 
-impl<N> EthApiSpec for OpEthApi<N>
+impl<N, Eth> EthApiSpec for OpEthApi<N, Eth>
 where
+    Self: Send + Sync,
     N: FullNodeComponents,
 {
     #[inline]
@@ -123,15 +125,16 @@ where
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn reth_rpc_eth_api::helpers::EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
 }
 
-impl<N> SpawnBlocking for OpEthApi<N>
+impl<N, Eth> SpawnBlocking for OpEthApi<N, Eth>
 where
     Self: Send + Sync + Clone + 'static,
     N: FullNodeComponents,
+    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -149,7 +152,7 @@ where
     }
 }
 
-impl<N> LoadFee for OpEthApi<N>
+impl<N, Eth> LoadFee for OpEthApi<N, Eth>
 where
     Self: LoadBlock,
     N: FullNodeComponents,
@@ -175,10 +178,11 @@ where
     }
 }
 
-impl<N> LoadState for OpEthApi<N>
+impl<N, Eth> LoadState for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
     N: FullNodeComponents,
+    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
@@ -196,7 +200,7 @@ where
     }
 }
 
-impl<N> EthState for OpEthApi<N>
+impl<N, Eth> EthState for OpEthApi<N, Eth>
 where
     Self: LoadState + SpawnBlocking,
     N: FullNodeComponents,
@@ -207,14 +211,14 @@ where
     }
 }
 
-impl<N> EthFees for OpEthApi<N>
+impl<N, Eth> EthFees for OpEthApi<N, Eth>
 where
     Self: LoadFee,
     N: FullNodeComponents,
 {
 }
 
-impl<N> Trace for OpEthApi<N>
+impl<N, Eth> Trace for OpEthApi<N, Eth>
 where
     Self: LoadState,
     N: FullNodeComponents,
@@ -225,25 +229,27 @@ where
     }
 }
 
-impl<N: FullNodeComponents> AddDevSigners for OpEthApi<N> {
+impl<N: FullNodeComponents, Eth> AddDevSigners for OpEthApi<N, Eth> {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }
 }
 
-impl<N> BuilderProvider<N> for OpEthApi<N>
+impl<N, Eth> BuilderProvider<N> for OpEthApi<N, Eth>
 where
+    Self: Send,
     N: FullNodeComponents,
+    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse> + 'static,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<N>;
+    type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(|ctx| Self::with_spawner(ctx))
     }
 }
 
-impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<N: FullNodeComponents, Eth> fmt::Debug for OpEthApi<N, Eth> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
 }

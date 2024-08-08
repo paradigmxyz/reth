@@ -10,6 +10,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
+use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 
@@ -155,7 +156,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
     /// The core `eth` namespace API type to install on the RPC server (see
     /// `reth_rpc_eth_api::EthApiServer`).
-    type EthApi: Send + Clone;
+    type EthApi: EthApiTypes + Send + Clone;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {

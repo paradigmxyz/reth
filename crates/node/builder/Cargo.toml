@@ -52,6 +52,9 @@ reth-rpc-eth-types.workspace = true
 reth-network-api.workspace = true
 reth-payload-validator.workspace = true
 
+## ethereum
+alloy-network.workspace = true
+
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = [

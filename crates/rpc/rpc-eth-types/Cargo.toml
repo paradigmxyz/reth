@@ -27,6 +27,7 @@ reth-rpc-types-compat.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie.workspace = true
+reth-provider.workspace = true
 
 # ethereum
 alloy-sol-types.workspace = true

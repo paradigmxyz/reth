@@ -1,6 +1,5 @@
 //! Loads OP pending block for a RPC response.   
 
-use crate::OpEthApi;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
@@ -17,7 +16,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
 
-impl<N> LoadPendingBlock for OpEthApi<N>
+use crate::OpEthApi;
+
+impl<N, Eth> LoadPendingBlock for OpEthApi<N, Eth>
 where
     Self: SpawnBlocking,
     N: FullNodeComponents,

@@ -1,12 +1,13 @@
 //! `eth_` RPC API for filtering.
 
+use alloy_json_rpc::RpcObject;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_types::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthFilterApi {
+pub trait EthFilterApi<T: RpcObject> {
     /// Creates anew filter and returns its id.
     #[method(name = "newFilter")]
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId>;
@@ -24,7 +25,7 @@ pub trait EthFilterApi {
 
     /// Returns all filter changes since last poll.
     #[method(name = "getFilterChanges")]
-    async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges>;
+    async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges<T>>;
 
     /// Returns all logs matching given filter (in a range 'from' - 'to').
     #[method(name = "getFilterLogs")]

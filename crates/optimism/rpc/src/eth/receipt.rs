@@ -11,7 +11,7 @@ use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 
 use crate::{OpEthApi, OpEthApiError, OptimismTxMeta};
 
-impl<N> LoadReceipt for OpEthApi<N>
+impl<N, Eth> LoadReceipt for OpEthApi<N, Eth>
 where
     Self: EthApiSpec + LoadTransaction,
     Self::Error: From<OpEthApiError>,
