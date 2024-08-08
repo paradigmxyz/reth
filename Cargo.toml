@@ -540,8 +540,3 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
-
-[patch.crates-io]
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "ab42581" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "ab42581" }
-op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy.git", rev = "8dde493" }
