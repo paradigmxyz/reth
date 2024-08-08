@@ -30,7 +30,7 @@ pub fn rng() -> StdRng {
     }
 }
 
-/// Generates a range of random [`SealedHeader`]s.
+/// Generates a range of random headers.
 ///
 /// The parent hash of the first header
 /// in the result will be equal to `head`.
@@ -52,7 +52,7 @@ pub fn random_header_range<R: Rng>(
     headers
 }
 
-/// Generate a random [`SealedHeader`].
+/// Generate a random header
 ///
 /// The header is assumed to not be correct if validated.
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> Sealed<Header> {
