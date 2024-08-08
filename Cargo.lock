@@ -6983,6 +6983,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-engine-service"
+version = "1.0.4"
+dependencies = [
+ "futures",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-db-api",
+ "reth-engine-primitives",
+ "reth-engine-tree",
+ "reth-ethereum-engine-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-exex-types",
+ "reth-network-p2p",
+ "reth-payload-builder",
+ "reth-payload-validator",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-prune-types",
+ "reth-stages-api",
+ "reth-tasks",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "reth-engine-tree"
 version = "1.0.4"
 dependencies = [
@@ -7143,36 +7174,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-primitives",
  "tracing",
-]
-
-[[package]]
-name = "reth-ethereum-engine"
-version = "1.0.4"
-dependencies = [
- "futures",
- "pin-project",
- "reth-beacon-consensus",
- "reth-blockchain-tree",
- "reth-chainspec",
- "reth-consensus",
- "reth-db-api",
- "reth-engine-tree",
- "reth-ethereum-engine-primitives",
- "reth-evm",
- "reth-evm-ethereum",
- "reth-exex-types",
- "reth-network-p2p",
- "reth-payload-builder",
- "reth-payload-validator",
- "reth-primitives",
- "reth-provider",
- "reth-prune",
- "reth-prune-types",
- "reth-stages-api",
- "reth-tasks",
- "thiserror",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -7787,8 +7788,8 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
+ "reth-engine-service",
  "reth-engine-tree",
- "reth-ethereum-engine",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
  "reth-evm-ethereum",
