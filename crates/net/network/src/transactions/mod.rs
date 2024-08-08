@@ -421,7 +421,7 @@ where
 
         // send full transactions to a fraction of the connected peers (square root of the total
         // number of connected peers)
-        let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
+        let max_num_full = (self.peers.len() as f64).sqrt().round() as usize;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
