@@ -6,8 +6,8 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineHandle,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::tree::TreeConfig;
-use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
 use reth_network::{
@@ -173,7 +173,9 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         // Configure the consensus engine
-        let mut eth_service = EthService::new(
+        let mut eth_service = EngineService::new(
+            ctx.consensus(),
+            ctx.components().block_executor().clone(),
             ctx.chain_spec(),
             network_client.clone(),
             UnboundedReceiverStream::new(consensus_engine_rx),
