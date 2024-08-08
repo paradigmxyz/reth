@@ -2914,7 +2914,6 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
- "once_cell",
  "reth-chainspec",
  "reth-discv4",
  "reth-ecies",
@@ -7474,7 +7473,6 @@ name = "reth-metrics-derive"
 version = "1.0.4"
 dependencies = [
  "metrics",
- "once_cell",
  "proc-macro2",
  "quote",
  "regex",
@@ -7847,7 +7845,6 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",
- "once_cell",
  "procfs",
  "reqwest",
  "reth-chainspec",
@@ -8798,7 +8795,6 @@ dependencies = [
  "derive_more",
  "itertools 0.13.0",
  "metrics",
- "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
  "rayon",
@@ -8856,7 +8852,6 @@ dependencies = [
  "derive_more",
  "itertools 0.13.0",
  "metrics",
- "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
  "rayon",

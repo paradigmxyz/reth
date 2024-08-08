@@ -1,6 +1,6 @@
-use once_cell::sync::Lazy;
 use quote::{quote, ToTokens};
 use regex::Regex;
+use std::sync::LazyLock;
 use syn::{
     punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Expr, Field, Lit, LitBool, LitStr,
     Meta, MetaNameValue, Result, Token,
@@ -11,8 +11,8 @@ use crate::{metric::Metric, with_attrs::WithAttrs};
 /// Metric name regex according to Prometheus data model
 ///
 /// See <https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels>
-static METRIC_NAME_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^[a-zA-Z_:.][a-zA-Z0-9_:.]*$").unwrap());
+static METRIC_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z_:.][a-zA-Z0-9_:.]*$").unwrap());
 
 /// Supported metrics separators
 const SUPPORTED_SEPARATORS: &[&str] = &[".", "_", ":"];
