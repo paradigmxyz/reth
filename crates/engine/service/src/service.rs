@@ -63,7 +63,7 @@ where
     E: BlockExecutorProvider + 'static,
     T: EngineTypes + 'static,
 {
-    /// Constructor for `EthService`.
+    /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         consensus: Arc<dyn Consensus>,
@@ -129,10 +129,10 @@ where
     }
 }
 
-/// Potential error returned by `EthService`.
+/// Potential error returned by `EngineService`.
 #[derive(Debug, thiserror::Error)]
-#[error("Eth service error.")]
-pub struct EthServiceError {}
+#[error("Engine service error.")]
+pub struct EngineServiceError {}
 
 #[cfg(test)]
 mod tests {
