@@ -163,6 +163,18 @@ impl NetworkArgs {
             ),
         };
 
+        println!("getting network config builder");
+        println!("{}", self.nat);
+        println!("{}", self.addr);
+
+        // self.nat = extip:99.241.141.46
+        // read the ip address from the above
+        // let external_ip: Option<IpAddr> = match self.nat {
+        //     NatResolver::ExternalIp(ip) => Some(ip),
+        //     _ => None,
+        // };
+
+
         // Configure basic network stack
         NetworkConfigBuilder::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
@@ -191,7 +203,7 @@ impl NetworkArgs {
                 self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
             .listener_addr(SocketAddr::new(
-                self.addr, // set discovery port based on instance number
+                self.addr, // 
                 self.port,
             ))
             .discovery_addr(SocketAddr::new(

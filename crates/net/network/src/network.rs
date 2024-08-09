@@ -1,5 +1,5 @@
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -8,7 +8,7 @@ use std::{
 
 use enr::Enr;
 use parking_lot::Mutex;
-use reth_discv4::Discv4;
+use reth_discv4::{Discv4, NatResolver};
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -62,6 +62,7 @@ impl NetworkHandle {
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
         event_sender: EventSender<NetworkEvent>,
+        nat: Option<NatResolver>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -77,6 +78,7 @@ impl NetworkHandle {
             tx_gossip_disabled,
             discv4,
             event_sender,
+            nat
         };
         Self { inner: Arc::new(inner) }
     }
@@ -213,7 +215,18 @@ impl PeersInfo for NetworkHandle {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
 
-            if socket_addr.ip().is_unspecified() {
+            println!("nat: {:?}", self.inner.nat);
+
+            let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| {
+                match nat {
+                    NatResolver::ExternalIp(ip) => Some(ip),
+                    _ => None,
+                }
+            });
+
+            if let Some(ip) = external_ip {
+                socket_addr.set_ip(ip)
+            } else if socket_addr.ip().is_unspecified() {
                 // zero address is invalid
                 if socket_addr.ip().is_ipv4() {
                     socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
@@ -221,6 +234,9 @@ impl PeersInfo for NetworkHandle {
                     socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
                 }
             }
+
+            // if self.nat exists, fetch the public ip if there is and assign to socket_addr
+            println!("socket_addr: {:?}", socket_addr);
 
             NodeRecord::new(socket_addr, id)
         }
@@ -408,6 +424,8 @@ struct NetworkInner {
     discv4: Option<Discv4>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
+
+    nat: Option<NatResolver>,
 }
 
 /// Provides access to modify the network's additional protocol handlers.
