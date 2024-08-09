@@ -218,7 +218,7 @@ pub fn calc_difficulty_generic(
         pdiff = min_difficulty();
     }
 
-    if bomb_delay_from_parent > parent.number {
+    if parent.number >= bomb_delay_from_parent {
         let fake_block_num = parent.number - bomb_delay_from_parent;
         if fake_block_num >= 2 * EXP_DIFF_PERIOD_UINT {
             let exponent = fake_block_num / EXP_DIFF_PERIOD_UINT;
