@@ -849,7 +849,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
     fn fill_env_with_header<EvmConfig>(
@@ -862,7 +864,17 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.database.chain_spec(),
+            header,
+            total_difficulty,
+        );
+        Ok(())
     }
 
     fn fill_cfg_env_at<EvmConfig>(
@@ -874,7 +886,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -886,7 +900,11 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_env(cfg, &self.database.chain_spec(), header, total_difficulty);
+        Ok(())
     }
 }
 
