@@ -2021,7 +2021,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::{Address, Bytes};
+    use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::block_to_payload_v1;
     use std::{
@@ -2076,9 +2076,7 @@ mod tests {
                 TreeConfig::default(),
             );
 
-            let block_builder = TestBlockBuilder::default()
-                .with_chain_spec((*chain_spec).clone())
-                .with_signer(Address::random());
+            let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
             Self {
                 to_tree_tx: tree.incoming_tx.clone(),
                 tree,
@@ -2219,18 +2217,8 @@ mod tests {
         ) {
             for block in chain.clone() {
                 self.insert_block(block.clone()).unwrap();
-
-                // check for CanonicalBlockAdded events, we expect chain.len() blocks added
-                let event = self.from_tree_rx.recv().await.unwrap();
-                match event {
-                    EngineApiEvent::BeaconConsensus(
-                        BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
-                    ) => {
-                        assert!(chain.clone().into_iter().any(|b| b.hash() == block.hash()));
-                    }
-                    _ => panic!("Unexpected event: {:#?}", event),
-                }
             }
+            self.check_canon_chain_insertion(chain).await;
         }
 
         async fn check_canon_commit(&mut self, hash: B256) {
@@ -2262,9 +2250,24 @@ mod tests {
             }
         }
 
-        fn persist_blocks(&mut self, blocks: Vec<SealedBlockWithSenders>) {
-            self.setup_range_insertion_for_chain(blocks.clone());
+        async fn check_canon_chain_insertion(
+            &mut self,
+            chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
+        ) {
+            for _ in chain.clone() {
+                let event = self.from_tree_rx.recv().await.unwrap();
+                match event {
+                    EngineApiEvent::BeaconConsensus(
+                        BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                    ) => {
+                        assert!(chain.clone().into_iter().any(|b| b.hash() == block.hash()));
+                    }
+                    _ => panic!("Unexpected event: {:#?}", event),
+                }
+            }
+        }
 
+        fn persist_blocks(&mut self, blocks: Vec<SealedBlockWithSenders>) {
             let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
@@ -2279,8 +2282,13 @@ mod tests {
         }
 
         fn setup_range_insertion_for_chain(&mut self, chain: Vec<SealedBlockWithSenders>) {
-            let mut execution_outcomes = Vec::new();
-            for block in &chain {
+            // setting up execution outcomes for the chain, the blocks will be
+            // executed starting from the oldest, so we need to reverse.
+            let mut chain_rev = chain.clone();
+            chain_rev.reverse();
+
+            let mut execution_outcomes = Vec::with_capacity(chain_rev.len());
+            for block in &chain_rev {
                 let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
                 self.tree.provider.add_state_root(block.state_root);
                 execution_outcomes.push(execution_outcome);
@@ -2877,11 +2885,7 @@ mod tests {
             main_chain.clone().drain(0..(MIN_BLOCKS_FOR_PIPELINE_RUN + 1) as usize).collect();
         test_harness.persist_blocks(backfilled_chain.clone());
 
-        // setting up execution outcomes for the chain, the blocks will be
-        // executed starting from the oldest, so we need to reverse.
-        let mut backfilled_chain_rev = backfilled_chain.clone();
-        backfilled_chain_rev.reverse();
-        test_harness.setup_range_insertion_for_chain(backfilled_chain_rev.to_vec());
+        test_harness.setup_range_insertion_for_chain(backfilled_chain);
 
         // send message to mark backfill finished
         test_harness.tree.on_engine_message(FromEngine::Event(
@@ -2924,11 +2928,7 @@ mod tests {
             .drain((MIN_BLOCKS_FOR_PIPELINE_RUN + 1) as usize..main_chain.len())
             .collect();
 
-        // setting up execution outcomes for the chain, the blocks will be
-        // executed starting from the oldest, so we need to reverse.
-        let mut remaining_rev = remaining.clone();
-        remaining_rev.reverse();
-        test_harness.setup_range_insertion_for_chain(remaining_rev.to_vec());
+        test_harness.setup_range_insertion_for_chain(remaining.clone());
 
         // tell engine block range downloaded
         test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone()));
@@ -2981,5 +2981,61 @@ mod tests {
         test_harness.check_canon_commit(main_last_hash).await;
         test_harness.check_fcu(main_last_hash, ForkchoiceStatus::Valid).await;
         test_harness.check_canon_head(main_last_hash);
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_forks_with_older_canonical_head() {
+        reth_tracing::init_test_tracing();
+
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        // create base chain and setup test harness with it
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        let old_head = base_chain.first().unwrap().block();
+        let fork_block = base_chain.last().unwrap().block();
+
+        // fcu to old_head
+        test_harness.fcu_to(old_head.hash(), ForkchoiceStatus::Valid).await;
+
+        // create two competing chains starting from fork_block
+        let chain_a = test_harness.block_builder.create_fork(fork_block, 3);
+        let chain_b = test_harness.block_builder.create_fork(fork_block, 3);
+
+        // insert chain A blocks using newPayload
+        test_harness.setup_range_insertion_for_chain(chain_a.clone());
+        for block in &chain_a {
+            let payload = block_to_payload_v1(block.block.clone());
+            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+        }
+
+        test_harness.check_canon_chain_insertion(chain_a.clone()).await;
+
+        // insert chain B blocks using newPayload
+        test_harness.setup_range_insertion_for_chain(chain_b.clone());
+        for block in &chain_b {
+            let payload = block_to_payload_v1(block.block.clone());
+            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+        }
+
+        test_harness.check_canon_chain_insertion(chain_b.clone()).await;
+
+        // send FCU to make the tip of chain B the new head
+        let chain_b_tip_hash = chain_b.last().unwrap().hash();
+        test_harness.send_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
+
+        // check for CanonicalChainCommitted event
+        test_harness.check_canon_commit(chain_b_tip_hash).await;
+
+        // verify FCU was processed
+        test_harness.check_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
+
+        // verify the new canonical head
+        test_harness.check_canon_head(chain_b_tip_hash);
+
+        // verify that chain A is now considered a fork
+        assert!(test_harness.tree.state.tree_state.is_fork(chain_a.last().unwrap().hash()));
     }
 }
