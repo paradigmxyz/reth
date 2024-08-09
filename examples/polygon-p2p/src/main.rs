@@ -12,7 +12,7 @@
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEvents, NetworkManager,
+    config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };
 use reth_provider::test_utils::NoopProvider;
 use reth_tracing::{

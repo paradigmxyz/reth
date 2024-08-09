@@ -1,6 +1,6 @@
 //! Helper type that represents one of two possible executor types
 
-use std::fmt::Display;
+use core::fmt::Display;
 
 use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;

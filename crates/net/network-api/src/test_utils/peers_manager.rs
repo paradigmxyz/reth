@@ -1,12 +1,21 @@
-//! Async peer handle.
+//! Interaction with `reth_network::PeersManager`, for integration testing. Otherwise
+//! `reth_network::NetworkManager` manages `reth_network::PeersManager`.
 
 use std::net::SocketAddr;
 
 use derive_more::Constructor;
 use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::{Peer, ReputationChangeKind};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{Peer, PeerCommand, ReputationChangeKind};
+/// Provides an API for managing the peers of the network.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait PeersHandleProvider {
+    /// Returns the [`PeersHandle`] that can be cloned and shared.
+    ///
+    /// The [`PeersHandle`] can be used to interact with the network's peer set.
+    fn peers_handle(&self) -> &PeersHandle;
+}
 
 /// A communication channel to the `PeersManager` to apply manual changes to the peer set.
 #[derive(Clone, Debug, Constructor)]
@@ -52,4 +61,21 @@ impl PeersHandle {
 
         rx.await.unwrap_or_default()
     }
+}
+
+/// Commands the `PeersManager` listens for.
+#[derive(Debug)]
+pub enum PeerCommand {
+    /// Command for manually add
+    Add(PeerId, SocketAddr),
+    /// Remove a peer from the set
+    ///
+    /// If currently connected this will disconnect the session
+    Remove(PeerId),
+    /// Apply a reputation change to the given peer.
+    ReputationChange(PeerId, ReputationChangeKind),
+    /// Get information about a peer
+    GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
+    /// Get node information on all peers
+    GetPeers(oneshot::Sender<Vec<NodeRecord>>),
 }

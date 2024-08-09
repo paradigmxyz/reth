@@ -4,8 +4,8 @@
 
 use reth_errors::ProviderResult;
 use reth_primitives::{Address, B256, U256};
-use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_storage_api::StateProvider;
 use reth_trie::HashedStorage;
 use revm::Database;
 
@@ -17,7 +17,7 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 #[allow(missing_debug_implementations)]
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
-impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
+impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_state_root(
         &self,
         hashed_state: reth_trie::HashedPostState,
@@ -41,7 +41,7 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     }
 }
 
-impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
+impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_proof(
         &self,
         hashed_state: reth_trie::HashedPostState,
@@ -60,7 +60,7 @@ impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> 
     }
 }
 
-impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
+impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
     fn basic_account(
         &self,
         address: revm_primitives::Address,
@@ -69,7 +69,7 @@ impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
     }
 }
 
-impl<'a> reth_provider::BlockHashReader for StateProviderTraitObjWrapper<'a> {
+impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> {
     fn block_hash(
         &self,
         block_number: reth_primitives::BlockNumber,

@@ -184,6 +184,7 @@ where
             pool: self.pool.clone(),
             executor: self.executor.clone(),
             deadline,
+            // ticks immediately
             interval: tokio::time::interval(self.config.interval),
             best_payload: None,
             pending_block: None,
@@ -423,23 +424,20 @@ where
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
             match fut.poll_unpin(cx) {
-                Poll::Ready(Ok(outcome)) => {
-                    this.interval.reset();
-                    match outcome {
-                        BuildOutcome::Better { payload, cached_reads } => {
-                            this.cached_reads = Some(cached_reads);
-                            debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                            this.best_payload = Some(payload);
-                        }
-                        BuildOutcome::Aborted { fees, cached_reads } => {
-                            this.cached_reads = Some(cached_reads);
-                            trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
-                        }
-                        BuildOutcome::Cancelled => {
-                            unreachable!("the cancel signal never fired")
-                        }
+                Poll::Ready(Ok(outcome)) => match outcome {
+                    BuildOutcome::Better { payload, cached_reads } => {
+                        this.cached_reads = Some(cached_reads);
+                        debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                        this.best_payload = Some(payload);
                     }
-                }
+                    BuildOutcome::Aborted { fees, cached_reads } => {
+                        this.cached_reads = Some(cached_reads);
+                        trace!(target: "payload_builder", worse_fees = %fees, "skipped payload build of worse block");
+                    }
+                    BuildOutcome::Cancelled => {
+                        unreachable!("the cancel signal never fired")
+                    }
+                },
                 Poll::Ready(Err(error)) => {
                     // job failed, but we simply try again next interval
                     debug!(target: "payload_builder", %error, "payload build attempt failed");

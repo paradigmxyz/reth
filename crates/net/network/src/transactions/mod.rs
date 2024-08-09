@@ -38,7 +38,9 @@ use reth_eth_wire::{
     PooledTransactions, RequestTxHashes, Transactions,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
-use reth_network_api::Peers;
+use reth_network_api::{
+    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
+};
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
     sync::SyncStateProvider,
@@ -63,12 +65,9 @@ use crate::{
         DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
     cache::LruCache,
-    duration_metered_exec,
-    manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
-    metered_poll_nested_stream_with_budget,
+    duration_metered_exec, metered_poll_nested_stream_with_budget,
     metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    NetworkEvents, NetworkHandle,
+    NetworkHandle,
 };
 
 /// The future for importing transactions into the pool.
@@ -422,7 +421,7 @@ where
 
         // send full transactions to a fraction of the connected peers (square root of the total
         // number of connected peers)
-        let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
+        let max_num_full = (self.peers.len() as f64).sqrt().round() as usize;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
@@ -434,7 +433,9 @@ where
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
             for tx in &to_propagate {
-                if peer.seen_transactions.insert(tx.hash()) {
+                // Only proceed if the transaction is not in the peer's list of seen transactions
+                if !peer.seen_transactions.contains(&tx.hash()) {
+                    // add transaction to the list of hashes to propagate
                     hashes.push(tx);
 
                     // Do not send full 4844 transaction hashes to peers.
@@ -452,40 +453,42 @@ where
             }
             let mut new_pooled_hashes = hashes.build();
 
-            if !new_pooled_hashes.is_empty() {
-                // determine whether to send full tx objects or hashes. If there are no full
-                // transactions, try to send hashes.
-                if peer_idx > max_num_full || full_transactions.is_empty() {
-                    // enforce tx soft limit per message for the (unlikely) event the number of
-                    // hashes exceeds it
-                    new_pooled_hashes.truncate(
-                        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
-                    );
+            if new_pooled_hashes.is_empty() {
+                trace!(target: "net::tx", ?peer_id, "Nothing to propagate to peer; has seen all transactions");
+                continue
+            }
 
-                    for hash in new_pooled_hashes.iter_hashes().copied() {
-                        propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
-                    }
+            // determine whether to send full tx objects or hashes. If there are no full
+            // transactions, try to send hashes.
+            if peer_idx > max_num_full || full_transactions.is_empty() {
+                // enforce tx soft limit per message for the (unlikely) event the number of
+                // hashes exceeds it
+                new_pooled_hashes
+                    .truncate(SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE);
 
-                    trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
-
-                    // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
-                } else {
-                    let new_full_transactions = full_transactions.build();
-
-                    for tx in &new_full_transactions {
-                        propagated
-                            .0
-                            .entry(tx.hash())
-                            .or_default()
-                            .push(PropagateKind::Full(*peer_id));
-                    }
-
-                    trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
-
-                    // send full transactions
-                    self.network.send_transactions(*peer_id, new_full_transactions);
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+                    // mark transaction as seen by peer
+                    peer.seen_transactions.insert(hash);
                 }
+
+                trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
+
+                // send hashes of transactions
+                self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
+            } else {
+                let new_full_transactions = full_transactions.build();
+
+                for tx in &new_full_transactions {
+                    propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
+                    // mark transaction as seen by peer
+                    peer.seen_transactions.insert(tx.hash());
+                }
+
+                trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
+
+                // send full transactions
+                self.network.send_transactions(*peer_id, new_full_transactions);
             }
         }
 

@@ -4,6 +4,9 @@ use crate::Compact;
 use alloy_primitives::{Address, Bytes, Log, LogData};
 use bytes::BufMut;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Implement `Compact` for `LogData` and `Log`.
 impl Compact for LogData {
     fn to_compact<B>(&self, buf: &mut B) -> usize

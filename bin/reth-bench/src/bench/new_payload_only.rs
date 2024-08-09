@@ -71,7 +71,8 @@ impl Command {
 
             let versioned_hashes: Vec<B256> =
                 block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload(block);
+            let parent_beacon_block_root = block.parent_beacon_block_root;
+            let payload = block_to_payload(block);
 
             let block_number = payload.block_number();
 

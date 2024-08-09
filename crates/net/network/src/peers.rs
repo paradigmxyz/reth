@@ -12,14 +12,15 @@ use std::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_banlist::BanList;
+use reth_network_api::test_utils::{PeerCommand, PeersHandle};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{
     peers::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
     },
-    ConnectionsConfig, Peer, PeerAddr, PeerCommand, PeerConnectionState, PeerKind, PeersConfig,
-    PeersHandle, ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
+    ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
+    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use reth_primitives::ForkId;
 use thiserror::Error;

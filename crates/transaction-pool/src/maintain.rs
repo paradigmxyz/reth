@@ -11,16 +11,15 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::ChainSpecProvider;
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
     PooledTransactionsElementEcRecovered, TransactionSigned,
 };
-use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
-    StateProviderFactory,
-};
+use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
@@ -741,5 +740,47 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         temp_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_update_with_higher_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(10));
+        assert_eq!(tracker.update(Some(15)), Some(15));
+        assert_eq!(tracker.last_finalized_block, Some(15));
+    }
+
+    #[test]
+    fn test_update_with_lower_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(20));
+        assert_eq!(tracker.update(Some(15)), None);
+        assert_eq!(tracker.last_finalized_block, Some(15));
+    }
+
+    #[test]
+    fn test_update_with_equal_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(20));
+        assert_eq!(tracker.update(Some(20)), None);
+        assert_eq!(tracker.last_finalized_block, Some(20));
+    }
+
+    #[test]
+    fn test_update_with_no_last_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(None);
+        assert_eq!(tracker.update(Some(10)), Some(10));
+        assert_eq!(tracker.last_finalized_block, Some(10));
+    }
+
+    #[test]
+    fn test_update_with_no_new_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(10));
+        assert_eq!(tracker.update(None), None);
+        assert_eq!(tracker.last_finalized_block, Some(10));
+    }
+
+    #[test]
+    fn test_update_with_no_finalized_blocks() {
+        let mut tracker = FinalizedBlockTracker::new(None);
+        assert_eq!(tracker.update(None), None);
+        assert_eq!(tracker.last_finalized_block, None);
     }
 }

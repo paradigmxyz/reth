@@ -5,8 +5,8 @@ use std::fmt::{self, Debug, Formatter};
 
 use derive_more::{Deref, DerefMut, From, Into};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
-use reth_provider::BlockReaderIdExt;
 use reth_rpc_server_types::constants;
+use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;

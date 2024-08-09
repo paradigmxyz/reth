@@ -134,10 +134,10 @@ impl<S> EngineStoreStream<S> {
     }
 }
 
-impl<Engine, S> Stream for EngineStoreStream<S>
+impl<S, Engine> Stream for EngineStoreStream<S>
 where
-    Engine: EngineTypes,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
+    Engine: EngineTypes,
 {
     type Item = S::Item;
 
@@ -146,7 +146,7 @@ where
         let next = ready!(this.stream.poll_next_unpin(cx));
         if let Some(msg) = &next {
             if let Err(error) = this.store.on_message(msg, SystemTime::now()) {
-                error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
+                error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
             }
         }
         Poll::Ready(next)

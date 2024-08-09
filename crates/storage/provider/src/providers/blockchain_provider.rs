@@ -8,7 +8,9 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{CanonicalInMemoryState, RangeLookupResult};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, RangeLookupResult,
+};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -83,8 +85,11 @@ where
         latest: SealedHeader,
     ) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let finalized_block_number = provider.last_finalized_block_number()?;
-        let finalized_header = provider.sealed_header(finalized_block_number)?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         Ok(Self {
             database,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
@@ -118,6 +123,17 @@ where
         };
 
         (start, end)
+    }
+
+    /// This uses a given [`BlockState`] to initialize a state provider for that block.
+    fn block_state_provider(
+        &self,
+        state: impl AsRef<BlockState>,
+    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        let state = state.as_ref();
+        let anchor_hash = state.anchor().hash;
+        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
+        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
     }
 }
 
@@ -180,11 +196,30 @@ where
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.database.header_td(hash)
+        if let Some(num) = self.block_number(*hash)? {
+            self.header_td_by_number(num)
+        } else {
+            Ok(None)
+        }
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.database.header_td_by_number(number)
+        // If the TD is recorded on disk, we can just return that
+        if let Some(td) = self.database.header_td_by_number(number)? {
+            Ok(Some(td))
+        } else if self.canonical_in_memory_state.hash_by_number(number).is_some() {
+            // Otherwise, if the block exists in memory, we should return a TD for it.
+            //
+            // The canonical in memory state should only store post-merge blocks. Post-merge blocks
+            // have zero difficulty. This means we can use the total difficulty for the last
+            // persisted block number.
+            let last_persisted_block_number = self.database.last_block_number()?;
+            self.database.header_td_by_number(last_persisted_block_number)
+        } else {
+            // If the block does not exist in memory, and does not exist on-disk, we should not
+            // return a TD for it.
+            Ok(None)
+        }
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -398,7 +433,34 @@ where
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
+        if let Some(indices) = self.database.block_body_indices(number)? {
+            Ok(Some(indices))
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
+            // we have to construct the stored indices for the in memory blocks
+            //
+            // To calculate this we will fetch the anchor block and walk forward from all parents
+            let mut parent_chain = state.parent_state_chain();
+            parent_chain.reverse();
+            let anchor_num = state.anchor().number;
+            let mut stored_indices = self
+                .database
+                .block_body_indices(anchor_num)?
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+            stored_indices.first_tx_num = stored_indices.next_tx_num();
+
+            for state in parent_chain {
+                let txs = state.block().block.body.len() as u64;
+                if state.block().block().number == number {
+                    stored_indices.tx_count = txs;
+                } else {
+                    stored_indices.first_tx_num += txs;
+                }
+            }
+
+            Ok(Some(stored_indices))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -788,7 +850,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
     fn fill_env_with_header<EvmConfig>(
@@ -801,7 +865,17 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.database.chain_spec(),
+            header,
+            total_difficulty,
+        );
+        Ok(())
     }
 
     fn fill_cfg_env_at<EvmConfig>(
@@ -813,7 +887,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -825,7 +901,11 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_env(cfg, &self.database.chain_spec(), header, total_difficulty);
+        Ok(())
     }
 }
 
@@ -861,7 +941,14 @@ where
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
-        self.database.latest()
+        // use latest state provider if the head state exists
+        if let Some(state) = self.canonical_in_memory_state.head_state() {
+            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            Ok(self.block_state_provider(state)?.boxed())
+        } else {
+            trace!(target: "providers::blockchain", "Using database state for latest state provider");
+            self.database.latest()
+        }
     }
 
     fn history_by_block_number(
@@ -870,27 +957,39 @@ where
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
-        self.database.history_by_block_number(block_number)
+        let hash = self
+            .block_hash(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        self.history_by_block_hash(hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        self.database.history_by_block_hash(block_hash)
+        if let Ok(state) = self.database.history_by_block_hash(block_hash) {
+            // This could be tracked by a block in the database block
+            Ok(state)
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            // ... or this could be tracked by the in memory state
+            let state_provider = self.block_state_provider(state)?;
+            Ok(Box::new(state_provider))
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(block_hash))
+        }
     }
 
-    fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox> {
-        trace!(target: "providers::blockchain", ?block, "Getting state by block hash");
-        let mut state = self.history_by_block_hash(block);
-
-        // we failed to get the state by hash, from disk, hash block be the pending block
-        if state.is_err() {
-            if let Ok(Some(pending)) = self.pending_state_by_hash(block) {
-                // we found pending block by hash
-                state = Ok(pending)
-            }
+    fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
+        trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
+        if let Ok(state) = self.history_by_block_hash(hash) {
+            // This could be tracked by a historical block
+            Ok(state)
+        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
+            // .. or this could be the pending state
+            Ok(pending)
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(hash))
         }
-
-        state
     }
 
     /// Returns the state provider for pending state.
@@ -923,6 +1022,35 @@ where
             }
         }
         Ok(None)
+    }
+
+    /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                let hash = self
+                    .block_hash(num)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
+                self.state_by_block_hash(hash)
+            }
+        }
     }
 }
 
@@ -1076,6 +1204,8 @@ where
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        self.database.provider()?.basic_account(address)
+        // use latest state provider
+        let state_provider = self.latest()?;
+        state_provider.basic_account(address)
     }
 }

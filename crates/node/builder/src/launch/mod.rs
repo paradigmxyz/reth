@@ -3,6 +3,8 @@
 pub mod common;
 mod exex;
 
+pub(crate) mod engine;
+
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
@@ -15,7 +17,7 @@ use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEvents};
+use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -182,6 +184,12 @@ where
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+                node_config.debug.reorg_frequency,
+            )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.

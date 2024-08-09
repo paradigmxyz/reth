@@ -43,7 +43,6 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
 
 rand.workspace = true
-serde_json.workspace = true
 
 test-fuzz.workspace = true
 
@@ -59,7 +58,6 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
-paste.workspace = true
 
 assert_matches.workspace = true
 

@@ -1,7 +1,7 @@
 //! Support for maintaining the blob pool.
 
+use reth_execution_types::ChainBlocks;
 use reth_primitives::{BlockNumber, B256};
-use reth_provider::ChainBlocks;
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
