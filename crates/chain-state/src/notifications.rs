@@ -151,12 +151,15 @@ pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
-    /// Get notified when a new head of the chain is selected.
-    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications;
+    /// Get notified when a new safe block of the chain is selected.
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications;
 
-    /// Convenience method to get a stream of the new head of the chain.
+    /// Get notified when a new finalized block of the chain is selected.
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications;
+
+    /// Convenience method to get a stream of the new safe blocks of the chain.
     fn fork_choice_stream(&self) -> ForkChoiceStream {
-        ForkChoiceStream { st: WatchStream::new(self.subscribe_to_fork_choice().0) }
+        ForkChoiceStream { st: WatchStream::new(self.subscribe_to_safe_block().0) }
     }
 }
 

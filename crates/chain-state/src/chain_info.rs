@@ -130,7 +130,7 @@ impl ChainInfoTracker {
     }
 
     /// Subscribe to the safe block.
-    pub fn subscribe_to_fork_choice(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_to_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
         self.inner.safe_block.subscribe()
     }
 }

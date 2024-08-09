@@ -510,7 +510,12 @@ impl CanonStateSubscriptions for NoopProvider {
 }
 
 impl ForkChoiceSubscriptions for NoopProvider {
-    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications {
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)
     }
