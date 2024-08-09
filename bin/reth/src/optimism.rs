@@ -11,7 +11,6 @@ use jsonrpsee::{
 use reth::cli::Cli;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
-use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
 use reth_tracing::tracing::info;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,6 +21,11 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use reth_node_builder::EngineNodeLauncher;
+use reth_node_optimism::{
+    args::RollupArgs, node::OptimismAddOns, rpc::SequencerClient, OptimismNode,
+};
+use reth_provider::providers::BlockchainProvider2;
 
 // We use jemalloc for performance reasons
 #[cfg(all(feature = "jemalloc", unix))]
@@ -43,29 +47,64 @@ fn main() {
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
         let (rpc_tx, rpc_rx) = mpsc::unbounded_channel(); // For WallTimeExEx
 
-        let handle = builder
-            .node(OptimismNode::new(rollup_args.clone()))
-            .extend_rpc_modules(move |ctx| {
-                // register sequencer tx forwarder
-                if let Some(sequencer_http) = rollup_args.sequencer_http {
-                    ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(SequencerClient::new(
-                        sequencer_http,
-                    )));
-                }
+        let enable_engine2 = rollup_args.experimental;
+        let sequencer_http_arg = rollup_args.sequencer_http.clone();
+        match enable_engine2 {
+            true => {
+                let handle = builder
+                    .with_types_and_provider::<OptimismNode, BlockchainProvider2<_>>()
+                    .with_components(OptimismNode::components(rollup_args))
+                    .with_add_ons::<OptimismAddOns>()
+                    .extend_rpc_modules(move |ctx| {
+                        // register sequencer tx forwarder
+                        if let Some(sequencer_http) = sequencer_http_arg {
+                            ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(
+                                SequencerClient::new(sequencer_http),
+                            ));
+                        }
 
-                Ok(())
-            })
-            .extend_rpc_modules(move |ctx| {
-                ctx.modules.merge_configured(WallTimeRpcExt { to_exex: rpc_tx }.into_rpc())?;
-                Ok(())
-            })
-            .install_exex("walltime", |ctx| async move {
-                Ok(WallTimeExEx::new(ctx, UnboundedReceiverStream::from(rpc_rx)))
-            })
-            .launch()
-            .await?;
+                        ctx.modules.merge_configured(WallTimeRpcExt { to_exex: rpc_tx }.into_rpc())?;
 
-        handle.node_exit_future.await
+                        Ok(())
+                    })
+                    .install_exex("walltime", |ctx| async move {
+                        Ok(WallTimeExEx::new(ctx, UnboundedReceiverStream::from(rpc_rx)))
+                    })
+                    .launch_with_fn(|builder| {
+                        let launcher = EngineNodeLauncher::new(
+                            builder.task_executor().clone(),
+                            builder.config().datadir(),
+                        );
+                        builder.launch_with(launcher)
+                    })
+                    .await?;
+
+                handle.node_exit_future.await
+            }
+            false => {
+                let handle = builder
+                    .node(OptimismNode::new(rollup_args.clone()))
+                    .extend_rpc_modules(move |ctx| {
+                        // register sequencer tx forwarder
+                        if let Some(sequencer_http) = sequencer_http_arg {
+                            ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(
+                                SequencerClient::new(sequencer_http),
+                            ));
+                        }
+
+                        ctx.modules.merge_configured(WallTimeRpcExt { to_exex: rpc_tx }.into_rpc())?;
+
+                        Ok(())
+                    })
+                    .install_exex("walltime", |ctx| async move {
+                        Ok(WallTimeExEx::new(ctx, UnboundedReceiverStream::from(rpc_rx)))
+                    })
+                    .launch()
+                    .await?;
+
+                handle.node_exit_future.await
+            }
+        }
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);

@@ -1391,11 +1391,14 @@ where
                 }
                 Err(err) => {
                     debug!(target: "engine", ?err, "failed to connect buffered block to tree");
+                    if let Err(fatal) = self.on_insert_block_error(err) {
+                        warn!(target: "engine", %fatal, "fatal error occurred while connecting buffered blocks");
+                    }
                 }
             }
         }
 
-        debug!(target: "engine", elapsed = ?now.elapsed(), %block_count ,"connected buffered blocks");
+        debug!(target: "engine", elapsed = ?now.elapsed(), %block_count, "connected buffered blocks");
     }
 
     /// Attempts to recover the block's senders and then buffers it.
@@ -1634,6 +1637,9 @@ where
             }
             Err(err) => {
                 debug!(target: "engine", err=%err.kind(), "failed to insert downloaded block");
+                if let Err(fatal) = self.on_insert_block_error(err) {
+                    warn!(target: "engine", %fatal, "fatal error occurred while inserting downloaded block");
+                }
             }
         }
         None
@@ -1706,7 +1712,11 @@ where
         let block_hash = block.hash();
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
+
+        let exec_time = Instant::now();
         let output = executor.execute((&block, U256::MAX).into())?;
+        debug!(target: "engine", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
         self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -1714,6 +1724,7 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
+        let root_time = Instant::now();
         let (state_root, trie_output) =
             state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
@@ -1722,6 +1733,8 @@ where
             )
             .into())
         }
+
+        debug!(target: "engine", elapsed=?root_time.elapsed(), ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {
             block: sealed_block.clone(),

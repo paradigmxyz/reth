@@ -430,6 +430,11 @@ TxPool:
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
 
+      --txpool.additional-validation-tasks <ADDITIONAL_VALIDATION_TASKS>
+          Number of additional transaction validation tasks to spawn
+
+          [default: 1]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -481,6 +486,9 @@ Debug:
 
       --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
           If provided, the engine will skip `n` consecutive new payloads
+
+      --debug.reorg-frequency <REORG_FREQUENCY>
+          If provided, the chain will be reorged at specified frequency
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
