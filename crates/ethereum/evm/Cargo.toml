@@ -38,3 +38,6 @@ serde_json.workspace = true
 [features]
 default = ["std"]
 std = []
+optimism = [
+    "reth-primitives/optimism",
+]

@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_cfg_and_block_env1() {
+    fn test_evm_configure() {
         // Create a default `EthEvmConfig`
         let evm_config = EthEvmConfig::default();
 
@@ -213,6 +213,7 @@ mod tests {
         assert!(evm.context.evm.inner.valid_authorizations.is_empty());
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_default_spec() {
         let evm_config = EthEvmConfig::default();
@@ -230,6 +231,7 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_custom_cfg() {
         let evm_config = EthEvmConfig::default();
@@ -257,6 +259,7 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
         let evm_config = EthEvmConfig::default();
@@ -287,6 +290,7 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_spec_id() {
         let evm_config = EthEvmConfig::default();
