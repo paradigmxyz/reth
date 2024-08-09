@@ -133,9 +133,7 @@ mod tests {
         db::{CacheDB, EmptyDBTyped},
         JournaledState,
     };
-    use revm_primitives::CfgEnvWithHandlerCfg;
-    #[cfg(not(feature = "optimism"))]
-    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
     use std::collections::HashSet;
 
     #[test]
@@ -215,7 +213,6 @@ mod tests {
         assert!(evm.context.evm.inner.valid_authorizations.is_empty());
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_default_spec() {
         let evm_config = EthEvmConfig::default();
@@ -233,7 +230,6 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_custom_cfg() {
         let evm_config = EthEvmConfig::default();
@@ -261,7 +257,6 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
         let evm_config = EthEvmConfig::default();
@@ -292,17 +287,16 @@ mod tests {
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_evm_with_spec_id() {
         let evm_config = EthEvmConfig::default();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let env_with_handler = EnvWithHandlerCfg {
-            env: Box::new(Env::default()),
-            handler_cfg: HandlerCfg { spec_id: SpecId::CONSTANTINOPLE },
-        };
+        let mut handler_cfg = HandlerCfg::default();
+        handler_cfg.spec_id = SpecId::CONSTANTINOPLE;
+
+        let env_with_handler = EnvWithHandlerCfg { env: Box::new(Env::default()), handler_cfg };
 
         let evm = evm_config.evm_with_env(db, env_with_handler.clone());
 
