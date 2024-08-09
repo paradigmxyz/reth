@@ -1,4 +1,4 @@
-# Runs all single stage commands.
+# Runs all `stage run` commands.
 
 name: stage-test
 
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   stage:
-    name: stage commands
+    name: stage-run-test
     # Only run stage commands test in merge groups
     if: github.event_name == 'merge_group'
     runs-on:
