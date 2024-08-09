@@ -4,7 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceSubscriptions};
+use reth_chain_state::{
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
+    ForkChoiceSubscriptions,
+};
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
@@ -505,7 +508,6 @@ impl CanonStateSubscriptions for NoopProvider {
         broadcast::channel(1).1
     }
 }
-
 
 impl ForkChoiceSubscriptions for NoopProvider {
     fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications {

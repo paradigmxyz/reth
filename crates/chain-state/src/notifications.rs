@@ -10,7 +10,10 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{broadcast, watch};
-use tokio_stream::{wrappers::BroadcastStream, Stream, wrappers::WatchStream};
+use tokio_stream::{
+    wrappers::{BroadcastStream, WatchStream},
+    Stream,
+};
 use tracing::debug;
 
 /// Type alias for a receiver that receives [`CanonStateNotification`]
