@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
@@ -20,7 +20,7 @@ use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::{
     providers::StaticFileProvider,
@@ -503,5 +503,13 @@ impl StaticFileProviderFactory for NoopProvider {
 impl CanonStateSubscriptions for NoopProvider {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         broadcast::channel(1).1
+    }
+}
+
+
+impl ForkChoiceSubscriptions for NoopProvider {
+    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
     }
 }
