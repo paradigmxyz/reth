@@ -6482,6 +6482,8 @@ dependencies = [
 name = "reth-chain-state"
 version = "1.0.4"
 dependencies = [
+ "alloy-signer",
+ "alloy-signer-local",
  "auto_impl",
  "derive_more",
  "metrics",
