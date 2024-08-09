@@ -44,7 +44,14 @@ pub enum RangeLookupResult<T> {
     /// No results were found for the specified range.
     None,
     /// Partial results were found for the specified range.
-    Partial(Vec<T>),
+    Partial { 
+        /// The headers that were found in memory.
+        headers: Vec<T>, 
+        /// The lowest value within the specified range that was not found in memory.
+        lowest: u64, 
+        /// The highest value within the specified range that was not found in memory.
+        highest: u64 
+    },
     /// Full results were found for the specified range.
     Full(Vec<T>),
 }
@@ -284,15 +291,13 @@ impl CanonicalInMemoryState {
     pub fn range_lookup(&self, start: u64, end: u64) -> RangeLookupResult<Header> {
         let mut headers = Vec::new();
 
-        if start > end {
-            return RangeLookupResult::None;
-        }
-        
         for num in start..=end {
             if let Some(block_state) = self.state_by_number(num) {
                 headers.push(block_state.block().block().header.header().clone());
+            } else if num == start {
+                return RangeLookupResult::None;
             } else {
-                return RangeLookupResult::Partial(headers);
+                return RangeLookupResult::Partial { headers, lowest: end, highest: num };
             }
         }
         RangeLookupResult::Full(headers)
