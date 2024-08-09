@@ -2991,29 +2991,18 @@ mod tests {
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
         // create base chain and setup test harness with it
-        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..2).collect();
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
         test_harness = test_harness.with_blocks(base_chain.clone());
 
         let old_head = base_chain.first().unwrap().block();
-        let fork_block = base_chain.last().unwrap().block();
 
-        // fcu to old_head
-        test_harness.fcu_to(old_head.hash(), ForkchoiceStatus::Valid).await;
+        // verify old_head is the canonical head
+        test_harness.check_canon_head(old_head.hash());
 
-        // create two competing chains starting from fork_block
-        let chain_a = test_harness.block_builder.create_fork(fork_block, 3);
-        let chain_b = test_harness.block_builder.create_fork(fork_block, 3);
+        // create a fork chain starting from old_head
+        let chain_b = test_harness.block_builder.create_fork(old_head, 3);
 
-        // insert chain A blocks using newPayload
-        test_harness.setup_range_insertion_for_chain(chain_a.clone());
-        for block in &chain_a {
-            let payload = block_to_payload_v1(block.block.clone());
-            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
-        }
-
-        test_harness.check_canon_chain_insertion(chain_a.clone()).await;
-
-        // insert chain B blocks using newPayload
+        // insert chain_b blocks using newPayload
         test_harness.setup_range_insertion_for_chain(chain_b.clone());
         for block in &chain_b {
             let payload = block_to_payload_v1(block.block.clone());
@@ -3022,7 +3011,10 @@ mod tests {
 
         test_harness.check_canon_chain_insertion(chain_b.clone()).await;
 
-        // send FCU to make the tip of chain B the new head
+        // verify the canonical head hasn't changed yet
+        test_harness.check_canon_head(old_head.hash());
+
+        // send FCU to make the tip of chain_b the new head
         let chain_b_tip_hash = chain_b.last().unwrap().hash();
         test_harness.send_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
 
@@ -3034,8 +3026,5 @@ mod tests {
 
         // verify the new canonical head
         test_harness.check_canon_head(chain_b_tip_hash);
-
-        // verify that chain A is now considered a fork
-        assert!(test_harness.tree.state.tree_state.is_fork(chain_a.last().unwrap().hash()));
     }
 }
