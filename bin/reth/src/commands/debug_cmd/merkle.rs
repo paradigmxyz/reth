@@ -115,7 +115,7 @@ impl Command {
         // build the full block client
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-        let block_range_client = FullBlockClient::new(fetch_client, consensus);
+        let block_range_client: FullBlockClient<_> = FullBlockClient::new(fetch_client, consensus);
 
         // get best block number
         let best_block_number = provider_rw.best_block_number()?;

@@ -53,7 +53,7 @@ where
         .into_task();
     // TODO: The pipeline should correctly configure the downloader on its own.
     // Find the possibility to remove unnecessary pre-configuration.
-    header_downloader.update_local_head(local_head);
+    header_downloader.update_local_head(local_head.into());
     header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
     let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)

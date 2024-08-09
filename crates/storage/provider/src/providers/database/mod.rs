@@ -774,12 +774,12 @@ mod tests {
         // Checkpoint and no gap
         let mut static_file_writer =
             provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
-        static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
+        static_file_writer.append_header(head.inner(), U256::ZERO, &head.seal()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
         let gap = provider.sync_gap(tip_rx, checkpoint).unwrap();
-        assert_eq!(gap.local_head, head);
+        assert_eq!(gap.local_head, head.into());
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }
 }

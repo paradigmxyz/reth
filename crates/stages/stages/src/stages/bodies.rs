@@ -632,8 +632,9 @@ mod tests {
             error::DownloadResult,
         };
         use reth_primitives::{
-            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
-            StaticFileSegment, TxNumber, B256,
+            alloy_primitives::{Sealable, Sealed},
+            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, StaticFileSegment, TxNumber,
+            B256,
         };
         use reth_provider::{
             providers::StaticFileWriter, HeaderProvider, ProviderFactory,
@@ -887,7 +888,7 @@ mod tests {
         pub(crate) struct TestBodyDownloader {
             provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
             responses: HashMap<B256, BlockBody>,
-            headers: VecDeque<SealedHeader>,
+            headers: VecDeque<Sealed<Header>>,
             batch_size: u64,
         }
 
@@ -914,7 +915,7 @@ mod tests {
                     |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
                 )? {
                     let (header, hash) = header?;
-                    self.headers.push_back(header.seal(hash));
+                    self.headers.push_back(Sealable::seal_unchecked(header, hash));
                 }
 
                 Ok(())
@@ -936,9 +937,9 @@ mod tests {
                         response.push(BlockResponse::Empty(header))
                     } else {
                         let body =
-                            this.responses.remove(&header.hash()).expect("requested unknown body");
+                            this.responses.remove(&header.seal()).expect("requested unknown body");
                         response.push(BlockResponse::Full(SealedBlock {
-                            header,
+                            header: header.into(),
                             body: body.transactions,
                             ommers: body.ommers,
                             withdrawals: body.withdrawals,

@@ -86,6 +86,7 @@ impl AutoSealClient {
 }
 
 impl HeadersClient for AutoSealClient {
+    type Header = Header;
     type Output = HeadersFut;
 
     fn get_headers_with_priority(
@@ -102,7 +103,8 @@ impl HeadersClient for AutoSealClient {
 }
 
 impl BodiesClient for AutoSealClient {
-    type Output = BodiesFut;
+    type Body = BlockBody;
+    type Output = BodiesFut<BlockBody>;
 
     fn get_block_bodies_with_priority(
         &self,

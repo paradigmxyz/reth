@@ -1,12 +1,8 @@
 //! A client implementation that can interact with the network and download data.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
-
 use futures::{future, future::Either};
-use reth_network_api::test_utils::PeersHandle;
+use reth_eth_wire::NetworkTypes;
+use reth_network_api::{test_utils::PeersHandle, ReputationChangeKind};
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -15,8 +11,11 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_network_types::ReputationChangeKind;
-use reth_primitives::{Header, B256};
+use reth_primitives::B256;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
@@ -29,16 +28,16 @@ use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse};
 ///
 /// include_mmd!("docs/mermaid/fetch-client.mmd")
 #[derive(Debug, Clone)]
-pub struct FetchClient {
+pub struct FetchClient<T: NetworkTypes> {
     /// Sender half of the request channel.
-    pub(crate) request_tx: UnboundedSender<DownloadRequest>,
+    pub(crate) request_tx: UnboundedSender<DownloadRequest<T>>,
     /// The handle to the peers
     pub(crate) peers_handle: PeersHandle,
     /// Number of active peer sessions the node's currently handling.
     pub(crate) num_active_peers: Arc<AtomicUsize>,
 }
 
-impl DownloadClient for FetchClient {
+impl<T: NetworkTypes> DownloadClient for FetchClient<T> {
     fn report_bad_message(&self, peer_id: PeerId) {
         self.peers_handle.reputation_change(peer_id, ReputationChangeKind::BadMessage);
     }
@@ -52,8 +51,9 @@ impl DownloadClient for FetchClient {
 // or an error.
 type HeadersClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
 
-impl HeadersClient for FetchClient {
-    type Output = HeadersClientFuture<PeerRequestResult<Vec<Header>>>;
+impl<T: NetworkTypes> HeadersClient for FetchClient<T> {
+    type Header = T::BlockHeader;
+    type Output = HeadersClientFuture<PeerRequestResult<Vec<T::BlockHeader>>>;
 
     /// Sends a `GetBlockHeaders` request to an available peer.
     fn get_headers_with_priority(
@@ -74,8 +74,9 @@ impl HeadersClient for FetchClient {
     }
 }
 
-impl BodiesClient for FetchClient {
-    type Output = BodiesFut;
+impl<T: NetworkTypes> BodiesClient for FetchClient<T> {
+    type Body = T::BlockBody;
+    type Output = BodiesFut<T::BlockBody>;
 
     /// Sends a `GetBlockBodies` request to an available peer.
     fn get_block_bodies_with_priority(

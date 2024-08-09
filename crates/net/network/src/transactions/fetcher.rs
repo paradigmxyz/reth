@@ -37,7 +37,7 @@ use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
-    PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
+    NetworkTypes, PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -415,9 +415,9 @@ impl TransactionFetcher {
     ///
     /// Finds the first buffered hash with a fallback peer that is idle, if any. Fills the rest of
     /// the request by checking the transactions seen by the peer against the buffer.
-    pub fn on_fetch_pending_hashes(
+    pub fn on_fetch_pending_hashes<T: NetworkTypes>(
         &mut self,
-        peers: &HashMap<PeerId, PeerMetadata>,
+        peers: &HashMap<PeerId, PeerMetadata<T>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
         let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
@@ -617,10 +617,10 @@ impl TransactionFetcher {
     /// This filters all announced hashes that are already in flight, and requests the missing,
     /// while marking the given peer as an alternative peer for the hashes that are already in
     /// flight.
-    pub fn request_transactions_from_peer(
+    pub fn request_transactions_from_peer<T: NetworkTypes>(
         &mut self,
         new_announced_hashes: RequestTxHashes,
-        peer: &PeerMetadata,
+        peer: &PeerMetadata<T>,
     ) -> Option<RequestTxHashes> {
         let peer_id: PeerId = peer.request_tx.peer_id;
         let conn_eth_version = peer.version;
@@ -676,7 +676,7 @@ impl TransactionFetcher {
         }
 
         let (response, rx) = oneshot::channel();
-        let req: PeerRequest = PeerRequest::GetPooledTransactions {
+        let req: PeerRequest<T> = PeerRequest::GetPooledTransactions {
             request: GetPooledTransactions(
                 new_announced_hashes.iter().copied().collect::<Vec<_>>(),
             ),

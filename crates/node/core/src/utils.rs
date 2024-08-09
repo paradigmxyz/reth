@@ -4,13 +4,20 @@
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_block_pre_execution;
+use reth_eth_wire_types::types::BlockHeader;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
-use reth_rpc_types::engine::{JwtError, JwtSecret};
+use reth_primitives::{
+    alloy_primitives::{Sealable, Sealed},
+    BlockBody, BlockHashOrNumber, SealedBlock, SealedHeader,
+};
+use reth_rpc_types::{
+    engine::{JwtError, JwtSecret},
+    BlockNumHash,
+};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -39,7 +46,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
 pub async fn get_single_header<Client>(
     client: Client,
     id: BlockHashOrNumber,
-) -> Result<SealedHeader>
+) -> Result<Sealed<Client::Header>>
 where
     Client: HeadersClient,
 {
@@ -56,15 +63,15 @@ where
     let header = response.into_iter().next().unwrap().seal_slow();
 
     let valid = match id {
-        BlockHashOrNumber::Hash(hash) => header.hash() == hash,
-        BlockHashOrNumber::Number(number) => header.number == number,
+        BlockHashOrNumber::Hash(hash) => header.seal() == hash,
+        BlockHashOrNumber::Number(number) => header.number() == number,
     };
 
     if !valid {
         client.report_bad_message(peer_id);
         eyre::bail!(
             "Received invalid header. Received: {:?}. Expected: {:?}",
-            header.num_hash(),
+            BlockNumHash::new(header.number(), header.seal()),
             id
         );
     }
@@ -89,6 +96,7 @@ where
     }
 
     let block = response.unwrap();
+    let block: BlockBody = block.into();
     let block = SealedBlock {
         header,
         body: block.transactions,

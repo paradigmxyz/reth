@@ -52,7 +52,8 @@ fn decode_request_pair_pooled_blob_transactions() {
         .join("testdata/request_pair_pooled_blob_transactions");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
+    let _txs: ProtocolMessage =
+        ProtocolMessage::decode_message(EthVersion::Eth68, &mut &hex_data[..]).unwrap();
 }
 
 #[test]

@@ -32,8 +32,9 @@ where
 impl<A, B> BodiesClient for Either<A, B>
 where
     A: BodiesClient,
-    B: BodiesClient,
+    B: BodiesClient<Body = A::Body>,
 {
+    type Body = A::Body;
     type Output = Either<A::Output, B::Output>;
 
     fn get_block_bodies_with_priority(
@@ -51,8 +52,9 @@ where
 impl<A, B> HeadersClient for Either<A, B>
 where
     A: HeadersClient,
-    B: HeadersClient,
+    B: HeadersClient<Header = A::Header>,
 {
+    type Header = A::Header;
     type Output = Either<A::Output, B::Output>;
 
     fn get_headers_with_priority(

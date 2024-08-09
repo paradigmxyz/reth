@@ -1,4 +1,5 @@
 use super::Header;
+use alloy_consensus::Sealed;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, BlockHash};
 #[cfg(any(test, feature = "test-utils"))]
@@ -133,5 +134,18 @@ impl SealedHeader {
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Header::arbitrary(u)?.seal_slow())
+    }
+}
+
+impl<T: Into<Header>> From<Sealed<T>> for SealedHeader {
+    fn from(value: Sealed<T>) -> Self {
+        let (header, hash) = value.into_parts();
+        Self { hash, header: header.into() }
+    }
+}
+
+impl<T: From<Header>> From<SealedHeader> for Sealed<T> {
+    fn from(value: SealedHeader) -> Self {
+        Self::new_unchecked(value.header.into(), value.hash)
     }
 }

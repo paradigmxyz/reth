@@ -10,43 +10,44 @@ use std::{
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
-    GetBlockBodies, GetBlockHeaders, NewBlock, NewBlockHashes, NewPooledTransactionHashes,
-    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
+    capability::RawCapabilityMessage,
+    message::RequestPair,
+    types::{Block, BlockHeader},
+    BlockBodies, BlockHeaders, EthMessage, GetBlockBodies, GetBlockHeaders, NetworkTypes, NewBlock,
+    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
+    SharedTransactions, Transactions,
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_primitives::{
-    BlockBody, Bytes, Header, PooledTransactionsElement, ReceiptWithBloom, B256,
-};
+use reth_primitives::{Bytes, PooledTransactionsElement, ReceiptWithBloom, B256};
 use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message
 #[derive(Debug, Clone)]
-pub struct NewBlockMessage {
+pub struct NewBlockMessage<B> {
     /// Hash of the block
     pub hash: B256,
     /// Raw received message
-    pub block: Arc<NewBlock>,
+    pub block: Arc<NewBlock<B>>,
 }
 
 // === impl NewBlockMessage ===
 
-impl NewBlockMessage {
+impl<B: Block> NewBlockMessage<B> {
     /// Returns the block number of the block
     pub fn number(&self) -> u64 {
-        self.block.block.header.number
+        self.block.block.header().number()
     }
 }
 
 /// All Bi-directional eth-message variants that can be sent to a session or received from a
 /// session.
 #[derive(Debug)]
-pub enum PeerMessage {
+pub enum PeerMessage<T: NetworkTypes> {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(NewBlockMessage),
+    NewBlock(NewBlockMessage<T::Block>),
     /// Received transactions _from_ the peer
     ReceivedTransaction(Transactions),
     /// Broadcast transactions _from_ local _to_ a peer.
@@ -54,7 +55,7 @@ pub enum PeerMessage {
     /// Send new pooled transactions
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
-    EthRequest(PeerRequest),
+    EthRequest(PeerRequest<T>),
     /// Other than eth namespace message
     Other(RawCapabilityMessage),
 }
@@ -75,16 +76,16 @@ pub enum BlockRequest {
 
 /// Corresponding variant for [`PeerRequest`].
 #[derive(Debug)]
-pub enum PeerResponse {
+pub enum PeerResponse<T: NetworkTypes> {
     /// Represents a response to a request for block headers.
     BlockHeaders {
         /// The receiver channel for the response to a block headers request.
-        response: oneshot::Receiver<RequestResult<BlockHeaders>>,
+        response: oneshot::Receiver<RequestResult<BlockHeaders<T::BlockHeader>>>,
     },
     /// Represents a response to a request for block bodies.
     BlockBodies {
         /// The receiver channel for the response to a block bodies request.
-        response: oneshot::Receiver<RequestResult<BlockBodies>>,
+        response: oneshot::Receiver<RequestResult<BlockBodies<T::BlockBody>>>,
     },
     /// Represents a response to a request for pooled transactions.
     PooledTransactions {
@@ -105,9 +106,9 @@ pub enum PeerResponse {
 
 // === impl PeerResponse ===
 
-impl PeerResponse {
+impl<T: NetworkTypes> PeerResponse<T> {
     /// Polls the type to completion.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PeerResponseResult> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PeerResponseResult<T>> {
         macro_rules! poll_request {
             ($response:ident, $item:ident, $cx:ident) => {
                 match ready!($response.poll_unpin($cx)) {
@@ -140,11 +141,11 @@ impl PeerResponse {
 
 /// All response variants for [`PeerResponse`]
 #[derive(Debug)]
-pub enum PeerResponseResult {
+pub enum PeerResponseResult<T: NetworkTypes> {
     /// Represents a result containing block headers or an error.
-    BlockHeaders(RequestResult<Vec<Header>>),
+    BlockHeaders(RequestResult<Vec<T::BlockHeader>>),
     /// Represents a result containing block bodies or an error.
-    BlockBodies(RequestResult<Vec<BlockBody>>),
+    BlockBodies(RequestResult<Vec<T::BlockBody>>),
     /// Represents a result containing pooled transactions or an error.
     PooledTransactions(RequestResult<Vec<PooledTransactionsElement>>),
     /// Represents a result containing node data or an error.
@@ -155,9 +156,9 @@ pub enum PeerResponseResult {
 
 // === impl PeerResponseResult ===
 
-impl PeerResponseResult {
+impl<T: NetworkTypes> PeerResponseResult<T> {
     /// Converts this response into an [`EthMessage`]
-    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage> {
+    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<T>> {
         macro_rules! to_message {
             ($response:ident, $item:ident, $request_id:ident) => {
                 match $response {

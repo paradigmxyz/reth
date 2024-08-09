@@ -6,7 +6,7 @@ use std::{
 use reth_discv4::Discv4Config;
 use reth_network::{
     error::{NetworkError, ServiceKind},
-    Discovery, NetworkConfigBuilder, NetworkManager,
+    Discovery, NetworkConfig, NetworkConfigBuilder, NetworkManager,
 };
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::test_utils::NoopProvider;
@@ -25,7 +25,7 @@ fn is_addr_in_use_kind(err: &NetworkError, kind: ServiceKind) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_is_default_syncing() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .disable_discovery()
         .listener_port(0)
         .build(NoopProvider::default());
@@ -36,13 +36,13 @@ async fn test_is_default_syncing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_listener_addr_in_use() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .disable_discovery()
         .listener_port(0)
         .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
     let listener_port = network.local_addr().port();
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .listener_port(listener_port)
         .disable_discovery()
         .build(NoopProvider::default());
@@ -71,7 +71,7 @@ async fn test_discovery_addr_in_use() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_no_discovery() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .disable_discovery()
         .build_with_noop_provider();
@@ -89,7 +89,7 @@ async fn test_tcp_port_node_record_no_discovery() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tcp_port_node_record_discovery() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config: NetworkConfig<_> = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .discovery_port(0)
         .disable_dns_discovery()

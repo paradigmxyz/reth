@@ -7,7 +7,10 @@ pub use error::HeaderError;
 #[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
 pub mod test_utils;
 
-use alloy_consensus::constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+use alloy_consensus::{
+    constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH},
+    Sealable,
+};
 use alloy_eips::{
     calc_next_block_base_fee, eip1559::BaseFeeParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS,
     BlockNumHash,
@@ -526,5 +529,11 @@ impl<'a> arbitrary::Arbitrary<'a> for Header {
             u.arbitrary()?,
             u.arbitrary()?,
         ))
+    }
+}
+
+impl Sealable for Header {
+    fn hash_slow(&self) -> B256 {
+        self.hash_slow()
     }
 }

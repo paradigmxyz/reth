@@ -54,7 +54,7 @@ fn main() -> eyre::Result<()> {
             .build(NoopProvider::default());
 
         // spawn the second network instance
-        let subnetwork = NetworkManager::new(net_cfg).await?;
+        let subnetwork: NetworkManager = NetworkManager::new(net_cfg).await?;
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();

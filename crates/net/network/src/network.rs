@@ -8,8 +8,12 @@ use std::{
 
 use enr::Enr;
 use parking_lot::Mutex;
+use reth_chainspec::Head;
 use reth_discv4::Discv4;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{
+    DisconnectReason, NetworkTypes, NewBlock, NewPooledTransactionHashes, PrimitiveNetworkTypes,
+    SharedTransactions,
+};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
@@ -22,7 +26,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
-use reth_primitives::{Head, TransactionSigned, B256};
+use reth_primitives::{TransactionSigned, B256};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use tokio::sync::{
@@ -40,20 +44,20 @@ use crate::{
 ///
 /// See also [`NetworkManager`](crate::NetworkManager).
 #[derive(Clone, Debug)]
-pub struct NetworkHandle {
+pub struct NetworkHandle<T: NetworkTypes = PrimitiveNetworkTypes> {
     /// The Arc'ed delegate that contains the state.
-    inner: Arc<NetworkInner>,
+    inner: Arc<NetworkInner<T>>,
 }
 
 // === impl NetworkHandle ===
 
-impl NetworkHandle {
+impl<T: NetworkTypes> NetworkHandle<T> {
     /// Creates a single new instance.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
-        to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+        to_manager_tx: UnboundedSender<NetworkHandleMessage<T>>,
         secret_key: SecretKey,
         local_peer_id: PeerId,
         peers: PeersHandle,
@@ -61,7 +65,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
-        event_sender: EventSender<NetworkEvent>,
+        event_sender: EventSender<NetworkEvent<T>>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -86,7 +90,7 @@ impl NetworkHandle {
         &self.inner.local_peer_id
     }
 
-    fn manager(&self) -> &UnboundedSender<NetworkHandleMessage> {
+    fn manager(&self) -> &UnboundedSender<NetworkHandleMessage<T>> {
         &self.inner.to_manager_tx
     }
 
@@ -96,7 +100,7 @@ impl NetworkHandle {
     }
 
     /// Sends a [`NetworkHandleMessage`] to the manager
-    pub(crate) fn send_message(&self, msg: NetworkHandleMessage) {
+    pub(crate) fn send_message(&self, msg: NetworkHandleMessage<T>) {
         let _ = self.inner.to_manager_tx.send(msg);
     }
 
@@ -110,12 +114,12 @@ impl NetworkHandle {
     /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
-    pub fn announce_block(&self, block: NewBlock, hash: B256) {
+    pub fn announce_block(&self, block: NewBlock<T::Block>, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
     /// Sends a [`PeerRequest`] to the given peer's session.
-    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
+    pub fn send_request(&self, peer_id: PeerId, request: PeerRequest<T>) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
     }
 
@@ -135,7 +139,7 @@ impl NetworkHandle {
     /// Send message to get the [`TransactionsHandle`].
     ///
     /// Returns `None` if no transaction task is installed.
-    pub async fn transactions_handle(&self) -> Option<TransactionsHandle> {
+    pub async fn transactions_handle(&self) -> Option<TransactionsHandle<T>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
@@ -183,8 +187,8 @@ impl NetworkHandle {
 
 // === API Implementations ===
 
-impl NetworkEventListenerProvider for NetworkHandle {
-    fn event_listener(&self) -> EventStream<NetworkEvent> {
+impl<T: NetworkTypes> NetworkEventListenerProvider<T> for NetworkHandle<T> {
+    fn event_listener(&self) -> EventStream<NetworkEvent<T>> {
         self.inner.event_sender.new_listener()
     }
 
@@ -195,13 +199,13 @@ impl NetworkEventListenerProvider for NetworkHandle {
     }
 }
 
-impl NetworkProtocols for NetworkHandle {
+impl<T: NetworkTypes> NetworkProtocols for NetworkHandle<T> {
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
         self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
     }
 }
 
-impl PeersInfo for NetworkHandle {
+impl<T: NetworkTypes> PeersInfo for NetworkHandle<T> {
     fn num_connected_peers(&self) -> usize {
         self.inner.num_active_peers.load(Ordering::Relaxed)
     }
@@ -241,7 +245,7 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
-impl Peers for NetworkHandle {
+impl<T: NetworkTypes> Peers for NetworkHandle<T> {
     fn add_trusted_peer_id(&self, peer: PeerId) {
         self.send_message(NetworkHandleMessage::AddTrustedPeerId(peer));
     }
@@ -313,13 +317,13 @@ impl Peers for NetworkHandle {
     }
 }
 
-impl PeersHandleProvider for NetworkHandle {
+impl<T: NetworkTypes> PeersHandleProvider for NetworkHandle<T> {
     fn peers_handle(&self) -> &PeersHandle {
         &self.inner.peers
     }
 }
 
-impl NetworkInfo for NetworkHandle {
+impl<T: NetworkTypes> NetworkInfo for NetworkHandle<T> {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
@@ -343,7 +347,7 @@ impl NetworkInfo for NetworkHandle {
     }
 }
 
-impl SyncStateProvider for NetworkHandle {
+impl<T: NetworkTypes> SyncStateProvider for NetworkHandle<T> {
     fn is_syncing(&self) -> bool {
         self.inner.is_syncing.load(Ordering::Relaxed)
     }
@@ -356,7 +360,7 @@ impl SyncStateProvider for NetworkHandle {
     }
 }
 
-impl NetworkSyncUpdater for NetworkHandle {
+impl<T: NetworkTypes> NetworkSyncUpdater for NetworkHandle<T> {
     fn update_sync_state(&self, state: SyncState) {
         let future_state = state.is_syncing();
         let prev_state = self.inner.is_syncing.swap(future_state, Ordering::Relaxed);
@@ -372,8 +376,10 @@ impl NetworkSyncUpdater for NetworkHandle {
     }
 }
 
-impl BlockDownloaderProvider for NetworkHandle {
-    async fn fetch_client(&self) -> Result<impl BlockClient + 'static, oneshot::error::RecvError> {
+impl<T: NetworkTypes> BlockDownloaderProvider<T> for NetworkHandle<T> {
+    async fn fetch_client(
+        &self,
+    ) -> Result<impl BlockClient<T> + 'static, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::FetchClient(tx));
         rx.await
@@ -381,11 +387,11 @@ impl BlockDownloaderProvider for NetworkHandle {
 }
 
 #[derive(Debug)]
-struct NetworkInner {
+struct NetworkInner<T: NetworkTypes> {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
     /// Sender half of the message channel to the [`crate::NetworkManager`].
-    to_manager_tx: UnboundedSender<NetworkHandleMessage>,
+    to_manager_tx: UnboundedSender<NetworkHandleMessage<T>>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The secret key used for authenticating sessions.
@@ -407,7 +413,7 @@ struct NetworkInner {
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
     /// Sender for high level network events.
-    event_sender: EventSender<NetworkEvent>,
+    event_sender: EventSender<NetworkEvent<T>>,
 }
 
 /// Provides access to modify the network's additional protocol handlers.
@@ -418,7 +424,7 @@ pub trait NetworkProtocols: Send + Sync {
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
 #[derive(Debug)]
-pub(crate) enum NetworkHandleMessage {
+pub(crate) enum NetworkHandleMessage<T: NetworkTypes> {
     /// Marks a peer as trusted.
     AddTrustedPeerId(PeerId),
     /// Adds an address for a peer, including its ID, kind, and socket address.
@@ -428,7 +434,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Broadcasts an event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock, B256),
+    AnnounceBlock(NewBlock<T::Block>, B256),
     /// Sends a list of transactions to the given peer.
     SendTransaction {
         /// The ID of the peer to which the transactions are sent.
@@ -448,12 +454,12 @@ pub(crate) enum NetworkHandleMessage {
         /// The peer to send the request to.
         peer_id: PeerId,
         /// The request to send to the peer's sessions.
-        request: PeerRequest,
+        request: PeerRequest<T>,
     },
     /// Applies a reputation change to the given peer.
     ReputationChange(PeerId, ReputationChangeKind),
     /// Returns the client that can be used to interact with the network.
-    FetchClient(oneshot::Sender<FetchClient>),
+    FetchClient(oneshot::Sender<FetchClient<T>>),
     /// Applies a status update.
     StatusUpdate {
         /// The head status to apply.
@@ -472,7 +478,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Gets the reputation for a specific peer via a oneshot sender.
     GetReputationById(PeerId, oneshot::Sender<Option<Reputation>>),
     /// Retrieves the `TransactionsHandle` via a oneshot sender.
-    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle>>),
+    GetTransactionsHandle(oneshot::Sender<Option<TransactionsHandle<T>>>),
     /// Initiates a graceful shutdown of the network via a oneshot sender.
     Shutdown(oneshot::Sender<()>),
     /// Sets the network state between hibernation and active.
