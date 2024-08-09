@@ -301,6 +301,12 @@ impl Peers for NetworkHandle {
         self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
     }
 
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to reconnect to the given
+    /// peer.
+    fn reconnect_peer(&self, addr: SocketAddr, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::ReConnect(addr, peer))
+    }
+
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
@@ -481,4 +487,6 @@ pub(crate) enum NetworkHandleMessage {
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.
     AddRlpxSubProtocol(RlpxSubProtocol),
+    /// Reconnect to the given peer.
+    ReConnect(SocketAddr, PeerId),
 }
