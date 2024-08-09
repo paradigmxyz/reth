@@ -59,13 +59,13 @@ pub enum RangeLookupResult<T> {
     /// No results were found for the specified range.
     None,
     /// Partial results were found for the specified range.
-    Partial { 
+    Partial {
         /// The headers that were found in memory.
-        headers: Vec<T>, 
+        headers: Vec<T>,
         /// The lowest value within the specified range that was not found in memory.
-        lowest: u64, 
+        lowest: u64,
         /// The highest value within the specified range that was not found in memory.
-        highest: u64 
+        highest: u64,
     },
     /// Full results were found for the specified range.
     Full(Vec<T>),
