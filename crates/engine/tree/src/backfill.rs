@@ -2,7 +2,7 @@
 //!
 //!  - Backfill sync: Sync to a certain block height in stages, e.g. download data from p2p then
 //!    execute that range.
-//!  - Live sync: In this mode the nodes is keeping up with the latest tip and listens for new
+//!  - Live sync: In this mode the node is keeping up with the latest tip and listens for new
 //!    requests from the consensus client.
 //!
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
