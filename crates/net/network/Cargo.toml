@@ -47,7 +47,6 @@ tokio-util = { workspace = true, features = ["codec"] }
 
 # io
 serde = { workspace = true, optional = true }
-humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # metrics
@@ -95,12 +94,11 @@ url.workspace = true
 
 ## Benchmarks
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
-criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
 default = ["serde"]
 geth-tests = []
-serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json", "reth-network-types/serde"]
+serde = ["dep:serde", "secp256k1/serde", "enr/serde", "dep:serde_json", "reth-network-types/serde"]
 test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
 
 [[bench]]

@@ -82,7 +82,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 
 jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
-assert_matches.workspace = true
 
 [features]
 optimism = [
