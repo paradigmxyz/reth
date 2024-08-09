@@ -195,11 +195,10 @@ where
 
         // Perform range lookup in the in-memory state
         match self.canonical_in_memory_state.range_lookup(start, end) {
-            RangeLookupResult::None => Ok(Vec::new()),
-            RangeLookupResult::Partial(mut in_memory_headers) => {
+            RangeLookupResult::None => Ok(self.database.headers_range(start..=end)?),
+            RangeLookupResult::Partial { headers: mut in_memory_headers, lowest, highest } => {
                 // Retrieve remaining headers from the database
-                let mut db_headers =
-                    self.database.headers_range(start + in_memory_headers.len() as u64..=end)?;
+                let mut db_headers = self.database.headers_range((highest)..=lowest)?;
                 headers.append(&mut in_memory_headers);
                 headers.append(&mut db_headers);
                 Ok(headers)
