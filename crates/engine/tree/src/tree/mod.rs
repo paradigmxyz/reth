@@ -2996,13 +2996,28 @@ mod tests {
 
         let old_head = base_chain.first().unwrap().block();
 
-        // verify old_head is the canonical head
-        test_harness.check_canon_head(old_head.hash());
+        // extend base chain
+        let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
+        let fork_block = extension_chain.last().unwrap().block.clone();
+        test_harness.insert_chain(extension_chain).await;
 
-        // create a fork chain starting from old_head
-        let chain_b = test_harness.block_builder.create_fork(old_head, 3);
+        // fcu to old_head
+        test_harness.fcu_to(old_head.hash(), ForkchoiceStatus::Valid).await;
 
-        // insert chain_b blocks using newPayload
+        // create two competing chains starting from fork_block
+        let chain_a = test_harness.block_builder.create_fork(&fork_block, 10);
+        let chain_b = test_harness.block_builder.create_fork(&fork_block, 10);
+
+        // insert chain A blocks using newPayload
+        test_harness.setup_range_insertion_for_chain(chain_a.clone());
+        for block in &chain_a {
+            let payload = block_to_payload_v1(block.block.clone());
+            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+        }
+
+        test_harness.check_canon_chain_insertion(chain_a.clone()).await;
+
+        // insert chain B blocks using newPayload
         test_harness.setup_range_insertion_for_chain(chain_b.clone());
         for block in &chain_b {
             let payload = block_to_payload_v1(block.block.clone());
@@ -3011,10 +3026,7 @@ mod tests {
 
         test_harness.check_canon_chain_insertion(chain_b.clone()).await;
 
-        // verify the canonical head hasn't changed yet
-        test_harness.check_canon_head(old_head.hash());
-
-        // send FCU to make the tip of chain_b the new head
+        // send FCU to make the tip of chain B the new head
         let chain_b_tip_hash = chain_b.last().unwrap().hash();
         test_harness.send_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
 
@@ -3026,5 +3038,8 @@ mod tests {
 
         // verify the new canonical head
         test_harness.check_canon_head(chain_b_tip_hash);
+
+        // verify that chain A is now considered a fork
+        assert!(test_harness.tree.state.tree_state.is_fork(chain_a.last().unwrap().hash()));
     }
 }
