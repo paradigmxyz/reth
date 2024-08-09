@@ -221,56 +221,63 @@ impl TreeState {
     /// Note: This does not update the tracked state and instead returns the new chain based on the
     /// given head.
     fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
+        let new_head_block = self.blocks_by_hash.get(&new_head)?;
+        let new_head_number = new_head_block.block.number;
+        let current_canonical_number = self.current_canonical_head.number;
+
         let mut new_chain = Vec::new();
-        let mut current_hash = new_head;
-        let mut fork_point = None;
 
-        // walk back the chain until we reach the canonical block
-        while current_hash != self.canonical_block_hash() {
-            let current_block = self.blocks_by_hash.get(&current_hash)?;
-            new_chain.push(current_block.clone());
-
-            // check if this block's parent has multiple children
-            if let Some(children) = self.parent_to_child.get(&current_block.block.parent_hash) {
-                if children.len() > 1 ||
-                    self.canonical_block_hash() == current_block.block.parent_hash
-                {
-                    // we've found a fork point
-                    fork_point = Some(current_block.block.parent_hash);
-                    break;
-                }
-            }
-
-            current_hash = current_block.block.parent_hash;
-        }
-
-        new_chain.reverse();
-
-        // if we found a fork point, collect the reorged blocks
-        let reorged = if let Some(fork_hash) = fork_point {
+        let create_reorg = |new_chain: Vec<ExecutedBlock>, fork_hash: B256| {
             let mut reorged = Vec::new();
             let mut current_hash = self.current_canonical_head.hash;
-            // walk back the chain up to the fork hash
+
             while current_hash != fork_hash {
                 if let Some(block) = self.blocks_by_hash.get(&current_hash) {
                     reorged.push(block.clone());
                     current_hash = block.block.parent_hash;
                 } else {
-                    // current hash not found in memory
-                    warn!(target: "consensus::engine", invalid_hash=?current_hash, "Block not found in TreeState while walking back fork");
-                    return None;
+                    warn!(target: "consensus::engine", invalid_hash=?current_hash, "Canonical block not found in TreeState");
+                    return NewCanonicalChain::Commit { new: Vec::new() };
                 }
             }
-            reorged.reverse();
-            reorged
-        } else {
-            Vec::new()
+
+            NewCanonicalChain::Reorg { new: new_chain, old: reorged }
         };
 
-        if reorged.is_empty() {
-            Some(NewCanonicalChain::Commit { new: new_chain })
+        if new_head_number > current_canonical_number {
+            // The new head is higher than our current head, so we're either
+            // extending the chain or dealing with a fork
+            let mut current_hash = new_head;
+            let mut current_number = new_head_number;
+
+            while current_number > current_canonical_number {
+                let block = self.blocks_by_hash.get(&current_hash)?;
+                new_chain.push(block.clone());
+                current_hash = block.block.parent_hash;
+                current_number -= 1;
+            }
+
+            if current_hash == self.current_canonical_head.hash {
+                // Simple extension of the current chain
+                new_chain.reverse();
+                Some(NewCanonicalChain::Commit { new: new_chain })
+            } else {
+                // We've found a fork point
+                new_chain.reverse();
+                Some(create_reorg(new_chain, current_hash))
+            }
+        } else if new_head_number == current_canonical_number {
+            if new_head == self.current_canonical_head.hash {
+                // The new head is the same as our current head, no change
+                Some(NewCanonicalChain::Commit { new: Vec::new() })
+            } else {
+                // Fork at the current height
+                new_chain.push(new_head_block.clone());
+                Some(create_reorg(new_chain, new_head_block.block.parent_hash))
+            }
         } else {
-            Some(NewCanonicalChain::Reorg { new: new_chain, old: reorged })
+            // The new head is lower than our current head, we're reorganizing to a lower height
+            Some(create_reorg(vec![new_head_block.clone()], new_head))
         }
     }
 }
