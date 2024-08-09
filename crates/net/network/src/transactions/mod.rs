@@ -433,7 +433,9 @@ where
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
             for tx in &to_propagate {
-                if peer.seen_transactions.insert(tx.hash()) {
+                // Only proceed if the transaction is not in the peer's list of seen transactions
+                if !peer.seen_transactions.contains(&tx.hash()) {
+                    // add transaction to the list of hashes to propagate
                     hashes.push(tx);
 
                     // Do not send full 4844 transaction hashes to peers.
@@ -463,6 +465,8 @@ where
 
                     for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
+                        // mark transaction as seen by peer
+                        peer.seen_transactions.insert(hash);
                     }
 
                     trace!(target: "net::tx", ?peer_id, num_txs=?new_pooled_hashes.len(), "Propagating tx hashes to peer");
@@ -478,6 +482,8 @@ where
                             .entry(tx.hash())
                             .or_default()
                             .push(PropagateKind::Full(*peer_id));
+                        // mark transaction as seen by peer
+                        peer.seen_transactions.insert(tx.hash());
                     }
 
                     trace!(target: "net::tx", ?peer_id, num_txs=?new_full_transactions.len(), "Propagating full transactions to peer");
