@@ -123,6 +123,16 @@ impl ChainInfoTracker {
             let _ = h.replace(header);
         });
     }
+
+    /// Subscribe to the finalized block.
+    pub fn subscribe_to_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.finalized_block.subscribe()
+    }
+
+    /// Subscribe to the safe block.
+    pub fn subscribe_to_fork_choice(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.safe_block.subscribe()
+    }
 }
 
 /// Container type for all chain info fields

@@ -12,7 +12,7 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::ChainInfoTracker;
+use reth_chain_state::{ChainInfoTracker, ForkChoiceSubscriptions, ForkChoiceNotifications};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -903,6 +903,17 @@ where
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.tree.subscribe_to_canonical_state()
     }
+}
+
+impl<DB> ForkChoiceSubscriptions for BlockchainProvider<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications {
+        let receiver = self.chain_info.subscribe_to_fork_choice();
+        ForkChoiceNotifications(receiver)
+    
+}
 }
 
 impl<DB> ChangeSetReader for BlockchainProvider<DB>
