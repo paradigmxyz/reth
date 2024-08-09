@@ -248,7 +248,7 @@ mod tests {
             handler_cfg: Default::default(),
         };
 
-        let evm = evm_config.evm_with_env(db, env_with_handler.clone());
+        let evm = evm_config.evm_with_env(db, env_with_handler);
 
         // Check that the EVM environment is initialized with the custom environment
         assert_eq!(evm.context.evm.inner.env.cfg, cfg);
@@ -293,12 +293,11 @@ mod tests {
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let mut handler_cfg = HandlerCfg::default();
-        handler_cfg.spec_id = SpecId::CONSTANTINOPLE;
+        let handler_cfg = HandlerCfg { spec_id: SpecId::CONSTANTINOPLE, ..Default::default() };
 
         let env_with_handler = EnvWithHandlerCfg { env: Box::new(Env::default()), handler_cfg };
 
-        let evm = evm_config.evm_with_env(db, env_with_handler.clone());
+        let evm = evm_config.evm_with_env(db, env_with_handler);
 
         // Check that the spec ID is setup properly
         assert_eq!(evm.handler.spec_id(), SpecId::CONSTANTINOPLE);
