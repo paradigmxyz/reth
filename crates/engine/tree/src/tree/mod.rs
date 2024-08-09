@@ -225,60 +225,58 @@ impl TreeState {
         let new_head_number = new_head_block.block.number;
         let current_canonical_number = self.current_canonical_head.number;
 
-        let mut new_chain = Vec::new();
+        let mut new_chain = vec![new_head_block.clone()];
+        let mut current_hash = new_head_block.block.parent_hash;
+        let mut current_number = new_head_number - 1;
 
-        let create_reorg = |new_chain: Vec<ExecutedBlock>, fork_hash: B256| {
-            let mut reorged = Vec::new();
-            let mut current_hash = self.current_canonical_head.hash;
-
-            while current_hash != fork_hash {
-                if let Some(block) = self.blocks_by_hash.get(&current_hash) {
-                    reorged.push(block.clone());
-                    current_hash = block.block.parent_hash;
-                } else {
-                    warn!(target: "consensus::engine", invalid_hash=?current_hash, "Canonical block not found in TreeState");
-                    return NewCanonicalChain::Commit { new: Vec::new() };
-                }
-            }
-
-            NewCanonicalChain::Reorg { new: new_chain, old: reorged }
-        };
-
-        if new_head_number > current_canonical_number {
-            // The new head is higher than our current head, so we're either
-            // extending the chain or dealing with a fork
-            let mut current_hash = new_head;
-            let mut current_number = new_head_number;
-
-            while current_number > current_canonical_number {
-                let block = self.blocks_by_hash.get(&current_hash)?;
+        // Walk back the new chain until we reach a block we know about
+        while current_number > current_canonical_number {
+            if let Some(block) = self.blocks_by_hash.get(&current_hash) {
                 new_chain.push(block.clone());
                 current_hash = block.block.parent_hash;
                 current_number -= 1;
+            } else {
+                return None; // We don't have the full chain
+            }
+        }
+
+        new_chain.reverse();
+
+        if current_hash == self.current_canonical_head.hash {
+            // Simple extension of the current chain
+            return Some(NewCanonicalChain::Commit { new: new_chain });
+        }
+
+        // We have a reorg. Walk back both chains to find the fork point.
+        let mut old_chain = Vec::new();
+        let mut old_hash = self.current_canonical_head.hash;
+
+        while old_hash != current_hash {
+            if let Some(block) = self.blocks_by_hash.get(&old_hash) {
+                old_chain.push(block.clone());
+                old_hash = block.block.parent_hash;
+            } else {
+                // This shouldn't happen as we're walking back the canonical chain
+                warn!(target: "consensus::engine", invalid_hash=?old_hash, "Canonical block not found in TreeState");
+                return None;
             }
 
-            if current_hash == self.current_canonical_head.hash {
-                // Simple extension of the current chain
-                new_chain.reverse();
-                Some(NewCanonicalChain::Commit { new: new_chain })
-            } else {
-                // We've found a fork point
-                new_chain.reverse();
-                Some(create_reorg(new_chain, current_hash))
+            if old_hash == current_hash {
+                // We've found the fork point
+                break;
             }
-        } else if new_head_number == current_canonical_number {
-            if new_head == self.current_canonical_head.hash {
-                // The new head is the same as our current head, no change
-                Some(NewCanonicalChain::Commit { new: Vec::new() })
+
+            if let Some(block) = self.blocks_by_hash.get(&current_hash) {
+                new_chain.insert(0, block.clone());
+                current_hash = block.block.parent_hash;
             } else {
-                // Fork at the current height
-                new_chain.push(new_head_block.clone());
-                Some(create_reorg(new_chain, new_head_block.block.parent_hash))
+                // This shouldn't happen as we've already walked this path
+                warn!(target: "consensus::engine", invalid_hash=?current_hash, "New chain block not found in TreeState");
+                return None;
             }
-        } else {
-            // The new head is lower than our current head, we're reorganizing to a lower height
-            Some(create_reorg(vec![new_head_block.clone()], new_head))
         }
+
+        Some(NewCanonicalChain::Reorg { new: new_chain, old: old_chain })
     }
 }
 
