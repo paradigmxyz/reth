@@ -148,5 +148,5 @@ impl Parse for GenerateTestsInput {
 pub fn generate_tests(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as GenerateTestsInput);
 
-    arbitrary::maybe_generate_tests(input.args.into(), &input.ty, &input.mod_name).into()
+    arbitrary::maybe_generate_tests(input.args, &input.ty, &input.mod_name).into()
 }
