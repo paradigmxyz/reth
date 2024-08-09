@@ -133,7 +133,9 @@ mod tests {
         db::{CacheDB, EmptyDBTyped},
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
+    use revm_primitives::CfgEnvWithHandlerCfg;
+    #[cfg(not(feature = "optimism"))]
+    use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
     use std::collections::HashSet;
 
     #[test]
@@ -187,7 +189,7 @@ mod tests {
         let evm = evm_config.evm(db);
 
         // Check that the EVM environment is initialized with default values
-        assert_eq!(evm.context.evm.inner.env, Box::new(Default::default()));
+        assert_eq!(evm.context.evm.inner.env, Box::default());
 
         // Latest spec ID and no warm preloaded addresses
         assert_eq!(
