@@ -670,12 +670,16 @@ impl PeersManager {
         addr: PeerAddr,
         fork_id: Option<ForkId>,
     ) {
+        println!("add_peer_kind");
+        println!("peer_id: {:?}", peer_id);
+        println!("ban_list: {:?}", self.ban_list);
         if self.ban_list.is_banned(&peer_id, &addr.tcp().ip()) {
             return
         }
 
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
+                println!("entry: {:?}", entry);
                 let peer = entry.get_mut();
                 peer.kind = kind;
                 peer.fork_id = fork_id;
@@ -689,6 +693,7 @@ impl PeersManager {
                 }
             }
             Entry::Vacant(entry) => {
+                println!("vacant");
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "discovered new node");
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.fork_id = fork_id;
