@@ -74,7 +74,8 @@ pub trait EthFees: LoadFee {
                 block_count = max_fee_history
             }
 
-            if newest_block.is_pending() {
+            let is_pending_block = newest_block.is_pending();
+            if is_pending_block {
                 // cap the target block since we don't have fee history for the pending block
                 newest_block = BlockNumberOrTag::Latest;
                 // account for missing pending block
@@ -154,10 +155,22 @@ pub trait EthFees: LoadFee {
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
             // read the requested header range
-            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_eth_err)?;
+            let mut headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_eth_err)?;
             if headers.len() != block_count as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
+
+            // If the newest block is pending, we need to fetch the pending block and add it to the headers
+            let pending_block_hash = if is_pending_block {
+                if let Some(pending_block) = self.block(BlockNumberOrTag::Pending.into()).await? {
+                    headers.push(pending_block.header.clone());
+                    Some(pending_block.header.hash())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             for header in &headers {
                 base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
@@ -170,20 +183,24 @@ pub trait EthFees: LoadFee {
 
                 // Percentiles were specified, so we need to collect reward percentile ino
                 if let Some(percentiles) = &reward_percentiles {
-                    let (transactions, receipts) = LoadFee::cache(self)
-                        .get_transactions_and_receipts(header.hash())
-                        .await.map_err(Self::Error::from_eth_err)?
-                        .ok_or(EthApiError::InvalidBlockRange)?;
-                    rewards.push(
-                        calculate_reward_percentiles_for_block(
-                            percentiles,
-                            header.gas_used,
-                            header.base_fee_per_gas.unwrap_or_default(),
-                            &transactions,
-                            &receipts,
-                        )
-                        .unwrap_or_default(),
-                    );
+                    if Some(header.hash()) != pending_block_hash {
+                        let (transactions, receipts) = LoadFee::cache(self)
+                            .get_transactions_and_receipts(header.hash())
+                            .await.map_err(Self::Error::from_eth_err)?
+                            .ok_or(EthApiError::InvalidBlockRange)?;
+                        
+                        rewards.push(
+                            calculate_reward_percentiles_for_block(
+                                percentiles,
+                                header.gas_used,
+                                header.base_fee_per_gas.unwrap_or_default(),
+                                &transactions,
+                                &receipts,
+                            )
+                            .unwrap_or_default(),
+                        );
+                    }
+
                 }
             }
 
