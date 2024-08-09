@@ -3,8 +3,7 @@
 //! ## Functionality
 //!
 //! The components in this crate are involved in:
-//! * Handling and reacting to incoming consensus events
-//!   ([`EngineHandler`](engine::EngineHandler))
+//! * Handling and reacting to incoming consensus events ([`EngineHandler`](engine::EngineHandler))
 //! * Advancing the chain ([`ChainOrchestrator`](chain::ChainOrchestrator))
 //! * Keeping track of the chain structure in-memory ([`TreeState`](tree::TreeState))
 //! * Performing backfill sync and handling its progress ([`BackfillSync`](backfill::BackfillSync))
