@@ -1,6 +1,7 @@
 //! Engine tree configuration.
 
 const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 3;
+const DEFAUL_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
@@ -9,8 +10,12 @@ const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 /// The configuration of the engine tree.
 #[derive(Debug)]
 pub struct TreeConfig {
-    /// Maximum number of blocks to be kept only in memory without triggering persistence.
+    /// Maximum number of blocks to be kept only in memory without triggering
+    /// persistence.
     persistence_threshold: u64,
+    /// How close to the canonical head we persist blocks. Represents the ideal
+    /// number of most recent blocks to keep in memory for quick access and reorgs.
+    memory_block_buffer_target: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
     block_buffer_limit: u32,
@@ -24,6 +29,7 @@ impl Default for TreeConfig {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            memory_block_buffer_target: DEFAUL_MEMORY_BLOCK_BUFFER_TARGET,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
@@ -35,12 +41,14 @@ impl TreeConfig {
     /// Create engine tree configuration.
     pub const fn new(
         persistence_threshold: u64,
+        memory_block_buffer_target: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
     ) -> Self {
         Self {
             persistence_threshold,
+            memory_block_buffer_target,
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
@@ -50,6 +58,11 @@ impl TreeConfig {
     /// Return the persistence threshold.
     pub const fn persistence_threshold(&self) -> u64 {
         self.persistence_threshold
+    }
+
+    /// Return the memory block buffer target.
+    pub const fn memory_block_buffer_target(&self) -> u64 {
+        self.memory_block_buffer_target
     }
 
     /// Return the block buffer limit.
@@ -70,6 +83,15 @@ impl TreeConfig {
     /// Setter for persistence threshold.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
+        self
+    }
+
+    /// Setter for memory block buffer target.
+    pub const fn with_memory_block_buffer_target(
+        mut self,
+        memory_block_buffer_target: u64,
+    ) -> Self {
+        self.memory_block_buffer_target = memory_block_buffer_target;
         self
     }
 
