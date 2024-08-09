@@ -12,7 +12,7 @@
 //!
 //! ## Design and motivation
 //!
-//! The ndoe must keep up with the state of the chain and validate new updates to the chain state.
+//! The node must keep up with the state of the chain and validate new updates to the chain state.
 //!
 //! In order to respond to consensus messages and advance the chain quickly, validation code must
 //! avoid database write operations and perform as much work as possible in-memory. This requirement
