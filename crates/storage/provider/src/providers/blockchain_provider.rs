@@ -17,9 +17,9 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -797,11 +797,29 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        self.database.withdrawals_by_block(id, timestamp)
+        if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
+            return Ok(None)
+        }
+
+        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
+            Ok(block.block().block().withdrawals.clone())
+        } else {
+            self.database.withdrawals_by_block(id, timestamp)
+        }
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.database.latest_withdrawal()
+        let best_block_num = self.best_block_number()?;
+
+        // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
+        // database.
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
+            Ok(block.block().block().withdrawals.clone().and_then(|mut w| w.pop()))
+        } else {
+            self.database.latest_withdrawal()
+        }
     }
 }
 
