@@ -15,7 +15,6 @@ extern crate alloc;
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
-use reth_revm::{Database, EvmBuilder};
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 
 #[cfg(not(feature = "std"))]
@@ -109,13 +108,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
-
-    fn evm<DB: Database>(
-        &self,
-        db: DB,
-    ) -> reth_revm::Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        EvmBuilder::default().with_db(db).build()
-    }
 
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
