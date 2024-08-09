@@ -66,9 +66,9 @@
 //! different types of writes, for example a command to write a list of transaction, or remove a
 //! specific range of blocks.
 //!
-//! Additionally, the persistence service must respond to these commands, to ensure that any
-//! in-memory state that is on-disk can be cleaned up, conserving memory and allowing us to add new
-//! blocks indefinitely.
+//! The persistence service must also respond to these commands, to ensure that any in-memory state
+//! that is on-disk can be cleaned up, conserving memory and allowing us to add new blocks
+//! indefinitely.
 //!
 //! ## Feature Flags
 //!
