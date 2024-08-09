@@ -144,6 +144,15 @@ impl Parse for GenerateTestsInput {
     }
 }
 
+/// Generates tests for given type based on passed parameters.
+///
+/// See `arbitrary::maybe_generate_tests` for more information.
+///
+/// Examples:
+/// * `generate_tests!(#[rlp] MyType, MyTypeTests)`: will generate rlp roundtrip tests for `MyType`
+///   in a module named `MyTypeTests`.
+/// * `generate_tests!(#[compact, 10] MyType, MyTypeTests)`: will generate compact roundtrip tests
+///   for `MyType` limited to 10 cases.
 #[proc_macro]
 pub fn generate_tests(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as GenerateTestsInput);
