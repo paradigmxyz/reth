@@ -199,11 +199,6 @@ impl From<ProviderError> for BlockExecutionError {
     }
 }
 
-// impl From<PruneSegmentError> for BlockExecutionError {
-//     fn from(error: PruneSegmentError) -> Self {
-//         InternalBlockExecutionError::from(error).into()
-//     }
-// }
 
 #[cfg(feature = "std")]
 impl std::error::Error for BlockExecutionError {
