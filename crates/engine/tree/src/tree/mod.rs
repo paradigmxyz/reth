@@ -1124,7 +1124,7 @@ where
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
         let target_number =
-            canonical_head_number.saturating_sub(self.config.persistence_threshold());
+            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
 
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             if block.block.number <= last_persisted_number {
@@ -2352,9 +2352,10 @@ mod tests {
         let received_action =
             test_harness.action_rx.recv().expect("Failed to receive save blocks action");
         if let PersistenceAction::SaveBlocks(saved_blocks, _) = received_action {
-            // only blocks.len() - tree_config.persistence_threshold() will be
+            // only blocks.len() - tree_config.memory_block_buffer_target() will be
             // persisted
-            let expected_persist_len = blocks.len() - tree_config.persistence_threshold() as usize;
+            let expected_persist_len =
+                blocks.len() - tree_config.memory_block_buffer_target() as usize;
             assert_eq!(saved_blocks.len(), expected_persist_len);
             assert_eq!(saved_blocks, blocks[..expected_persist_len]);
         } else {
@@ -2648,13 +2649,15 @@ mod tests {
             last_persisted_block_number;
 
         let persistence_threshold = 4;
-        test_harness.tree.config =
-            TreeConfig::default().with_persistence_threshold(persistence_threshold);
+        let memory_block_buffer_target = 3;
+        test_harness.tree.config = TreeConfig::default()
+            .with_persistence_threshold(persistence_threshold)
+            .with_memory_block_buffer_target(memory_block_buffer_target);
 
         let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
 
         let expected_blocks_to_persist_length: usize =
-            (canonical_head_number - persistence_threshold - last_persisted_block_number)
+            (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
                 .try_into()
                 .unwrap();
 
