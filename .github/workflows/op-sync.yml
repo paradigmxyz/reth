@@ -52,5 +52,5 @@ jobs:
           op-reth stage --chain base unwind num-blocks 100
       - name: Run stage unwind to block hash
         run: |
-          reth stage unwind to-block 0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de
+          op-reth stage unwind to-block 0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de
 
