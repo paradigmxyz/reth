@@ -2267,7 +2267,7 @@ mod tests {
             }
         }
 
-        fn persist_blocks(&mut self, blocks: Vec<SealedBlockWithSenders>) {
+        fn persist_blocks(&self, blocks: Vec<SealedBlockWithSenders>) {
             let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
@@ -2284,7 +2284,7 @@ mod tests {
         fn setup_range_insertion_for_chain(&mut self, chain: Vec<SealedBlockWithSenders>) {
             // setting up execution outcomes for the chain, the blocks will be
             // executed starting from the oldest, so we need to reverse.
-            let mut chain_rev = chain.clone();
+            let mut chain_rev = chain;
             chain_rev.reverse();
 
             let mut execution_outcomes = Vec::with_capacity(chain_rev.len());
