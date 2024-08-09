@@ -33,7 +33,7 @@ use std::{
 
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     PooledTransactions, RequestTxHashes, Transactions,
 };
@@ -425,9 +425,12 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            // filter all transactions unknown to the peer
-            let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
-            let mut full_transactions = FullTransactionsBuilder::default();
+            // determine whether to send full tx objects or hashes.
+            let mut builder = if peer_idx > max_num_full {
+                PropagateTransactionsBuilder::pooled(peer.version)
+            } else {
+                PropagateTransactionsBuilder::full(peer.version)
+            };
 
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction lists, before deciding whether or not to send full transactions to the
@@ -436,31 +439,19 @@ where
                 // Only proceed if the transaction is not in the peer's list of seen transactions
                 if !peer.seen_transactions.contains(&tx.hash()) {
                     // add transaction to the list of hashes to propagate
-                    hashes.push(tx);
-
-                    // Do not send full 4844 transaction hashes to peers.
-                    //
-                    //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
-                    //  Instead, those transactions are only announced using
-                    //  `NewPooledTransactionHashes` messages, and can then be manually requested
-                    //  via `GetPooledTransactions`.
-                    //
-                    // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-                    if !tx.transaction.is_eip4844() {
-                        full_transactions.push(tx);
-                    }
+                    builder.push(tx);
                 }
             }
-            let mut new_pooled_hashes = hashes.build();
 
-            if new_pooled_hashes.is_empty() {
+            if builder.is_empty() {
                 trace!(target: "net::tx", ?peer_id, "Nothing to propagate to peer; has seen all transactions");
                 continue
             }
 
-            // determine whether to send full tx objects or hashes. If there are no full
-            // transactions, try to send hashes.
-            if peer_idx > max_num_full || full_transactions.is_empty() {
+            let (new_pooled_hashes, new_full_transactions) = builder.build();
+
+            // send hashes if any
+            if let Some(mut new_pooled_hashes) = new_pooled_hashes {
                 // enforce tx soft limit per message for the (unlikely) event the number of
                 // hashes exceeds it
                 new_pooled_hashes
@@ -476,9 +467,10 @@ where
 
                 // send hashes of transactions
                 self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
-            } else {
-                let new_full_transactions = full_transactions.build();
+            }
 
+            // send full transactions, if any
+            if let Some(new_full_transactions) = new_full_transactions {
                 for tx in &new_full_transactions {
                     propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
                     // mark transaction as seen by peer
@@ -512,30 +504,33 @@ where
         let mut propagated = PropagatedTransactions::default();
 
         // filter all transactions unknown to the peer
-        let mut full_transactions = FullTransactionsBuilder::default();
+        let mut full_transactions = FullTransactionsBuilder::new(peer.version);
 
         let to_propagate = self
             .pool
             .get_all(txs)
             .into_iter()
-            .filter(|tx| !tx.transaction.is_eip4844())
             .map(PropagateTransaction::new);
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
-            if peer.seen_transactions.insert(tx.hash()) {
+            if !peer.seen_transactions.contains(&tx.hash()) {
                 full_transactions.push(&tx);
             }
         }
 
-        if full_transactions.transactions.is_empty() {
+        if full_transactions.is_empty() {
             // nothing to propagate
             return None
         }
 
-        let new_full_transactions = full_transactions.build();
+        let (new_pooled,  new_full_transactions) = full_transactions.build();
+
+
+
         for tx in &new_full_transactions {
             propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
+            peer.seen_transactions.
         }
         // send full transactions
         self.network.send_transactions(peer_id, new_full_transactions);
@@ -865,8 +860,8 @@ where
                 let peers = self.peers.keys().copied().collect::<HashSet<_>>();
                 tx.send(peers).ok();
             }
-            TransactionsCommand::PropagateTransactionsTo(_txs, _peer) => {
-                if let Some(propagated) = self.propagate_full_transactions_to_peer(_txs, _peer) {
+            TransactionsCommand::PropagateTransactionsTo(txs, _peer) => {
+                if let Some(propagated) = self.propagate_full_transactions_to_peer(txs, _peer) {
                     self.pool.on_propagated(propagated);
                 }
             }
@@ -1388,27 +1383,111 @@ impl PropagateTransaction {
     }
 }
 
+/// Helper type to construct the appropriate message to send to the peer based on whether the peer
+/// should receive them in full or as pooled
+enum PropagateTransactionsBuilder {
+    Pooled(PooledTransactionsHashesBuilder),
+    Full(FullTransactionsBuilder),
+}
+
+impl PropagateTransactionsBuilder {
+    /// Create a builder for pooled transactions
+    fn pooled(version: EthVersion) -> Self {
+        Self::Pooled(PooledTransactionsHashesBuilder::new(version))
+    }
+
+    /// Create a builder that sends transactions in full and records transactions that don't fit.
+    fn full(version: EthVersion) -> Self {
+        Self::Full(FullTransactionsBuilder::new(version))
+    }
+
+    /// Appends a transaction to the list.
+    fn push(&mut self, transaction: &PropagateTransaction) {
+        match self {
+            Self::Pooled(builder) => builder.push(transaction),
+            Self::Full(builder) => builder.push(transaction),
+        }
+    }
+
+    /// Returns true if no transactions are recorded.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Pooled(builder) => builder.is_empty(),
+            Self::Full(builder) => builder.is_empty(),
+        }
+    }
+
+    /// Consumes the type and returns the built messages that should be sent to the peer.
+    fn build(self) -> (Option<NewPooledTransactionHashes>, Option<Vec<Arc<TransactionSigned>>>) {
+        match self {
+            PropagateTransactionsBuilder::Pooled(pooled) => (Some(pooled.build()), None),
+            PropagateTransactionsBuilder::Full(full) => full.build(),
+        }
+    }
+}
+
+/// Represents how the transactions should be sent to a peer.
+enum PropagateTransactions {
+    /// Send a list of transaction hashes.
+    Pooled(NewPooledTransactionHashes),
+    /// Send a list of full transactions
+    Full(Vec<Arc<TransactionSigned>>),
+    /// Send both, full transactions and hashes that are either unsuitable to be sent in full or
+    /// don't fit into the list.
+    Both(Vec<Arc<TransactionSigned>>, NewPooledTransactionHashes),
+}
+
 /// Helper type for constructing the full transaction message that enforces the
 /// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE`].
-#[derive(Default)]
 struct FullTransactionsBuilder {
+    /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
+    /// All transactions to be broadcasted.
     transactions: Vec<Arc<TransactionSigned>>,
+    /// Transactions that didn't fit into the broadcast message
+    pooled: PooledTransactionsHashesBuilder,
 }
 
 // === impl FullTransactionsBuilder ===
 
 impl FullTransactionsBuilder {
-    /// Append a transaction to the list if the total message bytes size doesn't exceed the soft
-    /// maximum target byte size. The limit is soft, meaning if one single transaction goes over
-    /// the limit, it will be broadcasted in its own [`Transactions`] message. The same pattern is
-    /// followed in filling a [`GetPooledTransactions`] request in
+    /// Create a builder for the negotiated version of the peer's session
+    fn new(version: EthVersion) -> Self {
+        Self {
+            total_size: 0,
+            pooled: PooledTransactionsHashesBuilder::new(version),
+            transactions: vec![],
+        }
+    }
+
+    /// Append a transaction to the list of full transaction if the total message bytes size doesn't
+    /// exceed the soft maximum target byte size. The limit is soft, meaning if one single
+    /// transaction goes over the limit, it will be broadcasted in its own [`Transactions`]
+    /// message. The same pattern is followed in filling a [`GetPooledTransactions`] request in
     /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`].
+    ///
+    /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
+    /// to list of pooled transactions, (e.g. 4844 transactions).
     fn push(&mut self, transaction: &PropagateTransaction) {
+        // Do not send full 4844 transaction hashes to peers.
+        //
+        //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
+        //  Instead, those transactions are only announced using
+        //  `NewPooledTransactionHashes` messages, and can then be manually requested
+        //  via `GetPooledTransactions`.
+        //
+        // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
+        if transaction.transaction.is_eip4844() {
+            self.pooled.push(transaction);
+            return
+        }
+
         let new_size = self.total_size + transaction.size;
         if new_size > DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE &&
             self.total_size > 0
         {
+            // transaction does not fit into the message
+            self.pooled.push(transaction);
             return
         }
 
@@ -1418,12 +1497,14 @@ impl FullTransactionsBuilder {
 
     /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
     fn is_empty(&self) -> bool {
-        self.transactions.is_empty()
+        self.transactions.is_empty() && self.pooled.is_empty()
     }
 
-    /// returns the list of transactions.
-    fn build(self) -> Vec<Arc<TransactionSigned>> {
-        self.transactions
+    /// Returns the messages that should be sent to the peer.
+    fn build(self) -> (Option<NewPooledTransactionHashes>, Option<Vec<Arc<TransactionSigned>>>) {
+        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
+        let full = Some(self.transactions).filter(|full| !full.is_empty());
+        (pooled, full)
     }
 }
 
@@ -1446,6 +1527,14 @@ impl PooledTransactionsHashesBuilder {
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
             }
+        }
+    }
+
+    /// Returns whether or not any transactions are in the [`PooledTransactionsHashesBuilder`].
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Eth66(hashes) => hashes.is_empty(),
+            Self::Eth68(hashes) => hashes.is_empty(),
         }
     }
 
