@@ -190,11 +190,15 @@ where
                         taiko_data.clone().unwrap(),
                     )
                     .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
-                } else {
+                } else if spec_id.is_enabled_in(SpecId::HEKLA) {
                     check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
                         .map_err(|e| BlockExecutionError::CanonicalRevert {
                             inner: e.to_string(),
                         })?;
+                } else {
+                    return Err(BlockExecutionError::CanonicalRevert {
+                        inner: "unknown spec id for anchor".to_string(),
+                    });
                 }
             }
 
