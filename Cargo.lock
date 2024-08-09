@@ -7508,6 +7508,7 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "auto_impl",
+ "criterion",
  "derive_more",
  "discv5",
  "enr",
