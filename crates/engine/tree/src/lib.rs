@@ -12,13 +12,11 @@
 //!
 //! ## Design and motivation
 //!
-//! The job of a node is to keep up to date with the state of the chain and validate new updates to
-//! the chain state. Performing this task quickly is often the bottleneck for high performance
-//! blockchain systems.
+//! The ndoe must keep up with the state of the chain and validate new updates to the chain state.
 //!
-//! In order to quickly respond to consensus messages and advance the chain quickly, validation code
-//! must avoid database write operations and perform as much work as possible in-memory. This
-//! requirement is what informs the architecture of consensus message handling in this crate.
+//! In order to respond to consensus messages and advance the chain quickly, validation code must
+//! avoid database write operations and perform as much work as possible in-memory. This requirement
+//! is what informs the architecture of consensus message handling in this crate.
 //!
 //! ## Chain synchronization
 //!
@@ -41,33 +39,24 @@
 //! ## Handling consensus messages
 //!
 //! Consensus message handling is performed by three main components:
-//! * [`EngineHandler`] -> take incoming events, poll request handler, manage download / pipeline loop
-//! * [`EngineRequestHandler`] -> take incoming requests, poll tree, send any download / pipeline requests back
-//! * [`EngineApiTreeHandlerImpl`] -> take incoming tree events, send validaiton + download / pipeline
-//!   requests back
-//!
-//! The [`EngineHandler`] is the component which processes incoming consensus messages, and
-//! performing any download needed by lower level components.
-//!
-//! The [`EngineRequestHandler`] is a middle layer, which allow
-//!
-//! Finally, a new payload is stored in-memory before the node returns a response to the consensus
-//! client.
+//! 1. The [`EngineHandler`], which takes incoming consensus mesesages and manages any requested
+//!    backfill or download work.
+//! 2. The [`EngineApiRequestHandler`], which processes messages from the `EngineHandler` and
+//!    delegates them to the [`EngineApiTreeHandler`].
+//! 3. The [`EngineApiTreeHandler`], which processes incoming tree events, such as new payload
+//!    events, sending back requests for any needed backfill or download work.
 //!
 //! ## Chain representation
 //!
-//! The chain is represented by the [`TreeState`] data structure, which consists of two maps which
-//! track each block by hash and by number, respectively.
-//! The hash and number of the current tip of the canonical chain is also tracked in the
+//! The chain is represented by the [`TreeState`] data structure, which keeps tracks of blocks by
+//! hash and number, as well as keeping track of parent-child relationships between blocks.
+//! The hash and number of the current head of the canonical chain is also tracked in the
 //! [`TreeState`].
-//!
-//! TODO:
-//! * explain `EngineApiTreeHandlerImpl`?
 //!
 //! ## Persistence model
 //!
 //! Because the node minimizes database writes in the critical path for handling consensus messages,
-//! it must perform them in at some other point, in the background.
+//! it must perform in the background.
 //!
 //! Performing writes in the background has two advantages:
 //! 1. As mentioned, writes are not in the critical path of request processing.
@@ -80,9 +69,6 @@
 //! Additionally, the persistence service must respond to these commands, to ensure that any
 //! in-memory state that is on-disk can be cleaned up, conserving memory and allowing us to add new
 //! blocks indefinitely.
-//!
-//! TODO:
-//! * not sure what else to put here
 //!
 //! ## Feature Flags
 //!
