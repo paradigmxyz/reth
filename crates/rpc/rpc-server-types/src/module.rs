@@ -195,7 +195,7 @@ impl FromStr for RpcModuleSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self::Selection(Default::default()))
+            return Ok(Self::Selection(Default::default()));
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
@@ -238,6 +238,7 @@ pub enum RethRpcModule {
     /// `admin_` module
     Admin,
     /// `debug_` module
+    #[cfg(feature = "js-tracer")]
     Debug,
     /// `eth_` module
     Eth,
@@ -299,6 +300,7 @@ impl FromStr for RethRpcModule {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "admin" => Self::Admin,
+            #[cfg(feature = "js-tracer")]
             "debug" => Self::Debug,
             "eth" => Self::Eth,
             "net" => Self::Net,

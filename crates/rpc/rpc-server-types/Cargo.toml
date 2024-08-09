@@ -29,3 +29,5 @@ jsonrpsee-types.workspace = true
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 
+[features]
+js-tracer = []

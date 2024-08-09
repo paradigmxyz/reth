@@ -66,3 +66,9 @@ reth-node-api.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
+
+[features]
+js-tracer = [
+    "reth-rpc/js-tracer",
+    "reth-rpc-server-types/js-tracer",
+]

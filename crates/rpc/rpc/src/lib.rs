@@ -25,14 +25,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_rlp as _;
 use http as _;
 use http_body as _;
 use hyper as _;
 use jsonwebtoken as _;
 use pin_project as _;
+use reth_trie as _;
 use tower as _;
 
 mod admin;
+#[cfg(feature = "js-tracer")]
 mod debug;
 mod engine;
 pub mod eth;
@@ -44,6 +47,7 @@ mod trace;
 mod txpool;
 mod web3;
 pub use admin::AdminApi;
+#[cfg(feature = "js-tracer")]
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthBundle, EthFilter, EthPubSub};

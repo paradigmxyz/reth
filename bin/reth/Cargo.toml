@@ -148,6 +148,8 @@ optimism = [
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
+js-tracer = ["reth-rpc-builder/js-tracer"]
+
 [[bin]]
 name = "reth"
 path = "src/main.rs"

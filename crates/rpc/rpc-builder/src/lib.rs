@@ -159,8 +159,8 @@ use reth_provider::{
     EvmEnvProvider, FullRpcProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
-    TxPoolApi, Web3Api,
+    AdminApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
+    Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -176,6 +176,9 @@ use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
+
+#[cfg(feature = "js-tracer")]
+use reth_rpc::DebugApi;
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 
@@ -831,6 +834,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
+    #[cfg(feature = "js-tracer")]
     pub fn register_debug(&mut self) -> &mut Self
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
@@ -930,6 +934,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
+    #[cfg(feature = "js-tracer")]
     pub fn debug_api(&self) -> DebugApi<Provider, EthApi>
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
@@ -1054,6 +1059,7 @@ where
                                 .into_rpc()
                                 .into()
                         }
+                        #[cfg(feature = "js-tracer")]
                         RethRpcModule::Debug => DebugApi::new(
                             self.provider.clone(),
                             eth_api.clone(),
@@ -1299,9 +1305,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     ///
     /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
-        self.http_server_config.is_some() ||
-            self.ws_server_config.is_some() ||
-            self.ipc_server_config.is_some()
+        self.http_server_config.is_some()
+            || self.ws_server_config.is_some()
+            || self.ipc_server_config.is_some()
     }
 
     /// Returns the [`SocketAddr`] of the http server
@@ -1366,9 +1372,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         }
 
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr &&
-            self.http_server_config.is_some() &&
-            self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr
+            && self.http_server_config.is_some()
+            && self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1661,7 +1667,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1673,7 +1679,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1685,7 +1691,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1732,8 +1738,8 @@ impl RpcServerHandle {
                 "Bearer {}",
                 secret
                     .encode(&Claims {
-                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                            Duration::from_secs(60))
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                            + Duration::from_secs(60))
                         .as_secs(),
                         exp: None,
                     })
@@ -1834,6 +1840,7 @@ mod tests {
                 [
                     RethRpcModule::Eth,
                     RethRpcModule::Admin,
+                    #[cfg(feature = "js-tracer")]
                     RethRpcModule::Debug,
                     RethRpcModule::EthCallBundle,
                 ]
@@ -1908,6 +1915,7 @@ mod tests {
         assert_rpc_module!
         (
                 "admin" =>  RethRpcModule::Admin,
+                #[cfg(feature = "js-tracer")]
                 "debug" =>  RethRpcModule::Debug,
                 "eth" =>  RethRpcModule::Eth,
                 "net" =>  RethRpcModule::Net,

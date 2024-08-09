@@ -31,3 +31,6 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client"
 ]
+js-tracer = [
+    "reth-rpc-eth-api/js-tracer",
+]
