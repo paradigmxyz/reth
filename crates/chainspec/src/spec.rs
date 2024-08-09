@@ -1722,7 +1722,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1716998400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 0 },
+                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478399, ..Default::default() },
+                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 0 },
                 ),
             ],
         );
