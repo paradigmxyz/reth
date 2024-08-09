@@ -20,13 +20,13 @@ use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::EVMError;
-use derive_more::{Display, From};
+use derive_more::Display;
 
 pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Clone, Debug, Display, Eq, From, PartialEq)]
+#[derive(Clone, Debug, Display, Eq, PartialEq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[display(fmt = "EVM reported invalid transaction ({hash}): {error}")]
@@ -54,14 +54,12 @@ pub enum BlockValidationError {
         block_available_gas: u64,
     },
     /// Error for pre-merge block
-    #[from(ignore)]
     #[display(fmt = "block {hash} is pre merge")]
     BlockPreMerge {
         /// The hash of the block
         hash: B256,
     },
     /// Error for missing total difficulty  
-    #[from(ignore)]
     #[display(fmt = "missing total difficulty for block {hash}")]
     MissingTotalDifficulty {
         /// The hash of the block
@@ -71,7 +69,6 @@ pub enum BlockValidationError {
     #[display(fmt = "EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
-    #[from(ignore)]
     #[display(fmt = "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}")]
     CancunGenesisParentBeaconBlockRootNotZero {
         /// The beacon block root
@@ -94,7 +91,6 @@ pub enum BlockValidationError {
     /// EVM error during withdrawal requests contract call [EIP-7002]
     ///
     /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
-    #[from(ignore)]
     #[display(fmt = "failed to apply withdrawal requests contract call: {message}")]
     WithdrawalRequestsContractCall {
         /// The error message.
@@ -103,7 +99,6 @@ pub enum BlockValidationError {
     /// EVM error during consolidation requests contract call [EIP-7251]
     ///
     /// [EIP-7251]: https://eips.ethereum.org/EIPS/eip-7251
-    #[from(ignore)]
     #[display(fmt = "failed to apply consolidation requests contract call: {message}")]
     ConsolidationRequestsContractCall {
         /// The error message.
@@ -112,9 +107,14 @@ pub enum BlockValidationError {
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    #[from(ignore)]
     #[display(fmt = "failed to decode deposit requests from receipts: {_0}")]
     DepositRequestDecode(String),
+}
+
+impl From<StateRootError> for BlockValidationError {
+    fn from(error: StateRootError) -> Self {
+        Self::StateRoot(error) 
+    }
 }
 
 #[cfg(feature = "std")]
@@ -133,7 +133,7 @@ impl std::error::Error for BlockValidationError {
 }
 
 /// `BlockExecutor` Errors
-#[derive(Debug, Display, From)]
+#[derive(Debug, Display)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     Validation(BlockValidationError),
@@ -141,35 +141,6 @@ pub enum BlockExecutionError {
     Consensus(ConsensusError),
     /// Internal, i.e. non consensus or validation related Block Executor Errors
     Internal(InternalBlockExecutionError),
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for BlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Validation(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Consensus(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Internal(source) => {
-                std::error::Error::source(source)
-            },
-        }
-    }
-}
-
-impl From<ProviderError> for BlockExecutionError {
-    fn from(value: ProviderError) -> Self {
-        InternalBlockExecutionError::from(value).into()
-    }
-}
-
-impl From<PruneSegmentError> for BlockExecutionError {
-    fn from(value: PruneSegmentError) -> Self {
-        InternalBlockExecutionError::from(value).into()
-    }
 }
 
 impl BlockExecutionError {
@@ -204,8 +175,55 @@ impl BlockExecutionError {
     }
 }
 
+impl From<BlockValidationError> for BlockExecutionError {
+    fn from(error: BlockValidationError) -> Self {
+        Self::Validation(error)
+    }
+}
+
+impl From<ConsensusError> for BlockExecutionError {
+    fn from(error: ConsensusError) -> Self {
+        Self::Consensus(error)
+    }
+}
+
+impl From<InternalBlockExecutionError> for BlockExecutionError {
+    fn from(error: InternalBlockExecutionError) -> Self {
+        Self::Internal(error)
+    }
+}
+
+impl From<ProviderError> for BlockExecutionError {
+    fn from(error: ProviderError) -> Self {
+        InternalBlockExecutionError::from(error).into()
+    }
+}
+
+// impl From<PruneSegmentError> for BlockExecutionError {
+//     fn from(error: PruneSegmentError) -> Self {
+//         InternalBlockExecutionError::from(error).into()
+//     }
+// }
+
+#[cfg(feature = "std")]
+impl std::error::Error for BlockExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Validation(source) => {
+                std::error::Error::source(source)
+            },
+            Self::Consensus(source) => {
+                std::error::Error::source(source)
+            },
+            Self::Internal(source) => {
+                std::error::Error::source(source)
+            },
+        }
+    }
+}
+
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
-#[derive(Display, Debug, From)]
+#[derive(Display, Debug)]
 pub enum InternalBlockExecutionError {
     /// Pruning error, transparently wrapping [`PruneSegmentError`]
     Pruning(PruneSegmentError),
@@ -226,21 +244,6 @@ pub enum InternalBlockExecutionError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InternalBlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Pruning(source) => {
-                std::error::Error::source(source)
-            },
-            Self::LatestBlock(source) => {
-                std::error::Error::source(source)
-            },
-            _ => Option::None,
-        }
-    }
-}
-
 impl InternalBlockExecutionError {
     /// Create a new [`InternalBlockExecutionError::Other`] variant.
     #[cfg(feature = "std")]
@@ -255,5 +258,32 @@ impl InternalBlockExecutionError {
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
+    }
+}
+
+impl From<PruneSegmentError> for InternalBlockExecutionError {
+    fn from(error: PruneSegmentError) -> Self {
+        Self::Pruning(error)
+    }
+}
+
+impl From<ProviderError> for InternalBlockExecutionError {
+    fn from(error: ProviderError) -> Self {
+        Self::LatestBlock(error)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InternalBlockExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pruning(source) => {
+                std::error::Error::source(source)
+            },
+            Self::LatestBlock(source) => {
+                std::error::Error::source(source)
+            },
+            _ => Option::None,
+        }
     }
 }

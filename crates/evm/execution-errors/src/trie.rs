@@ -3,18 +3,30 @@
 use alloy_primitives::B256;
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use derive_more::{Display, From};
+use derive_more::Display;
 
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
 
 /// State root errors.
-#[derive(Display, Debug, From, PartialEq, Eq, Clone)]
+#[derive(Display, Debug, PartialEq, Eq, Clone)]
 pub enum StateRootError {
     /// Internal database error.
     Database(DatabaseError),
     /// Storage root error.
     StorageRootError(StorageRootError),
+}
+
+impl From<DatabaseError> for StateRootError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<StorageRootError> for StateRootError {
+    fn from(error: StorageRootError) -> Self {
+        Self::StorageRootError(error)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -41,10 +53,24 @@ impl From<StateRootError> for DatabaseError {
 }
 
 /// Storage root error.
-#[derive(Display, From, PartialEq, Eq, Clone, Debug)]
+#[derive(Display, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     Database(DatabaseError),
+}
+
+impl From<DatabaseError> for StorageRootError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<StorageRootError> for DatabaseError {
+    fn from(err: StorageRootError) -> Self {
+        match err {
+            StorageRootError::Database(err) => err,
+        }
+    }
 }
 
 #[cfg(feature = "std")]
@@ -58,21 +84,34 @@ impl std::error::Error for StorageRootError {
     }
 }
 
-impl From<StorageRootError> for DatabaseError {
-    fn from(err: StorageRootError) -> Self {
-        match err {
-            StorageRootError::Database(err) => err,
-        }
-    }
-}
-
 /// State proof errors.
-#[derive(Display, Debug, From, PartialEq, Eq, Clone)]
+#[derive(Display, Debug, PartialEq, Eq, Clone)]
 pub enum StateProofError {
     /// Internal database error.
     Database(DatabaseError),
     /// RLP decoding error.
     Rlp(alloy_rlp::Error),
+}
+
+impl From<DatabaseError> for StateProofError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<alloy_rlp::Error> for StateProofError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Rlp(error)
+    }
+}
+
+impl From<StateProofError> for ProviderError {
+    fn from(value: StateProofError) -> Self {
+        match value {
+            StateProofError::Database(error) => Self::Database(error),
+            StateProofError::Rlp(error) => Self::Rlp(error),
+        }
+    }
 }
 
 #[cfg(feature = "std")]
@@ -89,17 +128,8 @@ impl std::error::Error for StateProofError {
     }
 }
 
-impl From<StateProofError> for ProviderError {
-    fn from(value: StateProofError) -> Self {
-        match value {
-            StateProofError::Database(error) => Self::Database(error),
-            StateProofError::Rlp(error) => Self::Rlp(error),
-        }
-    }
-}
-
 /// Trie witness errors.
-#[derive(Display, Debug, From, PartialEq, Eq, Clone)]
+#[derive(Display, Debug, PartialEq, Eq, Clone)]
 pub enum TrieWitnessError {
     /// Error gather proofs.
     Proof(StateProofError),
@@ -109,12 +139,29 @@ pub enum TrieWitnessError {
     #[display(fmt = "missing storage multiproof for {_0}")]
     MissingStorageMultiProof(B256),
     /// Missing account.
-    #[from(ignore)]
     #[display(fmt = "missing account {_0}")]
     MissingAccount(B256),
     /// Missing target node.
     #[display(fmt = "target node missing from proof {_0:?}")]
     MissingTargetNode(Nibbles),
+}
+
+impl From<StateProofError> for TrieWitnessError {
+    fn from(error: StateProofError) -> Self {
+        Self::Proof(error)
+    }
+}
+
+impl From<alloy_rlp::Error> for TrieWitnessError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Rlp(error)
+    }
+}
+
+impl From<TrieWitnessError> for ProviderError {
+    fn from(error: TrieWitnessError) -> Self {
+        Self::TrieWitnessError(error.to_string())
+    }
 }
 
 #[cfg(feature = "std")]
@@ -129,11 +176,5 @@ impl std::error::Error for TrieWitnessError {
             },
             _ => Option::None
         }
-    }
-}
-
-impl From<TrieWitnessError> for ProviderError {
-    fn from(value: TrieWitnessError) -> Self {
-        Self::TrieWitnessError(value.to_string())
     }
 }
