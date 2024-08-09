@@ -3,12 +3,14 @@
 //! ## Functionality
 //!
 //! The components in this crate are involved in:
-//! * Handling and reacting to incoming consensus events ([`EngineHandler`])
-//! * Advancing the chain ([`ChainOrchestrator`])
-//! * Keeping track of the chain structure in-memory ([`TreeState`])
-//! * Performing backfill sync and handling its progress ([`BackfillSync`])
-//! * Downloading blocks ([`BlockDownloader`]), and
-//! * Persisting blocks and performing pruning ([`PersistenceService`])
+//! * Handling and reacting to incoming consensus events
+//!   ([`EngineHandler`](engine::EngineHandler))
+//! * Advancing the chain ([`ChainOrchestrator`](chain::ChainOrchestrator))
+//! * Keeping track of the chain structure in-memory ([`TreeState`](tree::TreeState))
+//! * Performing backfill sync and handling its progress ([`BackfillSync`](backfill::BackfillSync))
+//! * Downloading blocks ([`BlockDownloader`](download::BlockDownloader)), and
+//! * Persisting blocks and performing pruning
+//!   ([`PersistenceService`](persistence::PersistenceService))
 //!
 //! ## Design and motivation
 //!
@@ -33,25 +35,27 @@
 //! catch up to the tip of the chain. If this range is large, backfill sync will be used. Otherwise,
 //! life sync will be used.
 //!
-//! The backfill sync is driven by components which implement the [`BackfillSync`] trait, like
-//! [`PipelineSync`].
+//! The backfill sync is driven by components which implement the
+//! [`BackfillSync`](backfill::BackfillSync) trait, like [`PipelineSync`](backfill::PipelineSync).
 //!
 //! ## Handling consensus messages
 //!
 //! Consensus message handling is performed by three main components:
-//! 1. The [`EngineHandler`], which takes incoming consensus mesesages and manages any requested
-//!    backfill or download work.
-//! 2. The [`EngineApiRequestHandler`], which processes messages from the `EngineHandler` and
-//!    delegates them to the [`EngineApiTreeHandler`].
-//! 3. The [`EngineApiTreeHandler`], which processes incoming tree events, such as new payload
-//!    events, sending back requests for any needed backfill or download work.
+//! 1. The [`EngineHandler`](engine::EngineHandler), which takes incoming consensus mesesages and
+//!    manages any requested backfill or download work.
+//! 2. The [`EngineApiRequestHandler`](engine::EngineApiRequestHandler), which processes messages
+//!    from the [`EngineHandler`](engine::EngineHandler) and delegates them to the
+//!    [`EngineApiTreeHandler`](tree::EngineApiTreeHandler).
+//! 3. The [`EngineApiTreeHandler`](tree::EngineApiTreeHandler), which processes incoming tree
+//!    events, such as new payload events, sending back requests for any needed backfill or download
+//!    work.
 //!
 //! ## Chain representation
 //!
-//! The chain is represented by the [`TreeState`] data structure, which keeps tracks of blocks by
-//! hash and number, as well as keeping track of parent-child relationships between blocks.
-//! The hash and number of the current head of the canonical chain is also tracked in the
-//! [`TreeState`].
+//! The chain is represented by the [`TreeState`](tree::TreeState) data structure, which keeps
+//! tracks of blocks by hash and number, as well as keeping track of parent-child relationships
+//! between blocks. The hash and number of the current head of the canonical chain is also tracked
+//! in the [`TreeState`](tree::TreeState).
 //!
 //! ## Persistence model
 //!
