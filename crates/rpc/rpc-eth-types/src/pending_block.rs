@@ -6,7 +6,9 @@ use std::{fmt, time::Instant};
 
 use derive_more::Constructor;
 use reth_chainspec::ChainSpec;
-use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
+use reth_primitives::{
+    BlockId, BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader, B256,
+};
 use reth_revm::state_change::apply_blockhashes_update;
 use reth_storage_api::errors::provider::ProviderError;
 use revm_primitives::{
@@ -120,4 +122,6 @@ pub struct PendingBlock {
     pub block: SealedBlockWithSenders,
     /// Timestamp when the pending block is considered outdated
     pub expires_at: Instant,
+    /// The receipts for the pending block
+    pub receipts: Vec<Receipt>,
 }
