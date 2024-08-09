@@ -16,7 +16,7 @@
 //!
 //! In order to respond to consensus messages and advance the chain quickly, validation code must
 //! avoid database write operations and perform as much work as possible in-memory. This requirement
-//! is what informs the architecture of consensus message handling in this crate.
+//! is what informs the architecture of the components this crate.
 //!
 //! ## Chain synchronization
 //!
