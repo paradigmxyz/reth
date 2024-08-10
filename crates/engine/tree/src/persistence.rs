@@ -1,14 +1,18 @@
 #![allow(dead_code)]
 
+use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
 use reth_primitives::{SealedBlock, B256};
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
-use std::sync::{
-    mpsc::{Receiver, SendError, Sender},
-    Arc,
+use std::{
+    sync::{
+        mpsc::{Receiver, SendError, Sender},
+        Arc,
+    },
+    time::Instant,
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -29,16 +33,18 @@ pub struct PersistenceService<DB> {
     incoming: Receiver<PersistenceAction>,
     /// The pruner
     pruner: Pruner<DB, ProviderFactory<DB>>,
+    /// metrics
+    metrics: PersistenceMetrics,
 }
 
 impl<DB: Database> PersistenceService<DB> {
     /// Create a new persistence service
-    pub const fn new(
+    pub fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
-        Self { provider, incoming, pruner }
+        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default() }
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -61,39 +67,20 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let provider_rw = self.provider.provider_rw()?;
-                    let sf_provider = self.provider.static_file_provider();
-
-                    UnifiedStorageWriter::from(&provider_rw, &sf_provider)
-                        .remove_blocks_above(new_tip_num)?;
-                    UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
-
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    let _ = self.on_remove_blocks_above(new_tip_num, sender);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let Some(last_block) = blocks.last() else {
-                        let _ = sender.send(None);
-                        continue
-                    };
-
-                    let last_block_hash = last_block.block().hash();
-
-                    let provider_rw = self.provider.provider_rw()?;
-                    let static_file_provider = self.provider.static_file_provider();
-
-                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
-                        .save_blocks(&blocks)?;
-                    UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
-
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(Some(last_block_hash));
+                    let _ = self.on_save_blocks(blocks, sender);
                 }
                 PersistenceAction::PruneBefore(block_num, sender) => {
+                    let start_time = Instant::now();
                     let res = self.prune_before(block_num)?;
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
+                    self.metrics.prune_before_duration.record(start_time.elapsed());
                 }
                 PersistenceAction::WriteTransactions(_block, _sender) => {
                     unimplemented!()
@@ -106,6 +93,48 @@ where
                 }
             }
         }
+        Ok(())
+    }
+
+    fn on_remove_blocks_above(
+        &self,
+        new_tip_num: u64,
+        sender: oneshot::Sender<()>,
+    ) -> Result<(), PersistenceError> {
+        let start_time = Instant::now();
+        let provider_rw = self.provider.provider_rw()?;
+        let sf_provider = self.provider.static_file_provider();
+
+        UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
+
+        // we ignore the error because the caller may or may not care about the result
+        let _ = sender.send(());
+        self.metrics.remove_blocks_above_duration.record(start_time.elapsed());
+        Ok(())
+    }
+
+    fn on_save_blocks(
+        &self,
+        blocks: Vec<ExecutedBlock>,
+        sender: oneshot::Sender<Option<B256>>,
+    ) -> Result<(), PersistenceError> {
+        let start_time = Instant::now();
+        let last_block_hash = blocks.last().map(|block| block.block().hash());
+
+        if let Some(last_block_hash) = last_block_hash {
+            let provider_rw = self.provider.provider_rw()?;
+            let static_file_provider = self.provider.static_file_provider();
+
+            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
+            UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
+
+            // we ignore the error because the caller may or may not care about the result
+            let _ = sender.send(Some(last_block_hash));
+        } else {
+            let _ = sender.send(None);
+        }
+        self.metrics.save_blocks_duration.record(start_time.elapsed());
         Ok(())
     }
 }

@@ -48,7 +48,7 @@ use std::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -848,32 +848,29 @@ where
         }
 
         if self.persistence_state.in_progress() {
-            let mut rx = self
-                .persistence_state
-                .rx
-                .take()
-                .expect("if a persistence task is in progress Receiver must be Some");
-
-            // Check if persistence has completed
-            match rx.try_recv() {
-                Ok(last_persisted_block_hash) => {
-                    let Some(last_persisted_block_hash) = last_persisted_block_hash else {
-                        // if this happened, then we persisted no blocks because we sent an empty
-                        // vec of blocks
-                        warn!(target: "engine", "Persistence task completed but did not persist any blocks");
-                        return Ok(())
-                    };
-                    if let Some(block) =
-                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
-                    {
-                        self.persistence_state.finish(last_persisted_block_hash, block.number);
-                        self.on_new_persisted_block();
-                    } else {
-                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+            if let Some((mut rx, start_time)) = self.persistence_state.rx.take() {
+                // Check if persistence has complete
+                match rx.try_recv() {
+                    Ok(last_persisted_block_hash) => {
+                        self.metrics.persistence_duration.record(start_time.elapsed());
+                        let Some(last_persisted_block_hash) = last_persisted_block_hash else {
+                            // if this happened, then we persisted no blocks because we sent an
+                            // empty vec of blocks
+                            warn!(target: "engine", "Persistence task completed but did not persist any blocks");
+                            return Ok(())
+                        };
+                        if let Some(block) =
+                            self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                        {
+                            self.persistence_state.finish(last_persisted_block_hash, block.number);
+                            self.on_new_persisted_block();
+                        } else {
+                            error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                        }
                     }
+                    Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                    Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
                 }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
-                Err(TryRecvError::Empty) => self.persistence_state.rx = Some(rx),
             }
         }
         Ok(())
@@ -1983,7 +1980,7 @@ pub struct PersistenceState {
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<oneshot::Receiver<Option<B256>>>,
+    rx: Option<(oneshot::Receiver<Option<B256>>, Instant)>,
     /// The last persisted block number.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -1999,15 +1996,22 @@ impl PersistenceState {
 
     /// Sets state for a started persistence task.
     fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
-        self.rx = Some(rx);
+        self.rx = Some((rx, Instant::now()));
     }
 
     /// Sets state for a finished persistence task.
-    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+    fn finish(
+        &mut self,
+        last_persisted_block_hash: B256,
+        last_persisted_block_number: u64,
+    ) -> Duration {
         trace!(target: "engine", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
+        let duration =
+            self.rx.take().map(|(_, start_time)| start_time.elapsed()).unwrap_or_default();
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
+        duration
     }
 }
 
