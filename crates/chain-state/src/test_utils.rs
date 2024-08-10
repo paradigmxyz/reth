@@ -2,6 +2,8 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
 use reth_chainspec::ChainSpec;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -26,6 +28,8 @@ use tokio::sync::broadcast::{self, Sender};
 pub struct TestBlockBuilder {
     /// The account that signs all the block's transactions.
     pub signer: Address,
+    /// Private key for signing.
+    pub signer_pk: PrivateKeySigner,
     /// Keeps track of signer's account info after execution, will be updated in
     /// methods related to block execution.
     pub signer_execute_account_info: AccountInfo,
@@ -39,9 +43,12 @@ pub struct TestBlockBuilder {
 impl Default for TestBlockBuilder {
     fn default() -> Self {
         let initial_account_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+        let signer_pk = PrivateKeySigner::random();
+        let signer = signer_pk.address();
         Self {
             chain_spec: ChainSpec::default(),
-            signer: Address::random(),
+            signer,
+            signer_pk,
             signer_execute_account_info: initial_account_info.clone(),
             signer_build_account_info: initial_account_info,
         }
@@ -49,9 +56,11 @@ impl Default for TestBlockBuilder {
 }
 
 impl TestBlockBuilder {
-    /// Signer setter.
-    pub const fn with_signer(mut self, signer: Address) -> Self {
-        self.signer = signer;
+    /// Signer pk setter.
+    pub fn with_signer_pk(mut self, signer_pk: PrivateKeySigner) -> Self {
+        self.signer = signer_pk.address();
+        self.signer_pk = signer_pk;
+
         self
     }
 
@@ -75,17 +84,25 @@ impl TestBlockBuilder {
         let mut rng = thread_rng();
 
         let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+            let tx = Transaction::Eip1559(TxEip1559 {
+                chain_id: self.chain_spec.chain.id(),
+                nonce,
+                gas_limit: 21_000,
+                to: Address::random().into(),
+                max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                max_priority_fee_per_gas: 1,
+                ..Default::default()
+            });
+            let signature_hash = tx.signature_hash();
+            let signature = self.signer_pk.sign_hash_sync(&signature_hash).unwrap();
+
             TransactionSigned::from_transaction_and_signature(
-                Transaction::Eip1559(TxEip1559 {
-                    chain_id: self.chain_spec.chain.id(),
-                    nonce,
-                    gas_limit: 21_000,
-                    to: Address::random().into(),
-                    max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
-                    max_priority_fee_per_gas: 1,
-                    ..Default::default()
-                }),
-                Signature::default(),
+                tx,
+                Signature {
+                    r: signature.r(),
+                    s: signature.s(),
+                    odd_y_parity: signature.v().y_parity(),
+                },
             )
             .with_signer(self.signer)
         };
