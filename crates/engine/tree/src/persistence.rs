@@ -67,12 +67,14 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = self.on_remove_blocks_above(new_tip_num, sender);
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
+                    let result = self.on_save_blocks(blocks);
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = self.on_save_blocks(blocks, sender);
+                    let _ = sender.send(result.ok().flatten());
                 }
                 PersistenceAction::PruneBefore(block_num, sender) => {
                     let start_time = Instant::now();
@@ -87,11 +89,7 @@ where
         Ok(())
     }
 
-    fn on_remove_blocks_above(
-        &self,
-        new_tip_num: u64,
-        sender: oneshot::Sender<()>,
-    ) -> Result<(), PersistenceError> {
+    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<(), PersistenceError> {
         let start_time = Instant::now();
         let provider_rw = self.provider.provider_rw()?;
         let sf_provider = self.provider.static_file_provider();
@@ -99,17 +97,11 @@ where
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
         UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
-        // we ignore the error because the caller may or may not care about the result
-        let _ = sender.send(());
         self.metrics.remove_blocks_above_duration.record(start_time.elapsed());
         Ok(())
     }
 
-    fn on_save_blocks(
-        &self,
-        blocks: Vec<ExecutedBlock>,
-        sender: oneshot::Sender<Option<B256>>,
-    ) -> Result<(), PersistenceError> {
+    fn on_save_blocks(&self, blocks: Vec<ExecutedBlock>) -> Result<Option<B256>, PersistenceError> {
         let start_time = Instant::now();
         let last_block_hash = blocks.last().map(|block| block.block().hash());
 
@@ -119,14 +111,9 @@ where
 
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
             UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
-
-            // we ignore the error because the caller may or may not care about the result
-            let _ = sender.send(Some(last_block_hash));
-        } else {
-            let _ = sender.send(None);
         }
         self.metrics.save_blocks_duration.record(start_time.elapsed());
-        Ok(())
+        Ok(last_block_hash)
     }
 }
 
