@@ -651,6 +651,10 @@ impl NetworkManager {
     }
 
     fn on_swarm_event(&mut self, event: SwarmEvent) {
+
+        // print peer_id if event contains peer_id
+        println!("event: {:?}", event);
+
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),

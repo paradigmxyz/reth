@@ -333,6 +333,7 @@ impl Stream for Swarm {
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
+#[derive(Debug)]
 pub(crate) enum SwarmEvent {
     /// Events related to the actual network protocol.
     ValidMessage {
