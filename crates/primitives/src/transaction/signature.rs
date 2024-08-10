@@ -200,6 +200,12 @@ impl From<alloy_primitives::Signature> for Signature {
     fn from(value: alloy_primitives::Signature) -> Self {
         Self { r: value.r(), s: value.s(), odd_y_parity: value.v().y_parity() }
     }
+
+    /// Returns a signature with a boolean parity flag. This is usefull when we want to encode
+    /// the `v` value as 0 or 1.
+    pub(crate) fn as_signature_with_boolean_parity(&self) -> SignatureWithParity {
+        SignatureWithParity::new(self.r(), self.s(), Parity::Parity(self.odd_y_parity))
+    }
 }
 
 /// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
