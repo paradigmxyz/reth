@@ -448,10 +448,10 @@ where
                 continue
             }
 
-            let (new_pooled_hashes, new_full_transactions) = builder.build();
+            let PropagateTransactions { pooled, full } = builder.build();
 
             // send hashes if any
-            if let Some(mut new_pooled_hashes) = new_pooled_hashes {
+            if let Some(mut new_pooled_hashes) = pooled {
                 // enforce tx soft limit per message for the (unlikely) event the number of
                 // hashes exceeds it
                 new_pooled_hashes
@@ -470,7 +470,7 @@ where
             }
 
             // send full transactions, if any
-            if let Some(new_full_transactions) = new_full_transactions {
+            if let Some(new_full_transactions) = full {
                 for tx in &new_full_transactions {
                     propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(*peer_id));
                     // mark transaction as seen by peer
@@ -490,9 +490,9 @@ where
         propagated
     }
 
-    /// Propagate the full transactions to a specific peer
+    /// Propagate the full transactions to a specific peer.
     ///
-    /// Returns the propagated transactions
+    /// Returns the propagated transactions.
     fn propagate_full_transactions_to_peer(
         &mut self,
         txs: Vec<TxHash>,
@@ -506,11 +506,7 @@ where
         // filter all transactions unknown to the peer
         let mut full_transactions = FullTransactionsBuilder::new(peer.version);
 
-        let to_propagate = self
-            .pool
-            .get_all(txs)
-            .into_iter()
-            .map(PropagateTransaction::new);
+        let to_propagate = self.pool.get_all(txs).into_iter().map(PropagateTransaction::new);
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
@@ -524,16 +520,29 @@ where
             return None
         }
 
-        let (new_pooled,  new_full_transactions) = full_transactions.build();
+        let PropagateTransactions { pooled, full } = full_transactions.build();
 
-
-
-        for tx in &new_full_transactions {
-            propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
-            peer.seen_transactions.
+        // send hashes if any
+        if let Some(new_pooled_hashes) = pooled {
+            for hash in new_pooled_hashes.iter_hashes().copied() {
+                propagated.0.entry(hash).or_default().push(PropagateKind::Hash(peer_id));
+                // mark transaction as seen by peer
+                peer.seen_transactions.insert(hash);
+            }
+            // send hashes of transactions
+            self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
         }
-        // send full transactions
-        self.network.send_transactions(peer_id, new_full_transactions);
+
+        // send full transactions, if any
+        if let Some(new_full_transactions) = full {
+            for tx in &new_full_transactions {
+                propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
+                // mark transaction as seen by peer
+                peer.seen_transactions.insert(tx.hash());
+            }
+            // send full transactions
+            self.network.send_transactions(peer_id, new_full_transactions);
+        }
 
         // Update propagated transactions metrics
         self.metrics.propagated_transactions.increment(propagated.0.len() as u64);
@@ -1363,6 +1372,7 @@ where
 }
 
 /// A transaction that's about to be propagated to multiple peers.
+#[derive(Debug, Clone)]
 struct PropagateTransaction {
     size: usize,
     transaction: Arc<TransactionSigned>,
@@ -1385,6 +1395,7 @@ impl PropagateTransaction {
 
 /// Helper type to construct the appropriate message to send to the peer based on whether the peer
 /// should receive them in full or as pooled
+#[derive(Debug, Clone)]
 enum PropagateTransactionsBuilder {
     Pooled(PooledTransactionsHashesBuilder),
     Full(FullTransactionsBuilder),
@@ -1418,27 +1429,29 @@ impl PropagateTransactionsBuilder {
     }
 
     /// Consumes the type and returns the built messages that should be sent to the peer.
-    fn build(self) -> (Option<NewPooledTransactionHashes>, Option<Vec<Arc<TransactionSigned>>>) {
+    fn build(self) -> PropagateTransactions {
         match self {
-            PropagateTransactionsBuilder::Pooled(pooled) => (Some(pooled.build()), None),
-            PropagateTransactionsBuilder::Full(full) => full.build(),
+            Self::Pooled(pooled) => {
+                PropagateTransactions { pooled: Some(pooled.build()), full: None }
+            }
+            Self::Full(full) => full.build(),
         }
     }
 }
 
-/// Represents how the transactions should be sent to a peer.
-enum PropagateTransactions {
-    /// Send a list of transaction hashes.
-    Pooled(NewPooledTransactionHashes),
-    /// Send a list of full transactions
-    Full(Vec<Arc<TransactionSigned>>),
-    /// Send both, full transactions and hashes that are either unsuitable to be sent in full or
-    /// don't fit into the list.
-    Both(Vec<Arc<TransactionSigned>>, NewPooledTransactionHashes),
+/// Represents how the transactions should be sent to a peer if any.
+struct PropagateTransactions {
+    /// The pooled transaction hashes to send.
+    pooled: Option<NewPooledTransactionHashes>,
+    /// The transactions to send in full.
+    full: Option<Vec<Arc<TransactionSigned>>>,
 }
 
 /// Helper type for constructing the full transaction message that enforces the
-/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE`].
+/// [`DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE`] for full transaction broadcast
+/// and enforces other propagation rules for EIP-4844 and tracks those transactions that can't be
+/// broadcasted in full.
+#[derive(Debug, Clone)]
 struct FullTransactionsBuilder {
     /// The soft limit to enforce for a single broadcast message of full transactions.
     total_size: usize,
@@ -1500,16 +1513,17 @@ impl FullTransactionsBuilder {
         self.transactions.is_empty() && self.pooled.is_empty()
     }
 
-    /// Returns the messages that should be sent to the peer.
-    fn build(self) -> (Option<NewPooledTransactionHashes>, Option<Vec<Arc<TransactionSigned>>>) {
+    /// Returns the messages that should be propagated to the peer.
+    fn build(self) -> PropagateTransactions {
         let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
         let full = Some(self.transactions).filter(|full| !full.is_empty());
-        (pooled, full)
+        PropagateTransactions { pooled, full }
     }
 }
 
 /// A helper type to create the pooled transactions message based on the negotiated version of the
 /// session with the peer
+#[derive(Debug, Clone)]
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
@@ -1716,13 +1730,20 @@ mod tests {
     };
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
+    use reth_transaction_pool::test_utils::{
+        testing_pool, MockTransaction, MockTransactionFactory, TestPool,
+    };
     use secp256k1::SecretKey;
-    use std::{fmt, future::poll_fn, hash};
+    use std::{
+        fmt,
+        future::poll_fn,
+        hash,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+    };
     use tests::fetcher::TxFetchMetadata;
     use tracing::error;
 
-    async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
+    async fn new_tx_manager() -> (TransactionsManager<TestPool>, NetworkManager) {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let client = NoopProvider::default();
 
@@ -1735,14 +1756,14 @@ mod tests {
         let pool = testing_pool();
 
         let transactions_manager_config = config.transactions_manager_config.clone();
-        let (_network_handle, _network, transactions, _) = NetworkManager::new(config)
+        let (_network_handle, network, transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
             .into_builder()
             .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
-        transactions
+        (transactions, network)
     }
 
     pub(super) fn default_cache<T: hash::Hash + Eq + fmt::Debug>() -> LruCache<T> {
@@ -2123,7 +2144,7 @@ mod tests {
     async fn test_max_retries_tx_request() {
         reth_tracing::init_test_tracing();
 
-        let mut tx_manager = new_tx_manager().await;
+        let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
         let peer_id_1 = PeerId::new([1; 64]);
@@ -2230,5 +2251,123 @@ mod tests {
         // for retry
         assert!(tx_fetcher.hashes_pending_fetch.is_empty());
         assert_eq!(tx_fetcher.active_peers.len(), 0);
+    }
+
+    #[test]
+    fn test_transaction_builder_empty() {
+        let mut builder = PropagateTransactionsBuilder::pooled(EthVersion::Eth68);
+        assert!(builder.is_empty());
+
+        let mut factory = MockTransactionFactory::default();
+        let tx = PropagateTransaction::new(Arc::new(factory.create_eip1559()));
+        builder.push(&tx);
+        assert!(!builder.is_empty());
+
+        let txs = builder.build();
+        assert!(txs.full.is_none());
+        let txs = txs.pooled.unwrap();
+        assert_eq!(txs.len(), 1);
+    }
+
+    #[test]
+    fn test_transaction_builder_large() {
+        let mut builder = PropagateTransactionsBuilder::full(EthVersion::Eth68);
+        assert!(builder.is_empty());
+
+        let mut factory = MockTransactionFactory::default();
+        let mut tx = factory.create_eip1559();
+        // create a transaction that still fits
+        tx.transaction.set_size(DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE + 1);
+        let tx = Arc::new(tx);
+        let tx = PropagateTransaction::new(tx);
+        builder.push(&tx);
+        assert!(!builder.is_empty());
+
+        let txs = builder.clone().build();
+        assert!(txs.pooled.is_none());
+        let txs = txs.full.unwrap();
+        assert_eq!(txs.len(), 1);
+
+        builder.push(&tx);
+
+        let txs = builder.clone().build();
+        let pooled = txs.pooled.unwrap();
+        assert_eq!(pooled.len(), 1);
+        let txs = txs.full.unwrap();
+        assert_eq!(txs.len(), 1);
+    }
+
+    #[test]
+    fn test_transaction_builder_eip4844() {
+        let mut builder = PropagateTransactionsBuilder::full(EthVersion::Eth68);
+        assert!(builder.is_empty());
+
+        let mut factory = MockTransactionFactory::default();
+        let tx = PropagateTransaction::new(Arc::new(factory.create_eip4844()));
+        builder.push(&tx);
+        assert!(!builder.is_empty());
+
+        let txs = builder.clone().build();
+        assert!(txs.full.is_none());
+        let txs = txs.pooled.unwrap();
+        assert_eq!(txs.len(), 1);
+
+        let tx = PropagateTransaction::new(Arc::new(factory.create_eip1559()));
+        builder.push(&tx);
+
+        let txs = builder.clone().build();
+        let pooled = txs.pooled.unwrap();
+        assert_eq!(pooled.len(), 1);
+        let txs = txs.full.unwrap();
+        assert_eq!(txs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_propagate_full() {
+        reth_tracing::init_test_tracing();
+
+        let (mut tx_manager, network) = new_tx_manager().await;
+        let peer_id = PeerId::random();
+
+        // ensure not syncing
+        network.handle().update_sync_state(SyncState::Idle);
+
+        // mock a peer
+        let (tx, _rx) = mpsc::channel(1);
+        tx_manager.on_network_event(NetworkEvent::SessionEstablished {
+            peer_id,
+            remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            client_version: Arc::from(""),
+            capabilities: Arc::new(vec![].into()),
+            messages: PeerRequestSender::new(peer_id, tx),
+            status: Arc::new(Default::default()),
+            version: EthVersion::Eth68,
+        });
+
+        let mut propagate = vec![];
+        let mut factory = MockTransactionFactory::default();
+        let eip1559_tx = Arc::new(factory.create_eip1559());
+        propagate.push(PropagateTransaction::new(eip1559_tx.clone()));
+        let eip4844_tx = Arc::new(factory.create_eip4844());
+        propagate.push(PropagateTransaction::new(eip4844_tx.clone()));
+
+        let propagated = tx_manager.propagate_transactions(propagate.clone());
+        assert_eq!(propagated.0.len(), 2);
+        let prop_txs = propagated.0.get(eip1559_tx.transaction.hash()).unwrap();
+        assert_eq!(prop_txs.len(), 1);
+        assert!(prop_txs[0].is_full());
+
+        let prop_txs = propagated.0.get(eip4844_tx.transaction.hash()).unwrap();
+        assert_eq!(prop_txs.len(), 1);
+        assert!(prop_txs[0].is_hash());
+
+        let peer = tx_manager.peers.get(&peer_id).unwrap();
+        assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
+        assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
+        peer.seen_transactions.contains(eip4844_tx.transaction.hash());
+
+        // propagate again
+        let propagated = tx_manager.propagate_transactions(propagate);
+        assert!(propagated.0.is_empty());
     }
 }
