@@ -165,7 +165,7 @@ impl Block {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Block].
+    /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() +
