@@ -10,6 +10,9 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
+/// The default additional validation tasks size.
+pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
+
 /// Default price bump (in %) for the transaction pool underpriced check.
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
 

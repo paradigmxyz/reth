@@ -33,6 +33,10 @@ pub struct RollupArgs {
     /// enables discovery v4 if provided
     #[arg(long = "rollup.discovery.v4", default_value = "false")]
     pub discovery_v4: bool,
+
+    /// Enable the engine2 experimental features on op-reth binary
+    #[arg(long = "engine.experimental", default_value = "false")]
+    pub experimental: bool,
 }
 
 #[cfg(test)]

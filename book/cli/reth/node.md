@@ -430,6 +430,11 @@ TxPool:
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
 
+      --txpool.additional-validation-tasks <ADDITIONAL_VALIDATION_TASKS>
+          Number of additional transaction validation tasks to spawn
+
+          [default: 1]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder

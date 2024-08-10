@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT OR Apache-2.0"
@@ -380,13 +380,13 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "12.1.0", features = [
+revm = { version = "13.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
 revm-inspectors = "0.5"
-revm-primitives = { version = "7.1.0", features = [
+revm-primitives = { version = "8.0.0", features = [
     "std",
 ], default-features = false }
 
