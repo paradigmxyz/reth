@@ -51,8 +51,11 @@ impl<DB: Database> PersistenceService<DB> {
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "tree::persistence", ?block_num, "Running pruner");
+        let start_time = Instant::now();
         // TODO: doing this properly depends on pruner segment changes
-        self.pruner.run(block_num)
+        let result = self.pruner.run(block_num);
+        self.metrics.prune_before_duration.record(start_time.elapsed());
+        result
     }
 }
 
@@ -72,17 +75,15 @@ where
                     let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let result = self.on_save_blocks(blocks);
+                    let result = self.on_save_blocks(blocks)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result.ok().flatten());
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::PruneBefore(block_num, sender) => {
-                    let start_time = Instant::now();
                     let res = self.prune_before(block_num)?;
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
-                    self.metrics.prune_before_duration.record(start_time.elapsed());
                 }
             }
         }
