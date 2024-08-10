@@ -4,7 +4,7 @@ use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
-use reth_primitives::{SealedBlock, B256};
+use reth_primitives::B256;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::{
@@ -82,15 +82,6 @@ where
                     let _ = sender.send(res);
                     self.metrics.prune_before_duration.record(start_time.elapsed());
                 }
-                PersistenceAction::WriteTransactions(_block, _sender) => {
-                    unimplemented!()
-                    // let (block_num, td) =
-                    //     self.write_transactions(block).expect("todo: handle errors");
-                    // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
-
-                    // // we ignore the error because the caller may or may not care about the
-                    // result let _ = sender.send(());
-                }
             }
         }
         Ok(())
@@ -160,13 +151,6 @@ pub enum PersistenceAction {
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
     SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<B256>>),
-
-    /// The given block has been added to the canonical chain, its transactions and headers will be
-    /// persisted for durability.
-    ///
-    /// This will first append the header and transactions to static files, then update the
-    /// checkpoints for headers and block bodies in the database.
-    WriteTransactions(Arc<SealedBlock>, oneshot::Sender<()>),
 
     /// Removes block data above the given block number from the database.
     ///
