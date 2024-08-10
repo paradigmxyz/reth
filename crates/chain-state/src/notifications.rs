@@ -9,8 +9,11 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::broadcast;
-use tokio_stream::{wrappers::BroadcastStream, Stream};
+use tokio::sync::{broadcast, watch};
+use tokio_stream::{
+    wrappers::{BroadcastStream, WatchStream},
+    Stream,
+};
 use tracing::debug;
 
 /// Type alias for a receiver that receives [`CanonStateNotification`]
@@ -172,6 +175,41 @@ impl Stream for ForkChoiceStream {
                 }
                 None => Poll::Ready(None),
             };
+        }
+    }
+}
+
+/// A stream for block state watch channels (pending, safe or finalized watchers)
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct BlockStateNotificationStream<T> {
+    #[pin]
+    st: WatchStream<Option<T>>,
+}
+
+impl<T: Clone + Sync + Send + 'static> BlockStateNotificationStream<T> {
+    /// Creates a new `BlockStateNotificationStream`
+    pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
+        Self { st: WatchStream::new(rx) }
+    }
+}
+
+impl<T: Clone + Sync + Send + 'static> Stream for BlockStateNotificationStream<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            return match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(notification) => {
+                    if notification.is_some() {
+                        return Poll::Ready(notification);
+                    } else {
+                        // skip None values
+                        continue;
+                    }
+                }
+                None => Poll::Ready(None),
+            }
         }
     }
 }
