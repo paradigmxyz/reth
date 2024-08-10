@@ -11,7 +11,11 @@
 
 use proc_macro::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, DeriveInput};
+use syn::{
+    bracketed,
+    parse::{Parse, ParseStream},
+    parse_macro_input, DeriveInput, Result, Token,
+};
 
 mod arbitrary;
 mod compact;
@@ -85,7 +89,8 @@ pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
-    let tests = arbitrary::maybe_generate_tests(args, &ast);
+    let tests =
+        arbitrary::maybe_generate_tests(args, &ast.ident, &format_ident!("{}Tests", ast.ident));
 
     // Avoid duplicate names
     let arb_import = format_ident!("{}Arbitrary", ast.ident);
@@ -106,10 +111,51 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn add_arbitrary_tests(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-    let tests = arbitrary::maybe_generate_tests(args, &ast);
+
+    let tests =
+        arbitrary::maybe_generate_tests(args, &ast.ident, &format_ident!("{}Tests", ast.ident));
     quote! {
         #ast
         #tests
     }
     .into()
+}
+
+struct GenerateTestsInput {
+    args: TokenStream,
+    ty: syn::Type,
+    mod_name: syn::Ident,
+}
+
+impl Parse for GenerateTestsInput {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        input.parse::<Token![#]>()?;
+
+        let args;
+        bracketed!(args in input);
+
+        let args = args.parse::<proc_macro2::TokenStream>()?;
+        let ty = input.parse()?;
+
+        input.parse::<Token![,]>()?;
+        let mod_name = input.parse()?;
+
+        Ok(Self { args: args.into(), ty, mod_name })
+    }
+}
+
+/// Generates tests for given type based on passed parameters.
+///
+/// See `arbitrary::maybe_generate_tests` for more information.
+///
+/// Examples:
+/// * `generate_tests!(#[rlp] MyType, MyTypeTests)`: will generate rlp roundtrip tests for `MyType`
+///   in a module named `MyTypeTests`.
+/// * `generate_tests!(#[compact, 10] MyType, MyTypeTests)`: will generate compact roundtrip tests
+///   for `MyType` limited to 10 cases.
+#[proc_macro]
+pub fn generate_tests(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as GenerateTestsInput);
+
+    arbitrary::maybe_generate_tests(input.args, &input.ty, &input.mod_name).into()
 }

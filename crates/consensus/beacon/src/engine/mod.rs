@@ -8,9 +8,8 @@ use reth_db_api::database::Database;
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
-    headers::client::HeadersClient,
     sync::{NetworkSyncUpdater, SyncState},
+    BlockClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -171,7 +170,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database,
-    Client: HeadersClient + BodiesClient,
+    Client: BlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -234,7 +233,7 @@ where
         + StageCheckpointReader
         + ChainSpecProvider
         + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
     EngineT: EngineTypes + Unpin,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
@@ -1792,7 +1791,7 @@ where
 impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database + Unpin + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader

@@ -6,11 +6,8 @@ use reth_db::{
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
-use reth_node_builder::{FullNodeComponents, NodeBuilder, NodeConfig};
-use reth_node_ethereum::{
-    launch::EthNodeLauncher,
-    node::{EthereumAddOns, EthereumNode},
-};
+use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig};
+use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
 
@@ -55,7 +52,7 @@ async fn test_eth_launcher() {
         .with_components(EthereumNode::components())
         .with_add_ons::<EthereumAddOns>()
         .launch_with_fn(|builder| {
-            let launcher = EthNodeLauncher::new(tasks.executor(), builder.config.datadir());
+            let launcher = EngineNodeLauncher::new(tasks.executor(), builder.config.datadir());
             builder.launch_with(launcher)
         });
 }

@@ -10,8 +10,7 @@ use reth_downloaders::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    bodies::{client::BodiesClient, downloader::BodyDownloader},
-    headers::{client::HeadersClient, downloader::HeaderDownloader},
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_core::primitives::{BlockNumber, B256};
 use reth_provider::ProviderFactory;
@@ -39,7 +38,7 @@ pub fn build_networked_pipeline<DB, Client, Executor>(
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Unpin + Clone + 'static,
-    Client: HeadersClient + BodiesClient + Clone + 'static,
+    Client: BlockClient + 'static,
     Executor: BlockExecutorProvider,
 {
     // building network downloaders using the fetch client

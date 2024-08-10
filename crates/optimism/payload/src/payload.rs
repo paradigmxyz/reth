@@ -3,6 +3,7 @@
 //! Optimism builder support
 
 use alloy_rlp::Encodable;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
@@ -13,6 +14,8 @@ use reth_primitives::{
     Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
     U256,
 };
+/// Re-export for use in downstream arguments.
+pub use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
     OptimismExecutionPayloadEnvelopeV4, PayloadId,
@@ -23,9 +26,6 @@ use reth_rpc_types_compat::engine::payload::{
 };
 use revm::primitives::HandlerCfg;
 use std::sync::Arc;
-
-/// Re-export for use in downstream arguments.
-pub use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +168,8 @@ pub struct OptimismBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: SealedBlock,
+    /// Block execution data for the payload, if any.
+    pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -189,8 +191,9 @@ impl OptimismBuiltPayload {
         fees: U256,
         chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
+        executed_block: Option<ExecutedBlock>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), chain_spec, attributes }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
 
     /// Returns the identifier of the payload.
@@ -222,6 +225,10 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn fees(&self) -> U256 {
         self.fees
     }
+
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
+    }
 }
 
 impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
@@ -231,6 +238,10 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 
     fn fees(&self) -> U256 {
         (**self).fees()
+    }
+
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
     }
 }
 
@@ -261,7 +272,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
                 B256::ZERO
             };
         Self {
-            execution_payload: block_to_payload_v3(block).0,
+            execution_payload: block_to_payload_v3(block),
             block_value: fees,
             // From the engine API spec:
             //

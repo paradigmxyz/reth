@@ -44,7 +44,6 @@ generic-array.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-chainspec.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
