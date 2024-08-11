@@ -89,7 +89,7 @@ impl EthBeaconConsensus {
         Ok(())
     }
 
-    fn validate_difficuty_increment(
+    fn validate_difficulty_increment(
         &self,
         header: &Header,
         parent: &Header,
@@ -193,11 +193,16 @@ impl Consensus for EthBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
+        let is_post_merge =
+            self.chain_spec.fork(EthereumHardfork::Paris).active_at_block(header.number);
+
         validate_against_parent_hash_number(header, parent)?;
 
         validate_against_parent_timestamp(header, parent)?;
 
-        self.validate_difficuty_increment(header, parent)?;
+        if !is_post_merge {
+            self.validate_difficulty_increment(header, parent)?;
+        }
 
         self.validate_against_parent_gas_limit(header, parent)?;
 
