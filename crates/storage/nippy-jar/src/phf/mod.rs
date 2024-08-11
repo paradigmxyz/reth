@@ -12,11 +12,11 @@ pub trait PHFKey: AsRef<[u8]> + Sync + Clone + Hash {}
 impl<T: AsRef<[u8]> + Sync + Clone + Hash> PHFKey for T {}
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct DummyFunction {
+pub struct DummyFunction {
     map: HashMap<Vec<u8>, usize>,
 }
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct DummyGoFunction {
+pub struct DummyGoFunction {
     pub(crate) map: HashMap<Vec<u8>, usize>,
 }
 

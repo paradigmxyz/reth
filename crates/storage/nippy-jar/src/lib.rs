@@ -87,7 +87,7 @@ impl<T> NippyJarHeader for T where
 /// block hash, into a unique integer. This integer is then used as an index in `offsets_index`,
 /// which maps to the actual data location in the `offsets` list. Similar to the `filter`, the PHF
 /// may also produce false positives but not false negatives, necessitating subsequent data
-/// verification.
+/// verification. Right now, the `phf` use dummy function implemented by HashMap.
 ///
 /// Note: that the key (eg. `BlockHash`) passed to a filter and phf does not need to actually be
 /// stored.
