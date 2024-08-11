@@ -1,6 +1,6 @@
 use crate::NippyJarError;
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
+use std::{collections::HashMap, hash::Hash};
 
 mod fmph;
 pub use fmph::Fmph;
@@ -8,9 +8,49 @@ pub use fmph::Fmph;
 mod go_fmph;
 pub use go_fmph::GoFmph;
 
-/// Trait alias for [`PerfectHashingFunction`] keys.
 pub trait PHFKey: AsRef<[u8]> + Sync + Clone + Hash {}
 impl<T: AsRef<[u8]> + Sync + Clone + Hash> PHFKey for T {}
+
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct DummyFunction {
+    map: HashMap<Vec<u8>, usize>,
+}
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct DummyGoFunction {
+    pub(crate) map: HashMap<Vec<u8>, usize>,
+}
+
+impl<T: PHFKey> From<&[T]> for DummyFunction {
+    fn from(keys: &[T]) -> Self {
+        let mut map = HashMap::new();
+        for (i, key) in keys.iter().enumerate() {
+            map.insert(key.as_ref().to_vec(), i);
+        }
+        Self { map }
+    }
+}
+
+impl DummyFunction {
+    pub(crate) fn get(&self, key: &[u8]) -> Option<u64> {
+        self.map.get(key).map(|&v| v as u64)
+    }
+}
+
+impl<T: PHFKey> From<&[T]> for DummyGoFunction {
+    fn from(keys: &[T]) -> Self {
+        let mut map = HashMap::new();
+        for (i, key) in keys.iter().enumerate() {
+            map.insert(key.as_ref().to_vec(), i);
+        }
+        Self { map }
+    }
+}
+
+impl DummyGoFunction {
+    pub(crate) fn get(&self, key: &[u8]) -> Option<u64> {
+        self.map.get(key).map(|&v| v as u64)
+    }
+}
 
 /// Trait to build and query a perfect hashing function.
 pub trait PerfectHashingFunction: Serialize + for<'a> Deserialize<'a> {

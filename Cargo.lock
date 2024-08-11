@@ -1196,12 +1196,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "binout"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b60b1af88a588fca5fe424ae7d735bc52814f80ff57614f57043cc4e2024f2ea"
-
-[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1230,15 +1224,6 @@ checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 dependencies = [
  "arbitrary",
  "serde",
-]
-
-[[package]]
-name = "bitm"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b06e8e5bec3490b9f6f3adbb78aa4f53e8396fd9994e8a62a346b44ea7c15f35"
-dependencies = [
- "dyn_size_of",
 ]
 
 [[package]]
@@ -2539,12 +2524,6 @@ name = "dyn-clone"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
-
-[[package]]
-name = "dyn_size_of"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33d4f78a40b1ec35bf8cafdaaf607ba2f773c366b0b3bda48937cacd7a8d5134"
 
 [[package]]
 name = "ecdsa"
@@ -5474,19 +5453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ph"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86b7b74d575d7c11fb653fae69688be5206cafc1ead33c01ce61ac7f36eae45b"
-dependencies = [
- "binout",
- "bitm",
- "dyn_size_of",
- "rayon",
- "wyhash",
-]
-
-[[package]]
 name = "pharos"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7692,7 +7658,6 @@ dependencies = [
  "derive_more 1.0.0",
  "lz4_flex",
  "memmap2",
- "ph",
  "rand 0.8.5",
  "reth-fs-util",
  "serde",
@@ -11428,15 +11393,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "wyhash"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf6e163c25e3fac820b4b453185ea2dea3b6a3e0a721d4d23d75bd33734c295"
-dependencies = [
- "rand_core 0.6.4",
 ]
 
 [[package]]
