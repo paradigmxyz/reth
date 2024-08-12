@@ -2,14 +2,15 @@
 
 use alloy_rlp::{Decodable, Encodable, Header};
 use derive_more::Display;
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::bytes::{Buf, BufMut};
 use thiserror::Error;
 
 /// RLPx disconnect reason.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
     #[default]
