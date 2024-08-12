@@ -7,15 +7,16 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{Account, Address, BlockNumber, Buf, StorageKey};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved in the database.
 ///
 /// [`Address`] is the subkey.
-#[derive_arbitrary(compact)]
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
     pub address: Address,
