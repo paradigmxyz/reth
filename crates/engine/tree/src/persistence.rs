@@ -8,10 +8,7 @@ use reth_primitives::B256;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::{
-    sync::{
-        mpsc::{Receiver, SendError, Sender},
-        Arc,
-    },
+    sync::mpsc::{Receiver, SendError, Sender},
     time::Instant,
 };
 use thiserror::Error;
@@ -70,9 +67,9 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
+                    self.on_remove_blocks_above(new_tip_num)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(result);
+                    let _ = sender.send(());
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
