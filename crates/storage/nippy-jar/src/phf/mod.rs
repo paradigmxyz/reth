@@ -8,6 +8,7 @@ pub use fmph::Fmph;
 mod go_fmph;
 pub use go_fmph::GoFmph;
 
+/// Trait alias for [`PerfectHashingFunction`] keys.
 pub trait PHFKey: AsRef<[u8]> + Sync + Clone + Hash {}
 impl<T: AsRef<[u8]> + Sync + Clone + Hash> PHFKey for T {}
 

@@ -196,13 +196,15 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self
     }
 
-    /// Adds [`phf::Fmph`] perfect hashing function.
+    /// Adds [`phf::Fmph`] perfect hashing function. right now it use dummy function implemented by
+    /// `HashMap`
     pub fn with_fmph(mut self) -> Self {
         self.phf = Some(Functions::Fmph(Fmph::new()));
         self
     }
 
-    /// Adds [`phf::GoFmph`] perfect hashing function.
+    /// Adds [`phf::GoFmph`] perfect hashing function. right now it use dummy function implemented
+    /// by `HashMap`
     pub fn with_gofmph(mut self) -> Self {
         self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
