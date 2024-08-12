@@ -32,7 +32,19 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
     compact::derive(input, is_zstd)
 }
 
-/// To be used for types that implement `Arbitrary` manually. See [`derive_arbitrary()`] for more.
+/// Generates tests for given type.
+///
+/// If `compact` or `rlp` is passed to `add_arbitrary_tests`, there will be proptest roundtrip tests
+/// generated. An integer value passed will limit the number of proptest cases generated (default:
+/// 256).
+///
+/// Examples:
+/// * `#[add_arbitrary_tests]`: will derive arbitrary with no tests.
+/// * `#[add_arbitrary_tests(rlp)]`: will derive arbitrary and generate rlp roundtrip proptests.
+/// * `#[add_arbitrary_tests(rlp, 10)]`: will derive arbitrary and generate rlp roundtrip proptests.
+///   Limited to 10 cases.
+/// * `#[add_arbitrary_tests(compact, rlp)]`. will derive arbitrary and generate rlp and compact
+///   roundtrip proptests.
 #[proc_macro_attribute]
 pub fn add_arbitrary_tests(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
