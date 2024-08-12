@@ -194,6 +194,7 @@ jobs:
     needs:
       - clippy-binaries
       - clippy
+      - wasm
       - crate-checks
       - docs
       - fmt
