@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::FromEthApiError;
 
-use super::LoadBlock;
+use super::{pending_block, LoadBlock};
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
@@ -161,16 +161,13 @@ pub trait EthFees: LoadFee {
             }
 
             // If the newest block is pending, we need to fetch the pending block and add it to the headers
-            let pending_block_hash = if is_pending_block {
-                if let Some(pending_block) = self.block(BlockNumberOrTag::Pending.into()).await? {
+            let pending_block = self.block(BlockNumberOrTag::Pending.into()).await?;
+            let pending_block_hash = pending_block.as_ref().map(|block| block.header.hash());
+            if is_pending_block {
+                if let Some(pending_block) = pending_block {
                     headers.push(pending_block.header.clone());
-                    Some(pending_block.header.hash())
-                } else {
-                    None
                 }
-            } else {
-                None
-            };
+            }
 
             for header in &headers {
                 base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
@@ -188,7 +185,7 @@ pub trait EthFees: LoadFee {
                             .get_transactions_and_receipts(header.hash())
                             .await.map_err(Self::Error::from_eth_err)?
                             .ok_or(EthApiError::InvalidBlockRange)?;
-                        
+
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
@@ -200,7 +197,6 @@ pub trait EthFees: LoadFee {
                             .unwrap_or_default(),
                         );
                     }
-
                 }
             }
 
