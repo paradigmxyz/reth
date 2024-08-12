@@ -106,7 +106,7 @@ where
         let start_time = Instant::now();
         let last_block_hash = blocks.last().map(|block| block.block().hash());
 
-        if let Some(last_block_hash) = last_block_hash {
+        if last_block_hash.is_some() {
             let provider_rw = self.provider.provider_rw()?;
             let static_file_provider = self.provider.static_file_provider();
 
