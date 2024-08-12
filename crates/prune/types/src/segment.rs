@@ -6,7 +6,18 @@ use thiserror::Error;
 
 /// Segment of the data that can be pruned.
 #[derive(
-    Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Compact
+    Debug,
+    Display,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    Compact,
 )]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]

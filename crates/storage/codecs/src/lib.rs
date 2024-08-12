@@ -704,7 +704,9 @@ mod tests {
         );
     }
 
-    #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary)]
+    #[derive(
+        Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary,
+    )]
     #[add_arbitrary_tests(compact)]
     enum TestEnum {
         #[default]

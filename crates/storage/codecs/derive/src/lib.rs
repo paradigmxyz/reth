@@ -9,7 +9,7 @@
 #![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use proc_macro::{TokenStream};
+use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     bracketed,

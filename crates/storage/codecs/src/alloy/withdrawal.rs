@@ -1,7 +1,7 @@
 use crate::Compact;
 use alloy_eips::eip4895::Withdrawal as AlloyWithdrawal;
 use alloy_primitives::Address;
-use reth_codecs_derive::{add_arbitrary_tests};
+use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// Withdrawal acts as bridge which simplifies Compact implementation for AlloyWithdrawal.

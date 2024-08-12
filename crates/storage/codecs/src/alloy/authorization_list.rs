@@ -4,7 +4,7 @@ use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
 use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
-use reth_codecs_derive::{add_arbitrary_tests};
+use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.

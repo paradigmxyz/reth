@@ -5,7 +5,7 @@ use alloy_rlp::{
 use bytes::Buf;
 use core::mem;
 #[cfg(any(test, feature = "reth-codec"))]
-use reth_codecs::{Compact};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
