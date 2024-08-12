@@ -134,4 +134,3 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
         Ok(Header::arbitrary(u)?.seal_slow())
     }
 }
-
