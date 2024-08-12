@@ -425,4 +425,3 @@ pub struct HeaderConsensusError(ConsensusError, SealedHeader);
 
 #[cfg(feature = "std")]
 impl std::error::Error for HeaderConsensusError {}
-
