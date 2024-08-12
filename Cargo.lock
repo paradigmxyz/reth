@@ -7586,6 +7586,7 @@ name = "reth-network-p2p"
 version = "1.0.5"
 dependencies = [
  "auto_impl",
+ "derive_more",
  "futures",
  "parking_lot 0.12.3",
  "reth-consensus",
@@ -7594,7 +7595,6 @@ dependencies = [
  "reth-primitives",
  "reth-storage-errors",
  "serde",
- "thiserror",
  "tokio",
  "tracing",
 ]
