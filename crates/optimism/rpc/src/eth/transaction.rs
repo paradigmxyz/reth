@@ -3,20 +3,25 @@
 use std::sync::Arc;
 
 use reth_evm_optimism::RethL1BlockInfo;
+use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSigned;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction},
-    RawTransactionForwarder,
+    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    EthApiTypes, RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthResult, EthStateCache};
+use reth_rpc_eth_types::EthStateCache;
 use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
 
-impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
+impl<N> EthTransactions for OpEthApi<N>
+where
+    Self: LoadTransaction,
+    N: FullNodeComponents,
+{
     fn provider(&self) -> impl BlockReaderIdExt {
-        EthTransactions::provider(&self.inner)
+        self.inner.provider()
     }
 
     fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
@@ -28,19 +33,23 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
     }
 }
 
-impl<Eth: LoadTransaction> LoadTransaction for OpEthApi<Eth> {
-    type Pool = Eth::Pool;
+impl<N> LoadTransaction for OpEthApi<N>
+where
+    Self: SpawnBlocking,
+    N: FullNodeComponents,
+{
+    type Pool = N::Pool;
 
     fn provider(&self) -> impl TransactionsProvider {
-        LoadTransaction::provider(&self.inner)
+        self.inner.provider()
     }
 
     fn cache(&self) -> &EthStateCache {
-        LoadTransaction::cache(&self.inner)
+        self.inner.cache()
     }
 
     fn pool(&self) -> &Self::Pool {
-        LoadTransaction::pool(&self.inner)
+        self.inner.pool()
     }
 }
 
@@ -66,9 +75,11 @@ impl OptimismTxMeta {
     }
 }
 
-impl<Eth> OpEthApi<Eth>
+impl<N> OpEthApi<N>
 where
-    Eth: EthApiSpec + LoadTransaction,
+    Self: EthApiSpec + LoadTransaction,
+    <Self as EthApiTypes>::Error: From<OpEthApiError>,
+    N: FullNodeComponents,
 {
     /// Builds [`OptimismTxMeta`] object using the provided [`TransactionSigned`], L1 block
     /// info and block timestamp. The [`L1BlockInfo`] is used to calculate the l1 fee and l1 data
@@ -79,22 +90,17 @@ where
         tx: &TransactionSigned,
         l1_block_info: Option<L1BlockInfo>,
         block_timestamp: u64,
-    ) -> EthResult<OptimismTxMeta> {
+    ) -> Result<OptimismTxMeta, <Self as EthApiTypes>::Error> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
             let envelope_buf = tx.envelope_encoded();
 
             let inner_l1_fee = l1_block_info
-                .l1_tx_data_fee(
-                    &self.inner.chain_spec(),
-                    block_timestamp,
-                    &envelope_buf,
-                    tx.is_deposit(),
-                )
+                .l1_tx_data_fee(&self.chain_spec(), block_timestamp, &envelope_buf, tx.is_deposit())
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?;
             let inner_l1_data_gas = l1_block_info
-                .l1_data_gas(&self.inner.chain_spec(), block_timestamp, &envelope_buf)
+                .l1_data_gas(&self.chain_spec(), block_timestamp, &envelope_buf)
                 .map_err(|_| OpEthApiError::L1BlockGasError)?;
             (
                 Some(inner_l1_fee.saturating_to::<u128>()),

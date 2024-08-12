@@ -1,6 +1,6 @@
-use crate::{capability::Capability, EthVersion, ProtocolVersion};
+use crate::{Capability, EthVersion, ProtocolVersion};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_codecs::derive_arbitrary;
+use reth_codecs::add_arbitrary_tests;
 use reth_network_peers::PeerId;
 use reth_primitives::constants::RETH_CLIENT_VERSION;
 
@@ -103,9 +103,10 @@ impl HelloMessageWithProtocols {
 /// supported RLPx protocol version and capabilities.
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct HelloMessage {
     /// The version of the `p2p` protocol.
     pub protocol_version: ProtocolVersion,
@@ -214,9 +215,7 @@ impl HelloMessageBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        capability::Capability, p2pstream::P2PMessage, EthVersion, HelloMessage, ProtocolVersion,
-    };
+    use crate::{p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, ProtocolVersion};
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};

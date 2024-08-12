@@ -12,9 +12,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["secp256k1"] }
 
 alloy-genesis.workspace = true
 
-secp256k1.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 rand.workspace = true

@@ -13,11 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-execution-errors.workspace = true
-reth-db.workspace = true
-reth-db-api.workspace = true
+reth-primitives.workspace = true
 reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
@@ -48,9 +47,7 @@ serde = { workspace = true, optional = true }
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-storage-errors.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # trie
@@ -65,7 +62,6 @@ tokio = { workspace = true, default-features = false, features = [
     "macros",
 ] }
 tokio-stream.workspace = true
-once_cell.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 criterion.workspace = true

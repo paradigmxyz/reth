@@ -33,7 +33,8 @@ secp256k1 = { workspace = true, features = [
     "global-context",
     "recovery",
     "rand",
-] }
+], optional = true }
+k256.workspace = true
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -41,17 +42,16 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 bytes.workspace = true
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
-once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
+once_cell.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror-no-std = { workspace = true, default-features = false }
+thiserror = { workspace = true, optional = true }
 zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-# proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
@@ -59,23 +59,17 @@ reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 reth-chainspec.workspace = true
 reth-codecs.workspace = true
-nybbles = { workspace = true, features = ["arbitrary"] }
-alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
-toml.workspace = true
-triehash = "0.8"
 modular-bitfield.workspace = true
 
-sucds = "0.8.1"
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
@@ -83,25 +77,23 @@ pprof = { workspace = true, features = [
     "frame-pointer",
     "criterion",
 ] }
-secp256k1.workspace = true
 
 [features]
-default = ["c-kzg", "alloy-compat", "std", "reth-codec"]
-std = ["thiserror-no-std/std", "reth-primitives-traits/std"]
-reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield"]
+default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
+std = ["thiserror", "reth-primitives-traits/std"]
+reth-codec = ["dep:reth-codecs", "dep:zstd", "dep:modular-bitfield", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-chainspec?/arbitrary",
     "reth-ethereum-forks/arbitrary",
-    "nybbles/arbitrary",
-    "alloy-trie/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "reth-codec",
 ]
+secp256k1 = ["dep:secp256k1"]
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 optimism = [
     "reth-chainspec/optimism",

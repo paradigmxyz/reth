@@ -13,8 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-errors.workspace = true
 reth-evm-optimism.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
@@ -27,6 +25,7 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
+reth-network-api.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -38,10 +37,12 @@ tokio.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
 
 # misc
 thiserror.workspace = true
 serde = { workspace = true, features = ["derive"] }
+derive_more.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -54,11 +55,9 @@ client = [
 ]
 
 optimism = [
-    "reth-chainspec/optimism",
     "reth-evm-optimism/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism",
     "revm/optimism"
 ]

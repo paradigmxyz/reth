@@ -1,12 +1,4 @@
-use crate::{
-    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredNibbles,
-    StoredNibblesSubKey,
-};
-use reth_db::tables;
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    transaction::{DbTx, DbTxMut},
-};
+use crate::{walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles};
 use reth_primitives::B256;
 use std::collections::{HashMap, HashSet};
 
@@ -40,6 +32,15 @@ impl TrieUpdates {
     /// Returns a reference to updated storage tries.
     pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdates> {
         &self.storage_tries
+    }
+
+    /// Extends the trie updates.
+    pub fn extend(&mut self, other: Self) {
+        self.account_nodes.extend(other.account_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
+        for (hashed_address, storage_trie) in other.storage_tries {
+            self.storage_tries.entry(hashed_address).or_default().extend(storage_trie);
+        }
     }
 
     /// Insert storage updates for a given hashed address.
@@ -84,64 +85,6 @@ impl TrieUpdates {
             .collect();
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
-
-    /// Flush updates all aggregated updates to the database.
-    ///
-    /// # Returns
-    ///
-    /// The number of storage trie entries updated in the database.
-    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, reth_db::DatabaseError>
-    where
-        TX: DbTx + DbTxMut,
-    {
-        if self.is_empty() {
-            return Ok(0)
-        }
-
-        // Track the number of inserted entries.
-        let mut num_entries = 0;
-
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut account_updates = self
-            .removed_nodes
-            .into_iter()
-            .filter_map(|n| (!self.account_nodes.contains_key(&n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        account_updates
-            .extend(self.account_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
-        // Sort trie node updates.
-        account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-        for (key, updated_node) in account_updates {
-            let nibbles = StoredNibbles(key);
-            match updated_node {
-                Some(node) => {
-                    if !nibbles.0.is_empty() {
-                        num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
-                    }
-                }
-                None => {
-                    num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                        account_trie_cursor.delete_current()?;
-                    }
-                }
-            }
-        }
-
-        let mut storage_tries = Vec::from_iter(self.storage_tries);
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        for (hashed_address, storage_trie_updates) in storage_tries {
-            let updated_storage_entries =
-                storage_trie_updates.write_with_cursor(&mut storage_trie_cursor, hashed_address)?;
-            num_entries += updated_storage_entries;
-        }
-
-        Ok(num_entries)
-    }
 }
 
 /// Trie updates for storage trie of a single account.
@@ -154,6 +97,14 @@ pub struct StorageTrieUpdates {
     pub(crate) storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
     pub(crate) removed_nodes: HashSet<Nibbles>,
+}
+
+#[cfg(feature = "test-utils")]
+impl StorageTrieUpdates {
+    /// Creates a new storage trie updates that are not marked as deleted.
+    pub fn new(updates: HashMap<Nibbles, BranchNodeCompact>) -> Self {
+        Self { storage_nodes: updates, ..Default::default() }
+    }
 }
 
 impl StorageTrieUpdates {
@@ -196,6 +147,13 @@ impl StorageTrieUpdates {
         self.is_deleted = deleted;
     }
 
+    /// Extends storage trie updates.
+    pub fn extend(&mut self, other: Self) {
+        self.is_deleted |= other.is_deleted;
+        self.storage_nodes.extend(other.storage_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
+    }
+
     /// Finalize storage trie updates for by taking updates from walker and hash builder.
     pub fn finalize<C>(&mut self, walker: TrieWalker<C>, hash_builder: HashBuilder) {
         // Retrieve deleted keys from trie walker.
@@ -216,77 +174,6 @@ impl StorageTrieUpdates {
             removed_nodes: self.removed_nodes,
             storage_nodes,
         }
-    }
-
-    /// Initializes a storage trie cursor and writes updates to database.
-    pub fn write_to_database<TX>(
-        self,
-        tx: &TX,
-        hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError>
-    where
-        TX: DbTx + DbTxMut,
-    {
-        if self.is_empty() {
-            return Ok(0)
-        }
-
-        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        self.write_with_cursor(&mut cursor, hashed_address)
-    }
-
-    /// Writes updates to database.
-    ///
-    /// # Returns
-    ///
-    /// The number of storage trie entries updated in the database.
-    fn write_with_cursor<C>(
-        self,
-        cursor: &mut C,
-        hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError>
-    where
-        C: DbCursorRO<tables::StoragesTrie>
-            + DbCursorRW<tables::StoragesTrie>
-            + DbDupCursorRO<tables::StoragesTrie>
-            + DbDupCursorRW<tables::StoragesTrie>,
-    {
-        // The storage trie for this account has to be deleted.
-        if self.is_deleted && cursor.seek_exact(hashed_address)?.is_some() {
-            cursor.delete_current_duplicates()?;
-        }
-
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates = self
-            .removed_nodes
-            .into_iter()
-            .filter_map(|n| (!self.storage_nodes.contains_key(&n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        storage_updates
-            .extend(self.storage_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
-        // Sort trie node updates.
-        storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-        let mut num_entries = 0;
-        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
-            num_entries += 1;
-            let nibbles = StoredNibblesSubKey(nibbles);
-            // Delete the old entry if it exists.
-            if cursor
-                .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                cursor.delete_current()?;
-            }
-
-            // There is an updated version of this node, insert new entry.
-            if let Some(node) = maybe_updated {
-                cursor.upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
-            }
-        }
-
-        Ok(num_entries)
     }
 }
 

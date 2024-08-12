@@ -15,7 +15,7 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
-/// `Address | Storagekey | 200` -> data is from transition 0 to 200.
+/// `Address | StorageKey | 200` -> data is from transition 0 to 200.
 ///
 /// `Address | StorageKey | 300` -> data is from transition 201 to 300.
 #[derive(

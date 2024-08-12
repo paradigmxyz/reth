@@ -16,20 +16,15 @@ mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
 mod state;
-pub use state::StateWriter;
+pub use state::{StateChangeWriter, StateWriter};
 
-mod chain;
-pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
-    ForkChoiceSubscriptions,
-};
-
-mod spec;
-pub use spec::ChainSpecProvider;
+pub use reth_chainspec::ChainSpecProvider;
 
 mod hashing;
 pub use hashing::HashingWriter;
+
+mod trie;
+pub use trie::{StorageTrieWriter, TrieWriter};
 
 mod history;
 pub use history::HistoryWriter;

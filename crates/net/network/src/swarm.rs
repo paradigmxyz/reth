@@ -1,18 +1,3 @@
-use crate::{
-    listener::{ConnectionListener, ListenerEvent},
-    message::{PeerMessage, PeerRequestSender},
-    peers::InboundConnectionError,
-    protocol::IntoRlpxSubProtocol,
-    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
-    state::{NetworkState, StateAction},
-};
-use futures::Stream;
-use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    EthVersion, Status,
-};
-use reth_network_peers::PeerId;
 use std::{
     io,
     net::SocketAddr,
@@ -21,7 +6,22 @@ use std::{
     task::{Context, Poll},
 };
 
+use futures::Stream;
+use reth_eth_wire::{
+    capability::CapabilityMessage, errors::EthStreamError, Capabilities, EthVersion, Status,
+};
+use reth_network_api::PeerRequestSender;
+use reth_network_peers::PeerId;
 use tracing::trace;
+
+use crate::{
+    listener::{ConnectionListener, ListenerEvent},
+    message::PeerMessage,
+    peers::InboundConnectionError,
+    protocol::IntoRlpxSubProtocol,
+    session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
+    state::{NetworkState, StateAction},
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.

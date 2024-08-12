@@ -7,7 +7,7 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkHandle;
+use reth_network_api::FullNetwork;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -47,7 +47,7 @@ impl<P, E> AnyNodeTypes<P, E> {
 impl<P, E> NodeTypes for AnyNodeTypes<P, E>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin,
 {
     type Primitives = P;
 
@@ -126,6 +126,9 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;
 
+    /// Network API.
+    type Network: FullNetwork;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -139,12 +142,12 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn provider(&self) -> &Self::Provider;
 
     /// Returns the handle to the network
-    fn network(&self) -> &NetworkHandle;
+    fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
     fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
 
-    /// Returns the task executor.
+    /// Returns handle to runtime.
     fn task_executor(&self) -> &TaskExecutor;
 }
 

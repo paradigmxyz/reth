@@ -18,6 +18,17 @@ pub enum BeaconConsensusEngineEvent {
     ForkBlockAdded(Arc<SealedBlock>),
 }
 
+impl BeaconConsensusEngineEvent {
+    /// Returns the canonical header if the event is a
+    /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
+    pub const fn canonical_header(&self) -> Option<&SealedHeader> {
+        match self {
+            Self::CanonicalChainCommitted(header, _) => Some(header),
+            _ => None,
+        }
+    }
+}
+
 /// Progress of the consensus engine during live sync.
 #[derive(Clone, Debug)]
 pub enum ConsensusEngineLiveSyncProgress {

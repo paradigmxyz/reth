@@ -16,6 +16,7 @@ workspace = true
 alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
+once_cell.workspace = true
 
 # used for forkid
 crc = "3"
@@ -23,7 +24,6 @@ crc = "3"
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
 thiserror-no-std = { workspace = true, default-features = false }
-once_cell.workspace = true
 dyn-clone.workspace = true
 rustc-hash = { workspace = true, optional = true }
 
@@ -36,7 +36,6 @@ auto_impl.workspace = true
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
-proptest-derive.workspace = true
 
 [features]
 default = ["std", "serde", "rustc-hash"]

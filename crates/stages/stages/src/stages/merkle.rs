@@ -8,13 +8,14 @@ use reth_db_api::{
 use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
-    StageCheckpointWriter, StatsReader,
+    StageCheckpointWriter, StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
+use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -217,7 +218,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })?;
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
-                    updates.write_to_database(tx)?;
+                    provider.write_trie_updates(&updates)?;
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
@@ -237,7 +238,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
-                    updates.write_to_database(tx)?;
+                    provider.write_trie_updates(&updates)?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -252,7 +253,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
-            updates.write_to_database(provider.tx_ref())?;
+
+            provider.write_trie_updates(&updates)?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -325,7 +327,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
-            updates.write_to_database(provider.tx_ref())?;
+            provider.write_trie_updates(&updates)?;
 
             // TODO(alexey): update entities checkpoint
         } else {
@@ -562,7 +564,7 @@ mod tests {
                     }
                     let storage = storage_entries
                         .into_iter()
-                        .filter(|v| v.value != U256::ZERO)
+                        .filter(|v| !v.value.is_zero())
                         .map(|v| (v.key, v.value))
                         .collect::<Vec<_>>();
                     accounts.insert(key, (account, storage));
@@ -580,7 +582,7 @@ mod tests {
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
             writer.commit().unwrap();
-            writer.append_header(last_header, U256::ZERO, hash).unwrap();
+            writer.append_header(&last_header, U256::ZERO, &hash).unwrap();
             writer.commit().unwrap();
 
             Ok(blocks)
@@ -636,7 +638,7 @@ mod tests {
                                 storage_cursor.delete_current().unwrap();
                             }
 
-                            if value != U256::ZERO {
+                            if !value.is_zero() {
                                 let storage_entry = StorageEntry { key: hashed_slot, value };
                                 storage_cursor.upsert(hashed_address, storage_entry).unwrap();
                             }

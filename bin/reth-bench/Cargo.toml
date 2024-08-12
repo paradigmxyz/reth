@@ -83,7 +83,7 @@ default = ["jemalloc"]
 
 asm-keccak = ["reth-primitives/asm-keccak"]
 
-jemalloc = ["dep:tikv-jemallocator", "reth-node-core/jemalloc"]
+jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
 min-error-logs = ["tracing/release_max_level_error"]

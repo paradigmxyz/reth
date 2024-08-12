@@ -14,13 +14,15 @@ extern crate alloc;
 
 use core::ops::Deref;
 
+use crate::builder::RethEvmBuilder;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
-use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
 
+pub mod builder;
 pub mod either;
 pub mod execute;
 pub mod noop;
@@ -42,17 +44,17 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext<'a>, DB>;
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB>;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<'a, DB: Database + 'a>(
+    fn evm_with_env<DB: Database>(
         &self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         let mut evm = self.evm(db);
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
@@ -65,12 +67,12 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This will use the given external inspector as the EVM external context.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env_and_inspector<'a, DB, I>(
+    fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
         env: EnvWithHandlerCfg,
         inspector: I,
-    ) -> Evm<'a, I, DB>
+    ) -> Evm<'_, I, DB>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -86,17 +88,16 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It
     /// is up to the caller to call an appropriate method to fill the transaction and block
     /// environment before executing any transactions using the provided EVM.
-    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
     where
-        DB: Database + 'a,
+        DB: Database,
         I: GetInspector<DB>,
     {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .append_handler_register(inspector_handle_register)
-            .build()
+        RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
     }
+
+    /// Provides the default external context.
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
 /// This represents the set of methods used to configure the EVM's environment before block

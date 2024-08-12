@@ -105,7 +105,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
-        for num in range.start..range.end {
+        for num in range {
             if let Some(header) = cursor.get_one::<HeaderMask<Header>>(num.into())? {
                 headers.push(header);
             }
@@ -131,7 +131,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
-        for number in range.start..range.end {
+        for number in range {
             if let Some((header, hash)) =
                 cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
             {

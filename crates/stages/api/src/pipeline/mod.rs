@@ -8,7 +8,7 @@ use futures_util::Future;
 use reth_db_api::database::Database;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    writer::UnifiedStorageWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
@@ -336,18 +336,21 @@ where
                         // update finalized block if needed
                         let last_saved_finalized_block_number =
                             provider_rw.last_finalized_block_number()?;
-                        if checkpoint.block_number < last_saved_finalized_block_number {
+
+                        // If None, that means the finalized block is not written so we should
+                        // always save in that case
+                        if last_saved_finalized_block_number.is_none() ||
+                            Some(checkpoint.block_number) < last_saved_finalized_block_number
+                        {
                             provider_rw.save_finalized_block_number(BlockNumber::from(
                                 checkpoint.block_number,
                             ))?;
                         }
 
-                        // For unwinding it makes more sense to commit the database first, since if
-                        // this function is interrupted before the static files commit, we can just
-                        // truncate the static files according to the
-                        // checkpoints on the next start-up.
-                        provider_rw.commit()?;
-                        self.provider_factory.static_file_provider().commit()?;
+                        UnifiedStorageWriter::commit_unwind(
+                            provider_rw,
+                            self.provider_factory.static_file_provider(),
+                        )?;
 
                         stage.post_unwind_commit()?;
 
@@ -455,14 +458,10 @@ where
                         result: out.clone(),
                     });
 
-                    // For execution it makes more sense to commit the static files first, since if
-                    // this function is interrupted before the database commit, we can just truncate
-                    // the static files according to the checkpoints on the next
-                    // start-up.
-                    self.provider_factory.static_file_provider().commit()?;
-                    provider_rw.commit()?;
-
-                    stage.post_execute_commit()?;
+                    UnifiedStorageWriter::commit(
+                        provider_rw,
+                        self.provider_factory.static_file_provider(),
+                    )?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -520,8 +519,8 @@ fn on_stage_error<DB: Database>(
                     StageId::MerkleExecute,
                     prev_checkpoint.unwrap_or_default(),
                 )?;
-                factory.static_file_provider().commit()?;
-                provider_rw.commit()?;
+
+                UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
 
                 // We unwind because of a validation error. If the unwind itself
                 // fails, we bail entirely,

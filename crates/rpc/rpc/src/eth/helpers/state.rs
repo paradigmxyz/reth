@@ -13,12 +13,13 @@ where
     Self: LoadState + SpawnBlocking,
 {
     fn max_proof_window(&self) -> u64 {
-        self.eth_proof_window()
+        self.inner.eth_proof_window()
     }
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: Send + Sync,
     Provider: StateProviderFactory + ChainSpecProvider,
     Pool: TransactionPool,
 {

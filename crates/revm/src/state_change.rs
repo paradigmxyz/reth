@@ -1,3 +1,4 @@
+use crate::precompile::HashMap;
 use alloy_eips::eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
@@ -8,15 +9,6 @@ use revm::{
     primitives::{Account, AccountInfo, Bytecode, EvmStorageSlot, BLOCKHASH_SERVE_WINDOW},
     Database, DatabaseCommit,
 };
-
-// reuse revm's hashbrown implementation for no-std
-#[cfg(not(feature = "std"))]
-use crate::precompile::HashMap;
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, format, string::ToString, vec::Vec};
-
-#[cfg(feature = "std")]
-use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
 ///

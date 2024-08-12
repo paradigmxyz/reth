@@ -2,12 +2,13 @@
 
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
+use alloy_rpc_types::Transaction;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
-/// Converts the given primitive block into a [Block] response with the given
+/// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
@@ -25,7 +26,7 @@ pub fn from_block(
     }
 }
 
-/// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
@@ -47,11 +48,11 @@ pub fn from_block_with_tx_hashes(
     )
 }
 
-/// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with the _full_
-/// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
+/// [`Transaction`] objects: [`BlockTransactions::Full`]
 pub fn from_block_full(
     mut block: BlockWithSenders,
     total_difficulty: U256,
@@ -154,7 +155,7 @@ fn from_block_with_transactions(
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
-    transactions: BlockTransactions,
+    transactions: BlockTransactions<Transaction>,
 ) -> Block {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let mut header = from_primitive_with_hash(block.header.seal(block_hash));

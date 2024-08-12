@@ -1,11 +1,12 @@
 //! Client version model.
 
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
 /// Client version that accessed the database.
-#[derive_arbitrary(compact)]
 #[derive(Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct ClientVersion {
     /// Client version
     pub version: String,

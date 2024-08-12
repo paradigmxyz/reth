@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 

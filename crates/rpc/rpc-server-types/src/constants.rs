@@ -87,6 +87,9 @@ pub mod gas_oracle {
     /// Taken from Geth's implementation in order to pass the hive tests
     /// <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/internal/ethapi/api.go#L56>
     pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
+
+    /// Gas required at the beginning of a call.
+    pub const CALL_STIPEND_GAS: u64 = 2_300;
 }
 
 /// Cache specific constants

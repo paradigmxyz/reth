@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
@@ -23,7 +24,7 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats},
+    batch::BlockBatchRecord,
     db::states::bundle_state::BundleRetention,
     state_change::{apply_blockhashes_update, post_block_balance_increments},
     Evm, State,
@@ -33,8 +34,11 @@ use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 #[cfg(feature = "std")]
-use std::{fmt::Display, sync::Arc, vec, vec::Vec};
+use std::sync::Arc;
+
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
 pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
@@ -99,11 +103,7 @@ where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let executor = self.eth_executor(db);
-        EthBatchExecutor {
-            executor,
-            batch_record: BlockBatchRecord::default(),
-            stats: BlockExecutorStats::default(),
-        }
+        EthBatchExecutor { executor, batch_record: BlockBatchRecord::default() }
     }
 }
 
@@ -145,7 +145,7 @@ where
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
-        DB::Error: Into<ProviderError> + std::fmt::Display,
+        DB::Error: Into<ProviderError> + Display,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -363,7 +363,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -397,7 +397,6 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
     executor: EthBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and records receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
-    stats: BlockExecutorStats,
 }
 
 impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
@@ -442,8 +441,6 @@ where
     }
 
     fn finalize(mut self) -> Self::Output {
-        self.stats.log_debug();
-
         ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),

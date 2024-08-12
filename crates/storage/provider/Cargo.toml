@@ -16,7 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-execution-types.workspace = true
-reth-primitives = { workspace = true, features = ["reth-codec"] }
+reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
@@ -27,9 +27,11 @@ reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
+reth-chain-state.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true
@@ -37,7 +39,6 @@ revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-tokio-stream = { workspace = true, features = ["sync"] }
 
 # tracing
 tracing.workspace = true
@@ -48,9 +49,7 @@ metrics.workspace = true
 
 # misc
 auto_impl.workspace = true
-derive_more.workspace = true
 itertools.workspace = true
-pin-project.workspace = true
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
@@ -76,4 +75,4 @@ rand.workspace = true
 [features]
 optimism = ["reth-primitives/optimism", "reth-execution-types/optimism"]
 serde = ["reth-execution-types/serde"]
-test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils"]
+test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils", "reth-trie/test-utils", "reth-chain-state/test-utils", "reth-db/test-utils"]

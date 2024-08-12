@@ -21,12 +21,18 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] crate::db::DatabaseError),
+    /// RLP error.
+    #[error(transparent)]
+    Rlp(#[from] alloy_rlp::Error),
     /// Filesystem path error.
     #[error("{0}")]
     FsPathError(String),
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
+    /// Trie witness error.
+    #[error("trie witness error: {0}")]
+    TrieWitnessError(String),
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
@@ -94,8 +100,11 @@ pub enum ProviderError {
     #[error("unknown block {0}")]
     UnknownBlockHash(B256),
     /// Thrown when we were unable to find a state for a block hash.
-    #[error("no state found for block {0}")]
+    #[error("no state found for block hash {0}")]
     StateForHashNotFound(B256),
+    /// Thrown when we were unable to find a state for a block number.
+    #[error("no state found for block number {0}")]
+    StateForNumberNotFound(u64),
     /// Unable to find the block number for a given transaction index.
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
@@ -141,7 +150,7 @@ pub enum ProviderError {
     StorageLockError(#[from] crate::lockfile::StorageLockError),
     /// Storage writer error.
     #[error(transparent)]
-    StorageWriterError(#[from] crate::writer::StorageWriterError),
+    UnifiedStorageWriterError(#[from] crate::writer::UnifiedStorageWriterError),
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

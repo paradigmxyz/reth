@@ -57,11 +57,11 @@ impl Command {
                 };
 
                 let head_block_hash = block.hash();
-                let safe_block_hash =
-                    block_provider.get_block_by_number((block.number - 32).into(), false);
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(32).into(), false);
 
-                let finalized_block_hash =
-                    block_provider.get_block_by_number((block.number - 64).into(), false);
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(64).into(), false);
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -97,7 +97,8 @@ impl Command {
 
             let versioned_hashes: Vec<B256> =
                 block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload(block);
+            let parent_beacon_block_root = block.parent_beacon_block_root;
+            let payload = block_to_payload(block);
 
             debug!(?block_number, "Sending payload",);
 
@@ -125,7 +126,8 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result = CombinedResult { new_payload_result, fcu_latency, total_latency };
+            let combined_result =
+                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
             // current duration since the start of the benchmark
             let current_duration = total_benchmark_duration.elapsed();

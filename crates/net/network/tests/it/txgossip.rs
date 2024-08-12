@@ -1,13 +1,14 @@
 //! Testing gossiping of transactions.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use rand::thread_rng;
-use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEvents};
+use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::PeersInfo;
 use reth_primitives::{TransactionSigned, TxLegacy, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::sync::Arc;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {

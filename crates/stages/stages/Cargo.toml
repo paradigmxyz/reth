@@ -23,7 +23,7 @@ reth-etl.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-execution-types.workspace = true
@@ -33,6 +33,7 @@ reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-db = { workspace = true, features = ["metrics"] }
 
 reth-testing-utils = { workspace = true, optional = true }
 

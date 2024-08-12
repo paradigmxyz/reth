@@ -83,6 +83,8 @@ pub struct NetworkMetrics {
 pub struct SessionManagerMetrics {
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
+    /// Number of dropped outgoing peer messages.
+    pub(crate) total_outgoing_peer_messages_dropped: Counter,
 }
 
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).

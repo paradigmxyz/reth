@@ -15,15 +15,15 @@ workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
-alloy-rpc-types = { workspace = true, features = ["jsonrpsee-types"] }
+alloy-rpc-types.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-anvil.workspace = true
-alloy-rpc-types-beacon.workspace = true
+alloy-rpc-types-beacon = { workspace = true, optional = true }
 alloy-rpc-types-mev.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-txpool.workspace = true
 alloy-serde.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
+alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"], optional = true }
 
 # misc
 jsonrpsee-types = { workspace = true, optional = true }
@@ -32,13 +32,15 @@ jsonrpsee-types = { workspace = true, optional = true }
 # misc
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
-proptest-derive.workspace = true
 rand.workspace = true
-similar-asserts.workspace = true
-bytes.workspace = true
-serde_json.workspace = true
 
 [features]
 default = ["jsonrpsee-types"]
+jsonrpsee-types = [
+    "dep:jsonrpsee-types",
+    "dep:alloy-rpc-types-beacon",
+    "dep:alloy-rpc-types-engine",
+    "alloy-rpc-types/jsonrpsee-types",
+    "alloy-rpc-types-engine/jsonrpsee-types"
+]
 arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]

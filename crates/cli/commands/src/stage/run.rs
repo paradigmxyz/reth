@@ -1,6 +1,7 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
+
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -8,26 +9,42 @@ use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
-use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_network::BlockDownloaderProvider;
+use reth_network_p2p::HeadersClient;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
-    prometheus_exporter,
+    primitives::BlockHashOrNumber,
+    version::{
+        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
+        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
+    },
+};
+use reth_node_metrics::{
+    hooks::Hooks,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
 };
 use reth_provider::{
-    ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
-    StaticFileWriter,
+    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, IndexAccountHistoryStage,
+        AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, IndexAccountHistoryStage,
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageError, StageExt, UnwindInput,
+    UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
+use tokio::sync::watch;
 use tracing::*;
 
 /// `reth stage` command
@@ -99,15 +116,24 @@ impl Command {
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::serve(
+            let config = MetricServerConfig::new(
                 listen_addr,
-                prometheus_exporter::install_recorder()?,
-                provider_factory.db_ref().clone(),
-                provider_factory.static_file_provider(),
-                metrics_process::Collector::default(),
+                VersionInfo {
+                    version: CARGO_PKG_VERSION,
+                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
+                    cargo_features: VERGEN_CARGO_FEATURES,
+                    git_sha: VERGEN_GIT_SHA,
+                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
+                    build_profile: BUILD_PROFILE_NAME,
+                },
                 ctx.task_executor,
-            )
-            .await?;
+                Hooks::new(
+                    provider_factory.db_ref().clone(),
+                    provider_factory.static_file_provider(),
+                ),
+            );
+
+            MetricServer::new(config).serve().await?;
         }
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
@@ -117,13 +143,59 @@ impl Command {
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
+                StageEnum::Headers => {
+                    let consensus =
+                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
+
+                    let network_secret_path = self
+                        .network
+                        .p2p_secret_key
+                        .clone()
+                        .unwrap_or_else(|| data_dir.p2p_secret());
+                    let p2p_secret_key = get_secret_key(&network_secret_path)?;
+
+                    let default_peers_path = data_dir.known_peers();
+
+                    let network = self
+                        .network
+                        .network_config(
+                            &config,
+                            provider_factory.chain_spec(),
+                            p2p_secret_key,
+                            default_peers_path,
+                        )
+                        .build(provider_factory.clone())
+                        .start_network()
+                        .await?;
+                    let fetch_client = Arc::new(network.fetch_client().await?);
+
+                    // Use `to` as the tip for the stage
+                    let tip = fetch_client
+                        .get_header(BlockHashOrNumber::Number(self.to))
+                        .await?
+                        .into_data()
+                        .ok_or(StageError::MissingSyncGap)?;
+                    let (_, rx) = watch::channel(tip.hash_slow());
+
+                    (
+                        Box::new(HeaderStage::new(
+                            provider_factory.clone(),
+                            ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+                                .build(fetch_client, consensus.clone()),
+                            rx,
+                            consensus,
+                            etl_config,
+                        )),
+                        None,
+                    )
+                }
                 StageEnum::Bodies => {
                     let consensus =
                         Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
-                    config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
+                    config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
                     let network_secret_path = self
                         .network
@@ -251,12 +323,10 @@ impl Command {
                 }
 
                 if self.commit {
-                    // For unwinding it makes more sense to commit the database first, since if
-                    // this function is interrupted before the static files commit, we can just
-                    // truncate the static files according to the
-                    // checkpoints on the next start-up.
-                    provider_rw.commit()?;
-                    provider_factory.static_file_provider().commit()?;
+                    UnifiedStorageWriter::commit_unwind(
+                        provider_rw,
+                        provider_factory.static_file_provider(),
+                    )?;
                     provider_rw = provider_factory.provider_rw()?;
                 }
             }
@@ -279,8 +349,7 @@ impl Command {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                provider_factory.static_file_provider().commit()?;
-                provider_rw.commit()?;
+                UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
                 provider_rw = provider_factory.provider_rw()?;
             }
 

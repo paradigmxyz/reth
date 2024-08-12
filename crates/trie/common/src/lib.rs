@@ -26,7 +26,7 @@ pub use subnode::StoredSubNode;
 mod proofs;
 #[cfg(any(test, feature = "test-utils"))]
 pub use proofs::triehash;
-pub use proofs::{AccountProof, StorageProof};
+pub use proofs::*;
 
 pub mod root;
 

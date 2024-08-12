@@ -582,6 +582,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
                         if let Some(tx) = moved {
+                            trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
                             outcome.promoted.push(tx);
                         }
                     }
@@ -663,12 +664,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        match pool {
+        let tx = match pool {
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
+        };
+
+        if let Some(ref tx) = tx {
+            // We trace here instead of in subpool structs directly, because the `ParkedPool` type
+            // is generic and it would not be possible to distinguish whether a transaction is
+            // being removed from the `BaseFee` pool, or the `Queued` pool.
+            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Removed transaction from a subpool");
         }
+
+        tx
     }
 
     /// Removes the transaction from the given pool and advance sub-pool internal state, with the
@@ -678,12 +688,21 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        match pool {
+        let tx = match pool {
             SubPool::Pending => self.pending_pool.remove_transaction(tx),
             SubPool::Queued => self.queued_pool.remove_transaction(tx),
             SubPool::BaseFee => self.basefee_pool.remove_transaction(tx),
             SubPool::Blob => self.blob_pool.remove_transaction(tx),
+        };
+
+        if let Some(ref tx) = tx {
+            // We trace here instead of in subpool structs directly, because the `ParkedPool` type
+            // is generic and it would not be possible to distinguish whether a transaction is
+            // being pruned from the `BaseFee` pool, or the `Queued` pool.
+            trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Pruned transaction from a subpool");
         }
+
+        tx
     }
 
     /// Removes _only_ the descendants of the given transaction from the __entire__ pool.
@@ -717,19 +736,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         pool: SubPool,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
     ) {
+        // We trace here instead of in structs directly, because the `ParkedPool` type is
+        // generic and it would not be possible to distinguish whether a transaction is being
+        // added to the `BaseFee` pool, or the `Queued` pool.
+        trace!(target: "txpool", hash=%tx.transaction.hash(), ?pool, "Adding transaction to a subpool");
         match pool {
-            SubPool::Queued => {
-                self.queued_pool.add_transaction(tx);
-            }
+            SubPool::Queued => self.queued_pool.add_transaction(tx),
             SubPool::Pending => {
                 self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
             }
-            SubPool::BaseFee => {
-                self.basefee_pool.add_transaction(tx);
-            }
-            SubPool::Blob => {
-                self.blob_pool.add_transaction(tx);
-            }
+            SubPool::BaseFee => self.basefee_pool.add_transaction(tx),
+            SubPool::Blob => self.blob_pool.add_transaction(tx),
         }
     }
 

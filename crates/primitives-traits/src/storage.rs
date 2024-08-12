@@ -1,12 +1,13 @@
 use alloy_primitives::{B256, U256};
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
 /// Account storage entry.
 ///
 /// `key` is the subkey when used as a value in the `StorageChangeSets` table.
-#[derive_arbitrary(compact)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct StorageEntry {
     /// Storage key.
     pub key: B256,

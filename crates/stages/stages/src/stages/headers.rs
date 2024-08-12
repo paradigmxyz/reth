@@ -138,7 +138,7 @@ where
             })?;
 
             // Append to Headers segment
-            writer.append_header(header, td, header_hash)?;
+            writer.append_header(&header, td, &header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");

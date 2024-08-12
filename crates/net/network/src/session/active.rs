@@ -1,26 +1,6 @@
 //! Represents an established session.
 
-use crate::{
-    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
-    session::{
-        conn::EthRlpxConnection,
-        handle::{ActiveSessionMessage, SessionCommand},
-        SessionId,
-    },
-};
 use core::sync::atomic::Ordering;
-use futures::{stream::Fuse, SinkExt, StreamExt};
-use reth_eth_wire::{
-    capability::Capabilities,
-    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    message::{EthBroadcastMessage, RequestPair},
-    DisconnectP2P, DisconnectReason, EthMessage,
-};
-use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_network_p2p::error::RequestError;
-use reth_network_peers::PeerId;
-use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
-use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -30,6 +10,19 @@ use std::{
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
+
+use futures::{stream::Fuse, SinkExt, StreamExt};
+use reth_eth_wire::{
+    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    message::{EthBroadcastMessage, RequestPair},
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage,
+};
+use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_network_api::PeerRequest;
+use reth_network_p2p::error::RequestError;
+use reth_network_peers::PeerId;
+use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
+use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc::error::TrySendError, oneshot},
     time::Interval,
@@ -37,6 +30,15 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
+
+use crate::{
+    message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
+    session::{
+        conn::EthRlpxConnection,
+        handle::{ActiveSessionMessage, SessionCommand},
+        SessionId,
+    },
+};
 
 // Constants for timeout updating.
 

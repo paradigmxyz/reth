@@ -28,7 +28,7 @@ pub mod mined_sidecar;
 
 fn main() {
     Cli::<BeaconSidecarConfig>::parse()
-        .run(|builder, args| async move {
+        .run(|builder, beacon_config| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
@@ -38,27 +38,30 @@ fn main() {
 
             let pool = node.pool.clone();
 
-            let mut sidecar_stream = MinedSidecarStream {
-                events: notifications,
-                pool,
-                beacon_config: args,
-                client: reqwest::Client::new(),
-                pending_requests: FuturesUnordered::new(),
-                queued_actions: VecDeque::new(),
-            };
+            node.task_executor.spawn(async move {
+                let mut sidecar_stream = MinedSidecarStream {
+                    events: notifications,
+                    pool,
+                    beacon_config,
+                    client: reqwest::Client::new(),
+                    pending_requests: FuturesUnordered::new(),
+                    queued_actions: VecDeque::new(),
+                };
 
-            while let Some(result) = sidecar_stream.next().await {
-                match result {
-                    Ok(blob_transaction) => {
-                        // Handle successful transaction
-                        println!("Processed BlobTransaction: {:?}", blob_transaction);
-                    }
-                    Err(e) => {
-                        // Handle errors specifically
-                        eprintln!("Failed to process transaction: {:?}", e);
+                while let Some(result) = sidecar_stream.next().await {
+                    match result {
+                        Ok(blob_transaction) => {
+                            // Handle successful transaction
+                            println!("Processed BlobTransaction: {:?}", blob_transaction);
+                        }
+                        Err(e) => {
+                            // Handle errors specifically
+                            eprintln!("Failed to process transaction: {:?}", e);
+                        }
                     }
                 }
-            }
+            });
+
             node_exit_future.await
         })
         .unwrap();

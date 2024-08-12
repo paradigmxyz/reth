@@ -2,6 +2,9 @@ use crate::Compact;
 use alloy_eips::eip2930::{AccessList, AccessListItem};
 use alloy_primitives::Address;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {
     fn to_compact<B>(&self, buf: &mut B) -> usize

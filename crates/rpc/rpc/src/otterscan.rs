@@ -85,7 +85,8 @@ where
                 TransferInspector::new(false),
                 |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
             )
-            .await?
+            .await
+            .map_err(Into::into)?
             .map(|transfer_operations| {
                 transfer_operations
                     .iter()
@@ -115,7 +116,8 @@ where
                 _ => Ok(None),
             })
             .await
-            .map(Option::flatten)?;
+            .map(Option::flatten)
+            .map_err(Into::into)?;
         Ok(maybe_revert)
     }
 
@@ -128,7 +130,8 @@ where
                 TracingInspectorConfig::default_parity(),
                 move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
             )
-            .await?
+            .await
+            .map_err(Into::into)?
             .map(|traces| {
                 traces
                     .into_iter()
@@ -325,7 +328,8 @@ where
                     Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
                 },
             )
-            .await?
+            .await
+            .map_err(Into::into)?
             .map(|traces| {
                 traces
                     .into_iter()
