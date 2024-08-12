@@ -139,7 +139,9 @@ pub enum ConsensusError {
     },
 
     /// Error when block gas used doesn't match expected value
-    #[display(fmt = "block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
+    #[display(
+        fmt = "block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}"
+    )]
     BlockGasUsed {
         /// The gas diff.
         gas: GotExpected<u64>,
@@ -210,7 +212,9 @@ pub enum ConsensusError {
     ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block timestamp is in the future compared to our clock time.
-    #[display(fmt = "block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
+    #[display(
+        fmt = "block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}"
+    )]
     TimestampIsInFuture {
         /// The block's timestamp.
         timestamp: u64,
@@ -294,7 +298,9 @@ pub enum ConsensusError {
     ParentBeaconBlockRootUnexpected,
 
     /// Error when blob gas used exceeds the maximum allowed.
-    #[display(fmt = "blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
+    #[display(
+        fmt = "blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}"
+    )]
     BlobGasUsedExceedsMaxBlobGasPerBlock {
         /// The actual blob gas used.
         blob_gas_used: u64,
@@ -336,11 +342,9 @@ pub enum ConsensusError {
     BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
-    #[display(
-        fmt = "invalid excess blob gas: {diff}; \
+    #[display(fmt = "invalid excess blob gas: {diff}; \
             parent excess blob gas: {parent_excess_blob_gas}, \
-            parent blob gas used: {parent_blob_gas_used}"
-    )]
+            parent blob gas used: {parent_blob_gas_used}")]
     ExcessBlobGasDiff {
         /// The excess blob gas diff.
         diff: GotExpected<u64>,
@@ -362,7 +366,9 @@ pub enum ConsensusError {
     /// Error indicating that the child gas limit is below the minimum allowed limit.
     ///
     /// This error occurs when the child gas limit is less than the specified minimum gas limit.
-    #[display(fmt = "child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
+    #[display(
+        fmt = "child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})"
+    )]
     GasLimitInvalidMinimum {
         /// The child gas limit.
         child_gas_limit: u64,
@@ -378,7 +384,9 @@ pub enum ConsensusError {
     },
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.
-    #[display(fmt = "block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
+    #[display(
+        fmt = "block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}"
+    )]
     TimestampIsInPast {
         /// The parent block's timestamp.
         parent_timestamp: u64,
@@ -391,9 +399,7 @@ pub enum ConsensusError {
 impl std::error::Error for ConsensusError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::InvalidTransaction(err) => {
-                std::error::Error::source(err)
-            },
+            Self::InvalidTransaction(err) => std::error::Error::source(err),
             _ => Option::None,
         }
     }
@@ -419,3 +425,4 @@ pub struct HeaderConsensusError(ConsensusError, SealedHeader);
 
 #[cfg(feature = "std")]
 impl std::error::Error for HeaderConsensusError {}
+
