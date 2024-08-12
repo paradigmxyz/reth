@@ -24,7 +24,6 @@ nybbles.workspace = true
 
 derive_more.workspace = true
 
-
 [features]
 default = ["std"]
-std = []
+std = ["reth-consensus/std"]
