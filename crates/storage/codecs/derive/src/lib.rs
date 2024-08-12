@@ -9,7 +9,7 @@
 #![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use proc_macro::{TokenStream, TokenTree};
+use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     bracketed,
@@ -32,82 +32,19 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
     compact::derive(input, is_zstd)
 }
 
-/// This code implements the main codec. If the codec supports it, it will also provide the [`derive_arbitrary()`] function, which automatically implements arbitrary traits and roundtrip fuzz tests.
+/// Generates tests for given type.
 ///
-/// If you prefer to manually implement the arbitrary traits, you can still use the [`add_arbitrary_tests()`] function to add arbitrary fuzz tests.
-///
-/// Example usage:
-/// * `#[reth_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `reth_codec`.
-/// * `#[reth_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
-#[proc_macro_attribute]
-#[rustfmt::skip]
-#[allow(unreachable_code)]
-pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as DeriveInput);
-
-    let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
-    let without_arbitrary = args.clone().into_iter().any(|tk| tk.to_string() == "no_arbitrary");
-    
-    let compact = if with_zstd {
-        quote! {
-            #[derive(CompactZstd)]
-            #ast
-        }
-        .into()
-    } else {
-        quote! {
-            #[derive(Compact)]
-            #ast
-        }
-        .into()
-    };
-
-    if without_arbitrary {
-        return compact
-    }
-
-    let mut args = args.into_iter().collect::<Vec<_>>();
-    args.push(TokenTree::Ident(proc_macro::Ident::new("compact", proc_macro::Span::call_site())));
-
-    derive_arbitrary(TokenStream::from_iter(args), compact)
-}
-
-/// Adds `Arbitrary` imports into scope and derives the struct/enum.
-///
-/// If `compact` or `rlp` is passed to `derive_arbitrary`, there will be proptest roundtrip tests
+/// If `compact` or `rlp` is passed to `add_arbitrary_tests`, there will be proptest roundtrip tests
 /// generated. An integer value passed will limit the number of proptest cases generated (default:
 /// 256).
 ///
 /// Examples:
-/// * `#[derive_arbitrary]`: will derive arbitrary with no tests.
-/// * `#[derive_arbitrary(rlp)]`: will derive arbitrary and generate rlp roundtrip proptests.
-/// * `#[derive_arbitrary(rlp, 10)]`: will derive arbitrary and generate rlp roundtrip proptests.
+/// * `#[add_arbitrary_tests]`: will derive arbitrary with no tests.
+/// * `#[add_arbitrary_tests(rlp)]`: will derive arbitrary and generate rlp roundtrip proptests.
+/// * `#[add_arbitrary_tests(rlp, 10)]`: will derive arbitrary and generate rlp roundtrip proptests.
 ///   Limited to 10 cases.
-/// * `#[derive_arbitrary(compact, rlp)]`. will derive arbitrary and generate rlp and compact
+/// * `#[add_arbitrary_tests(compact, rlp)]`. will derive arbitrary and generate rlp and compact
 ///   roundtrip proptests.
-#[proc_macro_attribute]
-pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as DeriveInput);
-
-    let tests =
-        arbitrary::maybe_generate_tests(args, &ast.ident, &format_ident!("{}Tests", ast.ident));
-
-    // Avoid duplicate names
-    let arb_import = format_ident!("{}Arbitrary", ast.ident);
-
-    quote! {
-        #[cfg(any(test, feature = "arbitrary"))]
-        use arbitrary::Arbitrary as #arb_import;
-
-        #[cfg_attr(any(test, feature = "arbitrary"), derive(#arb_import))]
-        #ast
-
-        #tests
-    }
-    .into()
-}
-
-/// To be used for types that implement `Arbitrary` manually. See [`derive_arbitrary()`] for more.
 #[proc_macro_attribute]
 pub fn add_arbitrary_tests(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
