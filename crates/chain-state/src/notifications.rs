@@ -9,8 +9,11 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::broadcast;
-use tokio_stream::{wrappers::BroadcastStream, Stream};
+use tokio::sync::{broadcast, watch};
+use tokio_stream::{
+    wrappers::{BroadcastStream, WatchStream},
+    Stream,
+};
 use tracing::debug;
 
 /// Type alias for a receiver that receives [`CanonStateNotification`]
@@ -137,17 +140,20 @@ impl CanonStateNotification {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
+pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
-    /// Get notified when a new head of the chain is selected.
-    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications;
+    /// Get notified when a new safe block of the chain is selected.
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications;
 
-    /// Convenience method to get a stream of the new head of the chain.
+    /// Get notified when a new finalized block of the chain is selected.
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications;
+
+    /// Convenience method to get a stream of the new safe blocks of the chain.
     fn fork_choice_stream(&self) -> ForkChoiceStream {
-        ForkChoiceStream { st: BroadcastStream::new(self.subscribe_to_fork_choice().0) }
+        ForkChoiceStream { st: WatchStream::new(self.subscribe_to_safe_block().0) }
     }
 }
 
@@ -156,7 +162,7 @@ pub trait ForkChoiceSubscriptions: Send + Sync {
 #[pin_project::pin_project]
 pub struct ForkChoiceStream {
     #[pin]
-    st: BroadcastStream<SealedHeader>,
+    st: WatchStream<Option<SealedHeader>>,
 }
 
 impl Stream for ForkChoiceStream {
@@ -164,14 +170,46 @@ impl Stream for ForkChoiceStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
+            match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Some(notification)) => return Poll::Ready(Some(notification)),
+                Some(None) => continue,
+                None => return Poll::Ready(None),
+            }
+        }
+    }
+}
+
+/// A stream for block state watch channels (pending, safe or finalized watchers)
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct BlockStateNotificationStream<T> {
+    #[pin]
+    st: WatchStream<Option<T>>,
+}
+
+impl<T: Clone + Sync + Send + 'static> BlockStateNotificationStream<T> {
+    /// Creates a new `BlockStateNotificationStream`
+    pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
+        Self { st: WatchStream::new(rx) }
+    }
+}
+
+impl<T: Clone + Sync + Send + 'static> Stream for BlockStateNotificationStream<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
             return match ready!(self.as_mut().project().st.poll_next(cx)) {
-                Some(Ok(notification)) => Poll::Ready(Some(notification)),
-                Some(Err(err)) => {
-                    debug!(%err, "finalized header notification stream lagging behind");
-                    continue
+                Some(notification) => {
+                    if notification.is_some() {
+                        return Poll::Ready(notification);
+                    } else {
+                        // skip None values
+                        continue;
+                    }
                 }
                 None => Poll::Ready(None),
-            };
+            }
         }
     }
 }
