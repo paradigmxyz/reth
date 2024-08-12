@@ -215,8 +215,6 @@ impl PeersInfo for NetworkHandle {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
 
-            println!("nat: {:?}", self.inner.nat);
-
             let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| {
                 match nat {
                     NatResolver::ExternalIp(ip) => Some(ip),
@@ -224,6 +222,7 @@ impl PeersInfo for NetworkHandle {
                 }
             });
 
+            // if able to resolve external ip, use it instead
             if let Some(ip) = external_ip {
                 socket_addr.set_ip(ip)
             } else if socket_addr.ip().is_unspecified() {
@@ -234,9 +233,6 @@ impl PeersInfo for NetworkHandle {
                     socket_addr.set_ip(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
                 }
             }
-
-            // if self.nat exists, fetch the public ip if there is and assign to socket_addr
-            println!("socket_addr: {:?}", socket_addr);
 
             NodeRecord::new(socket_addr, id)
         }
@@ -424,7 +420,7 @@ struct NetworkInner {
     discv4: Option<Discv4>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
-
+    /// The NAT resolver
     nat: Option<NatResolver>,
 }
 

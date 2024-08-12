@@ -81,7 +81,7 @@ pub struct NetworkConfig<C> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-
+    /// The NAT resolver for external IP
     pub nat: Option<NatResolver>
 }
 
@@ -190,7 +190,7 @@ pub struct NetworkConfigBuilder {
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
-    
+    /// The NAT resolver for external IP
     nat: Option<NatResolver>
 }
 
