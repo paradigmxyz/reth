@@ -1,9 +1,9 @@
 //! Errors when computing the state root.
 
 use alloy_primitives::B256;
+use derive_more::Display;
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use derive_more::Display;
 
 #[cfg(not(feature = "std"))]
 use alloc::string::ToString;
@@ -33,12 +33,8 @@ impl From<StorageRootError> for StateRootError {
 impl std::error::Error for StateRootError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Database(source) => {
-                std::error::Error::source(source)
-            },
-            Self::StorageRootError(source) => {
-                std::error::Error::source(source)
-            }
+            Self::Database(source) => std::error::Error::source(source),
+            Self::StorageRootError(source) => std::error::Error::source(source),
         }
     }
 }
@@ -77,9 +73,7 @@ impl From<StorageRootError> for DatabaseError {
 impl std::error::Error for StorageRootError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Database(source) => {
-                std::error::Error::source(source)
-            }
+            Self::Database(source) => std::error::Error::source(source),
         }
     }
 }
@@ -118,12 +112,8 @@ impl From<StateProofError> for ProviderError {
 impl std::error::Error for StateProofError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Database(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Rlp(source) => {
-                std::error::Error::source(source)
-            }
+            Self::Database(source) => std::error::Error::source(source),
+            Self::Rlp(source) => std::error::Error::source(source),
         }
     }
 }
@@ -168,13 +158,9 @@ impl From<TrieWitnessError> for ProviderError {
 impl std::error::Error for TrieWitnessError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Proof(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Rlp(source) => {
-                std::error::Error::source(source)
-            },
-            _ => Option::None
+            Self::Proof(source) => std::error::Error::source(source),
+            Self::Rlp(source) => std::error::Error::source(source),
+            _ => Option::None,
         }
     }
 }

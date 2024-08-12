@@ -16,11 +16,11 @@ use alloc::{boxed::Box, string::String};
 
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use derive_more::Display;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::EVMError;
-use derive_more::Display;
 
 pub mod trie;
 pub use trie::*;
@@ -46,7 +46,9 @@ pub enum BlockValidationError {
     // #[from(ignore)]
     StateRoot(StateRootError),
     /// Error when transaction gas limit exceeds available block gas
-    #[display(fmt = "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
+    #[display(
+        fmt = "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
+    )]
     TransactionGasLimitMoreThanAvailableBlockGas {
         /// The transaction's gas limit
         transaction_gas_limit: u64,
@@ -59,7 +61,7 @@ pub enum BlockValidationError {
         /// The hash of the block
         hash: B256,
     },
-    /// Error for missing total difficulty  
+    /// Error for missing total difficulty
     #[display(fmt = "missing total difficulty for block {hash}")]
     MissingTotalDifficulty {
         /// The hash of the block
@@ -69,7 +71,9 @@ pub enum BlockValidationError {
     #[display(fmt = "EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
-    #[display(fmt = "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}")]
+    #[display(
+        fmt = "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}"
+    )]
     CancunGenesisParentBeaconBlockRootNotZero {
         /// The beacon block root
         parent_beacon_block_root: B256,
@@ -77,7 +81,9 @@ pub enum BlockValidationError {
     /// EVM error during [EIP-4788] beacon root contract call.
     ///
     /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
-    #[display(fmt = "failed to apply beacon root contract call at {parent_beacon_block_root}: {message}")]
+    #[display(
+        fmt = "failed to apply beacon root contract call at {parent_beacon_block_root}: {message}"
+    )]
     BeaconRootContractCall {
         /// The beacon block root
         parent_beacon_block_root: Box<B256>,
@@ -113,7 +119,7 @@ pub enum BlockValidationError {
 
 impl From<StateRootError> for BlockValidationError {
     fn from(error: StateRootError) -> Self {
-        Self::StateRoot(error) 
+        Self::StateRoot(error)
     }
 }
 
@@ -121,15 +127,11 @@ impl From<StateRootError> for BlockValidationError {
 impl std::error::Error for BlockValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::EVM { error, .. } => {
-                std::error::Error::source(error)
-            },
-            Self::StateRoot(source) => {
-                std::error::Error::source(source)
-            },
-            _ => Option::None
+            Self::EVM { error, .. } => std::error::Error::source(error),
+            Self::StateRoot(source) => std::error::Error::source(source),
+            _ => Option::None,
         }
-    } 
+    }
 }
 
 /// `BlockExecutor` Errors
@@ -199,20 +201,13 @@ impl From<ProviderError> for BlockExecutionError {
     }
 }
 
-
 #[cfg(feature = "std")]
 impl std::error::Error for BlockExecutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Validation(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Consensus(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Internal(source) => {
-                std::error::Error::source(source)
-            },
+            Self::Validation(source) => std::error::Error::source(source),
+            Self::Consensus(source) => std::error::Error::source(source),
+            Self::Internal(source) => std::error::Error::source(source),
         }
     }
 }
@@ -272,12 +267,8 @@ impl From<ProviderError> for InternalBlockExecutionError {
 impl std::error::Error for InternalBlockExecutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Pruning(source) => {
-                std::error::Error::source(source)
-            },
-            Self::LatestBlock(source) => {
-                std::error::Error::source(source)
-            },
+            Self::Pruning(source) => std::error::Error::source(source),
+            Self::LatestBlock(source) => std::error::Error::source(source),
             _ => Option::None,
         }
     }
