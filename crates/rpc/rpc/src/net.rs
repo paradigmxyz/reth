@@ -3,7 +3,6 @@ use reth_network_api::PeersInfo;
 use reth_primitives::U64;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_eth_api::helpers::EthApiSpec;
-use reth_rpc_types::PeerCount;
 
 /// `Net` API implementation.
 ///
@@ -37,8 +36,8 @@ where
     }
 
     /// Handler for `net_peerCount`
-    fn peer_count(&self) -> Result<PeerCount> {
-        Ok(PeerCount::Hex(U64::from(self.network.num_connected_peers())))
+    fn peer_count(&self) -> Result<U64> {
+        Ok(U64::from(self.network.num_connected_peers()))
     }
 
     /// Handler for `net_listening`
