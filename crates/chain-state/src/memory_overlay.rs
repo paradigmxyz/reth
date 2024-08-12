@@ -6,7 +6,8 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateRootProvider,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
 
@@ -36,6 +37,11 @@ impl MemoryOverlayStateProvider {
             hashed_post_state.extend(block.hashed_state.as_ref().clone());
         }
         Self { in_memory, hashed_post_state, historical }
+    }
+
+    /// Turn this state provider into a [`StateProviderBox`]
+    pub fn boxed(self) -> StateProviderBox {
+        Box::new(self)
     }
 }
 

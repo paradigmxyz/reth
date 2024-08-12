@@ -8,7 +8,6 @@ exclude_crates=(
   # The following are not working yet, but known to be fixable
   reth-consensus
   reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
-  reth-evm
   # The following require investigation if they can be fixed
   reth-auto-seal-consensus
   reth-basic-payload-builder

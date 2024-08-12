@@ -9,7 +9,7 @@ use crate::{
 use futures_util::{lock::Mutex, StreamExt};
 use reth_chainspec::ChainSpec;
 use reth_primitives::SealedBlock;
-use reth_provider::BlockReaderIdExt;
+use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{

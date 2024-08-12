@@ -155,7 +155,8 @@ where
                             }
                         }
                         Some(Err(err)) => {
-                            tracing::warn!("IPC request failed: {:?}", err);
+                            // this can happen if the client closes the connection
+                            tracing::debug!("IPC request failed: {:?}", err);
                             return Poll::Ready(())
                         }
                         None => return Poll::Ready(()),

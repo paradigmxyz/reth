@@ -100,8 +100,11 @@ pub enum ProviderError {
     #[error("unknown block {0}")]
     UnknownBlockHash(B256),
     /// Thrown when we were unable to find a state for a block hash.
-    #[error("no state found for block {0}")]
+    #[error("no state found for block hash {0}")]
     StateForHashNotFound(B256),
+    /// Thrown when we were unable to find a state for a block number.
+    #[error("no state found for block number {0}")]
+    StateForNumberNotFound(u64),
     /// Unable to find the block number for a given transaction index.
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,

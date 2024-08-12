@@ -11,43 +11,44 @@
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String};
 
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use derive_more::Display;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::EVMError;
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
-
 pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Display, Eq, PartialEq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
-    #[error("EVM reported invalid transaction ({hash}): {error}")]
+    #[display(fmt = "EVM reported invalid transaction ({hash}): {error}")]
     EVM {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        #[source]
         error: Box<EVMError<ProviderError>>,
     },
     /// Error when recovering the sender for a transaction
-    #[error("failed to recover sender for transaction")]
+    #[display(fmt = "failed to recover sender for transaction")]
     SenderRecoveryError,
     /// Error when incrementing balance in post execution
-    #[error("incrementing balance in post execution failed")]
+    #[display(fmt = "incrementing balance in post execution failed")]
     IncrementBalanceFailed,
     /// Error when the state root does not match the expected value.
-    #[error(transparent)]
-    StateRoot(#[from] StateRootError),
+    // #[from(ignore)]
+    StateRoot(StateRootError),
     /// Error when transaction gas limit exceeds available block gas
-    #[error("transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
+    #[display(
+        fmt = "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
+    )]
     TransactionGasLimitMoreThanAvailableBlockGas {
         /// The transaction's gas limit
         transaction_gas_limit: u64,
@@ -55,22 +56,24 @@ pub enum BlockValidationError {
         block_available_gas: u64,
     },
     /// Error for pre-merge block
-    #[error("block {hash} is pre merge")]
+    #[display(fmt = "block {hash} is pre merge")]
     BlockPreMerge {
         /// The hash of the block
         hash: B256,
     },
     /// Error for missing total difficulty
-    #[error("missing total difficulty for block {hash}")]
+    #[display(fmt = "missing total difficulty for block {hash}")]
     MissingTotalDifficulty {
         /// The hash of the block
         hash: B256,
     },
     /// Error for EIP-4788 when parent beacon block root is missing
-    #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
+    #[display(fmt = "EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
-    #[error("the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}")]
+    #[display(
+        fmt = "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}"
+    )]
     CancunGenesisParentBeaconBlockRootNotZero {
         /// The beacon block root
         parent_beacon_block_root: B256,
@@ -78,7 +81,9 @@ pub enum BlockValidationError {
     /// EVM error during [EIP-4788] beacon root contract call.
     ///
     /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
-    #[error("failed to apply beacon root contract call at {parent_beacon_block_root}: {message}")]
+    #[display(
+        fmt = "failed to apply beacon root contract call at {parent_beacon_block_root}: {message}"
+    )]
     BeaconRootContractCall {
         /// The beacon block root
         parent_beacon_block_root: Box<B256>,
@@ -88,12 +93,11 @@ pub enum BlockValidationError {
     /// Provider error during the [EIP-2935] block hash account loading.
     ///
     /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-    #[error(transparent)]
-    BlockHashAccountLoadingFailed(#[from] ProviderError),
+    BlockHashAccountLoadingFailed(ProviderError),
     /// EVM error during withdrawal requests contract call [EIP-7002]
     ///
     /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
-    #[error("failed to apply withdrawal requests contract call: {message}")]
+    #[display(fmt = "failed to apply withdrawal requests contract call: {message}")]
     WithdrawalRequestsContractCall {
         /// The error message.
         message: String,
@@ -101,7 +105,7 @@ pub enum BlockValidationError {
     /// EVM error during consolidation requests contract call [EIP-7251]
     ///
     /// [EIP-7251]: https://eips.ethereum.org/EIPS/eip-7251
-    #[error("failed to apply consolidation requests contract call: {message}")]
+    #[display(fmt = "failed to apply consolidation requests contract call: {message}")]
     ConsolidationRequestsContractCall {
         /// The error message.
         message: String,
@@ -109,34 +113,36 @@ pub enum BlockValidationError {
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    #[error("failed to decode deposit requests from receipts: {0}")]
+    #[display(fmt = "failed to decode deposit requests from receipts: {_0}")]
     DepositRequestDecode(String),
 }
 
+impl From<StateRootError> for BlockValidationError {
+    fn from(error: StateRootError) -> Self {
+        Self::StateRoot(error)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for BlockValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EVM { error, .. } => std::error::Error::source(error),
+            Self::StateRoot(source) => std::error::Error::source(source),
+            _ => Option::None,
+        }
+    }
+}
+
 /// `BlockExecutor` Errors
-#[derive(thiserror_no_std::Error, Debug)]
+#[derive(Debug, Display)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
-    #[error(transparent)]
-    Validation(#[from] BlockValidationError),
+    Validation(BlockValidationError),
     /// Consensus error, transparently wrapping [`ConsensusError`]
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
+    Consensus(ConsensusError),
     /// Internal, i.e. non consensus or validation related Block Executor Errors
-    #[error(transparent)]
-    Internal(#[from] InternalBlockExecutionError),
-}
-
-impl From<ProviderError> for BlockExecutionError {
-    fn from(value: ProviderError) -> Self {
-        InternalBlockExecutionError::from(value).into()
-    }
-}
-
-impl From<PruneSegmentError> for BlockExecutionError {
-    fn from(value: PruneSegmentError) -> Self {
-        InternalBlockExecutionError::from(value).into()
-    }
+    Internal(InternalBlockExecutionError),
 }
 
 impl BlockExecutionError {
@@ -171,15 +177,49 @@ impl BlockExecutionError {
     }
 }
 
+impl From<BlockValidationError> for BlockExecutionError {
+    fn from(error: BlockValidationError) -> Self {
+        Self::Validation(error)
+    }
+}
+
+impl From<ConsensusError> for BlockExecutionError {
+    fn from(error: ConsensusError) -> Self {
+        Self::Consensus(error)
+    }
+}
+
+impl From<InternalBlockExecutionError> for BlockExecutionError {
+    fn from(error: InternalBlockExecutionError) -> Self {
+        Self::Internal(error)
+    }
+}
+
+impl From<ProviderError> for BlockExecutionError {
+    fn from(error: ProviderError) -> Self {
+        InternalBlockExecutionError::from(error).into()
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for BlockExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Validation(source) => std::error::Error::source(source),
+            Self::Consensus(source) => std::error::Error::source(source),
+            Self::Internal(source) => std::error::Error::source(source),
+        }
+    }
+}
+
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
-#[derive(thiserror_no_std::Error, Debug)]
+#[derive(Display, Debug)]
 pub enum InternalBlockExecutionError {
     /// Pruning error, transparently wrapping [`PruneSegmentError`]
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
+    Pruning(PruneSegmentError),
     /// Error when appending chain on fork is not possible
-    #[error(
-        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+    #[display(
+        fmt = "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain
@@ -188,11 +228,9 @@ pub enum InternalBlockExecutionError {
         other_chain_fork: Box<BlockNumHash>,
     },
     /// Error when fetching latest block state.
-    #[error(transparent)]
-    LatestBlock(#[from] ProviderError),
+    LatestBlock(ProviderError),
     /// Arbitrary Block Executor Errors
     #[cfg(feature = "std")]
-    #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -210,5 +248,28 @@ impl InternalBlockExecutionError {
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
+    }
+}
+
+impl From<PruneSegmentError> for InternalBlockExecutionError {
+    fn from(error: PruneSegmentError) -> Self {
+        Self::Pruning(error)
+    }
+}
+
+impl From<ProviderError> for InternalBlockExecutionError {
+    fn from(error: ProviderError) -> Self {
+        Self::LatestBlock(error)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InternalBlockExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pruning(source) => std::error::Error::source(source),
+            Self::LatestBlock(source) => std::error::Error::source(source),
+            _ => Option::None,
+        }
     }
 }
