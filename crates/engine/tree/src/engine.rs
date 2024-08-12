@@ -7,6 +7,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_blockchain_tree::error::InsertBlockFatalError;
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
@@ -205,6 +206,9 @@ where
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
             }
             EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
+            EngineApiEvent::FatalBlockInsert(error) => {
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError)
+            }
         };
         Poll::Ready(ev)
     }
@@ -250,6 +254,8 @@ pub enum EngineApiEvent {
     BackfillAction(BackfillAction),
     /// Block download is needed.
     Download(DownloadRequest),
+    /// Fatal insert block error needs to be bubbled up.
+    FatalBlockInsert(InsertBlockFatalError),
 }
 
 impl EngineApiEvent {
