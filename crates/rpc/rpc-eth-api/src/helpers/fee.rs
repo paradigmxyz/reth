@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::FromEthApiError;
 
-use super::{pending_block, LoadBlock};
+use super::LoadBlock;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
@@ -165,7 +165,7 @@ pub trait EthFees: LoadFee {
             let pending_block_hash = pending_block.as_ref().map(|block| block.header.hash());
             if is_pending_block {
                 if let Some(pending_block) = pending_block {
-                    headers.push(pending_block.header.clone());
+                    headers.push(pending_block.header);
                 }
             }
 
