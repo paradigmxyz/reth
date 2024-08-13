@@ -263,7 +263,8 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 info!(
                     number=block.number,
-                    hash=?block.hash(),
+                    hash=%block.hash(),
+                    parent_hash=%block.parent_hash,
                     peers=self.num_connected_peers(),
                     txs=block.body.len(),
                     gas=%format_gas(block.header.gas_used),
@@ -280,10 +281,10 @@ impl<DB> NodeState<DB> {
                 self.latest_block = Some(head.number);
                 self.latest_block_time = Some(head.timestamp);
 
-                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
+                info!(number=head.number, hash=%head.hash(), parent_hash=%head.parent_hash, ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
+                info!(number=block.number, hash=%block.hash(), "Block added to fork chain");
             }
         }
     }
