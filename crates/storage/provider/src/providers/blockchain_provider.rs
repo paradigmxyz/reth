@@ -832,7 +832,15 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.database.requests_by_block(id, timestamp)
+        if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
+            return Ok(None)
+        }
+        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
+            Ok(block.block().block().requests.clone())
+        } else {
+            self.database.requests_by_block(id, timestamp)
+        }
     }
 }
 
