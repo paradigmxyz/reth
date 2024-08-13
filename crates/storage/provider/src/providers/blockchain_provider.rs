@@ -743,9 +743,9 @@ where
                     "Mismatch between transaction and receipt count"
                 );
 
-                for tx_id in 0..block.body.len() {
+                for receipt in receipts {
                     if id == in_memory_tx_num {
-                        return Ok(receipts.get(tx_id).cloned())
+                        return Ok(Some(receipt))
                     }
 
                     in_memory_tx_num += 1;
