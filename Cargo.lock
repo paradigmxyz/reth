@@ -8130,7 +8130,6 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.5"
 dependencies = [
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",

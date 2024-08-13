@@ -55,7 +55,6 @@ dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
-alloy-rlp = { workspace = true, optional = true }
 once_cell = { workspace = true, optional = true }
 
 # parallel utils
@@ -67,7 +66,6 @@ reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 
-alloy-rlp.workspace = true
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
