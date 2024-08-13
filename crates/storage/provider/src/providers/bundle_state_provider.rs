@@ -1,13 +1,15 @@
-use std::collections::HashMap;
-
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
 use revm::db::BundleState;
+use std::collections::HashMap;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
 /// or an underlying state provider.
@@ -80,6 +82,15 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         self.state_provider.hashed_state_root(state)
     }
 
+    fn hashed_state_root_from_nodes(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        unimplemented!()
+    }
+
     fn state_root_with_updates(
         &self,
         bundle_state: &BundleState,
@@ -97,6 +108,24 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
         self.state_provider.hashed_state_root_with_updates(state)
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut state_prefix_sets = state.construct_prefix_sets();
+        state.extend(hashed_state);
+        state_prefix_sets.extend(prefix_sets);
+        self.state_provider.hashed_state_root_from_nodes_with_updates(
+            nodes,
+            state,
+            state_prefix_sets,
+        )
     }
 
     fn hashed_storage_root(

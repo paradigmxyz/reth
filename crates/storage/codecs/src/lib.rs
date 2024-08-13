@@ -652,8 +652,8 @@ mod tests {
         }
     }
 
-    #[reth_codec]
-    #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+    #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Compact, arbitrary::Arbitrary)]
+    #[add_arbitrary_tests(compact)]
     struct TestStruct {
         f_u64: u64,
         f_u256: U256,
@@ -704,8 +704,10 @@ mod tests {
         );
     }
 
-    #[reth_codec]
-    #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
+    #[derive(
+        Debug, PartialEq, Clone, Default, Serialize, Deserialize, Compact, arbitrary::Arbitrary,
+    )]
+    #[add_arbitrary_tests(compact)]
     enum TestEnum {
         #[default]
         Var0,

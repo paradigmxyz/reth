@@ -6,7 +6,9 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::BeaconConsensusEngineEvent;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_chain_state::ExecutedBlock;
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::HashSet,
@@ -215,6 +217,27 @@ pub enum EngineApiKind {
     Ethereum,
     /// The chain contains Optimism configuration.
     OpStack,
+}
+
+/// The request variants that the engine API handler can receive.
+#[derive(Debug)]
+pub enum EngineApiRequest<T: EngineTypes> {
+    /// A request received from the consensus engine.
+    Beacon(BeaconEngineMessage<T>),
+    /// Request to insert an already executed block, e.g. via payload building.
+    InsertExecutedBlock(ExecutedBlock),
+}
+
+impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
+    fn from(msg: BeaconEngineMessage<T>) -> Self {
+        Self::Beacon(msg)
+    }
+}
+
+impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T>> {
+    fn from(req: EngineApiRequest<T>) -> Self {
+        Self::Request(req)
+    }
 }
 
 /// Events emitted by the engine API handler.

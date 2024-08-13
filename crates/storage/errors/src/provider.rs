@@ -103,6 +103,9 @@ pub enum ProviderError {
     /// Thrown when we were unable to find a state for a block hash.
     #[display(fmt = "no state found for block {_0}")]
     StateForHashNotFound(B256),
+    /// Thrown when we were unable to find a state for a block number.
+    #[display(fmt = "no state found for block number {_0}")]
+    StateForNumberNotFound(u64),
     /// Unable to find the block number for a given transaction index.
     #[display(fmt = "unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,

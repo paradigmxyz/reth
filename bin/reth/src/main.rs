@@ -24,7 +24,8 @@ pub struct EngineArgs {
 fn main() {
     use clap::Parser;
     use reth::cli::Cli;
-    use reth_node_ethereum::{launch::EthNodeLauncher, node::EthereumAddOns, EthereumNode};
+    use reth_node_builder::EngineNodeLauncher;
+    use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
     use reth_provider::providers::BlockchainProvider2;
 
     reth_cli_util::sigsegv_handler::install();
@@ -43,7 +44,7 @@ fn main() {
                     .with_components(EthereumNode::components())
                     .with_add_ons::<EthereumAddOns>()
                     .launch_with_fn(|builder| {
-                        let launcher = EthNodeLauncher::new(
+                        let launcher = EngineNodeLauncher::new(
                             builder.task_executor().clone(),
                             builder.config().datadir(),
                         );

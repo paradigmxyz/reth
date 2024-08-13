@@ -1,14 +1,15 @@
 use crate::Compact;
 use alloy_eips::eip4895::Withdrawal as AlloyWithdrawal;
 use alloy_primitives::Address;
-use reth_codecs_derive::reth_codec;
+use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// Withdrawal acts as bridge which simplifies Compact implementation for AlloyWithdrawal.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip4895::Withdrawal`
-#[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     index: u64,

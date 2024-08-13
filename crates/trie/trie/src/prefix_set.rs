@@ -18,6 +18,15 @@ pub struct TriePrefixSetsMut {
 }
 
 impl TriePrefixSetsMut {
+    /// Extends prefix sets with contents of another prefix set.
+    pub fn extend(&mut self, other: Self) {
+        self.account_prefix_set.extend(other.account_prefix_set.keys);
+        for (hashed_address, prefix_set) in other.storage_prefix_sets {
+            self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set.keys);
+        }
+        self.destroyed_accounts.extend(other.destroyed_accounts);
+    }
+
     /// Returns a `TriePrefixSets` with the same elements as these sets.
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
