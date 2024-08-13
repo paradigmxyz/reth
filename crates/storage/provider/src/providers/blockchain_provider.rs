@@ -425,7 +425,22 @@ where
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
+        match self.convert_hash_or_number(id)? {
+            Some(number) => {
+                // If the Paris (Merge) hardfork block is known and block is after it, return empty
+                // ommers.
+                if self.database.chain_spec().final_paris_total_difficulty(number).is_some() {
+                    return Ok(Some(Vec::new()));
+                }
+
+                // Check in-memory state first
+                self.canonical_in_memory_state
+                    .state_by_number(number)
+                    .map(|o| o.block().block().ommers.clone())
+                    .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
+            }
+            None => self.database.ommers(id),
+        }
     }
 
     fn block_body_indices(
