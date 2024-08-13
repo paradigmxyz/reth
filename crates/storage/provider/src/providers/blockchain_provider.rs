@@ -142,13 +142,15 @@ where
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
+        let provider = self.database.provider()?;
+
         // Get the last block number stored in the database
-        let last_database_block_number = self.database.last_block_number()?;
+        let last_database_block_number = provider.last_block_number()?;
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
         let Some(last_block_body_index) =
-            self.database.block_body_indices(last_database_block_number)?
+            provider.block_body_indices(last_database_block_number)?
         else {
             return Ok(None);
         };
@@ -157,8 +159,8 @@ where
         if id < in_memory_tx_num {
             // If the transaction number is less than the first in-memory transaction number, make a
             // database lookup
-            let Some(block_number) = self.database.transaction_block(id)? else { return Ok(None) };
-            let Some(body_index) = self.database.block_body_indices(block_number)? else {
+            let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
+            let Some(body_index) = provider.block_body_indices(block_number)? else {
                 return Ok(None)
             };
             let tx_index = id - body_index.last_tx_num();
