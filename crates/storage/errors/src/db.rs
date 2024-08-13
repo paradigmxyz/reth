@@ -1,10 +1,19 @@
+#[cfg(feature = "std")]
+use std::{fmt, fmt::Display, str::FromStr, string::String};
+
+#[cfg(not(feature = "std"))]
 use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt, fmt::{Display, Debug}, str::FromStr};
+#[cfg(not(feature = "std"))]
+use core::{
+    fmt,
+    fmt::{Debug, Display},
+    str::FromStr,
+};
 
 /// Database error type.
 #[derive(Clone, Debug, PartialEq, Eq, derive_more::Display)]
@@ -50,10 +59,8 @@ pub enum DatabaseError {
 impl std::error::Error for DatabaseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Write(err) => {
-                std::error::Error::source(err)
-            },
-            _ => Option::None
+            Self::Write(err) => std::error::Error::source(err),
+            _ => Option::None,
         }
     }
 }
@@ -73,15 +80,15 @@ where
     E: Display + Into<i32>,
 {
     #[inline]
-    fn from(value: E) -> Self {
-        Self { message: value.to_string(), code: value.into() }
+    fn from(error: E) -> Self {
+        Self { message: error.to_string(), code: error.into() }
     }
 }
 
 impl From<DatabaseWriteError> for DatabaseError {
     #[inline]
-    fn from(value: DatabaseWriteError) -> Self {
-        Self::Write(Box::new(value))
+    fn from(error: DatabaseWriteError) -> Self {
+        Self::Write(Box::new(error))
     }
 }
 
@@ -101,12 +108,12 @@ pub struct DatabaseWriteError {
 impl fmt::Display for DatabaseWriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-           f, 
-           "write operation {} failed for key \"{}\" in table {}: {}", 
-           self.operation, 
-           reth_primitives::hex::encode(&self.key), 
-           self.table_name, 
-           self.info
+            f,
+            "write operation {:?} failed for key \"{}\" in table {}: {}",
+            self.operation,
+            reth_primitives::hex::encode(&self.key),
+            self.table_name,
+            self.info
         )
     }
 }
@@ -115,23 +122,17 @@ impl fmt::Display for DatabaseWriteError {
 impl std::error::Error for DatabaseWriteError {}
 
 /// Database write operation type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, derive_more::Display)]
-#[display(fmt = "DatabaseWriteOperation: {}")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseWriteOperation {
     /// Append cursor.
-    #[display(fmt = "CursorAppend")]
     CursorAppend,
     /// Upsert cursor.
-    #[display(fmt = "CursorUpsert")]
     CursorUpsert,
     /// Insert cursor.
-    #[display(fmt = "CursorInsert")]
     CursorInsert,
     /// Append duplicate cursor.
-    #[display(fmt = "CursorAppendDup")]
     CursorAppendDup,
     /// Put.
-    #[display(fmt = "Put")]
     Put,
 }
 

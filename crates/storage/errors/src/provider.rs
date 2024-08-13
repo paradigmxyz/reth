@@ -1,13 +1,15 @@
+use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use derive_more::Display;
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
-use derive_more::Display;
-use alloc::{boxed::Box, string::String};
-use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
 
 #[cfg(feature = "std")]
 use std::path::PathBuf;
+
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -39,7 +41,9 @@ pub enum ProviderError {
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[display(fmt = "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
+    #[display(
+        fmt = "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist"
+    )]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
@@ -51,7 +55,9 @@ pub enum ProviderError {
         storage_key: Box<B256>,
     },
     /// The block number was found for the given address, but the changeset was not found.
-    #[display(fmt = "account change set for address {address} at block #{block_number} does not exist")]
+    #[display(
+        fmt = "account change set for address {address} at block #{block_number} does not exist"
+    )]
     AccountChangesetNotFound {
         /// Block number found for the address.
         block_number: BlockNumber,
@@ -171,19 +177,11 @@ impl From<UnifiedStorageWriterError> for ProviderError {
 impl std::error::Error for ProviderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Database(source) => {
-                std::error::Error::source(source)
-            },
-            Self::Rlp(source) => {
-                std::error::Error::source(source)
-            },
-            Self::StorageLockError(source) => {
-                std::error::Error::source(source)
-            },
-            Self::UnifiedStorageWriterError(source) => {
-                std::error::Error::source(source)
-            },
-            _ => Option::None
+            Self::Database(source) => std::error::Error::source(source),
+            Self::Rlp(source) => std::error::Error::source(source),
+            Self::StorageLockError(source) => std::error::Error::source(source),
+            Self::UnifiedStorageWriterError(source) => std::error::Error::source(source),
+            _ => Option::None,
         }
     }
 }
@@ -218,7 +216,7 @@ pub enum ConsistentViewError {
 }
 
 impl From<ConsistentViewError> for ProviderError {
-    fn from(value: ConsistentViewError) -> Self {
-        Self::ConsistentView(Box::new(value))
+    fn from(error: ConsistentViewError) -> Self {
+        Self::ConsistentView(Box::new(error))
     }
 }

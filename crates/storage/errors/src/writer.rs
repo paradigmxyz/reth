@@ -21,17 +21,15 @@ pub enum UnifiedStorageWriterError {
 #[cfg(feature = "std")]
 impl std::error::Error for UnifiedStorageWriterError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-       match self {
-            Self::Database(source) => {
-                std::error::Error::source(source)
-            },
-           _ => Option::None
-       } 
+        match self {
+            Self::Database(source) => std::error::Error::source(source),
+            _ => Option::None,
+        }
     }
 }
 
 impl From<DatabaseError> for UnifiedStorageWriterError {
-    fn from(value: DatabaseError) -> Self {
-        Self::Database(value)
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
     }
 }
