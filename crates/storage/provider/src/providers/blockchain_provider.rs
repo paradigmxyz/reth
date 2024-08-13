@@ -133,6 +133,64 @@ where
         let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
         Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
     }
+
+    /// Returns the block number, in-block transaction index, and whether the transaction is in
+    /// memory.
+    fn block_number_by_tx_id(
+        &self,
+        id: TxNumber,
+    ) -> ProviderResult<Option<(BlockNumber, usize, bool)>> {
+        // Get the last block number stored in the database
+        let last_database_block_number = self.database.last_block_number()?;
+
+        // Get the next tx number for the last block stored in the database and consider it the
+        // first tx number of the in-memory state
+        let Some(last_block_body_index) =
+            self.database.block_body_indices(last_database_block_number)?
+        else {
+            return Ok(None);
+        };
+        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
+
+        if id < in_memory_tx_num {
+            // If the transaction number is less than the first in-memory transaction number, make a
+            // database lookup
+            let Some(block_number) = self.database.transaction_block(id)? else { return Ok(None) };
+            let Some(body_index) = self.database.block_body_indices(block_number)? else {
+                return Ok(None)
+            };
+            let tx_index = id - body_index.last_tx_num();
+            Ok(Some((block_number, tx_index as usize, true)))
+        } else {
+            // Otherwise, iterate through in-memory blocks and find the transaction with the
+            // matching number
+
+            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
+            let last_in_memory_block_number =
+                self.canonical_in_memory_state.get_canonical_block_number();
+
+            for block_number in first_in_memory_block_number..=last_in_memory_block_number {
+                let Some(block_state) =
+                    self.canonical_in_memory_state.state_by_number(block_number)
+                else {
+                    return Ok(None);
+                };
+
+                let executed_block = block_state.block();
+                let block = executed_block.block();
+
+                for tx_index in 0..block.body.len() {
+                    if id == in_memory_tx_num {
+                        return Ok(Some((block_number, tx_index, false)))
+                    }
+
+                    in_memory_tx_num += 1;
+                }
+            }
+
+            Ok(None)
+        }
+    }
 }
 
 impl<DB> BlockchainProvider2<DB>
@@ -591,14 +649,39 @@ where
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.database.transaction_by_id(id)
+        let Some((block_number, tx_index, is_in_memory)) = self.block_number_by_tx_id(id)? else {
+            return Ok(None)
+        };
+
+        if is_in_memory {
+            let transaction = self
+                .canonical_in_memory_state
+                .state_by_number(block_number)
+                .and_then(|block_state| block_state.block().block().body.get(tx_index).cloned());
+            Ok(transaction)
+        } else {
+            self.database.transaction_by_id(id)
+        }
     }
 
     fn transaction_by_id_no_hash(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.database.transaction_by_id_no_hash(id)
+        let Some((block_number, tx_index, is_in_memory)) = self.block_number_by_tx_id(id)? else {
+            return Ok(None)
+        };
+
+        if is_in_memory {
+            let transaction = self
+                .canonical_in_memory_state
+                .state_by_number(block_number)
+                .and_then(|block_state| block_state.block().block().body.get(tx_index).cloned())
+                .map(Into::into);
+            Ok(transaction)
+        } else {
+            self.database.transaction_by_id_no_hash(id)
+        }
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
@@ -623,7 +706,7 @@ where
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.database.transaction_block(id)
+        Ok(self.block_number_by_tx_id(id)?.map(|(block_number, _, _)| block_number))
     }
 
     fn transactions_by_block(
@@ -695,7 +778,20 @@ where
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        self.database.transaction_sender(id)
+        let Some((block_number, tx_index, is_in_memory)) = self.block_number_by_tx_id(id)? else {
+            return Ok(None)
+        };
+
+        if is_in_memory {
+            let sender = self
+                .canonical_in_memory_state
+                .state_by_number(block_number)
+                .and_then(|block_state| block_state.block().block().body.get(tx_index).cloned())
+                .and_then(|transaction| transaction.recover_signer());
+            Ok(sender)
+        } else {
+            self.database.transaction_sender(id)
+        }
     }
 }
 
@@ -704,55 +800,17 @@ where
     DB: Database,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        // Get the last block number stored in the database
-        let last_database_block_number = self.database.last_block_number()?;
-
-        // Get the next tx number for the last block stored in the database and consider it the
-        // first tx number of the in-memory state
-        let Some(last_block_body_index) =
-            self.database.block_body_indices(last_database_block_number)?
-        else {
-            return Ok(None);
+        let Some((block_number, tx_index, is_in_memory)) = self.block_number_by_tx_id(id)? else {
+            return Ok(None)
         };
-        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
 
-        if id < in_memory_tx_num {
-            // If the transaction number is less than the first in-memory transaction number, make a
-            // database lookup
-            self.database.receipt(id)
+        if is_in_memory {
+            let receipt = self.canonical_in_memory_state.state_by_number(block_number).and_then(
+                |block_state| block_state.executed_block_receipts().get(tx_index).cloned(),
+            );
+            Ok(receipt)
         } else {
-            // Otherwise, iterate through in-memory blocks and find the receipt with the matching
-            // transaction number
-
-            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
-            let last_in_memory_block_number =
-                self.canonical_in_memory_state.get_canonical_block_number();
-
-            for number in first_in_memory_block_number..=last_in_memory_block_number {
-                let Some(block_state) = self.canonical_in_memory_state.state_by_number(number)
-                else {
-                    return Ok(None);
-                };
-
-                let executed_block = block_state.block();
-                let block = executed_block.block();
-                let receipts = block_state.executed_block_receipts();
-                debug_assert_eq!(
-                    block.body.len(),
-                    receipts.len(),
-                    "Mismatch between transaction and receipt count"
-                );
-
-                for receipt in receipts {
-                    if id == in_memory_tx_num {
-                        return Ok(Some(receipt))
-                    }
-
-                    in_memory_tx_num += 1;
-                }
-            }
-
-            Ok(None)
+            self.database.receipt(id)
         }
     }
 
