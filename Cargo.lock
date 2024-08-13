@@ -8130,13 +8130,13 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.5"
 dependencies = [
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
  "dashmap 6.0.1",
  "itertools 0.13.0",
  "metrics",
+ "once_cell",
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "rayon",
