@@ -704,7 +704,56 @@ where
     DB: Database,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.database.receipt(id)
+        // Get the last block number stored in the database
+        let last_database_block_number = self.database.last_block_number()?;
+
+        // Get the next tx number for the last block stored in the database and consider it the
+        // first tx number of the in-memory state
+        let Some(last_block_body_index) =
+            self.database.block_body_indices(last_database_block_number)?
+        else {
+            return Ok(None);
+        };
+        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
+
+        if id < in_memory_tx_num {
+            // If the transaction number is less than the first in-memory transaction number, make a
+            // database lookup
+            self.database.receipt(id)
+        } else {
+            // Otherwise, iterate through in-memory blocks and find the receipt with the matching
+            // transaction number
+
+            let first_in_memory_block_number = last_database_block_number.saturating_add(1);
+            let last_in_memory_block_number =
+                self.canonical_in_memory_state.get_canonical_block_number();
+
+            for number in first_in_memory_block_number..=last_in_memory_block_number {
+                let Some(block_state) = self.canonical_in_memory_state.state_by_number(number)
+                else {
+                    return Ok(None);
+                };
+
+                let executed_block = block_state.block();
+                let block = executed_block.block();
+                let receipts = block_state.executed_block_receipts();
+                debug_assert_eq!(
+                    block.body.len(),
+                    receipts.len(),
+                    "Mismatch between transaction and receipt count"
+                );
+
+                for tx_id in 0..block.body.len() {
+                    if id == in_memory_tx_num {
+                        return Ok(receipts.get(tx_id).cloned())
+                    }
+
+                    in_memory_tx_num += 1;
+                }
+            }
+
+            Ok(None)
+        }
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
