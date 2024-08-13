@@ -58,7 +58,7 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     // StageCheckpoints is not updated in tests
 }
 
-pub(crate) const TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
+pub(crate) static TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
     header: SealedHeader::new(
         Header {
             parent_hash: hex!("c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f")
