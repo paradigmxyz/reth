@@ -120,8 +120,8 @@ pub(crate) mod state;
 pub mod txpool;
 mod update;
 
-const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
-const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 10 * 2048;
+const NEW_TX_LISTENER_BUFFER_SIZE: usize = 10 * 1024;
 const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 
 /// Transaction pool internals.
