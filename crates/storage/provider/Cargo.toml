@@ -55,7 +55,7 @@ dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
-alloy-rlp = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -66,13 +66,19 @@ reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 
-alloy-rlp.workspace = true
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
+once_cell.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism", "reth-execution-types/optimism"]
 serde = ["reth-execution-types/serde"]
-test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils", "reth-trie/test-utils", "reth-chain-state/test-utils", "reth-db/test-utils"]
+test-utils = [
+    "reth-db/test-utils",
+    "reth-nippy-jar/test-utils",
+    "reth-trie/test-utils",
+    "reth-chain-state/test-utils",
+    "once_cell",
+]
