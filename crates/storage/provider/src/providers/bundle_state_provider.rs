@@ -112,12 +112,20 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 
     fn hashed_state_root_from_nodes_with_updates(
         &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        // TODO:
-        unimplemented!()
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let mut state_prefix_sets = state.construct_prefix_sets();
+        state.extend(hashed_state);
+        state_prefix_sets.extend(prefix_sets);
+        self.state_provider.hashed_state_root_from_nodes_with_updates(
+            nodes,
+            state,
+            state_prefix_sets,
+        )
     }
 
     fn hashed_storage_root(

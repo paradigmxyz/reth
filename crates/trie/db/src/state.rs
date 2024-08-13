@@ -110,7 +110,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
         post_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
-    /// TODO:
+    /// Calculates the state root for provided [`HashedPostState`] using cached intermediate nodes.
     fn overlay_root_from_nodes(
         tx: &'a TX,
         intermediate_nodes: TrieUpdates,
@@ -118,7 +118,8 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
         prefix_sets: TriePrefixSetsMut,
     ) -> Result<B256, StateRootError>;
 
-    /// TODO:
+    /// Calculates the state root and trie updates for provided [`HashedPostState`] using
+    /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
         intermediate_nodes: TrieUpdates,
