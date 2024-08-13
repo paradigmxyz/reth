@@ -30,7 +30,6 @@ reth-tasks.workspace = true
 # async
 futures.workspace = true
 pin-project.workspace = true
-tokio-stream.workspace = true
 
 # misc
 thiserror.workspace = true
@@ -46,3 +45,4 @@ reth-primitives.workspace = true
 reth-prune-types.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
