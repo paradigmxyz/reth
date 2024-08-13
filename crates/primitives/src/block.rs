@@ -7,12 +7,13 @@ pub use alloy_eips::eip1898::{
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
+use reth_primitives_traits::Requests;
+use serde::{Deserialize, Serialize};
+
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::Requests;
-use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -270,19 +271,7 @@ impl BlockWithSenders {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    Deref,
-    DerefMut,
-    RlpEncodable,
-    RlpDecodable,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut, RlpEncodable, RlpDecodable)]
 #[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
@@ -490,7 +479,7 @@ impl From<SealedBlock> for Block {
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
     #[deref]
