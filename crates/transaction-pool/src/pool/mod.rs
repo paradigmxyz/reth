@@ -736,7 +736,7 @@ where
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pending_transactions().iter().filter(|tx| tx.origin == origin).cloned().collect()
+        self.get_pool_data().pending_transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.

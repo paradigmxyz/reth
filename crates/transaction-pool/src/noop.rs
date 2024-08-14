@@ -243,7 +243,6 @@ impl TransactionPool for NoopTransactionPool {
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
 
-    #[doc = " Returns all pending transactions filtered by [`TransactionOrigin`]"]
     fn get_pending_transactions_by_origin(
         &self,
         _origin: TransactionOrigin,
