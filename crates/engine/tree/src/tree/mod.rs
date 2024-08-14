@@ -2013,7 +2013,6 @@ impl PersistenceState {
         trace!(target: "engine", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
         let duration =
             self.rx.take().map(|(_, start_time)| start_time.elapsed()).unwrap_or_default();
-        self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
         duration
