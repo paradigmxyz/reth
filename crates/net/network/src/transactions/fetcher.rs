@@ -390,7 +390,7 @@ impl TransactionFetcher {
                 // peer has not yet requested hash
                 fallback_peers.insert(peer_id);
             } else {
-                if *retries >= DEFAULT_MAX_RETRIES {
+                if *retries >= 100 {
                     trace!(target: "net::tx",
                         %hash,
                         retries,
