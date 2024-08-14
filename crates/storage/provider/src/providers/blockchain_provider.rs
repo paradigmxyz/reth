@@ -792,7 +792,6 @@ where
                 .block()
                 .body
                 .get(tx_index)
-                .cloned()
                 .and_then(|transaction| transaction.recover_signer());
             Ok(sender)
         } else {
