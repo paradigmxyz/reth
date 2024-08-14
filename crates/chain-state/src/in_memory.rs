@@ -16,7 +16,6 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
     sync::Arc,
     time::Instant,
 };
