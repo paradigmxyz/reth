@@ -60,7 +60,7 @@ where
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            // authorization_list,
+            authorization_list,
             ..
         } = request;
 
@@ -98,7 +98,7 @@ where
             // EIP-4844 fields
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
-            authorization_list: Default::default(),
+            authorization_list: authorization_list.map(Into::into),
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };
 
