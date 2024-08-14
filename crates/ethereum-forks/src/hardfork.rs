@@ -68,7 +68,7 @@ pub enum Hardfork {
     /// Hekla: the 1st taiko mainnet version: <>
     #[cfg(feature = "taiko")]
     Hekla,
-    /// Ontake: the 1st taiko mainnet fork: <>
+    /// Ontake: the 2nd taiko mainnet fork: <>
     #[cfg(feature = "taiko")]
     Ontake,
     /// Canyon:
