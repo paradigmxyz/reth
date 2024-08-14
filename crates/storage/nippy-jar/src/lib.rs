@@ -34,7 +34,7 @@ pub mod compression;
 use compression::Compression;
 use compression::Compressors;
 
-/// Enumerates all types of perfect hashing functions.
+/// Enumerates all types of perfect hashing functions. Right now it only has a dummy implementation.
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Functions {
