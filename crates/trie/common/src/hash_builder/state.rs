@@ -2,13 +2,14 @@ use crate::TrieMask;
 use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
-#[derive_arbitrary(compact)]
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,

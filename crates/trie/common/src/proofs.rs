@@ -9,6 +9,7 @@ use alloy_trie::{
     EMPTY_ROOT_HASH,
 };
 use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
@@ -119,7 +120,8 @@ impl StorageMultiProof {
 }
 
 /// The merkle proof with the relevant account info.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -174,7 +176,7 @@ impl AccountProof {
 }
 
 /// The merkle proof of the storage entry.
-#[derive(PartialEq, Eq, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,

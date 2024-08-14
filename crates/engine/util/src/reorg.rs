@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use futures::{future::BoxFuture, stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
+use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_beacon_consensus::{BeaconEngineMessage, BeaconOnNewPayloadError, OnForkChoiceUpdated};
 use reth_engine_primitives::EngineTypes;
@@ -26,6 +26,7 @@ use reth_rpc_types_compat::engine::payload::block_to_payload;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
+    future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -42,6 +43,8 @@ type EngineReorgResponse = Result<
     Either<Result<PayloadStatus, BeaconOnNewPayloadError>, RethResult<OnForkChoiceUpdated>>,
     oneshot::error::RecvError,
 >;
+
+type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send + Sync>>;
 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
@@ -66,7 +69,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     /// Last forkchoice state.
     last_forkchoice_state: Option<ForkchoiceState>,
     /// Pending engine responses to reorg messages.
-    reorg_responses: FuturesUnordered<BoxFuture<'static, EngineReorgResponse>>,
+    reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
 impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm> {
@@ -181,10 +184,8 @@ where
                             let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
                             let (reorg_fcu_tx, reorg_fcu_rx) = oneshot::channel();
                             this.reorg_responses.extend([
-                                Box::pin(reorg_payload_rx.map_ok(Either::Left))
-                                    as BoxFuture<'static, EngineReorgResponse>,
-                                Box::pin(reorg_fcu_rx.map_ok(Either::Right))
-                                    as BoxFuture<'static, EngineReorgResponse>,
+                                Box::pin(reorg_payload_rx.map_ok(Either::Left)) as ReorgResponseFut,
+                                Box::pin(reorg_fcu_rx.map_ok(Either::Right)) as ReorgResponseFut,
                             ]);
 
                             *this.state = EngineReorgState::Reorg {
