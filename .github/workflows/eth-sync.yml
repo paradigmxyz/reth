@@ -1,6 +1,5 @@
-# Runs an ethereum mainnet sync test.
-
-name: eth-sync-test
+# Runs on Ethereum Mainnet
+name: Runs syncing test
 
 on:
   pull_request:

@@ -1,4 +1,5 @@
-name: Lint GitHub Actions workflows
+name: Lint github workflows
+
 on:
   pull_request:
     paths:

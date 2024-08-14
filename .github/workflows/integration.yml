@@ -1,6 +1,4 @@
-# Runs integration tests.
-
-name: integration
+name: Runs integration tests
 
 on:
   pull_request:
