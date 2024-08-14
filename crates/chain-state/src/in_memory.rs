@@ -752,28 +752,34 @@ impl NewCanonicalChain {
 
     /// Converts the new chain into a notification that will be emitted to listeners
     pub fn to_chain_notification(&self) -> CanonStateNotification {
-        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
-        //  implement this properly
         match self {
-            Self::Commit { new } => CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
-            Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-                old: Arc::new(Chain::new(
-                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    old.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
+            Self::Commit { new } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Commit { new }
+            }
+            Self::Reorg { new, old } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Reorg { new, old }
+            }
         }
     }
 
