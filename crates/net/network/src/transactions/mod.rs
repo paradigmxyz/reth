@@ -54,7 +54,10 @@ use reth_transaction_pool::{
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
     TransactionPool, ValidPoolTransaction,
 };
-use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
+use tokio::{
+    sync::{mpsc, oneshot, oneshot::error::RecvError},
+    time::Interval,
+};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tracing::{debug, trace};
 
@@ -247,6 +250,8 @@ pub struct TransactionsManager<Pool> {
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
+    /// when to rebroadcast local transactions
+    local_rebroadcast_interval: Interval,
 }
 
 impl<Pool: TransactionPool> TransactionsManager<Pool> {
@@ -296,6 +301,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
             metrics,
+            local_rebroadcast_interval: tokio::time::interval(Duration::from_millis(5000)),
         }
     }
 }
@@ -385,9 +391,9 @@ where
     /// and won't need to request it.
     fn on_new_pending_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
-        if self.network.is_initially_syncing() {
-            return
-        }
+        // if self.network.is_initially_syncing() {
+        //     return
+        // }
         if self.network.tx_gossip_disabled() {
             return
         }
@@ -1185,7 +1191,7 @@ where
         let peers = self.transactions_by_peers.remove(&err.hash);
 
         // if we're _currently_ syncing, we ignore a bad transaction
-        if !err.is_bad_transaction() || self.network.is_syncing() {
+        if !err.is_bad_transaction() {
             return
         }
         // otherwise we penalize the peer that sent the bad transaction, with the assumption that
@@ -1226,6 +1232,19 @@ where
         let mut poll_durations = TxManagerPollDurations::default();
 
         let this = self.get_mut();
+
+        while this.local_rebroadcast_interval.poll_tick(cx).is_ready() {
+            let locals = this.pool.pending_local_transactions();
+            for peer in this.peers.iter_mut() {
+                for tx in &locals {
+                    // mark it as unseen to ensure delivery
+                    peer.1.seen_transactions.remove(tx.hash());
+                }
+            }
+            this.propagate_transactions(
+                locals.into_iter().map(PropagateTransaction::new).collect(),
+            );
+        }
 
         // All streams are polled until their corresponding budget is exhausted, then we manually
         // yield back control to tokio. See `NetworkManager` for more context on the design
