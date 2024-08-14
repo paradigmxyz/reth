@@ -623,6 +623,8 @@ where
         for block_number in last_database_block_number.saturating_add(1)..=
             self.canonical_in_memory_state.get_canonical_block_number()
         {
+            // TODO: there might be an update between loop iterations, we
+            // need to handle that situation.
             let block_state = self
                 .canonical_in_memory_state
                 .state_by_number(block_number)
