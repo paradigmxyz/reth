@@ -602,7 +602,41 @@ where
     DB: Database,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        self.database.transaction_id(tx_hash)
+        // First, check the database
+        if let Some(id) = self.database.transaction_id(tx_hash)? {
+            return Ok(Some(id))
+        }
+
+        // If the transaction is not found in the database, check the in-memory state
+
+        // Get the last transaction number stored in the database
+        let last_database_block_number = self.database.last_block_number()?;
+        let last_database_tx_id = self
+            .database
+            .block_body_indices(last_database_block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?
+            .last_tx_num();
+
+        // Find the transaction in the in-memory state with the matching hash, and return its
+        // number
+        let mut in_memory_tx_id = last_database_tx_id + 1;
+        for block_number in last_database_block_number.saturating_add(1)..=
+            self.canonical_in_memory_state.get_canonical_block_number()
+        {
+            let block_state = self
+                .canonical_in_memory_state
+                .state_by_number(block_number)
+                .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
+            for tx in &block_state.block().block().body {
+                if tx.hash() == tx_hash {
+                    return Ok(Some(in_memory_tx_id))
+                }
+
+                in_memory_tx_id += 1;
+            }
+        }
+
+        Ok(None)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
