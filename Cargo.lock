@@ -435,6 +435,8 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "jsonrpsee-types",
+ "jsonwebtoken",
+ "rand 0.8.5",
  "serde",
  "thiserror",
 ]

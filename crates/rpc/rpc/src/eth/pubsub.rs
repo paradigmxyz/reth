@@ -108,9 +108,9 @@ where
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub
-                .new_headers_stream()
-                .map(|block| EthSubscriptionResult::Header(Box::new(block.into())));
+            let stream = pubsub.new_headers_stream().map(|block| {
+                EthSubscriptionResult::<reth_rpc_types::Transaction>::Header(Box::new(block.into()))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
@@ -122,8 +122,9 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream =
-                pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
+            let stream = pubsub.log_stream(filter).map(|log| {
+                EthSubscriptionResult::<reth_rpc_types::Transaction>::Log(Box::new(log))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -132,11 +133,11 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(
-                                reth_rpc_types_compat::transaction::from_recovered(
+                            EthSubscriptionResult::<reth_rpc_types::Transaction>::FullTransaction(
+                                Box::new(reth_rpc_types_compat::transaction::from_recovered(
                                     tx.transaction.to_recovered_transaction(),
-                                ),
-                            ))
+                                )),
+                            )
                         });
                         return pipe_from_stream(accepted_sink, stream).await
                     }
@@ -153,7 +154,7 @@ where
 
             let stream = pubsub
                 .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::TransactionHash);
+                .map(EthSubscriptionResult::<reth_rpc_types::Transaction>::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {
