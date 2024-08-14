@@ -197,6 +197,17 @@ where
         }
     }
 
+    /// Returns a list of entries in the given transaction range.
+    ///
+    /// First, the entries are fetched from the database using the provided closure. When there's no
+    /// database entries left, but the range is still not exhausted, the entries are fetched
+    /// from the in-memory state using the provided closure.
+    ///
+    /// `query_database` is called with the transaction range
+    /// `query_in_memory` is called with the block state and the index of the transaction in the
+    /// block
+    ///
+    /// The entries are returned in the order of the transaction numbers.
     fn entries_by_tx_range<R: RangeBounds<TxNumber>, T>(
         &self,
         range: R,
