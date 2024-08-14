@@ -4,7 +4,7 @@ use crate::phf::PHFKey;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper struct for [`DummyFunction`].
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Fmph {
     function: Option<DummyFunction>,
 }
@@ -26,15 +26,5 @@ impl PerfectHashingFunction for Fmph {
             return Ok(f.get(key))
         }
         Err(NippyJarError::PHFMissingKeys)
-    }
-}
-
-#[cfg(test)]
-impl PartialEq for Fmph {
-    fn eq(&self, _other: &Self) -> bool {
-        match (&self.function, &_other.function) {
-            (Some(func1), Some(func2)) => func1 == func2,
-            _ => false,
-        }
     }
 }

@@ -34,7 +34,7 @@ use compression::Compressors;
 
 pub mod phf;
 pub use phf::PHFKey;
-use phf::{Fmph, Functions, GoFmph, PerfectHashingFunction};
+use phf::{Fmph, Functions, PerfectHashingFunction};
 
 mod error;
 pub use error::NippyJarError;
@@ -200,13 +200,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// `HashMap`
     pub fn with_fmph(mut self) -> Self {
         self.phf = Some(Functions::Fmph(Fmph::new()));
-        self
-    }
-
-    /// Adds [`phf::GoFmph`] perfect hashing function. right now it use dummy function implemented
-    /// by `HashMap`
-    pub fn with_gofmph(mut self) -> Self {
-        self.phf = Some(Functions::GoFmph(GoFmph::new()));
         self
     }
 
@@ -667,9 +660,6 @@ mod tests {
 
         // fmph bytes size for 100 values of 32 bytes: 54
         check_phf(create_nippy().with_fmph());
-
-        // fmph bytes size for 100 values of 32 bytes: 46
-        check_phf(create_nippy().with_gofmph());
     }
 
     #[test]

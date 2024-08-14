@@ -5,9 +5,6 @@ use std::{collections::HashMap, hash::Hash};
 mod fmph;
 pub use fmph::Fmph;
 
-mod go_fmph;
-pub use go_fmph::GoFmph;
-
 /// Trait alias for [`PerfectHashingFunction`] keys.
 pub trait PHFKey: AsRef<[u8]> + Sync + Clone + Hash {}
 impl<T: AsRef<[u8]> + Sync + Clone + Hash> PHFKey for T {}
@@ -47,12 +44,6 @@ impl<T: PHFKey> From<&[T]> for DummyGoFunction {
     }
 }
 
-impl DummyGoFunction {
-    pub(crate) fn get(&self, key: &[u8]) -> Option<u64> {
-        self.map.get(key).map(|&v| v as u64)
-    }
-}
-
 /// Trait to build and query a perfect hashing function.
 pub trait PerfectHashingFunction: Serialize + for<'a> Deserialize<'a> {
     /// Adds the key set and builds the perfect hashing function.
@@ -64,24 +55,21 @@ pub trait PerfectHashingFunction: Serialize + for<'a> Deserialize<'a> {
 
 /// Enumerates all types of perfect hashing functions.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Functions {
     Fmph(Fmph),
-    GoFmph(GoFmph),
 }
 
 impl PerfectHashingFunction for Functions {
     fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
         match self {
             Self::Fmph(f) => f.set_keys(keys),
-            Self::GoFmph(f) => f.set_keys(keys),
         }
     }
 
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         match self {
             Self::Fmph(f) => f.get_index(key),
-            Self::GoFmph(f) => f.get_index(key),
         }
     }
 }
