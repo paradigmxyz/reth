@@ -705,8 +705,9 @@ where
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        let provider = self.database.provider()?;
         Ok(self
-            .block_state_by_tx_id(id)?
+            .block_state_by_tx_id(&provider, id)?
             .and_then(|(block_state, _)| block_state)
             .map(|block_state| block_state.block().block().number))
     }
