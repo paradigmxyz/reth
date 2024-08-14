@@ -1003,6 +1003,13 @@ where
         self.history_by_block_hash(hash)
     }
 
+    fn state_by_block_id(&self, block_id: BlockId) -> ProviderResult<StateProviderBox> {
+        match block_id {
+            BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
+            BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
+        }
+    }
+
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         if let Ok(state) = self.database.history_by_block_hash(block_hash) {

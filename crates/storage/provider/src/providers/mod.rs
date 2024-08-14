@@ -661,6 +661,13 @@ where
         state
     }
 
+    fn state_by_block_id(&self, block_id: BlockId) -> ProviderResult<StateProviderBox> {
+        match block_id {
+            BlockId::Number(block_number) => self.state_by_block_number_or_tag(block_number),
+            BlockId::Hash(block_hash) => self.history_by_block_hash(block_hash.into()),
+        }
+    }
+
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
     ///
     /// Note: if a number is provided this will only look at historical(canonical) state.

@@ -750,6 +750,10 @@ impl StateProviderFactory for MockEthProvider {
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
     }
+
+    fn state_by_block_id(&self, _block_id: BlockId) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
 }
 
 impl WithdrawalsProvider for MockEthProvider {
