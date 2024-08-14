@@ -1,7 +1,6 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, PerfectHashingFunction,
-    RefRow,
+    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
 use std::{ops::Range, sync::Arc};
 use sucds::int_vectors::Access;

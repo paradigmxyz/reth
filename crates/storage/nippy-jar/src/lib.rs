@@ -16,8 +16,10 @@
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     error::Error as StdError,
     fs::{File, OpenOptions},
+    hash::Hash,
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -32,9 +34,41 @@ pub mod compression;
 use compression::Compression;
 use compression::Compressors;
 
-pub mod phf;
-pub use phf::PHFKey;
-use phf::{Fmph, Functions, PerfectHashingFunction};
+/// Enumerates all types of perfect hashing functions.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum Functions {
+    Dummy(Option<HashMap<Vec<u8>, usize>>),
+}
+
+impl Functions {
+    #[allow(dead_code)]
+    /// Adds the key set and builds the Functions
+    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
+        &mut self,
+        keys: &[T],
+    ) -> Result<(), NippyJarError> {
+        match self {
+            Self::Dummy(ref mut map) => {
+                let mut phf_map = HashMap::new();
+                for (index, key) in keys.iter().enumerate() {
+                    phf_map.insert(key.as_ref().to_vec(), index);
+                }
+                *map = Some(phf_map);
+                Ok(())
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Get corresponding associated integer. There might be false positives.
+    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
+        match self {
+            Self::Dummy(Some(map)) => Ok(map.get(key).map(|&v| v as u64)),
+            _ => Err(NippyJarError::PHFMissingKeys),
+        }
+    }
+}
 
 mod error;
 pub use error::NippyJarError;
@@ -196,10 +230,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self
     }
 
-    /// Adds [`phf::Fmph`] perfect hashing function. right now it use dummy function implemented by
-    /// `HashMap`
+    /// Adds HashMap-based PHF. This is a dummy implementation and should be used for testing
     pub fn with_fmph(mut self) -> Self {
-        self.phf = Some(Functions::Fmph(Fmph::new()));
+        self.phf = Some(Functions::Dummy(None));
         self
     }
 
@@ -325,6 +358,21 @@ impl<H: NippyJarHeader> NippyJar<H> {
         }
         Ok(())
     }
+
+    #[allow(dead_code)]
+    /// Adds the key set and builds the Functions
+    fn set_keys<T: AsRef<[u8]> + Sync + Clone + Hash>(
+        &mut self,
+        keys: &[T],
+    ) -> Result<(), NippyJarError> {
+        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
+    }
+
+    #[allow(dead_code)]
+    /// Get corresponding associated integer. There might be false positives.
+    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
+        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
+    }
 }
 
 impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
@@ -338,16 +386,6 @@ impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
 
     fn size(&self) -> usize {
         self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
-    }
-}
-
-impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
-    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
-        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
-    }
-
-    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
-        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
     }
 }
 
@@ -371,7 +409,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// later on inserted.
     ///
     /// Currently collecting all items before acting on them.
-    pub fn prepare_index<T: PHFKey>(
+    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone + Hash>(
         &mut self,
         values: impl IntoIterator<Item = ColumnResult<T>>,
         row_count: usize,
@@ -620,23 +658,17 @@ mod tests {
 
         let create_nippy = || -> NippyJar<()> {
             let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
-            assert!(matches!(
-                NippyJar::set_keys(&mut nippy, &col1),
-                Err(NippyJarError::PHFMissing)
-            ));
+            assert!(matches!(nippy.set_keys(&col1), Err(NippyJarError::PHFMissing)));
             nippy
         };
 
         let check_phf = |mut nippy: NippyJar<_>| {
-            assert!(matches!(
-                NippyJar::get_index(&nippy, &col1[0]),
-                Err(NippyJarError::PHFMissingKeys)
-            ));
-            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+            assert!(matches!(nippy.get_index(&col1[0]), Err(NippyJarError::PHFMissingKeys)));
+            assert!(nippy.set_keys(&col1).is_ok());
 
             let collect_indexes = |nippy: &NippyJar<_>| -> Vec<u64> {
                 col1.iter()
-                    .map(|value| NippyJar::get_index(nippy, value.as_slice()).unwrap().unwrap())
+                    .map(|value| nippy.get_index(value.as_slice()).unwrap().unwrap())
                     .collect()
             };
 
@@ -645,7 +677,7 @@ mod tests {
             assert_eq!(indexes.iter().collect::<HashSet<_>>().len(), indexes.len());
 
             // Ensure reproducibility
-            assert!(NippyJar::set_keys(&mut nippy, &col1).is_ok());
+            assert!(nippy.set_keys(&col1).is_ok());
             assert_eq!(indexes, collect_indexes(&nippy));
 
             // Ensure that loaded phf provides the same function outputs
