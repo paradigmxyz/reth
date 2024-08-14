@@ -321,7 +321,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pending_pool.all().collect()
     }
-    /// Returns all an iterator in transactions from the pending sub-pool
+    /// Returns an iterator over all transactions from the pending sub-pool
     pub(crate) fn pending_transactions_iter(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.pending_pool.all()
     }
