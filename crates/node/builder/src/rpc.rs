@@ -7,7 +7,7 @@ use std::{
 
 use futures::TryFutureExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{api::EngineApiServer, eth::FullEthApiServer},

@@ -3,7 +3,6 @@ pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 use std::{marker::PhantomData, sync::Arc};
 
-use reth_chainspec::ChainSpec;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},

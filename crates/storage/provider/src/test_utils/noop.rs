@@ -44,6 +44,8 @@ use crate::{
 pub struct NoopProvider;
 
 impl ChainSpecProvider for NoopProvider {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         MAINNET.clone()
     }
