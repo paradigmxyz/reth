@@ -552,3 +552,35 @@ test-fuzz = "5"
 [patch.crates-io]
 revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
+
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6", features = [
+    "reqwest",
+] }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6", features = [
+    "eth",
+] }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6", features = [
+    "reqwest-rustls-tls",
+] }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
