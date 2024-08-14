@@ -731,6 +731,14 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
+    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    pub(crate) fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pending_transactions().iter().filter(|tx| tx.origin == origin).cloned().collect()
+    }
+
     /// Returns all the transactions belonging to the hashes.
     ///
     /// If no transaction exists, it is skipped.

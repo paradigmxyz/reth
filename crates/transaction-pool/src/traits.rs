@@ -344,6 +344,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns all transactions that where submitted as [TransactionOrigin::Local]
     fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::Local)
@@ -357,6 +363,25 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns all transactions that where submitted as [TransactionOrigin::External]
     fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::External)
     }
 
     /// Returns a set of all senders of transactions in the pool

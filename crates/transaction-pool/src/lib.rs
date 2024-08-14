@@ -523,6 +523,13 @@ where
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
     }
+
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        todo!()
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
