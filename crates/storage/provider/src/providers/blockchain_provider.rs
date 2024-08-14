@@ -200,16 +200,12 @@ where
     fn entries_by_tx_range<R: RangeBounds<TxNumber>, T>(
         &self,
         range: R,
-        query_database: impl Fn(R) -> ProviderResult<Vec<T>>,
+        query_database: impl Fn(RangeInclusive<TxNumber>) -> ProviderResult<Vec<T>>,
         query_in_memory: impl Fn(&BlockState, usize) -> ProviderResult<T>,
     ) -> ProviderResult<Vec<T>> {
         let provider = self.database.provider()?;
-
-        let start_tx_number = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
+        let (start_tx_number, end_tx_number) = self.convert_range_bounds(range, || u64::MAX);
+        let range = start_tx_number..=end_tx_number;
         let last_database_block_number = provider.last_block_number()?;
 
         if start_tx_number <= last_database_block_number &&
@@ -231,7 +227,7 @@ where
 
             // Then, fetch the in-memory transactions for the rest of the range.
             let mut in_memory_tx_number = last_database_tx_number.saturating_add(1);
-            let Some((mut block_state, mut tx_index)) =
+            let Some((block_state, mut tx_index)) =
                 self.block_state_by_tx_id(&provider, in_memory_tx_number)?
             else {
                 return Ok(Vec::new())
@@ -241,7 +237,7 @@ where
 
             let mut in_memory_entries = Vec::new();
             if let Some(block_state) = block_state {
-                let block_number = block_state.block().block().number;
+                let mut block_number = block_state.block().block().number;
                 loop {
                     // Lookup the next in-memory block. If there are no more in-memory blocks,
                     // break.
