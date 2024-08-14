@@ -2,16 +2,16 @@ use crate::{PoolSize, TransactionOrigin};
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
-pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 100;
+pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = usize::MAX;
 
 /// The default maximum allowed number of transactions in the given subpool.
-pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 50_000;
+pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = usize::MAX;
 
 /// The default maximum allowed size of the given subpool.
-pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
+pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 10 * 1024;
 
 /// The default additional validation tasks size.
-pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
+pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 3;
 
 /// Default price bump (in %) for the transaction pool underpriced check.
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
