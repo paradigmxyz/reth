@@ -8011,6 +8011,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot 0.12.3",
+ "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",
