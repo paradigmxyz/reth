@@ -113,7 +113,7 @@ where
     Node: FullNodeComponents,
     AddOns: NodeAddOns<Node>,
 {
-    /// Returns the [`ChainSpec`] of the node.
+    /// Returns the chain spec of the node.
     pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
         self.provider.chain_spec()
     }
