@@ -8,9 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider,
-};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -203,20 +201,22 @@ where
     /// database entries left, but the range is still not exhausted, the entries are fetched
     /// from the in-memory state using the provided closure.
     ///
-    /// `query_database` is called with the transaction range
-    /// `query_in_memory` is called with the block state and the index of the transaction in the
-    /// block
+    /// - `query_database` is called with the transaction range
+    /// - `query_in_memory` is called with the block state and the index of the transaction in the
+    ///   block
     ///
     /// The entries are returned in the order of the transaction numbers.
-    fn entries_by_tx_range<R: RangeBounds<TxNumber>, T>(
+    fn entries_by_tx_range<T>(
         &self,
-        range: R,
+        range: impl RangeBounds<TxNumber>,
         query_database: impl Fn(RangeInclusive<TxNumber>) -> ProviderResult<Vec<T>>,
         query_in_memory: impl Fn(&BlockState, usize) -> ProviderResult<T>,
     ) -> ProviderResult<Vec<T>> {
         let provider = self.database.provider()?;
+
         let (start_tx_number, end_tx_number) = self.convert_range_bounds(range, || u64::MAX);
         let range = start_tx_number..=end_tx_number;
+
         let last_database_block_number = provider.last_block_number()?;
 
         if start_tx_number <= last_database_block_number &&
