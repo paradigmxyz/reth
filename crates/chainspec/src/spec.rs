@@ -1,4 +1,4 @@
-use crate::constants::MAINNET_DEPOSIT_CONTRACT;
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, ChainSpecTrait};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
@@ -813,8 +813,11 @@ impl From<Genesis> for ChainSpec {
 /// A trait for reading the current [`ChainSpec`].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
+    /// The chain spec type.
+    type ChainSpec: ChainSpecTrait;
+
     /// Get an [`Arc`] to the [`ChainSpec`].
-    fn chain_spec(&self) -> Arc<ChainSpec>;
+    fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 
 /// A helper to build custom chain specs

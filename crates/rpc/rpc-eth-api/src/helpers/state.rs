@@ -2,6 +2,7 @@
 //! RPC methods.
 
 use futures::Future;
+use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
@@ -136,7 +137,7 @@ pub trait LoadState: EthApiTypes {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider;
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>;
 
     /// Returns a handle for reading data from memory.
     ///

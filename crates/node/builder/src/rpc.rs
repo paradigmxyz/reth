@@ -6,7 +6,8 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
+use reth_chainspec::ChainSpec;
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{api::EngineApiServer, eth::FullEthApiServer},
@@ -260,7 +261,7 @@ pub async fn launch_rpc_servers<Node, Engine, EthApi>(
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
     EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
-    Node: FullNodeComponents + Clone,
+    Node: FullNodeComponents<ChainSpec = ChainSpec> + Clone,
     Engine: EngineApiServer<Node::Engine>,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;

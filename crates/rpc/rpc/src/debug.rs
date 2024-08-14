@@ -1,7 +1,7 @@
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
@@ -69,7 +69,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
@@ -767,7 +767,7 @@ impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,

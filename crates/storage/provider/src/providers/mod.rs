@@ -13,7 +13,7 @@ use reth_blockchain_tree_api::{
     InsertPayloadOk,
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecTrait};
 use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -68,16 +68,16 @@ pub use blockchain_provider::BlockchainProvider2;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[allow(missing_debug_implementations)]
-pub struct BlockchainProvider<DB> {
+pub struct BlockchainProvider<DB, Spec = ChainSpec> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    database: ProviderFactory<DB, Spec>,
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
 }
 
-impl<DB> Clone for BlockchainProvider<DB> {
+impl<DB, Spec> Clone for BlockchainProvider<DB, Spec> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
@@ -613,11 +613,14 @@ where
     }
 }
 
-impl<DB> ChainSpecProvider for BlockchainProvider<DB>
+impl<DB, ChainSpec> ChainSpecProvider for BlockchainProvider<DB, ChainSpec>
 where
     DB: Send + Sync,
+    ChainSpec: ChainSpecTrait,
 {
-    fn chain_spec(&self) -> Arc<ChainSpec> {
+    type ChainSpec = ChainSpec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.database.chain_spec()
     }
 }

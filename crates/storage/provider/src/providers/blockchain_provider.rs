@@ -38,9 +38,9 @@ use tracing::trace;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[allow(missing_debug_implementations)]
-pub struct BlockchainProvider2<DB> {
+pub struct BlockchainProvider2<DB, Spec = ChainSpec> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    database: ProviderFactory<DB, Spec>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(super) canonical_in_memory_state: CanonicalInMemoryState,
@@ -1171,6 +1171,8 @@ impl<DB> ChainSpecProvider for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.database.chain_spec()
     }

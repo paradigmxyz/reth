@@ -7,7 +7,7 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecTrait};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
@@ -39,11 +39,11 @@ mod metrics;
 ///
 /// This provider implements most provider or provider factory traits.
 #[derive(Debug)]
-pub struct ProviderFactory<DB> {
+pub struct ProviderFactory<DB, Spec = ChainSpec> {
     /// Database
     db: Arc<DB>,
     /// Chain spec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<Spec>,
     /// Static File Provider
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
@@ -569,10 +569,12 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB> ChainSpecProvider for ProviderFactory<DB>
+impl<DB, ChainSpec> ChainSpecProvider for ProviderFactory<DB, ChainSpec>
 where
     DB: Send + Sync,
+    ChainSpec: ChainSpecTrait,
 {
+    type ChainSpec = ChainSpec;
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()
     }
@@ -591,7 +593,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     }
 }
 
-impl<DB> Clone for ProviderFactory<DB> {
+impl<DB, Spec> Clone for ProviderFactory<DB, Spec> {
     fn clone(&self) -> Self {
         Self {
             db: Arc::clone(&self.db),

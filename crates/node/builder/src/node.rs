@@ -62,6 +62,8 @@ where
     type Primitives = N::Primitives;
 
     type Engine = N::Engine;
+
+    type ChainSpec = N::ChainSpec;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
@@ -113,7 +115,7 @@ where
     AddOns: NodeAddOns<Node>,
 {
     /// Returns the [`ChainSpec`] of the node.
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
         self.provider.chain_spec()
     }
 

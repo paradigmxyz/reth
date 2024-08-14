@@ -91,6 +91,7 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
     type Primitives = T::Primitives;
     type Engine = T::Engine;
+    type ChainSpec = T::ChainSpec;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {

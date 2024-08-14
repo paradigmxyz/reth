@@ -7670,6 +7670,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.0.5"
 dependencies = [
+ "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",

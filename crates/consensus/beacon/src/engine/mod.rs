@@ -4,6 +4,7 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
+use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
@@ -231,7 +232,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + 'static,
     Client: BlockClient + 'static,
     EngineT: EngineTypes + Unpin,
@@ -1797,7 +1798,7 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + Unpin
         + 'static,
     EngineT: EngineTypes + Unpin,

@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use reth_chainspec::ChainSpecTrait;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -26,32 +27,37 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
+    /// The type used for configuration of the EVM.
+    type ChainSpec: ChainSpecTrait;
 }
 
 /// A [`NodeTypes`] type builder
 #[derive(Default, Debug)]
-pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
+pub struct AnyNodeTypes<P = (), E = (), C = ()>(PhantomData<P>, PhantomData<E>, PhantomData<C>);
 
-impl<P, E> AnyNodeTypes<P, E> {
+impl<P, E, C> AnyNodeTypes<P, E, C> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
-        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E, C> {
+        AnyNodeTypes::<T, E, C>(PhantomData::<T>, PhantomData::<E>, PhantomData::<C>)
     }
 
     /// Sets the `Engine` associated type.
-    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
-        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    pub const fn engine<T>(self) -> AnyNodeTypes<P, T, C> {
+        AnyNodeTypes::<P, T, C>(PhantomData::<P>, PhantomData::<T>, PhantomData::<C>)
     }
 }
 
-impl<P, E> NodeTypes for AnyNodeTypes<P, E>
+impl<P, E, C> NodeTypes for AnyNodeTypes<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
+    C: ChainSpecTrait,
 {
     type Primitives = P;
 
     type Engine = E;
+
+    type ChainSpec = C;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
@@ -62,7 +68,7 @@ pub trait FullNodeTypes: NodeTypes + 'static {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self::DB>;
+    type Provider: FullProvider<Self::DB, Self::ChainSpec>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
@@ -103,12 +109,13 @@ where
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
+    type ChainSpec = Types::ChainSpec;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,
-    Provider: FullProvider<DB>,
+    Provider: FullProvider<DB, Types::ChainSpec>,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;

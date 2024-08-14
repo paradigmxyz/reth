@@ -151,6 +151,7 @@ use jsonrpsee::{
     },
     Methods, RpcModule,
 };
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -754,10 +755,11 @@ where
     }
 }
 
-impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EthApi>
+impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Network: NetworkInfo + Clone + 'static,
+    Provider: ChainSpecProvider<ChainSpec = ChainSpec>,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network>

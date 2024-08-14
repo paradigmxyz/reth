@@ -6,17 +6,18 @@ use crate::{
     StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::{ChainSpec, ChainSpecTrait};
 use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database>:
+pub trait FullProvider<DB: Database, ChainSpec: ChainSpecTrait>:
     DatabaseProviderFactory<DB>
     + StaticFileProviderFactory
     + BlockReaderIdExt
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
     + StageCheckpointReader
@@ -26,14 +27,14 @@ pub trait FullProvider<DB: Database>:
 {
 }
 
-impl<T, DB: Database> FullProvider<DB> for T where
+impl<T, DB: Database, ChainSpec: ChainSpecTrait> FullProvider<DB, ChainSpec> for T where
     T: DatabaseProviderFactory<DB>
         + StaticFileProviderFactory
         + BlockReaderIdExt
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions
         + StageCheckpointReader
@@ -48,7 +49,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
 pub trait FullRpcProvider:
     StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = ChainSpec>
     + BlockReaderIdExt
     + HeaderProvider
     + TransactionsProvider
@@ -62,7 +63,7 @@ pub trait FullRpcProvider:
 impl<T> FullRpcProvider for T where
     T: StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + BlockReaderIdExt
         + HeaderProvider
         + TransactionsProvider
