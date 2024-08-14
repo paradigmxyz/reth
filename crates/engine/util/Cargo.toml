@@ -48,3 +48,6 @@ optimism = [
     "reth-beacon-consensus/optimism",
     "reth-ethereum-forks/optimism"
 ]
+telos = [
+    "revm-primitives/telos",
+]

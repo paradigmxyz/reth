@@ -37,3 +37,8 @@ metrics.workspace = true
 
 # misc
 tracing.workspace = true
+
+[features]
+telos = [
+    "revm/telos",
+]

@@ -60,3 +60,6 @@ alloy-genesis.workspace = true
 [features]
 test-utils = []
 optimism = ["reth-primitives/optimism", "reth-provider/optimism"]
+telos = [
+    "reth-blockchain-tree-api/telos",
+]

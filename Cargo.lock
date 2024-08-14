@@ -4452,7 +4452,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -8897,8 +8897,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "13.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2f635bbbf4002b1b5c0219f841ec1a317723883ed7662c0d138617539a6087"
+source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#d015966b5131bf4d645465f8802d7a5ed7ca002a"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8911,9 +8910,8 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43cbb1576a147317c6990cf69d6cd5ef402df99f638616ba911006e9ec45866b"
+version = "0.5.5"
+source = "git+https://github.com/telosnetwork/telos-evm-inspectors?branch=telos-main#b9e00e316c5a01be709282e0f437ef5222376952"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8930,8 +8928,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "9.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ad04c7d87dc3421a5ccca76e56dbd0b29a358c03bb41fe9e80976e9d3f397d"
+source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#d015966b5131bf4d645465f8802d7a5ed7ca002a"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8940,8 +8937,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3526a4ba5ec400e7bbe71affbc10fe2e67c1cd1fb782bab988873d09a102e271"
+source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#d015966b5131bf4d645465f8802d7a5ed7ca002a"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8960,8 +8956,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4093d98a26601f0a793871c5bc7928410592f76b1f03fc89fde77180c554643c"
+source = "git+https://github.com/telosnetwork/telos-revm?branch=telos-main#d015966b5131bf4d645465f8802d7a5ed7ca002a"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",

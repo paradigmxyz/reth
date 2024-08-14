@@ -76,3 +76,6 @@ rand.workspace = true
 optimism = ["reth-primitives/optimism", "reth-execution-types/optimism"]
 serde = ["reth-execution-types/serde"]
 test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils", "reth-trie/test-utils", "reth-chain-state/test-utils", "reth-db/test-utils"]
+telos = [
+    "revm/telos",
+]

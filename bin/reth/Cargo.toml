@@ -147,6 +147,26 @@ optimism = [
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
+telos = [
+    "reth-basic-payload-builder/telos",
+    "reth-ethereum-payload-builder/telos",
+    "reth-evm/telos",
+    "reth-execution-types/telos",
+    "reth-payload-builder/telos",
+    "reth-provider/telos",
+    "reth-revm/telos",
+    "reth-rpc/telos",
+    "reth-rpc-eth-types/telos",
+    "reth-transaction-pool/telos",
+    "reth-trie/telos",
+    "reth-trie-db/telos",
+    "reth-engine-util/telos",
+    "reth-primitives/telos",
+    "reth-blockchain-tree/telos",
+    "reth-rpc-types-compat/telos",
+    "reth-consensus-common/telos",
+    "reth-stages/telos",
+]
 
 [[bin]]
 name = "reth"

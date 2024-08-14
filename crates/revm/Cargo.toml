@@ -38,3 +38,6 @@ std = []
 c-kzg = ["revm/c-kzg"]
 test-utils = ["dep:reth-trie"]
 optimism = ["revm/optimism"]
+telos = [
+    "revm/telos",
+]

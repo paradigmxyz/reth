@@ -30,3 +30,6 @@ default = ["std"]
 optimism = ["dep:reth-chainspec"]
 serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
 std = []
+telos = [
+    "revm/telos",
+]

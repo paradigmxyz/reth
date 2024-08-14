@@ -12,10 +12,14 @@ use reth_blockchain_tree_api::{
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+#[cfg(not(feature = "telos"))]
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_errors::BlockValidationError;
 use reth_execution_types::{Chain, ExecutionOutcome};
+#[cfg(not(feature = "telos"))]
+use reth_primitives::GotExpected;
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
+    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
@@ -25,7 +29,9 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_storage_errors::provider::{ProviderResult, RootMismatch};
+#[cfg(not(feature = "telos"))]
+use reth_storage_errors::provider::RootMismatch;
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
@@ -396,6 +402,7 @@ where
 
         let provider = self.externals.provider_factory.provider()?;
 
+        #[cfg(not(feature = "telos"))] {
         // Validate that the block is post merge
         let parent_td = provider
             .header_td(&block.parent_hash)?
@@ -413,6 +420,7 @@ where
                 hash: block.hash(),
             })
             .into())
+        }
         }
 
         let parent_header = provider
@@ -1239,6 +1247,16 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
+                #[cfg(feature = "telos")]
+                let (_, trie_updates) = StateRoot::from_tx(provider.tx_ref())
+                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                        &hashed_state_sorted,
+                    ))
+                    .with_prefix_sets(prefix_sets)
+                    .root_with_updates()
+                    .map_err(Into::<BlockValidationError>::into)?;
+                #[cfg(not(feature = "telos"))]
                 let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
                     .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                         DatabaseHashedCursorFactory::new(provider.tx_ref()),
@@ -1247,7 +1265,9 @@ where
                     .with_prefix_sets(prefix_sets)
                     .root_with_updates()
                     .map_err(Into::<BlockValidationError>::into)?;
+                #[cfg(not(feature = "telos"))]
                 let tip = blocks.tip();
+                #[cfg(not(feature = "telos"))]
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
                         root: GotExpected { got: state_root, expected: tip.state_root },
