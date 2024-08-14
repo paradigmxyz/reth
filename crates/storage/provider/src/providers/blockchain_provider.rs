@@ -8,7 +8,9 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider,
+};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -192,6 +194,81 @@ where
             }
 
             Ok(None)
+        }
+    }
+
+    fn entries_by_tx_range<R: RangeBounds<TxNumber>, T>(
+        &self,
+        range: R,
+        query_database: impl Fn(R) -> ProviderResult<Vec<T>>,
+        query_in_memory: impl Fn(&BlockState, usize) -> ProviderResult<T>,
+    ) -> ProviderResult<Vec<T>> {
+        let provider = self.database.provider()?;
+
+        let start_tx_number = match range.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => 0,
+        };
+        let last_database_block_number = provider.last_block_number()?;
+
+        if start_tx_number <= last_database_block_number &&
+            (matches!(range.end_bound(), Bound::Included(&n) if n < last_database_block_number) ||
+                matches!(range.end_bound(), Bound::Excluded(&n) if n <= last_database_block_number))
+        {
+            // The range is fully in the database
+            query_database(range)
+        } else {
+            // The range is partially in the in-memory state
+
+            // First, fetch the database entries up to the last database transaction number
+            let last_database_tx_number = provider
+                .block_body_indices(last_database_block_number)?
+                .map(|index| index.last_tx_num())
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
+            let database_range = start_tx_number..=last_database_tx_number;
+            let database_entries = query_database(database_range)?;
+
+            // Then, fetch the in-memory transactions for the rest of the range.
+            let mut in_memory_tx_number = last_database_tx_number.saturating_add(1);
+            let Some((mut block_state, mut tx_index)) =
+                self.block_state_by_tx_id(&provider, in_memory_tx_number)?
+            else {
+                return Ok(Vec::new())
+            };
+            // Sanity check
+            debug_assert!(block_state.is_some());
+
+            let mut in_memory_entries = Vec::new();
+            if let Some(block_state) = block_state {
+                let block_number = block_state.block().block().number;
+                loop {
+                    // Lookup the next in-memory block. If there are no more in-memory blocks,
+                    // break.
+                    let Some(state) = self.canonical_in_memory_state.state_by_number(block_number)
+                    else {
+                        break;
+                    };
+
+                    // Fetch the in-memory entries for the block. If the tx number counter exceeds
+                    // the range, break.
+                    for i in tx_index..state.block().block().body.len() {
+                        in_memory_entries.push(query_in_memory(&state, i)?);
+                        in_memory_tx_number += 1;
+
+                        match range.end_bound() {
+                            Bound::Included(&n) if in_memory_tx_number == n => break,
+                            Bound::Excluded(&n) if in_memory_tx_number == n - 1 => break,
+                            _ => {}
+                        }
+                    }
+
+                    block_number += 1;
+                    tx_index = 0;
+                }
+            }
+
+            Ok(database_entries.into_iter().chain(in_memory_entries).collect())
         }
     }
 }
@@ -770,14 +847,26 @@ where
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<TransactionSignedNoHash>> {
-        self.database.transactions_by_tx_range(range)
+        self.entries_by_tx_range(
+            range,
+            |range| self.database.transactions_by_tx_range(range),
+            |block, index| Ok(block.block().block().body[index].clone().into()),
+        )
     }
 
     fn senders_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.database.senders_by_tx_range(range)
+        self.entries_by_tx_range(
+            range,
+            |range| self.database.senders_by_tx_range(range),
+            |block, index| {
+                block.block().block().body[index]
+                    .recover_signer()
+                    .ok_or(ProviderError::SenderRecoveryError)
+            },
+        )
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -861,7 +950,11 @@ where
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Receipt>> {
-        self.database.receipts_by_tx_range(range)
+        self.entries_by_tx_range(
+            range,
+            |range| self.database.receipts_by_tx_range(range),
+            |block, index| Ok(block.executed_block_receipts()[index].clone()),
+        )
     }
 }
 
