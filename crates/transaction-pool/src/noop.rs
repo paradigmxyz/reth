@@ -247,7 +247,7 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        todo!()
+        vec![]
     }
 
     #[doc = " Imports an _external_ transaction."]
