@@ -1,7 +1,10 @@
 //! The internal transaction pool implementation.
 
 use crate::{
-    config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
+    config::{
+        LocalTransactionConfig, EXPECTED_TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+        TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    },
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
     metrics::{AllTransactionsMetrics, TxPoolMetrics},
@@ -331,7 +334,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn queued_and_pending_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> (SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>) {
+    ) -> (SmallVec<[TransactionId; EXPECTED_TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]>, Vec<TransactionId>)
+    {
         (self.queued_pool.get_txs_by_sender(sender), self.pending_pool.get_txs_by_sender(sender))
     }
 

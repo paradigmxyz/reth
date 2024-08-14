@@ -4,6 +4,8 @@ use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = usize::MAX;
 
+pub(crate) const EXPECTED_TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
+
 /// The default maximum allowed number of transactions in the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = usize::MAX;
 
