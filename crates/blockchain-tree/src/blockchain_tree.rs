@@ -12,10 +12,14 @@ use reth_blockchain_tree_api::{
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+#[cfg(not(feature = "telos"))]
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_errors::BlockValidationError;
 use reth_execution_types::{Chain, ExecutionOutcome};
+#[cfg(not(feature = "telos"))]
+use reth_primitives::GotExpected;
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
+    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
@@ -25,7 +29,11 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_storage_errors::provider::{ProviderResult, RootMismatch};
+#[cfg(not(feature = "telos"))]
+use reth_storage_errors::provider::RootMismatch;
+use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
@@ -324,6 +332,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         debug_assert!(self.validate_block(&block).is_ok(), "Block must be validated");
 
@@ -337,7 +347,7 @@ where
 
         // if not found, check if the parent can be found inside canonical chain.
         if self.is_block_hash_canonical(&parent.hash)? {
-            return self.try_append_canonical_chain(block.clone(), block_validation_kind)
+            return self.try_append_canonical_chain(block.clone(), block_validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -389,6 +399,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         let parent = block.parent_num_hash();
         let block_num_hash = block.num_hash();
@@ -396,6 +408,7 @@ where
 
         let provider = self.externals.provider_factory.provider()?;
 
+        #[cfg(not(feature = "telos"))] {
         // Validate that the block is post merge
         let parent_td = provider
             .header_td(&block.parent_hash)?
@@ -413,6 +426,7 @@ where
                 hash: block.hash(),
             })
             .into())
+        }
         }
 
         let parent_header = provider
@@ -436,6 +450,8 @@ where
             &self.externals,
             block_attachment,
             block_validation_kind,
+            #[cfg(feature = "telos")]
+            telos_extra_fields,
         )?;
 
         self.insert_chain(chain);
@@ -675,9 +691,11 @@ where
     pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
-            Ok(block) => self.insert_block(block, BlockValidationKind::Exhaustive),
+            Ok(block) => self.insert_block(block, BlockValidationKind::Exhaustive, #[cfg(feature = "telos")] telos_extra_fields),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
@@ -772,6 +790,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         // check if we already have this block
         match self.is_block_known(block.num_hash()) {
@@ -786,7 +806,7 @@ where
         }
 
         let status = self
-            .try_insert_validated_block(block.clone(), block_validation_kind)
+            .try_insert_validated_block(block.clone(), block_validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
             .map_err(|kind| InsertBlockError::new(block.block, kind))?;
         Ok(InsertPayloadOk::Inserted(status))
     }
@@ -929,7 +949,7 @@ where
         for block in include_blocks {
             // don't fail on error, just ignore the block.
             let _ = self
-                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
+                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation, #[cfg(feature = "telos")] None)
                 .map_err(|err| {
                     debug!(target: "blockchain_tree", %err, "Failed to insert buffered block");
                     err
@@ -1239,6 +1259,16 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
+                #[cfg(feature = "telos")]
+                let (_, trie_updates) = StateRoot::from_tx(provider.tx_ref())
+                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                        &hashed_state_sorted,
+                    ))
+                    .with_prefix_sets(prefix_sets)
+                    .root_with_updates()
+                    .map_err(Into::<BlockValidationError>::into)?;
+                #[cfg(not(feature = "telos"))]
                 let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
                     .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                         DatabaseHashedCursorFactory::new(provider.tx_ref()),
@@ -1247,7 +1277,9 @@ where
                     .with_prefix_sets(prefix_sets)
                     .root_with_updates()
                     .map_err(Into::<BlockValidationError>::into)?;
+                #[cfg(not(feature = "telos"))]
                 let tip = blocks.tip();
+                #[cfg(not(feature = "telos"))]
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
                         root: GotExpected { got: state_root, expected: tip.state_root },

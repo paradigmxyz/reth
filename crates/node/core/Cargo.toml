@@ -90,6 +90,8 @@ optimism = [
     "reth-rpc-eth-api/optimism",
     "dep:reth-optimism-chainspec",
 ]
+telos = ["reth-chainspec/telos"]
+
 # Features for vergen to generate correct env vars
 jemalloc = []
 asm-keccak = []

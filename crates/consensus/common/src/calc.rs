@@ -1,3 +1,5 @@
+#[cfg(feature = "telos")]
+use reth_chainspec::Chain;
 use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
 
@@ -26,6 +28,10 @@ pub fn base_block_reward(
     block_difficulty: U256,
     total_difficulty: U256,
 ) -> Option<u128> {
+    #[cfg(feature = "telos")]
+    if chain_spec.chain == Chain::from_id(40) || chain_spec.chain == Chain::from_id(41) {
+        return None
+    }
     if chain_spec.fork(EthereumHardfork::Paris).active_at_ttd(total_difficulty, block_difficulty) {
         None
     } else {

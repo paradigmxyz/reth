@@ -100,6 +100,7 @@ default = ["serde"]
 geth-tests = []
 serde = ["dep:serde", "secp256k1/serde", "enr/serde", "reth-network-types/serde"]
 test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
+telos = ["reth-network-peers/telos"]
 
 [[bench]]
 name = "bench"

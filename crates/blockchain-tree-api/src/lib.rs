@@ -14,6 +14,8 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use std::collections::BTreeMap;
 
 pub mod error;
@@ -34,9 +36,11 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
         &self,
         block: SealedBlock,
         validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
-            Ok(block) => self.insert_block(block, validation_kind),
+            Ok(block) => self.insert_block(block, validation_kind, #[cfg(feature = "telos")] telos_extra_fields),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
@@ -66,6 +70,8 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
         &self,
         block: SealedBlockWithSenders,
         validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
@@ -140,6 +146,9 @@ pub enum BlockValidationKind {
 impl BlockValidationKind {
     /// Returns true if the state root should be validated if possible.
     pub const fn is_exhaustive(&self) -> bool {
+        #[cfg(feature = "telos")]
+        return false;
+        #[cfg(not(feature = "telos"))]
         matches!(self, Self::Exhaustive)
     }
 }

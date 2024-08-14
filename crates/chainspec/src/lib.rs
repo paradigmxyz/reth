@@ -9,6 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "telos")]
+pub use spec::{TEVMMAINNET, TEVMTESTNET, TEVMMAINNET_BASE, TEVMTESTNET_BASE};
+
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 

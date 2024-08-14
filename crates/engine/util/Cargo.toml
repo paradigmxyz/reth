@@ -44,8 +44,15 @@ itertools.workspace = true
 # tracing
 tracing.workspace = true
 
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [features]
 optimism = [
     "reth-beacon-consensus/optimism",
     "reth-ethereum-forks/optimism"
+]
+telos = [
+    "revm-primitives/telos",
+    "dep:reth-telos-rpc-engine-api",
 ]

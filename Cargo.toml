@@ -114,6 +114,8 @@ members = [
     "crates/storage/provider/",
     "crates/storage/storage-api/",
     "crates/tasks/",
+    "crates/telos/node",
+    "crates/telos/rpc",
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
@@ -395,13 +397,13 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "14.0.0", features = [
+revm = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.6"
-revm-primitives = { version = "9.0.0", features = [
+revm-inspectors = { git = "https://github.com/telosnetwork/telos-evm-inspectors", branch = "telos-main" }
+revm-primitives = { git = "https://github.com/telosnetwork/telos-revm", branch = "telos-main", features = [
     "std",
 ], default-features = false }
 
@@ -562,3 +564,9 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
+
+# telos
+reth-node-telos = { path = "crates/telos/node" }
+reth-telos-rpc = { path = "crates/telos/rpc" }
+reth-telos-rpc-engine-api = { path = "crates/telos/rpc-engine-api" }
+antelope-client = { git = "https://github.com/telosnetwork/antelope-rs", branch = "finish_table_rows_params" }

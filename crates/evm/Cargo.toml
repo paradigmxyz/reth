@@ -26,6 +26,8 @@ auto_impl.workspace = true
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }
 
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [dev-dependencies]
 parking_lot.workspace = true
 
@@ -33,3 +35,7 @@ parking_lot.workspace = true
 default = ["std"]
 std = []
 test-utils = ["dep:parking_lot"]
+telos = [
+    "revm/telos",
+    "dep:reth-telos-rpc-engine-api",
+]

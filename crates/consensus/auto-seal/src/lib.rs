@@ -376,7 +376,7 @@ impl StorageInner {
 
         // execute the block
         let block_execution_output =
-            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+            executor.executor(&mut db).execute((&block, U256::ZERO).into(), #[cfg(feature = "telos")] None)?;
         let gas_used = block_execution_output.gas_used;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
         let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);

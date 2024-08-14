@@ -60,6 +60,9 @@ once_cell = { workspace = true, optional = true }
 # parallel utils
 rayon.workspace = true
 
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -82,4 +85,8 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "once_cell",
+]
+telos = [
+    "revm/telos",
+    "dep:reth-telos-rpc-engine-api",
 ]

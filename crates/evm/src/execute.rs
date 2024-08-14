@@ -4,6 +4,8 @@
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 
 use core::fmt::Display;
 
@@ -31,7 +33,7 @@ pub trait Executor<DB> {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+    fn execute(self, input: Self::Input<'_>, #[cfg(feature = "telos")] telos_extra_fields: Option<TelosEngineAPIExtraFields>) -> Result<Self::Output, Self::Error>;
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,

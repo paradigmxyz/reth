@@ -18,3 +18,11 @@ reth-storage-errors.workspace = true
 
 # misc
 thiserror.workspace = true
+
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
+[features]
+telos = [
+    "dep:reth-telos-rpc-engine-api",
+]

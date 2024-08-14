@@ -861,7 +861,7 @@ impl TransactionSignedNoHash {
     ///
     /// For optimism this will return [`Address::ZERO`] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
     /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
-    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
+    pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>, #[cfg(feature = "telos")] chain_id: Option<u64>) -> Option<Address> {
         buffer.clear();
         self.transaction.encode_without_signature(buffer);
 
@@ -882,7 +882,7 @@ impl TransactionSignedNoHash {
             }
         }
 
-        self.signature.recover_signer_unchecked(keccak256(buffer))
+        self.signature.recover_signer_unchecked(keccak256(buffer), #[cfg(feature = "telos")] chain_id)
     }
 
     /// Converts into a transaction type with its hash: [`TransactionSigned`].
@@ -1040,6 +1040,13 @@ impl TransactionSigned {
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
         }
+        #[cfg(feature = "telos")]
+        if self.transaction.chain_id() == Some(3) {
+            let mut s_bytes: [u8; 20] = [0; 20];
+            s_bytes.copy_from_slice(&self.signature.s.to_be_bytes::<32>()[0..20]);
+            let address = Address::new(s_bytes);
+            return Some(address);
+        }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
     }
@@ -1057,7 +1064,7 @@ impl TransactionSigned {
             return Some(from)
         }
         let signature_hash = self.signature_hash();
-        self.signature.recover_signer_unchecked(signature_hash)
+        self.signature.recover_signer_unchecked(signature_hash, #[cfg(feature = "telos")] self.chain_id())
     }
 
     /// Recovers a list of signers from a transaction list iterator.

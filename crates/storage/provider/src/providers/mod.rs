@@ -28,6 +28,8 @@ use reth_primitives::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
@@ -733,8 +735,10 @@ where
         &self,
         block: SealedBlockWithSenders,
         validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        self.tree.insert_block(block, validation_kind)
+        self.tree.insert_block(block, validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
     }
 
     fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {

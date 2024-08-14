@@ -22,6 +22,8 @@ use reth_provider::{
     FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
@@ -74,6 +76,8 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<Self, InsertBlockErrorKind>
     where
         DB: Database + Clone,
@@ -96,6 +100,8 @@ impl AppendableChain {
             externals,
             block_attachment,
             block_validation_kind,
+            #[cfg(feature = "telos")]
+            telos_extra_fields,
         )?;
 
         Ok(Self { chain: Chain::new(vec![block], bundle_state, trie_updates) })
@@ -142,6 +148,7 @@ impl AppendableChain {
             externals,
             BlockAttachment::HistoricalFork,
             block_validation_kind,
+            #[cfg(feature = "telos")] None,
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
@@ -174,6 +181,8 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<(ExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
         EDP: FullExecutionDataProvider,
@@ -209,7 +218,7 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state = executor.execute((&block, U256::MAX).into())?;
+        let state = executor.execute((&block, U256::MAX).into(), #[cfg(feature = "telos")] None)?;
         externals.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&state.receipts, &state.requests),
@@ -301,6 +310,7 @@ impl AppendableChain {
             externals,
             block_attachment,
             block_validation_kind,
+            #[cfg(feature = "telos")] None,
         )?;
         // extend the state.
         self.chain.append_block(block, block_state);

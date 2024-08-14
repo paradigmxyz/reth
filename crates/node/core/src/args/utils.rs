@@ -4,7 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
 use reth_chainspec::ChainSpec;
-#[cfg(not(feature = "optimism"))]
+#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
 use reth_chainspec::{DEV, HOLESKY, MAINNET, SEPOLIA};
 use reth_fs_util as fs;
 #[cfg(feature = "optimism")]
@@ -14,9 +14,13 @@ use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP
 /// Chains supported by op-reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] =
     &["optimism", "optimism-sepolia", "base", "base-sepolia", "dev"];
-#[cfg(not(feature = "optimism"))]
+#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
+#[cfg(feature = "telos")]
+/// Chains supported by telos-reth
+pub const SUPPORTED_CHAINS: &[&str] =
+    &["tevmmainnet", "tevmtestnet", "tevmmainnet-base", "tevmtestnet-base"];
 
 /// The help info for the --chain flag
 pub fn chain_help() -> String {
@@ -30,10 +34,22 @@ pub fn chain_help() -> String {
 #[cfg(not(feature = "optimism"))]
 pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
+        #[cfg(not(feature = "telos"))]
         "mainnet" => MAINNET.clone(),
+        #[cfg(not(feature = "telos"))]
         "sepolia" => SEPOLIA.clone(),
+        #[cfg(not(feature = "telos"))]
         "holesky" => HOLESKY.clone(),
+        #[cfg(not(feature = "telos"))]
         "dev" => DEV.clone(),
+        #[cfg(feature = "telos")]
+        "tevmmainnet" => reth_chainspec::TEVMMAINNET.clone(),
+        #[cfg(feature = "telos")]
+        "tevmtestnet" => reth_chainspec::TEVMTESTNET.clone(),
+        #[cfg(feature = "telos")]
+        "tevmmainnet-base" => reth_chainspec::TEVMMAINNET_BASE.clone(),
+        #[cfg(feature = "telos")]
+        "tevmtestnet-base" => reth_chainspec::TEVMTESTNET_BASE.clone(),
         _ => Arc::new(parse_custom_chain_spec(s)?),
     })
 }

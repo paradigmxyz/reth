@@ -109,6 +109,11 @@ optimism = [
 ]
 alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde", "dep:op-alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]
+telos = [
+    "reth-chainspec/telos",
+    "reth-primitives-traits/telos",
+    "revm-primitives/telos",
+]
 
 [[bench]]
 name = "recover_ecdsa_crit"

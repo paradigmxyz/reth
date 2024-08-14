@@ -99,6 +99,7 @@ test-utils = [
     "dep:reth-testing-utils",
     "dep:tempfile",
 ]
+telos = []
 
 [[bench]]
 name = "criterion"

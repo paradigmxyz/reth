@@ -1,0 +1,22 @@
+[package]
+name = "reth-telos-rpc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+
+reth-rpc-eth-api.workspace = true
+reth-rpc-eth-types.workspace = true
+
+antelope-client.workspace = true
+reth-node-telos = { workspace = true, features = ["telos"] }
+log = "0.4.22"
+
+[lints]
+workspace = true

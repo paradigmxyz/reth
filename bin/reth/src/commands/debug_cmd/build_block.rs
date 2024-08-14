@@ -274,7 +274,7 @@ impl Command {
                 let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
                 let block_execution_output =
-                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into(), #[cfg(feature = "telos")] None)?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");

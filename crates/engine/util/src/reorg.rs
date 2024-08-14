@@ -145,7 +145,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }),
+                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -177,6 +177,7 @@ where
                                 payload,
                                 cancun_fields,
                                 tx,
+                                #[cfg(feature = "telos")] telos_extra_fields,
                             }))
                         }
                     };
@@ -195,12 +196,14 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx },
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: reorg_payload,
                             cancun_fields: reorg_cancun_fields,
                             tx: reorg_payload_tx,
+                            #[cfg(feature = "telos")]
+                            telos_extra_fields: None,
                         },
                         // Reorg forkchoice state
                         BeaconEngineMessage::ForkchoiceUpdated {

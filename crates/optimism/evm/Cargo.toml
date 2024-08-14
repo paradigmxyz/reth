@@ -43,3 +43,4 @@ optimism = [
     "reth-optimism-consensus/optimism",
     "reth-revm/optimism",
 ]
+telos = []

@@ -156,7 +156,15 @@ impl Signature {
     /// Using this for signature validation will succeed, even if the signature is malleable or not
     /// compliant with EIP-2. This is provided for compatibility with old signatures which have
     /// large `s` values.
-    pub fn recover_signer_unchecked(&self, hash: B256) -> Option<Address> {
+    pub fn recover_signer_unchecked(&self, hash: B256, #[cfg(feature = "telos")] chain_id: Option<u64>) -> Option<Address> {
+        #[cfg(feature = "telos")]
+        if chain_id == Some(3) {
+            let mut s_bytes: [u8; 20] = [0; 20];
+            s_bytes.copy_from_slice(&self.s.to_be_bytes::<32>()[0..20]);
+            let address = Address::new(s_bytes);
+            return Some(address);
+        }
+
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
@@ -178,7 +186,7 @@ impl Signature {
             return None
         }
 
-        self.recover_signer_unchecked(hash)
+        self.recover_signer_unchecked(hash, #[cfg(feature = "telos")] None)
     }
 
     /// Turn this signature into its byte
@@ -368,6 +376,6 @@ mod tests {
         assert!(signature.recover_signer(hash).is_none());
 
         // use unchecked, ensure it succeeds (the signature is valid if not for EIP-2)
-        assert!(signature.recover_signer_unchecked(hash).is_some());
+        assert!(signature.recover_signer_unchecked(hash, #[cfg(feature = "telos")] tx.chain_id()).is_some());
     }
 }

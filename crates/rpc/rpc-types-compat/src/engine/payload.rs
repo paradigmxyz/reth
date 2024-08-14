@@ -1,10 +1,12 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+#[cfg(not(feature = "telos"))]
+use reth_primitives::UintTryTo;
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
     proofs::{self},
-    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
+    Block, Header, Request, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -46,6 +48,9 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         // it will fit in an u64. This is not always necessarily true, although it is extremely
         // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
         // gas.
+        #[cfg(feature = "telos")]
+        base_fee_per_gas: None,
+        #[cfg(not(feature = "telos"))]
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas

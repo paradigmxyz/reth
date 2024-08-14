@@ -254,6 +254,9 @@ pub const fn validate_against_parent_timestamp(
     parent: &Header,
 ) -> Result<(), ConsensusError> {
     if header.is_timestamp_in_past(parent.timestamp) {
+        #[cfg(feature = "telos")]
+        return Ok(());
+        #[cfg(not(feature = "telos"))]
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
             timestamp: header.timestamp,

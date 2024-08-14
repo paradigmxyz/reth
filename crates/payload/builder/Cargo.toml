@@ -40,3 +40,6 @@ revm.workspace = true
 
 [features]
 test-utils = []
+telos = [
+    "revm/telos",
+]

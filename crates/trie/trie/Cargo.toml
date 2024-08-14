@@ -70,6 +70,9 @@ criterion.workspace = true
 metrics = ["reth-metrics", "dep:metrics"]
 serde = ["dep:serde"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
+telos = [
+    "revm/telos",
+]
 
 [[bench]]
 name = "prefix_set"

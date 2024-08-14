@@ -110,6 +110,10 @@ itertools.workspace = true
 # p2p
 discv5.workspace = true
 
+# telos
+reth-node-telos = { workspace = true, optional = true }
+reth-telos-rpc = { workspace = true, optional = true }
+
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
 libc = "0.2"
@@ -147,6 +151,32 @@ optimism = [
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
+telos = [
+    "dep:reth-node-telos",
+    "dep:reth-telos-rpc",
+    "reth-chainspec/telos",
+    "reth-basic-payload-builder/telos",
+    "reth-ethereum-payload-builder/telos",
+    "reth-evm/telos",
+    "reth-execution-types/telos",
+    "reth-node-core/telos",
+    "reth-payload-builder/telos",
+    "reth-provider/telos",
+    "reth-revm/telos",
+    "reth-rpc/telos",
+    "reth-rpc-eth-types/telos",
+    "reth-transaction-pool/telos",
+    "reth-trie/telos",
+    "reth-trie-db/telos",
+    "reth-engine-util/telos",
+    "reth-primitives/telos",
+    "reth-blockchain-tree/telos",
+    "reth-rpc-types-compat/telos",
+    "reth-consensus-common/telos",
+    "reth-stages/telos",
+    "reth-beacon-consensus/telos",
+    "reth-exex/telos",
+]
 
 [[bin]]
 name = "reth"
@@ -156,3 +186,8 @@ path = "src/main.rs"
 name = "op-reth"
 path = "src/optimism.rs"
 required-features = ["optimism"]
+
+[[bin]]
+name = "telos-reth"
+path = "src/telos.rs"
+required-features = ["telos"]

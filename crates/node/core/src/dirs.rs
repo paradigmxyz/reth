@@ -379,6 +379,17 @@ mod tests {
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
         let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{path:?}");
+
+        #[cfg(feature = "telos")]
+        {
+            let path = MaybePlatformPath::<DataDirPath>::default();
+            let path = path.unwrap_or_chain_default(Chain::from_id(40), DatadirArgs::default());
+            assert!(path.as_ref().ends_with("reth/tevmmainnet"), "{:?}", path);
+
+            let path = MaybePlatformPath::<DataDirPath>::default();
+            let path = path.unwrap_or_chain_default(Chain::from_id(40), DatadirArgs::default());
+            assert!(path.as_ref().ends_with("reth/tevmmainnet-base"), "{:?}", path);
+        }
     }
 
     #[test]
@@ -389,6 +400,18 @@ mod tests {
 
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::sepolia(), DatadirArgs::default());
+
         assert!(path.as_ref().ends_with("reth/sepolia"), "{path:?}");
+
+        #[cfg(feature = "telos")]
+        {
+            let path = MaybePlatformPath::<DataDirPath>::default();
+            let path = path.unwrap_or_chain_default(Chain::from_id(41), DatadirArgs::default());
+            assert!(path.as_ref().ends_with("reth/tevmtestnet"), "{:?}", path);
+
+            let path = MaybePlatformPath::<DataDirPath>::default();
+            let path = path.unwrap_or_chain_default(Chain::from_id(41), DatadirArgs::default());
+            assert!(path.as_ref().ends_with("reth/tevmtestnet-base"), "{:?}", path);
+        }
     }
 }

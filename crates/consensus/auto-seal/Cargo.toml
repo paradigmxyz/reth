@@ -39,3 +39,4 @@ tracing.workspace = true
 
 [features]
 optimism = ["reth-provider/optimism"]
+telos = []

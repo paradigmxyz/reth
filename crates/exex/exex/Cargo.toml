@@ -54,3 +54,4 @@ secp256k1.workspace = true
 [features]
 default = []
 serde = ["reth-provider/serde", "reth-exex-types/serde"]
+telos = []
