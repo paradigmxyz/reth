@@ -344,7 +344,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
     fn get_pending_transactions_by_origin(
         &self,
         origin: TransactionOrigin,
