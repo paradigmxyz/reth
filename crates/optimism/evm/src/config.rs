@@ -1,4 +1,4 @@
-use reth_chainspec::{ChainSpec, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_ethereum_forks::{EthereumHardfork, Head};
 
 /// Returns the spec id at the given timestamp.
