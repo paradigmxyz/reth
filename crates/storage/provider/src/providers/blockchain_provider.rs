@@ -138,12 +138,11 @@ where
     /// 1. The block state as [`Some`] if the block is in memory, and [`None`] if the block is in
     ///    database.
     /// 2. The in-block transaction index.
-    fn block_number_by_tx_id(
+    fn block_state_by_tx_id(
         &self,
+        provider: &DatabaseProviderRO<DB>,
         id: TxNumber,
     ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
-        let provider = self.database.provider()?;
-
         // Get the last block number stored in the database
         let last_database_block_number = provider.last_block_number()?;
 
@@ -653,7 +652,8 @@ where
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        let Some((block_state, tx_index)) = self.block_number_by_tx_id(id)? else {
+        let provider = self.database.provider()?;
+        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
             return Ok(None)
         };
 
@@ -661,7 +661,7 @@ where
             let transaction = block_state.block().block().body.get(tx_index).cloned();
             Ok(transaction)
         } else {
-            self.database.transaction_by_id(id)
+            provider.transaction_by_id(id)
         }
     }
 
@@ -669,7 +669,8 @@ where
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        let Some((block_state, tx_index)) = self.block_number_by_tx_id(id)? else {
+        let provider = self.database.provider()?;
+        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
             return Ok(None)
         };
 
@@ -678,7 +679,7 @@ where
                 block_state.block().block().body.get(tx_index).cloned().map(Into::into);
             Ok(transaction)
         } else {
-            self.database.transaction_by_id_no_hash(id)
+            provider.transaction_by_id_no_hash(id)
         }
     }
 
@@ -705,7 +706,7 @@ where
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Ok(self
-            .block_number_by_tx_id(id)?
+            .block_state_by_tx_id(id)?
             .and_then(|(block_state, _)| block_state)
             .map(|block_state| block_state.block().block().number))
     }
@@ -779,7 +780,8 @@ where
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        let Some((block_state, tx_index)) = self.block_number_by_tx_id(id)? else {
+        let provider = self.database.provider()?;
+        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
             return Ok(None)
         };
 
@@ -793,7 +795,7 @@ where
                 .and_then(|transaction| transaction.recover_signer());
             Ok(sender)
         } else {
-            self.database.transaction_sender(id)
+            provider.transaction_sender(id)
         }
     }
 }
@@ -803,7 +805,8 @@ where
     DB: Database,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
-        let Some((block_state, tx_index)) = self.block_number_by_tx_id(id)? else {
+        let provider = self.database.provider()?;
+        let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
             return Ok(None)
         };
 
@@ -811,7 +814,7 @@ where
             let receipt = block_state.executed_block_receipts().get(tx_index).cloned();
             Ok(receipt)
         } else {
-            self.database.receipt(id)
+            provider.receipt(id)
         }
     }
 
