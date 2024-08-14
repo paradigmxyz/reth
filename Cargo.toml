@@ -345,7 +345,9 @@ reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = ["std"] }
+reth-primitives = { path = "crates/primitives", default-features = false, features = [
+    "std",
+] }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
@@ -404,10 +406,14 @@ alloy-genesis = { version = "0.2.1", default-features = false }
 alloy-json-rpc = { version = "0.2.1", default-features = false }
 alloy-network = { version = "0.2.1", default-features = false }
 alloy-node-bindings = { version = "0.2.1", default-features = false }
-alloy-provider = { version = "0.2.1", features = ["reqwest"], default-features = false }
+alloy-provider = { version = "0.2.1", features = [
+    "reqwest",
+], default-features = false }
 alloy-pubsub = { version = "0.2.1", default-features = false }
 alloy-rpc-client = { version = "0.2.1", default-features = false }
-alloy-rpc-types = { version = "0.2.1", features = ["eth"], default-features = false }
+alloy-rpc-types = { version = "0.2.1", features = [
+    "eth",
+], default-features = false }
 alloy-rpc-types-admin = { version = "0.2.1", default-features = false }
 alloy-rpc-types-anvil = { version = "0.2.1", default-features = false }
 alloy-rpc-types-beacon = { version = "0.2.1", default-features = false }
@@ -420,7 +426,9 @@ alloy-serde = { version = "0.2.1", default-features = false }
 alloy-signer = { version = "0.2.1", default-features = false }
 alloy-signer-local = { version = "0.2.1", default-features = false }
 alloy-transport = { version = "0.2.1" }
-alloy-transport-http = { version = "0.2.1", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-http = { version = "0.2.1", features = [
+    "reqwest-rustls-tls",
+], default-features = false }
 alloy-transport-ipc = { version = "0.2.1", default-features = false }
 alloy-transport-ws = { version = "0.2.1", default-features = false }
 
@@ -540,3 +548,7 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
