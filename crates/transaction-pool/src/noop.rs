@@ -243,116 +243,12 @@ impl TransactionPool for NoopTransactionPool {
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
 
+    #[doc = " Returns all pending transactions filtered by [`TransactionOrigin`]"]
     fn get_pending_transactions_by_origin(
         &self,
-        origin: TransactionOrigin,
+        _origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
-    }
-
-    #[doc = " Imports an _external_ transaction."]
-    #[doc = ""]
-    #[doc = " This is intended to be used by the network to insert incoming transactions received over the"]
-    #[doc = " p2p network."]
-    #[doc = ""]
-    #[doc = " Consumer: P2P"]
-    fn add_external_transaction(
-        &self,
-        transaction: Self::Transaction,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
-        self.add_transaction(TransactionOrigin::External, transaction)
-    }
-
-    #[doc = " Imports all _external_ transactions"]
-    #[doc = ""]
-    #[doc = ""]
-    #[doc = " Consumer: Utility"]
-    fn add_external_transactions(
-        &self,
-        transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
-        self.add_transactions(TransactionOrigin::External, transactions)
-    }
-
-    #[doc = " Returns a new Stream that yields transactions hashes for new __pending__ transactions"]
-    #[doc = " inserted into the pool that are allowed to be propagated."]
-    #[doc = ""]
-    #[doc = " Note: This is intended for networking and will __only__ yield transactions that are allowed"]
-    #[doc = " to be propagated over the network, see also [TransactionListenerKind]."]
-    #[doc = ""]
-    #[doc = " Consumer: RPC/P2P"]
-    fn pending_transactions_listener(&self) -> Receiver<TxHash> {
-        self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
-    }
-
-    #[doc = " Returns a new Stream that yields new transactions added to the pending sub-pool."]
-    #[doc = ""]
-    #[doc = " This is a convenience wrapper around [Self::new_transactions_listener] that filters for"]
-    #[doc = " [SubPool::Pending](crate::SubPool)."]
-    fn new_pending_pool_transactions_listener(
-        &self,
-    ) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(
-            self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly),
-            SubPool::Pending,
-        )
-    }
-
-    #[doc = " Returns a new Stream that yields new transactions added to the basefee sub-pool."]
-    #[doc = ""]
-    #[doc = " This is a convenience wrapper around [Self::new_transactions_listener] that filters for"]
-    #[doc = " [SubPool::BaseFee](crate::SubPool)."]
-    fn new_basefee_pool_transactions_listener(
-        &self,
-    ) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::BaseFee)
-    }
-
-    #[doc = " Returns a new Stream that yields new transactions added to the queued-pool."]
-    #[doc = ""]
-    #[doc = " This is a convenience wrapper around [Self::new_transactions_listener] that filters for"]
-    #[doc = " [SubPool::Queued](crate::SubPool)."]
-    fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
-        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
-    }
-
-    #[doc = " Returns if the transaction for the given hash is already included in this pool."]
-    fn contains(&self, tx_hash: &TxHash) -> bool {
-        self.get(tx_hash).is_some()
-    }
-
-    #[doc = " Returns all transactions that where submitted as [TransactionOrigin::Local]"]
-    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_transactions_by_origin(TransactionOrigin::Local)
-    }
-
-    #[doc = " Returns all transactions that where submitted as [TransactionOrigin::Private]"]
-    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_transactions_by_origin(TransactionOrigin::Private)
-    }
-
-    #[doc = " Returns all transactions that where submitted as [TransactionOrigin::External]"]
-    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_transactions_by_origin(TransactionOrigin::External)
-    }
-
-    #[doc = " Returns all pending transactions that where submitted as [TransactionOrigin::Local]"]
-    fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_transactions_by_origin(TransactionOrigin::Local)
-    }
-
-    #[doc = " Returns all pending transactions that where submitted as [TransactionOrigin::Private]"]
-    fn get_private_pending_transactions(
-        &self,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_pending_transactions_by_origin(TransactionOrigin::Private)
-    }
-
-    #[doc = " Returns all pending transactions that where submitted as [TransactionOrigin::External]"]
-    fn get_external_pending_transactions(
-        &self,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_pending_transactions_by_origin(TransactionOrigin::External)
     }
 }
 
