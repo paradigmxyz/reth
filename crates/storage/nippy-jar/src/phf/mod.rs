@@ -13,10 +13,6 @@ impl<T: AsRef<[u8]> + Sync + Clone + Hash> PHFKey for T {}
 pub struct DummyFunction {
     map: HashMap<Vec<u8>, usize>,
 }
-#[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DummyGoFunction {
-    pub(crate) map: HashMap<Vec<u8>, usize>,
-}
 
 impl<T: PHFKey> From<&[T]> for DummyFunction {
     fn from(keys: &[T]) -> Self {
@@ -31,16 +27,6 @@ impl<T: PHFKey> From<&[T]> for DummyFunction {
 impl DummyFunction {
     pub(crate) fn get(&self, key: &[u8]) -> Option<u64> {
         self.map.get(key).map(|&v| v as u64)
-    }
-}
-
-impl<T: PHFKey> From<&[T]> for DummyGoFunction {
-    fn from(keys: &[T]) -> Self {
-        let mut map = HashMap::new();
-        for (i, key) in keys.iter().enumerate() {
-            map.insert(key.as_ref().to_vec(), i);
-        }
-        Self { map }
     }
 }
 
