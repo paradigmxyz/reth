@@ -74,13 +74,23 @@ pub enum Subcommands {
     // RLPx utilities
     Rlpx(rlpx::Command),
 }
+
 impl Command {
     /// Execute `p2p` command
     pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
-        let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
+        // Load configuration
+        let mut config = if config_path.exists() {
+            toml::de::from_str(&std::fs::read_to_string(&config_path).unwrap_or_else(|_| {
+                tracing::warn!("Failed to read config file: {}", config_path.display());
+                String::new()
+            }))
+            .unwrap_or_default()
+        } else {
+            Config::default()
+        };
 
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 

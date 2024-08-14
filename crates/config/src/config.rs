@@ -48,9 +48,13 @@ impl Config {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
-            ))
+            ));
         }
-        confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+
+        let config = toml::to_string(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        std::fs::write(path, config)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     }
 
     /// Sets the pruning configuration.
@@ -399,7 +403,11 @@ mod tests {
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).expect("Failed to store config");
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
         })
     }
 
@@ -415,9 +423,21 @@ mod tests {
     fn test_load_config() {
         with_tempdir("config-load-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config: Config = toml::de::from_str(
+                &std::fs::read_to_string(config_path).expect("Failed to read config file"),
+            )
+            .expect("Failed to deserialize config");
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -427,9 +447,21 @@ mod tests {
         with_tempdir("config-load-test", |config_path| {
             let mut config = Config::default();
             config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config: Config = toml::de::from_str(
+                &std::fs::read_to_string(config_path).expect("Failed to read config file"),
+            )
+            .expect("Failed to deserialize config");
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }

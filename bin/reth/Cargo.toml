@@ -83,7 +83,6 @@ tracing.workspace = true
 fdlimit.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics

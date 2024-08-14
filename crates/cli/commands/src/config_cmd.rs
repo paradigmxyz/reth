@@ -25,12 +25,16 @@ impl Command {
             Config::default()
         } else {
             let path = self.config.clone().unwrap_or_default();
-            // confy will create the file if it doesn't exist; we don't want this
+            // Check if the file exists
             if !path.exists() {
                 bail!("Config file does not exist: {}", path.display());
             }
-            confy::load_path::<Config>(&path)
-                .wrap_err_with(|| format!("Could not load config file: {}", path.display()))?
+            // Read the configuration file
+            let config_str = std::fs::read_to_string(&path)
+                .wrap_err_with(|| format!("Could not read config file: {}", path.display()))?;
+            // Parse the configuration file
+            toml::de::from_str(&config_str)
+                .wrap_err_with(|| format!("Could not parse config file: {}", path.display()))?
         };
         println!("{}", toml::to_string_pretty(&config)?);
         Ok(())

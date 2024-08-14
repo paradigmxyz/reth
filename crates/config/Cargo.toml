@@ -21,9 +21,8 @@ serde.workspace = true
 humantime-serde.workspace = true
 
 # toml
-confy.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-toml.workspace = true
 reth-network-peers.workspace = true
