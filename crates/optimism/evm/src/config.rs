@@ -9,7 +9,10 @@ pub fn revm_spec_by_timestamp_after_bedrock(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
+    // todo
+    if chain_spec.is_prague_active_at_timestamp(timestamp) {
+        revm_primitives::PRAGUE_EOF
+    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp) {
         revm_primitives::GRANITE
     } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp) {
         revm_primitives::FJORD
@@ -26,7 +29,9 @@ pub fn revm_spec_by_timestamp_after_bedrock(
 
 /// return `revm_spec` from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecId {
-    if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
+    if chain_spec.is_prague_active_at_timestamp(timestamp) {
+        revm_primitives::PRAGUE_EOF
+    } else if chain_spec.fork(OptimismHardfork::Granite).active_at_head(block) {
         revm_primitives::GRANITE
     } else if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(block) {
         revm_primitives::FJORD

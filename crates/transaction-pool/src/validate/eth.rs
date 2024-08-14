@@ -768,6 +768,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
     let spec_id = if fork_tracker.is_prague_activated() {
+        // todo
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
         SpecId::SHANGHAI
