@@ -196,6 +196,10 @@ where
         }
 
         // Calculate the requests and the requests root.
+        // TODO(alexey): remove for non-frontiers
+        #[cfg(feature = "optimism")]
+        let (requests, requests_root) = (None, None);
+        #[cfg(not(feature = "optimism"))]
         let (requests, requests_root) =
             if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
                 // We do not calculate the EIP-6110 deposit requests because there are no

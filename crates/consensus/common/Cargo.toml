@@ -20,3 +20,7 @@ reth-consensus.workspace = true
 reth-storage-api.workspace = true
 rand.workspace = true
 mockall = "0.12"
+
+[features]
+default = []
+optimism = []
