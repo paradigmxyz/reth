@@ -97,6 +97,12 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
+    /// Max number of seen transactions to remember per peer.
+    ///
+    /// Default is 10 KiB, i.e. 320 transaction hashes.
+    #[arg(long = "max-seen-tx-history", value_name = "MAX_SEEN_TX_HISTORY", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    pub max_seen_tx_history: u32,
+
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
@@ -116,12 +122,6 @@ pub struct NetworkArgs {
     /// Default is 128 KiB.
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-
-    /// Max number of seen transactions to remember per peer.
-    ///
-    /// Default is 10 KiB, i.e. 320 transaction hashes.
-    #[arg(long = "max-seen-tx-history", value_name = "MAX_SEEN_TX_HISTORY", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
-    pub max_seen_tx_history: u32,
 }
 
 impl NetworkArgs {
