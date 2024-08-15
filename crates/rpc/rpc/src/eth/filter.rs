@@ -38,17 +38,15 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-pub struct EthFilter<Provider, Pool, Eth: TransactionBuilder> {
+
+pub struct EthFilter<Provider, Pool, Eth> {
     /// All nested fields bundled together
-    inner: Arc<EthFilterInner<Provider, Pool, Eth::Transaction>>,
+    inner: Arc<EthFilterInner<Provider, Pool, Transaction>>,
     /// Assembles response data w.r.t. network.
     _tx_resp_builder: PhantomData<Eth>,
 }
 
-impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth>
-where
-    Eth: TransactionBuilder,
-{
+impl<Provider, Pool, Eth> Clone for EthFilter<Provider, Pool, Eth> {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), _tx_resp_builder: PhantomData }
     }
@@ -58,7 +56,7 @@ impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: Send + Sync + 'static,
     Pool: Send + Sync + 'static,
-    Eth: TransactionBuilder + Clone + 'static,
+    Eth: Send + Sync + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -103,9 +101,15 @@ where
 
         eth_filter
     }
+}
 
+impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
+where
+    Provider: Send + Sync + 'static,
+    Pool: Send + Sync + 'static,
+{
     /// Returns all currently active filters
-    pub fn active_filters(&self) -> &ActiveFilters<Eth::Transaction> {
+    pub fn active_filters(&self) -> &ActiveFilters<Transaction> {
         &self.inner.active_filters
     }
 
@@ -141,8 +145,7 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
-    Eth: TransactionBuilder,
-    Eth::Transaction: Clone + 'static,
+    Eth: TransactionBuilder<Transaction = Transaction>,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
@@ -321,10 +324,7 @@ where
     }
 }
 
-impl<Provider, Pool, Eth> std::fmt::Debug for EthFilter<Provider, Pool, Eth>
-where
-    Eth: TransactionBuilder,
-{
+impl<Provider, Pool, Eth> std::fmt::Debug for EthFilter<Provider, Pool, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthFilter").finish_non_exhaustive()
     }

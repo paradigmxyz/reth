@@ -7,9 +7,9 @@ use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, Tra
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
-use reth_rpc_types_compat::{block::uncle_block_from_header, BlockBuilder};
+use reth_rpc_types_compat::{block::uncle_block_from_header, BlockBuilder, TransactionBuilder};
 
-use crate::{Block, FromEthApiError};
+use crate::{Block, FromEthApiError, Transaction};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -25,7 +25,10 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
+    where
+        Self::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self::NetworkTypes>>,
+    {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
     }
 
@@ -37,7 +40,10 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         full: bool,
-    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self::NetworkTypes>>,
+    {
         async move {
             let block = match self.block_with_senders(block_id).await? {
                 Some(block) => block,

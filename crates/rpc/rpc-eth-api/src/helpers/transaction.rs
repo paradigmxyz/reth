@@ -198,6 +198,7 @@ pub trait EthTransactions: LoadTransaction {
     ) -> impl Future<Output = Result<Option<Transaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
+        Self::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self::NetworkTypes>>,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {

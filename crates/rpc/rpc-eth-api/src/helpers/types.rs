@@ -1,11 +1,11 @@
 //! Trait for specifying `eth` API types that may be network dependent.
 
-use std::error::Error;
+use std::{error::Error, fmt};
 
 use alloy_network::{AnyNetwork, Network};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types::Rich;
-use reth_rpc_types_compat::{BlockBuilder, TransactionBuilder};
+use reth_rpc_types_compat::BlockBuilder;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -22,7 +22,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     type NetworkTypes: Network;
     /// Conversion methods for transaction RPC type.
-    type TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self::NetworkTypes>>;
+    type TransactionBuilder: Send + Sync + Clone + fmt::Debug;
     /// Conversion methods for block RPC type.
     type BlockBuilder: BlockBuilder<TxBuilder = Self::TransactionBuilder>;
 }

@@ -38,6 +38,7 @@ impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
     Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>> + EthApiTypes,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
+    Eth::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Eth::NetworkTypes>>,
     EthFilter: EthFilterApiServer<<Eth::TransactionBuilder as TransactionBuilder>::Transaction>,
 {
     /// Handler for: `eth_syncing`

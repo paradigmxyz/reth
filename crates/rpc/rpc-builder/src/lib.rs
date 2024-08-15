@@ -168,6 +168,7 @@ use reth_rpc_eth_api::{
         Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt, UpdateRawTxForwarder,
     },
     Block, EthApiServer, EthApiTypes, FullEthApiServer, RawTransactionForwarder, Transaction,
+    TransactionBuilder,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
@@ -229,8 +230,10 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
-    EthApi: FullEthApiServer,
-    EthApi::NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    EthApi: FullEthApiServer<
+        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+    >,
 {
     let module_config = module_config.into();
     server_config
@@ -437,9 +440,10 @@ where
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: FullEthApiServer,
-        EthApi::NetworkTypes:
-            alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        EthApi: FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+        >,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
@@ -505,9 +509,10 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer,
-        EthApi::NetworkTypes:
-            alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        EthApi: FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+        >,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -981,8 +986,10 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: FullEthApiServer,
-    EthApi::NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    EthApi: FullEthApiServer<
+        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+    >,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
