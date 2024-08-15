@@ -65,16 +65,6 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         self.row = 0;
     }
 
-    /// Returns a row, searching it by a key.
-    ///
-    /// **May return false positives.**
-    ///
-    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
-    /// stored in file.
-    pub fn row_by_key(&mut self, _key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        Err(NippyJarError::UnsupportedFilterQuery)
-    }
-
     /// Returns a row by its number.
     pub fn row_by_number(&mut self, row: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.row = row as u64;
