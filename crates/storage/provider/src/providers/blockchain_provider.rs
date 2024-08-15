@@ -229,10 +229,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.headers_range(range.clone())?;
-        headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -268,10 +269,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_range(range.clone())?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -300,10 +302,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -1431,11 +1434,10 @@ mod tests {
             Some(in_memory_block.difficulty)
         );
 
-        // TODO: fix the implementation: https://github.com/paradigmxyz/reth/actions/runs/10409473320/job/28829168152?pr=10330
-        // assert_eq!(
-        //     provider.headers_range(0..=10)?,
-        //     blocks.iter().map(|b| b.header().clone()).collect::<Vec<_>>()
-        // );
+        assert_eq!(
+            provider.headers_range(0..=10)?,
+            blocks.iter().map(|b| b.header().clone()).collect::<Vec<_>>()
+        );
 
         assert_eq!(
             provider.sealed_header(database_block.number)?,
@@ -1446,17 +1448,19 @@ mod tests {
             Some(in_memory_block.header.clone())
         );
 
-        // TODO: fix the implementation, see above
-        // assert_eq!(
-        //     provider.sealed_headers_range(0..=10)?,
-        //     blocks.iter().map(|b| b.header.clone()).collect::<Vec<_>>()
-        // );
+        assert_eq!(
+            provider.sealed_headers_range(0..=10)?,
+            blocks.iter().map(|b| b.header.clone()).collect::<Vec<_>>()
+        );
 
-        // TODO: fix the implementation, see above
-        // assert_eq!(
-        //     provider.sealed_headers_while(0..=10, |header| header.number <= 8)?,
-        //     blocks.iter().take(8).map(|b| b.header.clone()).collect::<Vec<_>>()
-        // );
+        assert_eq!(
+            provider.sealed_headers_while(0..=10, |header| header.number <= 8)?,
+            blocks
+                .iter()
+                .take_while(|header| header.number <= 8)
+                .map(|b| b.header.clone())
+                .collect::<Vec<_>>()
+        );
 
         Ok(())
     }
