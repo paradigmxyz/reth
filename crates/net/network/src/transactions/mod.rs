@@ -1235,7 +1235,7 @@ where
 
         while this.local_rebroadcast_interval.poll_tick(cx).is_ready() {
             let locals = this.pool.pending_local_transactions();
-            for peer in this.peers.iter_mut() {
+            for peer in &mut this.peers {
                 for tx in &locals {
                     // mark it as unseen to ensure delivery
                     peer.1.seen_transactions.remove(tx.hash());
