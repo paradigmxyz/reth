@@ -1,8 +1,7 @@
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
-    constants::EMPTY_ROOT_HASH, gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected,
-    Receipt, Request, B256,
+    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
 };
 
 /// Validate a block with regard to execution results:
@@ -39,7 +38,7 @@ pub fn validate_block_post_execution(
     }
 
     // Validate that the header requests root matches the calculated requests root
-    // todo(onbjerg): remove this when we start using reth-optimism-consensus for optimism
+    // TODO(onbjerg): remove this when we start using reth-optimism-consensus for optimism
     #[cfg(not(feature = "optimism"))]
     if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
         let Some(header_requests_root) = block.header.requests_root else {

@@ -18,3 +18,8 @@ reth-primitives.workspace = true
 reth-consensus.workspace = true
 
 tracing.workspace = true
+
+# TODO(onbjerg): remove when we start using reth-optimism-consensus
+[features]
+default = []
+optimism = []
