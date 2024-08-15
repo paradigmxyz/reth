@@ -1796,6 +1796,7 @@ mod tests {
                 PeerRequestSender::new(peer_id, to_mock_session_tx),
                 version,
                 Arc::from(""),
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             ),
             to_mock_session_rx,
         )
