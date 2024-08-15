@@ -249,14 +249,9 @@ where
             let mut in_memory_entries = Vec::new();
             if let Some(block_state) = block_state {
                 let mut block_number = block_state.block().block().number;
-                loop {
-                    // Lookup the next in-memory block. If there are no more in-memory blocks,
-                    // break.
-                    let Some(state) = self.canonical_in_memory_state.state_by_number(block_number)
-                    else {
-                        break;
-                    };
-
+                // Lookup next in-memory block until there are no more in-memory blocks
+                while let Some(state) = self.canonical_in_memory_state.state_by_number(block_number)
+                {
                     // Fetch the in-memory entries for the block. If the tx number counter exceeds
                     // the range, break.
                     for i in tx_index..state.block().block().body.len() {
