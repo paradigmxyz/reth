@@ -1,9 +1,8 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, RefRow,
+    DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
 use std::{ops::Range, sync::Arc};
-use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
@@ -72,27 +71,8 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     ///
     /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
     /// stored in file.
-    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallelize both?
-
-            // May have false positives
-            if filter.contains(key)? {
-                // May have false positives
-                if let Some(row_index) = phf.get_index(key)? {
-                    self.row = self
-                        .jar
-                        .offsets_index
-                        .access(row_index as usize)
-                        .expect("built from same set") as u64;
-                    return self.next_row()
-                }
-            }
-        } else {
-            return Err(NippyJarError::UnsupportedFilterQuery)
-        }
-
-        Ok(None)
+    pub fn row_by_key(&mut self, _key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        Err(NippyJarError::UnsupportedFilterQuery)
     }
 
     /// Returns a row by its number.
@@ -138,29 +118,10 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// stored in file.
     pub fn row_by_key_with_cols(
         &mut self,
-        key: &[u8],
-        mask: usize,
+        _key: &[u8],
+        _mask: usize,
     ) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallelize both?
-
-            // May have false positives
-            if filter.contains(key)? {
-                // May have false positives
-                if let Some(row_index) = phf.get_index(key)? {
-                    self.row = self
-                        .jar
-                        .offsets_index
-                        .access(row_index as usize)
-                        .expect("built from same set") as u64;
-                    return self.next_row_with_cols(mask)
-                }
-            }
-        } else {
-            return Err(NippyJarError::UnsupportedFilterQuery)
-        }
-
-        Ok(None)
+        Err(NippyJarError::UnsupportedFilterQuery)
     }
 
     /// Returns a row by its number by using a `mask` to only read certain columns from the row.
