@@ -112,7 +112,7 @@ impl Consensus for EthBeaconConsensus {
             return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
         }
 
-        // todo(onbjerg): remove when we start using reth-optimism-consensus
+        // TODO(onbjerg): remove when we start using reth-optimism-consensus
         #[cfg(not(feature = "optimism"))]
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
             if header.requests_root.is_none() {

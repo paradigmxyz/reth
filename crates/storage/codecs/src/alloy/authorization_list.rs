@@ -34,7 +34,7 @@ impl Compact for AlloyAuthorization {
         let alloy_authorization = Self {
             chain_id: authorization.chain_id,
             address: authorization.address,
-            nonce: authorization.nonce.into(),
+            nonce: authorization.nonce,
         };
         (alloy_authorization, buf)
     }
