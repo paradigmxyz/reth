@@ -221,20 +221,27 @@ where
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.headers_range(range.clone())?;
+        headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 headers.push(block_state.block().block().header.header().clone());
             } else {
-                let mut db_headers = self.database.headers_range(num..=end)?;
-                headers.append(&mut db_headers);
-                break;
+                break
             }
         }
 
@@ -253,20 +260,27 @@ where
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut sealed_headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.sealed_headers_range(range.clone())?;
+        sealed_headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 sealed_headers.push(block_state.block().block().header.clone());
             } else {
-                let mut db_headers = self.database.sealed_headers_range(num..=end)?;
-                sealed_headers.append(&mut db_headers);
-                break;
+                break
             }
         }
 
@@ -278,28 +292,35 @@ where
         range: impl RangeBounds<BlockNumber>,
         mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
+        sealed_headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let header = block_state.block().block().header.clone();
                 if !predicate(&header) {
-                    break;
+                    break
                 }
-                headers.push(header);
-            } else {
-                let mut db_headers = self.database.sealed_headers_while(num..=end, predicate)?;
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                headers.append(&mut db_headers);
-                break;
+                sealed_headers.push(header);
+            } else {
+                break
             }
         }
 
-        Ok(headers)
+        Ok(sealed_headers)
     }
 }
 
@@ -321,17 +342,26 @@ where
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         let mut hashes = Vec::with_capacity((end - start + 1) as usize);
-        for number in start..=end {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                hashes.push(block_state.hash());
-            } else {
-                let mut db_hashes = self.database.canonical_hashes_range(number, end)?;
+
+        // First, fetch the hashes from the database
+        let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
+        hashes.append(&mut db_hashes);
+
+        let mut range = start..=end;
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_hashes.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
+            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                hashes.append(&mut db_hashes);
-                break;
+                hashes.push(block_state.hash());
+            } else {
+                break
             }
         }
+
         Ok(hashes)
     }
 }
@@ -531,32 +561,47 @@ where
         self.database.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, mut range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.block_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 blocks.push(block_state.block().block().clone().unseal());
             } else {
-                let mut db_blocks = self.database.block_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 
     fn block_with_senders_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        mut range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.block_with_senders_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
@@ -564,22 +609,29 @@ where
                 // need to handle that situation.
                 blocks.push(BlockWithSenders { block: block.unseal(), senders });
             } else {
-                let mut db_blocks = self.database.block_with_senders_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 
     fn sealed_block_with_senders_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        mut range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.sealed_block_with_senders_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
@@ -587,12 +639,10 @@ where
                 // need to handle that situation.
                 blocks.push(SealedBlockWithSenders { block, senders });
             } else {
-                let mut db_blocks =
-                    self.database.sealed_block_with_senders_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 }
@@ -1234,7 +1284,23 @@ where
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        self.database.provider()?.account_block_changeset(block_number)
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
+            let changesets = state
+                .block()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .into_plain_state_reverts()
+                .accounts
+                .into_iter()
+                .flatten()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect();
+            Ok(changesets)
+        } else {
+            self.database.provider()?.account_block_changeset(block_number)
+        }
     }
 }
 
