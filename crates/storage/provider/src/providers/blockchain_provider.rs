@@ -1462,3 +1462,70 @@ where
         state_provider.basic_account(address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork};
+    use reth_primitives::B256;
+    use reth_storage_api::RequestsProvider;
+    use reth_testing_utils::generators::{self, random_block_range};
+
+    use crate::{
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+
+    #[test]
+    fn test_requests_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let chainspec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let factory = create_test_provider_factory_with_chain_spec(chainspec.clone());
+
+        // Generate 2 random blocks
+        let mut blocks =
+            random_block_range(&mut rng, 0..=1, B256::ZERO, 0..1, Some(1..2)).into_iter();
+        let (database_block, in_memory_block) = (blocks.next().unwrap(), blocks.next().unwrap());
+
+        // Insert first block into the database
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_historical_block(
+            database_block.clone().seal_with_senders().expect("failed to seal block with senders"),
+        )?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Insert second block into the in-memory state
+        let in_memory_block_senders = in_memory_block.senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock::new(
+                Arc::new(in_memory_block.clone()),
+                Arc::new(in_memory_block_senders),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        assert_eq!(
+            provider.requests_by_block(
+                database_block.number.into(),
+                chainspec.hardforks.fork(EthereumHardfork::Prague).as_timestamp().unwrap()
+            )?,
+            database_block.requests.clone()
+        );
+        assert_eq!(
+            provider.requests_by_block(
+                in_memory_block.number.into(),
+                chainspec.hardforks.fork(EthereumHardfork::Prague).as_timestamp().unwrap()
+            )?,
+            in_memory_block.requests.clone()
+        );
+
+        Ok(())
+    }
+}
