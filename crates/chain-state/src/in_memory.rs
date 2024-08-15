@@ -16,11 +16,10 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
     sync::Arc,
     time::Instant,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
 const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
@@ -48,7 +47,7 @@ pub(crate) struct InMemoryState {
     /// Mapping of block numbers to block hashes.
     numbers: RwLock<BTreeMap<u64, B256>>,
     /// The pending block that has not yet been made canonical.
-    pending: RwLock<Option<BlockState>>,
+    pending: watch::Sender<Option<BlockState>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
@@ -59,10 +58,11 @@ impl InMemoryState {
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState>,
     ) -> Self {
+        let (pending, _) = watch::channel(pending);
         let this = Self {
             blocks: RwLock::new(blocks),
             numbers: RwLock::new(numbers),
-            pending: RwLock::new(pending),
+            pending,
             metrics: Default::default(),
         };
         this.update_metrics();
@@ -112,7 +112,7 @@ impl InMemoryState {
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.read().as_ref().map(|state| Arc::new(BlockState::new(state.block.clone())))
+        self.pending.borrow().as_ref().map(|state| Arc::new(BlockState::new(state.block.clone())))
     }
 
     #[cfg(test)]
@@ -140,11 +140,11 @@ impl CanonicalInMemoryStateInner {
         {
             let mut blocks = self.in_memory_state.blocks.write();
             let mut numbers = self.in_memory_state.numbers.write();
-            let mut pending = self.in_memory_state.pending.write();
-
             blocks.clear();
             numbers.clear();
-            pending.take();
+            self.in_memory_state.pending.send_modify(|p| {
+                p.take();
+            });
         }
         self.in_memory_state.update_metrics();
     }
@@ -207,7 +207,7 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns the block hash corresponding to the given number
+    /// Returns the block hash corresponding to the given number.
     pub fn hash_by_number(&self, number: u64) -> Option<B256> {
         self.inner.in_memory_state.hash_by_number(number)
     }
@@ -229,7 +229,9 @@ impl CanonicalInMemoryState {
         // fetch the state of the pending block's parent block
         let parent = self.state_by_hash(pending.block().parent_hash);
         let pending = BlockState::with_parent(pending, parent.map(|p| (*p).clone()));
-        *self.inner.in_memory_state.pending.write() = Some(pending);
+        self.inner.in_memory_state.pending.send_modify(|p| {
+            p.replace(pending);
+        });
         self.inner.in_memory_state.update_metrics();
     }
 
@@ -242,7 +244,6 @@ impl CanonicalInMemoryState {
             // acquire all locks
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
-            let mut pending = self.inner.in_memory_state.pending.write();
 
             // we first remove the blocks from the reorged chain
             for block in reorged {
@@ -266,7 +267,9 @@ impl CanonicalInMemoryState {
             }
 
             // remove the pending state
-            pending.take();
+            self.inner.in_memory_state.pending.send_modify(|p| {
+                p.take();
+            });
         }
         self.inner.in_memory_state.update_metrics();
     }
@@ -291,7 +294,6 @@ impl CanonicalInMemoryState {
         {
             let mut blocks = self.inner.in_memory_state.blocks.write();
             let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut pending = self.inner.in_memory_state.pending.write();
 
             // clear all numbers
             numbers.clear();
@@ -319,12 +321,14 @@ impl CanonicalInMemoryState {
             }
 
             // also shift the pending state if it exists
-            if let Some(pending) = pending.as_mut() {
-                pending.parent = blocks
-                    .get(&pending.block().block.parent_hash)
-                    .cloned()
-                    .map(|p| Box::new((*p).clone()));
-            }
+            self.inner.in_memory_state.pending.send_modify(|p| {
+                if let Some(p) = p.as_mut() {
+                    p.parent = blocks
+                        .get(&p.block().block.parent_hash)
+                        .cloned()
+                        .map(|p| Box::new((*p).clone()));
+                }
+            });
         }
         self.inner.in_memory_state.update_metrics();
     }
@@ -486,7 +490,7 @@ impl CanonicalInMemoryState {
 
     /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.
     pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState>> {
-        let pending = self.inner.in_memory_state.pending.read().clone();
+        let pending = self.inner.in_memory_state.pending.borrow().clone();
         let head = self.inner.in_memory_state.head_state();
 
         // this clone is cheap because we only expect to keep in memory a few
@@ -747,28 +751,34 @@ impl NewCanonicalChain {
 
     /// Converts the new chain into a notification that will be emitted to listeners
     pub fn to_chain_notification(&self) -> CanonStateNotification {
-        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
-        //  implement this properly
         match self {
-            Self::Commit { new } => CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
-            Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-                old: Arc::new(Chain::new(
-                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    old.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
+            Self::Commit { new } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Commit { new }
+            }
+            Self::Reorg { new, old } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Reorg { new, old }
+            }
         }
     }
 
@@ -797,7 +807,7 @@ mod tests {
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage};
+    use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -871,9 +881,27 @@ mod tests {
             Ok(B256::random())
         }
 
+        fn hashed_state_root_from_nodes(
+            &self,
+            _nodes: TrieUpdates,
+            _post_state: HashedPostState,
+            _prefix_sets: TriePrefixSetsMut,
+        ) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
+
         fn hashed_state_root_with_updates(
             &self,
             _hashed_state: HashedPostState,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            Ok((B256::random(), TrieUpdates::default()))
+        }
+
+        fn hashed_state_root_from_nodes_with_updates(
+            &self,
+            _nodes: TrieUpdates,
+            _post_state: HashedPostState,
+            _prefix_sets: TriePrefixSetsMut,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }

@@ -15,8 +15,10 @@ use reth_codecs::Compact;
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,

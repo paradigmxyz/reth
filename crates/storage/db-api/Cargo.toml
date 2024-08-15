@@ -59,7 +59,6 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
-paste.workspace = true
 
 assert_matches.workspace = true
 

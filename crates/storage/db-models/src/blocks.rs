@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use reth_codecs::{reth_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::TxNumber;
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +11,9 @@ pub type NumTransactions = u64;
 ///
 /// It has the pointer to the transaction Number of the first
 /// transaction in the block and the total number of transactions.
-#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize)]
-#[reth_codec]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct StoredBlockBodyIndices {
     /// The number of the first transaction in this block
     ///

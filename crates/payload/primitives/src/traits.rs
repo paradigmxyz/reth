@@ -1,3 +1,4 @@
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -20,6 +21,11 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
+
+    /// Returns the entire execution data for the built block, if available.
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        None
+    }
 }
 
 /// This can be implemented by types that describe a currently running payload job.

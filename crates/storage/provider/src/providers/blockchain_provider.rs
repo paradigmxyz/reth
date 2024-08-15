@@ -8,7 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -17,9 +17,9 @@ use reth_db_api::{
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -83,8 +83,11 @@ where
         latest: SealedHeader,
     ) -> ProviderResult<Self> {
         let provider = database.provider()?;
-        let finalized_block_number = provider.last_finalized_block_number()?;
-        let finalized_header = provider.sealed_header(finalized_block_number)?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         Ok(Self {
             database,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(latest, finalized_header),
@@ -118,6 +121,17 @@ where
         };
 
         (start, end)
+    }
+
+    /// This uses a given [`BlockState`] to initialize a state provider for that block.
+    fn block_state_provider(
+        &self,
+        state: impl AsRef<BlockState>,
+    ) -> ProviderResult<MemoryOverlayStateProvider> {
+        let state = state.as_ref();
+        let anchor_hash = state.anchor().hash;
+        let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
+        Ok(self.canonical_in_memory_state.state_provider(state.hash(), latest_historical))
     }
 }
 
@@ -180,7 +194,11 @@ where
     }
 
     fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        self.database.header_td(hash)
+        if let Some(num) = self.block_number(*hash)? {
+            self.header_td_by_number(num)
+        } else {
+            Ok(None)
+        }
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
@@ -203,20 +221,27 @@ where
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.headers_range(range.clone())?;
+        headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 headers.push(block_state.block().block().header.header().clone());
             } else {
-                let mut db_headers = self.database.headers_range(num..=end)?;
-                headers.append(&mut db_headers);
-                break;
+                break
             }
         }
 
@@ -235,20 +260,27 @@ where
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut sealed_headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.sealed_headers_range(range.clone())?;
+        sealed_headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 sealed_headers.push(block_state.block().block().header.clone());
             } else {
-                let mut db_headers = self.database.sealed_headers_range(num..=end)?;
-                sealed_headers.append(&mut db_headers);
-                break;
+                break
             }
         }
 
@@ -260,28 +292,35 @@ where
         range: impl RangeBounds<BlockNumber>,
         mut predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
 
-        for num in start..=end {
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
+        sealed_headers.append(&mut db_headers);
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+
+        // Fetch the remaining headers from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let header = block_state.block().block().header.clone();
                 if !predicate(&header) {
-                    break;
+                    break
                 }
-                headers.push(header);
-            } else {
-                let mut db_headers = self.database.sealed_headers_while(num..=end, predicate)?;
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                headers.append(&mut db_headers);
-                break;
+                sealed_headers.push(header);
+            } else {
+                break
             }
         }
 
-        Ok(headers)
+        Ok(sealed_headers)
     }
 }
 
@@ -303,17 +342,26 @@ where
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
         let mut hashes = Vec::with_capacity((end - start + 1) as usize);
-        for number in start..=end {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
-                hashes.push(block_state.hash());
-            } else {
-                let mut db_hashes = self.database.canonical_hashes_range(number, end)?;
+
+        // First, fetch the hashes from the database
+        let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
+        hashes.append(&mut db_hashes);
+
+        let mut range = start..=end;
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_hashes.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
+            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
-                hashes.append(&mut db_hashes);
-                break;
+                hashes.push(block_state.hash());
+            } else {
+                break
             }
         }
+
         Ok(hashes)
     }
 }
@@ -407,14 +455,56 @@ where
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
+        match self.convert_hash_or_number(id)? {
+            Some(number) => {
+                // If the Paris (Merge) hardfork block is known and block is after it, return empty
+                // ommers.
+                if self.database.chain_spec().final_paris_total_difficulty(number).is_some() {
+                    return Ok(Some(Vec::new()));
+                }
+
+                // Check in-memory state first
+                self.canonical_in_memory_state
+                    .state_by_number(number)
+                    .map(|o| o.block().block().ommers.clone())
+                    .map_or_else(|| self.database.ommers(id), |ommers| Ok(Some(ommers)))
+            }
+            None => self.database.ommers(id),
+        }
     }
 
     fn block_body_indices(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
+        if let Some(indices) = self.database.block_body_indices(number)? {
+            Ok(Some(indices))
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
+            // we have to construct the stored indices for the in memory blocks
+            //
+            // To calculate this we will fetch the anchor block and walk forward from all parents
+            let mut parent_chain = state.parent_state_chain();
+            parent_chain.reverse();
+            let anchor_num = state.anchor().number;
+            let mut stored_indices = self
+                .database
+                .block_body_indices(anchor_num)?
+                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(anchor_num))?;
+            stored_indices.first_tx_num = stored_indices.next_tx_num();
+
+            for state in parent_chain {
+                let txs = state.block().block.body.len() as u64;
+                if state.block().block().number == number {
+                    stored_indices.tx_count = txs;
+                } else {
+                    stored_indices.first_tx_num += txs;
+                }
+            }
+
+            Ok(Some(stored_indices))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -471,32 +561,47 @@ where
         self.database.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, mut range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.block_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 blocks.push(block_state.block().block().clone().unseal());
             } else {
-                let mut db_blocks = self.database.block_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 
     fn block_with_senders_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        mut range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.block_with_senders_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
@@ -504,22 +609,29 @@ where
                 // need to handle that situation.
                 blocks.push(BlockWithSenders { block: block.unseal(), senders });
             } else {
-                let mut db_blocks = self.database.block_with_senders_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 
     fn sealed_block_with_senders_range(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        mut range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         let capacity = (range.end() - range.start() + 1) as usize;
         let mut blocks = Vec::with_capacity(capacity);
 
-        for num in range.clone() {
+        // First, fetch the blocks from the database
+        let mut db_blocks = self.database.sealed_block_with_senders_range(range.clone())?;
+        blocks.append(&mut db_blocks);
+
+        // Advance the range iterator by the number of blocks fetched from the database
+        range.nth(db_blocks.len() - 1);
+
+        // Fetch the remaining blocks from the in-memory state
+        for num in range {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let block = block_state.block().block().clone();
                 let senders = block_state.block().senders().clone();
@@ -527,12 +639,10 @@ where
                 // need to handle that situation.
                 blocks.push(SealedBlockWithSenders { block, senders });
             } else {
-                let mut db_blocks =
-                    self.database.sealed_block_with_senders_range(num..=*range.end())?;
-                blocks.append(&mut db_blocks);
-                break;
+                break
             }
         }
+
         Ok(blocks)
     }
 }
@@ -752,11 +862,29 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        self.database.withdrawals_by_block(id, timestamp)
+        if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
+            return Ok(None)
+        }
+
+        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
+            Ok(block.block().block().withdrawals.clone())
+        } else {
+            self.database.withdrawals_by_block(id, timestamp)
+        }
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.database.latest_withdrawal()
+        let best_block_num = self.best_block_number()?;
+
+        // If the best block is in memory, use that. Otherwise, use the latest withdrawal in the
+        // database.
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(best_block_num) {
+            Ok(block.block().block().withdrawals.clone().and_then(|mut w| w.pop()))
+        } else {
+            self.database.latest_withdrawal()
+        }
     }
 }
 
@@ -769,7 +897,15 @@ where
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        self.database.requests_by_block(id, timestamp)
+        if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
+            return Ok(None)
+        }
+        let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
+            Ok(block.block().block().requests.clone())
+        } else {
+            self.database.requests_by_block(id, timestamp)
+        }
     }
 }
 
@@ -804,7 +940,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_env_with_header(cfg, block_env, &header, evm_config)
     }
 
     fn fill_env_with_header<EvmConfig>(
@@ -817,7 +955,17 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_and_block_env(
+            cfg,
+            block_env,
+            &self.database.chain_spec(),
+            header,
+            total_difficulty,
+        );
+        Ok(())
     }
 
     fn fill_cfg_env_at<EvmConfig>(
@@ -829,7 +977,9 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
+        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
+        self.fill_cfg_env_with_header(cfg, &header, evm_config)
     }
 
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -841,7 +991,11 @@ where
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        let total_difficulty = self
+            .header_td_by_number(header.number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
+        evm_config.fill_cfg_env(cfg, &self.database.chain_spec(), header, total_difficulty);
+        Ok(())
     }
 }
 
@@ -877,7 +1031,14 @@ where
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
-        self.database.latest()
+        // use latest state provider if the head state exists
+        if let Some(state) = self.canonical_in_memory_state.head_state() {
+            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            Ok(self.block_state_provider(state)?.boxed())
+        } else {
+            trace!(target: "providers::blockchain", "Using database state for latest state provider");
+            self.database.latest()
+        }
     }
 
     fn history_by_block_number(
@@ -886,12 +1047,25 @@ where
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
         self.ensure_canonical_block(block_number)?;
-        self.database.history_by_block_number(block_number)
+        let hash = self
+            .block_hash(block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        self.history_by_block_hash(hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        self.database.history_by_block_hash(block_hash)
+        if let Ok(state) = self.database.history_by_block_hash(block_hash) {
+            // This could be tracked by a block in the database block
+            Ok(state)
+        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            // ... or this could be tracked by the in memory state
+            let state_provider = self.block_state_provider(state)?;
+            Ok(Box::new(state_provider))
+        } else {
+            // if we couldn't find it anywhere, then we should return an error
+            Err(ProviderError::StateForHashNotFound(block_hash))
+        }
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -899,13 +1073,6 @@ where
         if let Ok(state) = self.history_by_block_hash(hash) {
             // This could be tracked by a historical block
             Ok(state)
-        } else if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            // ... or this could be tracked by the in memory state
-            let anchor_hash = state.anchor().hash;
-            let latest_historical = self.database.history_by_block_hash(anchor_hash)?;
-            let state_provider =
-                self.canonical_in_memory_state.state_provider(hash, latest_historical);
-            Ok(Box::new(state_provider))
         } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
             // .. or this could be the pending state
             Ok(pending)
@@ -945,6 +1112,35 @@ where
             }
         }
         Ok(None)
+    }
+
+    /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+                self.state_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                let hash = self
+                    .block_hash(num)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
+                self.state_by_block_hash(hash)
+            }
+        }
     }
 }
 
@@ -1088,7 +1284,23 @@ where
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        self.database.provider()?.account_block_changeset(block_number)
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
+            let changesets = state
+                .block()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .into_plain_state_reverts()
+                .accounts
+                .into_iter()
+                .flatten()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect();
+            Ok(changesets)
+        } else {
+            self.database.provider()?.account_block_changeset(block_number)
+        }
     }
 }
 
@@ -1098,6 +1310,8 @@ where
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        self.database.provider()?.basic_account(address)
+        // use latest state provider
+        let state_provider = self.latest()?;
+        state_provider.basic_account(address)
     }
 }
