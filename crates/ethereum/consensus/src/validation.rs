@@ -12,7 +12,8 @@ pub fn validate_block_post_execution(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
-    requests: &[Request],
+    #[cfg(not(feature = "optimism"))] requests: &[Request],
+    #[cfg(feature = "optimism")] _requests: &[Request],
 ) -> Result<(), ConsensusError> {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
