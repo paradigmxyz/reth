@@ -1462,3 +1462,71 @@ where
         state_provider.basic_account(address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_primitives::B256;
+    use reth_storage_api::BlockNumReader;
+    use reth_testing_utils::generators::{self, random_block_range};
+
+    use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+
+    #[test]
+    fn test_block_num_reader() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+        let database_blocks = blocks[0..5].to_vec();
+        let in_memory_blocks = blocks[5..].to_vec();
+
+        let mut blocks_iter = blocks.into_iter();
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in (0..5).map_while(|_| blocks_iter.next()) {
+            provider_rw.insert_historical_block(
+                block.seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Insert the rest of the blocks into the in-memory state
+        let chain = NewCanonicalChain::Commit {
+            new: blocks_iter
+                .map(|block| {
+                    let senders = block.senders().expect("failed to recover senders");
+                    ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(senders),
+                        Default::default(),
+                        Default::default(),
+                        Default::default(),
+                    )
+                })
+                .collect(),
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+        provider
+            .canonical_in_memory_state
+            .set_canonical_head(in_memory_blocks.last().unwrap().clone().header);
+
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
+
+        assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
+        assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
+
+        assert_eq!(provider.block_number(database_block.hash())?, Some(database_block.number));
+        assert_eq!(provider.block_number(in_memory_block.hash())?, Some(in_memory_block.number));
+
+        Ok(())
+    }
+}
