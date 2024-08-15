@@ -11,7 +11,7 @@ pub(crate) struct BlockDownloaderMetrics {
     pub(crate) active_block_downloads: Gauge,
 }
 
-/// Metrics for the `PersistanceService`
+/// Metrics for the `PersistenceService`
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.persistence")]
 pub(crate) struct PersistenceMetrics {
