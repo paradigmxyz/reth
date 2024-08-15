@@ -29,8 +29,8 @@ mod info;
 /// The chain spec module.
 mod spec;
 
-mod r#trait;
-pub use r#trait::ChainSpecTrait;
+mod api;
+pub use api::ChainSpecTrait;
 
 /// Chain specific constants
 pub(crate) mod constants;
