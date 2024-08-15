@@ -99,7 +99,7 @@ pub struct NetworkArgs {
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
-    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, verbatim_doc_comment)]
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES_TX_RESP", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions to
@@ -113,7 +113,7 @@ pub struct NetworkArgs {
     /// more, up to 2 MiB, a node will answer with more than 128 KiB.
     ///
     /// Default is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES_TX_RESP_TO_REQ", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
