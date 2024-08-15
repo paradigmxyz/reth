@@ -12,7 +12,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: 
 /// broadcast message.
 ///
 /// Default is 128 KiB.
-pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 128 * 1024;
+pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE: usize = 9 * 1024 * 1024;
 
 /* ================ REQUEST-RESPONSE ================ */
 
@@ -31,7 +31,7 @@ pub const SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST: usize = 25
 /// Spec'd at 2 MiB.
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 2 * 1024 * 1024;
+pub const SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE: usize = 9 * 1024 * 1024;
 
 /// Constants used by [`TransactionsManager`](super::TransactionsManager).
 pub mod tx_manager {
@@ -40,14 +40,14 @@ pub mod tx_manager {
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
     /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER: u32 = 10 * 1024;
+    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER: u32 = 1000 * 1024;
 
     /// Default maximum pending pool imports to tolerate.
     ///
     /// Default is equivalent to the number of hashes in one full announcement, which is spec'd at
     /// 4096 hashes, so 4096 pending pool imports.
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
-        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+        SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE * 2;
 
     /// Default limit for number of bad imports to keep track of.
     ///
@@ -77,7 +77,7 @@ pub mod tx_fetcher {
     /// assembling a [`PooledTransactions`](reth_eth_wire::PooledTransactions) response.
     ///
     /// Default is 128 KiB.
-    pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ: usize = 128 * 1024;
+    pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ: usize = 9 * 1024 * 1024;
 
     /* ==================== RETRIES ==================== */
 
@@ -121,7 +121,7 @@ pub mod tx_fetcher {
     /// number reflects concurrent requests for different hashes.
     ///
     /// Default is 1 request.
-    pub const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER: u8 = 1;
+    pub const DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER: u8 = 5;
 
     /* =============== HASHES PENDING FETCH ================ */
 
@@ -146,7 +146,7 @@ pub mod tx_fetcher {
     /// Default is half of [`DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH`], which defaults to 25 600
     /// hashes, so 12 800 hashes.
     pub const DEFAULT_MAX_COUNT_PENDING_FETCH: usize =
-        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH as usize / 2;
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH as usize * 10;
 
     /* ====== LIMITED CAPACITY ON FETCH PENDING HASHES ====== */
 

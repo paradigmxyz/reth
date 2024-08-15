@@ -273,6 +273,14 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: RPC
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all local transactions that can be included in the next block.
+    fn pending_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pending_transactions()
+            .into_iter()
+            .filter(|tx| tx.origin == TransactionOrigin::Local)
+            .collect()
+    }
+
     /// Returns all transactions that can be included in _future_ blocks.
     ///
     /// This and [Self::pending_transactions] are mutually exclusive.

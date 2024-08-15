@@ -1,7 +1,8 @@
 use crate::{
+    config::EXPECTED_TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     identifier::{SenderId, TransactionId},
     pool::size::SizeTracker,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -156,7 +157,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn get_txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> SmallVec<[TransactionId; TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> {
+    ) -> SmallVec<[TransactionId; EXPECTED_TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER]> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
