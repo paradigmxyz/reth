@@ -12,8 +12,8 @@ pub fn validate_block_post_execution(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
-    #[cfg(not(feature = "optimism"))] requests: &[Request],
-    #[cfg(feature = "optimism")] _requests: &[Request],
+    // TODO: revert after frontiers
+    _requests: &[Request],
 ) -> Result<(), ConsensusError> {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
@@ -39,20 +39,19 @@ pub fn validate_block_post_execution(
     }
 
     // Validate that the header requests root matches the calculated requests root
-    // TODO(onbjerg): remove this when we start using reth-optimism-consensus for optimism
-    #[cfg(not(feature = "optimism"))]
-    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let Some(header_requests_root) = block.header.requests_root else {
-            return Err(ConsensusError::RequestsRootMissing)
-        };
-
-        let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-        if requests_root != header_requests_root {
-            return Err(ConsensusError::BodyRequestsRootDiff(
-                GotExpected::new(requests_root, header_requests_root).into(),
-            ))
-        }
-    }
+    // TODO(onbjerg): revert this when we start using reth-optimism-consensus for optimism
+    // if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+    //     let Some(header_requests_root) = block.header.requests_root else {
+    //         return Err(ConsensusError::RequestsRootMissing)
+    //     };
+    //
+    //     let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
+    //     if requests_root != header_requests_root {
+    //         return Err(ConsensusError::BodyRequestsRootDiff(
+    //             GotExpected::new(requests_root, header_requests_root).into(),
+    //         ))
+    //     }
+    // }
 
     Ok(())
 }

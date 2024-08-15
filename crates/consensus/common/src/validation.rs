@@ -89,19 +89,18 @@ pub fn validate_block_pre_execution(
     }
 
     // EIP-7685: General purpose execution layer requests
-    // TODO(alexey): remove for non-frontiers
-    #[cfg(not(feature = "optimism"))]
-    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
-        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
-        let header_requests_root =
-            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
-        if requests_root != *header_requests_root {
-            return Err(ConsensusError::BodyRequestsRootDiff(
-                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
-            ))
-        }
-    }
+    // TODO(alexey): revert after frontiers
+    // if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+    //     let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+    //     let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+    //     let header_requests_root =
+    //         block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+    //     if requests_root != *header_requests_root {
+    //         return Err(ConsensusError::BodyRequestsRootDiff(
+    //             GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+    //         ))
+    //     }
+    // }
 
     Ok(())
 }
