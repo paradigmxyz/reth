@@ -552,8 +552,8 @@ tempfile = "3.8"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/latest_eip7702" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "rkrasiuk/set-delegated-code-on-load" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rkrasiuk/set-delegated-code-on-load" }
 
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "fd159f6" }
