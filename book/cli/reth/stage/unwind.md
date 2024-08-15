@@ -182,14 +182,14 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
-      --pooled-tx-response-soft-limit <BYTES>
+      --pooled-tx-response-soft-limit <BYTES_TX_RESP>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
           Spec'd at 2MiB.
 
           [default: 2097152]
 
-      --pooled-tx-pack-soft-limit <BYTES>
+      --pooled-tx-pack-soft-limit <BYTES_TX_RESP_TO_REQ>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions to
           request in one request.
 
