@@ -29,7 +29,3 @@ revm.workspace = true
 
 # misc
 tracing.workspace = true
-
-[features]
-default = []
-optimism = []
