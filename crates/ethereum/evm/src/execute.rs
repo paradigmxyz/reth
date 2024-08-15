@@ -210,9 +210,7 @@ where
                     continue;
                 }
                 // In all other cases, the tx needs to have a valid signature
-                return Err(BlockExecutionError::CanonicalRevert {
-                    inner: "invalid tx".to_string(),
-                });
+                return Err(BlockExecutionError::CanonicalRevert { inner: "invalid tx".to_string() });
             }
 
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
@@ -226,7 +224,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -247,8 +245,7 @@ where
             });
             if res.is_err() {
                 // Clear the state for the next tx
-                evm.context.evm.journaled_state =
-                    JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
+                evm.context.evm.journaled_state = JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
 
                 if optimistic {
                     continue;
@@ -265,13 +262,11 @@ where
                             println!("Invalid tx at {}: {:?}", idx, invalid_transaction);
                             // skip the tx
                             continue;
-                        }
+                        },
                         _ => {
                             // any other error is not allowed
-                            return Err(BlockExecutionError::Validation(
-                                BlockValidationError::EVM { hash, error },
-                            ));
-                        }
+                            return Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error }));
+                        },
                     },
                     _ => {
                         // Any other type of error is not allowed
@@ -317,12 +312,7 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput {
-            receipts,
-            requests,
-            gas_used: cumulative_gas_used,
-            valid_transaction_indices,
-        })
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used, valid_transaction_indices })
     }
 }
 
@@ -346,12 +336,7 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self {
-            executor: EthEvmExecutor { chain_spec, evm_config },
-            state,
-            optimistic: false,
-            taiko_data: None,
-        }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, optimistic: false, taiko_data: None }
     }
 
     /// Optimistic execution
@@ -420,12 +405,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(
-                block,
-                evm,
-                self.optimistic,
-                self.taiko_data.clone(),
-            )
+            self.executor.execute_state_transitions(block, evm, self.optimistic, self.taiko_data.clone())
         }?;
 
         // 3. apply post execution changes
@@ -505,14 +485,7 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput {
-            state: self.state.take_bundle(),
-            receipts,
-            requests,
-            gas_used,
-            db: self.state,
-            valid_transaction_indices,
-        })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used, db: self.state, valid_transaction_indices })
     }
 }
 

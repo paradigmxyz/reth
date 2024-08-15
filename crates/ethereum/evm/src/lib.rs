@@ -15,8 +15,8 @@ use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Head, Header, TransactionSigned, U256,
 };
-use reth_revm::taiko::handler_register;
 use reth_revm::{Database, EvmBuilder};
+use reth_revm::taiko::handler_register;
 
 pub mod execute;
 pub mod taiko;
