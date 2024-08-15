@@ -75,7 +75,6 @@ impl<T> NippyJarHeader for T where
 ///
 /// Data is organized into a columnar format, enabling column-based compression. Data retrieval
 /// entails consulting an offset list and fetching the data from file via `mmap`.
-
 /// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
 /// configuration, and an index file that houses the offsets and `offsets_index`.
 #[derive(Serialize, Deserialize)]
