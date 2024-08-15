@@ -12,7 +12,8 @@ use reth_discv5::{
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
-        TransactionFetcherConfig, TransactionsManagerConfig,
+        constants::tx_manager::DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, TransactionFetcherConfig,
+        TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -95,6 +96,10 @@ pub struct NetworkArgs {
     /// Maximum number of inbound requests. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
+
+    #[arg(long = "max-pending-imports", value_name = "PENDING_IMPORTS", default_value_t = DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Max number of transactions to import concurrently.
+    pub max_pending_pool_imports: usize,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
@@ -261,6 +266,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
         }
     }
 }
