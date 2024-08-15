@@ -332,42 +332,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
         Ok(())
     }
 
-    /// Prepares beforehand the offsets index for querying rows based on `values` (eg. transaction
-    /// hash). Expects `values` to be sorted in the same way as the data that is going to be
-    /// later on inserted.
-    ///
-    /// Currently collecting all items before acting on them.
-    pub fn prepare_index<T: AsRef<[u8]> + Sync + Clone>(
-        &mut self,
-        values: impl IntoIterator<Item = ColumnResult<T>>,
-        row_count: usize,
-    ) -> Result<(), NippyJarError> {
-        debug!(target: "nippy-jar", ?row_count, "Preparing index.");
-
-        let values = values.into_iter().collect::<Result<Vec<_>, _>>()?;
-
-        debug_assert!(
-            row_count == values.len(),
-            "Row count ({row_count}) differs from value list count ({}).",
-            values.len()
-        );
-
-        let offsets_index = vec![0; row_count];
-        if self.filter.is_some() {
-            debug!(target: "nippy-jar", ?row_count, "Creating filter and offsets_index.");
-
-            for v in values {
-                if let Some(filter) = self.filter.as_mut() {
-                    filter.add(v.as_ref())?;
-                }
-            }
-        }
-
-        debug!(target: "nippy-jar", ?row_count, "Encoding offsets index list.");
-        self.offsets_index = PrefixSummedEliasFano::from_slice(&offsets_index)?;
-        Ok(())
-    }
-
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
         self,
@@ -783,7 +747,6 @@ mod tests {
                     .with_cuckoo_filter(col1.len());
 
             nippy.prepare_compression(data.clone()).unwrap();
-            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
@@ -839,7 +802,6 @@ mod tests {
                 .with_cuckoo_filter(col1.len());
 
             nippy.prepare_compression(data).unwrap();
-            nippy.prepare_index(clone_with_result(&col1), col1.len()).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
                 .unwrap();
