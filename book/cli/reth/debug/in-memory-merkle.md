@@ -199,6 +199,13 @@ Networking:
 
           [default: 131072]
 
+      --max-seen-tx-history <MAX_SEEN_TX_HISTORY>
+          Max number of seen transactions to remember per peer.
+
+          Default is 320 transaction hashes.
+
+          [default: 320]
+
       --retries <RETRIES>
           The number of retries per request
 
