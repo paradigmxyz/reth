@@ -180,6 +180,8 @@ Networking:
       --max-pending-imports <PENDING_IMPORTS>
           Max number of transactions to import concurrently.
 
+          [default: 4096]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
