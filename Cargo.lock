@@ -6341,7 +6341,7 @@ dependencies = [
  "reth-revm",
  "reth-tasks",
  "reth-transaction-pool",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "tokio",
  "tracing",
 ]
@@ -6962,7 +6962,7 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "reth-rpc-types-compat",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
  "serde_json",
  "sha2 0.10.8",
@@ -6996,7 +6996,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "tracing",
 ]
 
@@ -7023,8 +7023,8 @@ dependencies = [
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-errors",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
 ]
 
 [[package]]
@@ -7044,7 +7044,7 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-testing-utils",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "secp256k1",
  "serde_json",
 ]
@@ -7062,8 +7062,8 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-revm",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "thiserror",
  "tracing",
 ]
@@ -7077,7 +7077,7 @@ dependencies = [
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "thiserror-no-std",
 ]
 
@@ -7091,7 +7091,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-primitives",
  "reth-trie",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
 ]
 
 [[package]]
@@ -7596,7 +7596,7 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tracing",
  "reth-transaction-pool",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
  "serde_json",
  "thiserror",
@@ -7632,7 +7632,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-transaction-pool",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "sha2 0.10.8",
  "thiserror",
  "tracing",
@@ -7656,7 +7656,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-transaction-pool",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde_json",
  "thiserror",
  "tokio",
@@ -7720,9 +7720,9 @@ dependencies = [
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
- "revm-precompile 7.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
+ "revm-precompile 7.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "roaring",
  "secp256k1",
  "serde",
@@ -7754,7 +7754,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
  "test-fuzz",
 ]
@@ -7793,7 +7793,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "strum",
  "tempfile",
  "tokio",
@@ -7863,7 +7863,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "tracing",
 ]
 
@@ -7909,9 +7909,9 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "revm-inspectors",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "schnellru",
  "secp256k1",
  "serde",
@@ -8226,7 +8226,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
 ]
 
 [[package]]
@@ -8347,7 +8347,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
- "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm 9.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde_json",
  "similar-asserts",
  "tokio",
@@ -8377,7 +8377,7 @@ dependencies = [
  "proptest-derive",
  "reth-codecs",
  "reth-primitives-traits",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
  "serde_json",
  "test-fuzz",
@@ -8412,13 +8412,13 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "9.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake#e5f0306818ae8b16d537fa3a582e9aded4beeec0"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
 dependencies = [
  "auto_impl",
  "cfg-if",
  "dyn-clone",
- "revm-interpreter 5.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
- "revm-precompile 7.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-interpreter 5.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
+ "revm-precompile 7.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
  "serde_json",
 ]
@@ -8457,9 +8457,9 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "5.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake#e5f0306818ae8b16d537fa3a582e9aded4beeec0"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
 dependencies = [
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
 ]
 
@@ -8475,14 +8475,14 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "7.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake#e5f0306818ae8b16d537fa3a582e9aded4beeec0"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
  "c-kzg 1.0.0",
  "k256",
  "once_cell",
- "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake)",
+ "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "ripemd",
  "secp256k1",
  "sha2 0.10.8",
@@ -8508,7 +8508,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "4.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko-ontake#e5f0306818ae8b16d537fa3a582e9aded4beeec0"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
 dependencies = [
  "alloy-primitives",
  "auto_impl",

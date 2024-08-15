@@ -507,13 +507,13 @@ test-fuzz = "5"
 anyhow = "1.0"
 
 [patch.crates-io]
-revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-ontake", default-features = false, features = [
+revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", default-features = false, features = [
     "std",
     "serde",
     "taiko",
 ]}
-revm-interpreter = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-ontake" }
-revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-ontake" }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-ontake"}
+revm-interpreter = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
+revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko"}
 c-kzg = { git = "https://github.com/brechtpd/c-kzg-4844", branch = "for-alpha7" }
 secp256k1 = { git = "https://github.com/CeciliaZ030/rust-secp256k1", branch = "sp1-patch" }
