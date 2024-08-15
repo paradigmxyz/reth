@@ -197,7 +197,7 @@ where
 
         // Calculate the requests and the requests root.
         let (requests, requests_root) = (None, None);
-        // TODO: revert after frontiers
+        // TODO: uncomment after frontiers
         // let (requests, requests_root) =
         //     if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
         //         // We do not calculate the EIP-6110 deposit requests because there are no

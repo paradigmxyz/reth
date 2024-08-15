@@ -12,7 +12,7 @@ pub fn validate_block_post_execution(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
-    // TODO: revert after frontiers
+    // TODO: uncomment after frontiers
     _requests: &[Request],
 ) -> Result<(), ConsensusError> {
     // Check if gas used matches the value set in header.
@@ -39,7 +39,7 @@ pub fn validate_block_post_execution(
     }
 
     // Validate that the header requests root matches the calculated requests root
-    // TODO(onbjerg): revert this when we start using reth-optimism-consensus for optimism
+    // TODO(onbjerg): uncomment this when we start using reth-optimism-consensus for optimism
     // if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
     //     let Some(header_requests_root) = block.header.requests_root else {
     //         return Err(ConsensusError::RequestsRootMissing)
