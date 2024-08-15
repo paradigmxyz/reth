@@ -84,7 +84,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-consensus-common/optimism",
 ]
 # Features for vergen to generate correct env vars
 jemalloc = []

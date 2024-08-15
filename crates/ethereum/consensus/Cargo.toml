@@ -22,4 +22,4 @@ tracing.workspace = true
 # TODO(onbjerg): remove when we start using reth-optimism-consensus
 [features]
 default = []
-optimism = ["reth-consensus-common/optimism"]
+optimism = []

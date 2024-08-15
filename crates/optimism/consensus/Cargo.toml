@@ -21,4 +21,4 @@ reth-consensus.workspace = true
 tracing.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-consensus-common/optimism"]
+optimism = ["reth-primitives/optimism"]
