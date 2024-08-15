@@ -11,6 +11,8 @@ use super::{
 pub struct TransactionsManagerConfig {
     /// Configuration for fetching transactions.
     pub transaction_fetcher_config: TransactionFetcherConfig,
+    /// Max number of seen transactions to store for each peer.
+    pub max_transactions_seen_by_peer_history: u32,
 }
 
 /// Configuration for fetching transactions.

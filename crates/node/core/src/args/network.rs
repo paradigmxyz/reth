@@ -18,6 +18,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
+use reth_network::transactions::constants::tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER;
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use std::{
@@ -115,6 +116,11 @@ pub struct NetworkArgs {
     /// Default is 128 KiB.
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+
+    
+    /// Max number of seen transactions to remember per peer.
+    #[arg(long = "max-seen-tx-history", value_name = "MAX_SEEN_TX_HISTORY", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    pub max_seen_tx_history: u32,
 }
 
 impl NetworkArgs {
@@ -161,6 +167,7 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
+            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
         };
 
         // Configure basic network stack
@@ -261,6 +268,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         }
     }
 }
