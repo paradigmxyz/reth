@@ -126,7 +126,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let chain_id = tx.transaction.chain_id();
     let access_list = tx.transaction.access_list().cloned();
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
-    let authorization_list = tx.transaction.authorization_list().clone().map(Vec::from);
+    let authorization_list = tx.transaction.authorization_list().map(Vec::from);
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
 
