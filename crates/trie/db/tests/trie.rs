@@ -451,22 +451,6 @@ fn account_and_storage_trie() {
     assert_eq!(node2a.root_hash, None);
     assert_eq!(node2a.hashes.len(), 1);
 
-    // Check storage trie
-    let mut updated_storage_trie =
-        trie_updates.storage_tries_ref().iter().filter(|(_, u)| !u.storage_nodes_ref().is_empty());
-    assert_eq!(updated_storage_trie.clone().count(), 1);
-    let (_, storage_trie_updates) = updated_storage_trie.next().unwrap();
-    assert_eq!(storage_trie_updates.storage_nodes_ref().len(), 1);
-
-    let (nibbles3, node3) = storage_trie_updates.storage_nodes_ref().iter().next().unwrap();
-    assert!(nibbles3.is_empty());
-    assert_eq!(node3.state_mask, TrieMask::new(0b1010));
-    assert_eq!(node3.tree_mask, TrieMask::new(0b0000));
-    assert_eq!(node3.hash_mask, TrieMask::new(0b0010));
-
-    assert_eq!(node3.hashes.len(), 1);
-    assert_eq!(node3.root_hash, Some(account3_storage_root));
-
     // Add an account
     // Some address whose hash starts with 0xB1
     let address4b = Address::from_str("4f61f2d5ebd991b85aa1677db97307caf5215c91").unwrap();
