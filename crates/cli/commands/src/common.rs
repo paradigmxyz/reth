@@ -66,7 +66,7 @@ impl EnvironmentArgs {
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
         let mut config = if config_path.exists() {
-            toml::de::from_str(
+            toml::from_str(
                 &std::fs::read_to_string(&config_path)
                     .map_err(|e| warn!("Failed to read config file: {}", e))
                     .unwrap_or_default(),
