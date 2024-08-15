@@ -219,10 +219,9 @@ where
 
         let last_database_block_number = provider.last_block_number()?;
 
-        if start_tx_number <= last_database_block_number &&
-            (matches!(range.end_bound(), Bound::Included(&n) if n < last_database_block_number) ||
-                matches!(range.end_bound(), Bound::Excluded(&n) if n <= last_database_block_number))
-        {
+        // Check that the transaction range is fully in the database. If the end is less than or
+        // equal to the last database block number, then the full range is included.
+        if end_tx_number <= last_database_block_number {
             // The range is fully in the database
             query_database(range)
         } else {
