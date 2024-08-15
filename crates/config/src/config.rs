@@ -51,10 +51,11 @@ impl Config {
             ));
         }
 
-        let config = toml::to_string(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        std::fs::write(path, config)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        std::fs::write(
+            path,
+            toml::to_string(self)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        )
     }
 
     /// Sets the pruning configuration.

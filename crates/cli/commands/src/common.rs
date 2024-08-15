@@ -68,9 +68,10 @@ impl EnvironmentArgs {
         let mut config = if config_path.exists() {
             toml::from_str(
                 &std::fs::read_to_string(&config_path)
-                    .map_err(|e| warn!("Failed to read config file: {}", e))
+                    .inspect_err(|e| warn!("Failed to read config file: {}", e))
                     .unwrap_or_default(),
             )
+            .inspect_err(|e| warn!("Failed to parse config file: {}", e))
             .unwrap_or_default()
         } else {
             Config::default()

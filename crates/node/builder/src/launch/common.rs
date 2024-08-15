@@ -115,10 +115,9 @@ impl LaunchContext {
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
-        let mut toml_config: reth_config::Config = std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or_default();
+        let mut toml_config: reth_config::Config =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap_or_default())
+                .wrap_err_with(|| format!("Could not parse config file: {:?}", config_path))?;
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
 
