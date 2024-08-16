@@ -2,6 +2,7 @@ use clap::Parser;
 use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_node_core::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
@@ -51,7 +52,10 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
+    pub fn execute<N: NodePrimitives>(
+        self,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
+    ) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();

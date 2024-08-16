@@ -4,6 +4,7 @@ use eyre::WrapErr;
 use reth_db::{DatabaseEnv, RawValue, TableViewer, Tables};
 use reth_db_api::{database::Database, table::Table};
 use reth_db_common::{DbTool, ListFilter};
+use reth_node_builder::primitives::NodePrimitives;
 use reth_primitives::hex;
 use std::{cell::RefCell, sync::Arc};
 use tracing::error;
@@ -51,7 +52,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db list` command
-    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
+    pub fn execute<N: NodePrimitives>(
+        self,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
+    ) -> eyre::Result<()> {
         self.table.view(&ListTableViewer { tool, args: &self })
     }
 
@@ -81,12 +85,12 @@ impl Command {
     }
 }
 
-struct ListTableViewer<'a> {
-    tool: &'a DbTool<Arc<DatabaseEnv>>,
+struct ListTableViewer<'a, N> {
+    tool: &'a DbTool<Arc<DatabaseEnv>, N>,
     args: &'a Command,
 }
 
-impl TableViewer<()> for ListTableViewer<'_> {
+impl<N> TableViewer<()> for ListTableViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {

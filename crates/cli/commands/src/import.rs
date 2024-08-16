@@ -18,6 +18,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
+use reth_node_builder::primitives::NodePrimitives;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::B256;
@@ -56,10 +57,11 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<E, F, N>(self, executor: F) -> eyre::Result<()>
     where
         E: BlockExecutorProvider,
         F: FnOnce(Arc<ChainSpec>) -> E,
+        N: NodePrimitives + Clone,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
@@ -72,7 +74,7 @@ impl ImportCommand {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let executor = executor(provider_factory.chain_spec());
         let consensus = Arc::new(EthBeaconConsensus::new(self.env.chain.clone()));
@@ -96,7 +98,7 @@ impl ImportCommand {
             total_decoded_blocks += file_client.headers_len();
             total_decoded_txns += file_client.total_transactions();
 
-            let (mut pipeline, events) = build_import_pipeline(
+            let (mut pipeline, events) = build_import_pipeline::<_, _, _, N>(
                 &config,
                 provider_factory.clone(),
                 &consensus,
@@ -160,19 +162,20 @@ impl ImportCommand {
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub fn build_import_pipeline<DB, C, E>(
+pub fn build_import_pipeline<DB, C, E, N>(
     config: &Config,
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: ProviderFactory<DB, N>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<DB, N>,
     disable_exec: bool,
     executor: E,
-) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
+) -> eyre::Result<(Pipeline<DB, N>, impl Stream<Item = NodeEvent>)>
 where
     DB: Database + Clone + Unpin + 'static,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
+    N: NodePrimitives + Clone + Unpin + 'static,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");
@@ -205,7 +208,7 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let pipeline = Pipeline::builder()
+    let pipeline = Pipeline::<_, N>::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)

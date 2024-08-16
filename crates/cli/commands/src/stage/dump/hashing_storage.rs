@@ -3,13 +3,14 @@ use eyre::Result;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::StorageHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
-    db_tool: &DbTool<DB>,
+pub(crate) async fn dump_hashing_storage_stage<DB: Database, N: NodePrimitives>(
+    db_tool: &DbTool<DB, N>,
     from: u64,
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
@@ -20,8 +21,8 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
     unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
-        dry_run(
-            ProviderFactory::new(
+        dry_run::<_, N>(
+            ProviderFactory::<_, N>::new(
                 output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
@@ -35,8 +36,8 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-fn unwind_and_copy<DB: Database>(
-    db_tool: &DbTool<DB>,
+fn unwind_and_copy<DB: Database, N: NodePrimitives>(
+    db_tool: &DbTool<DB, N>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
@@ -65,8 +66,8 @@ fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage straight away
-fn dry_run<DB: Database>(
-    output_provider_factory: ProviderFactory<DB>,
+fn dry_run<DB: Database, N: NodePrimitives>(
+    output_provider_factory: ProviderFactory<DB, N>,
     to: u64,
     from: u64,
 ) -> eyre::Result<()> {

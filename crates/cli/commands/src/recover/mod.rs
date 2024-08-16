@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use reth_cli_runner::CliContext;
+use reth_node_builder::primitives::NodePrimitives;
 
 mod storage_tries;
 
@@ -21,9 +22,9 @@ pub enum Subcommands {
 
 impl Command {
     /// Execute `recover` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<N: NodePrimitives>(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {
-            Subcommands::StorageTries(command) => command.execute(ctx).await,
+            Subcommands::StorageTries(command) => command.execute::<N>(ctx).await,
         }
     }
 }

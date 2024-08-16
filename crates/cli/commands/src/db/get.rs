@@ -8,6 +8,7 @@ use reth_db_api::{
     table::{Decompress, DupSort, Table},
 };
 use reth_db_common::DbTool;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_primitives::{BlockHash, Header};
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
@@ -54,7 +55,10 @@ enum Subcommand {
 
 impl Command {
     /// Execute `db get` command
-    pub fn execute<DB: Database>(self, tool: &DbTool<DB>) -> eyre::Result<()> {
+    pub fn execute<DB: Database, N: NodePrimitives>(
+        self,
+        tool: &DbTool<DB, N>,
+    ) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, raw } => {
                 table.view(&GetValueViewer { tool, key, subkey, raw })?
@@ -138,14 +142,14 @@ fn table_subkey<T: DupSort>(subkey: &Option<String>) -> Result<T::SubKey, eyre::
         .map_err(|e| eyre::eyre!(e))
 }
 
-struct GetValueViewer<'a, DB: Database> {
-    tool: &'a DbTool<DB>,
+struct GetValueViewer<'a, DB: Database, N> {
+    tool: &'a DbTool<DB, N>,
     key: String,
     subkey: Option<String>,
     raw: bool,
 }
 
-impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
+impl<DB: Database, N: NodePrimitives> TableViewer<()> for GetValueViewer<'_, DB, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {

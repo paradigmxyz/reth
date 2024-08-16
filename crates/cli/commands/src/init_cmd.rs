@@ -2,6 +2,7 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_provider::BlockHashReader;
 use tracing::info;
 
@@ -14,10 +15,10 @@ pub struct InitCommand {
 
 impl InitCommand {
     /// Execute the `init` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodePrimitives>(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");
 
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let hash = provider_factory
             .block_hash(0)?

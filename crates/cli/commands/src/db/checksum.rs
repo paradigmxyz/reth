@@ -49,20 +49,20 @@ impl Command {
     }
 }
 
-pub(crate) struct ChecksumViewer<'a, DB: Database, T: NodeTypes> {
-    tool: &'a DbTool<DB, T>,
+pub(crate) struct ChecksumViewer<'a, DB: Database, N: NodePrimitives> {
+    tool: &'a DbTool<DB, N>,
     start_key: Option<String>,
     end_key: Option<String>,
     limit: Option<usize>,
 }
 
-impl<DB: Database> ChecksumViewer<'_, DB> {
-    pub(crate) const fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
+impl<DB: Database, N: NodePrimitives> ChecksumViewer<'_, DB, N> {
+    pub(crate) const fn new(tool: &'_ DbTool<DB, N>) -> ChecksumViewer<'_, DB, N> {
         ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
 }
 
-impl<DB: Database> TableViewer<(u64, Duration)> for ChecksumViewer<'_, DB> {
+impl<DB: Database, N: NodePrimitives> TableViewer<(u64, Duration)> for ChecksumViewer<'_, DB, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {

@@ -5,6 +5,7 @@ use clap::Parser;
 use reth_config::config::EtlConfig;
 use reth_db_api::database::Database;
 use reth_db_common::init::init_from_state_dump;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 
@@ -40,10 +41,10 @@ pub struct InitStateCommand {
 
 impl InitStateCommand {
     /// Execute the `init` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodePrimitives>(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         info!(target: "reth::cli", "Initiating state dump");
 
@@ -55,9 +56,9 @@ impl InitStateCommand {
 }
 
 /// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<DB: Database>(
+pub fn init_at_state<DB: Database, N: NodePrimitives>(
     state_dump_path: PathBuf,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<DB, N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     info!(target: "reth::cli",

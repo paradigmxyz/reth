@@ -55,7 +55,7 @@ pub struct EnvironmentArgs {
 impl EnvironmentArgs {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {
+    pub fn init<N: NodePrimitives>(&self, access: AccessRights) -> eyre::Result<Environment<N>> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -134,7 +134,7 @@ impl EnvironmentArgs {
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds and executes an unwind-only pipeline
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::<_, N>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,

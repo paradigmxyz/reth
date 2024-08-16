@@ -8,6 +8,7 @@ use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Ta
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::providers::StaticFileProvider;
 use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
@@ -36,10 +37,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute(
+    pub fn execute<N: NodePrimitives>(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<Arc<DatabaseEnv>>,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -52,13 +53,16 @@ impl Command {
 
         println!("\n");
 
-        let db_stats_table = self.db_stats_table(tool)?;
+        let db_stats_table = self.db_stats_table::<N>(tool)?;
         println!("{db_stats_table}");
 
         Ok(())
     }
 
-    fn db_stats_table(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
+    fn db_stats_table<N: NodePrimitives>(
+        &self,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
+    ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header([
@@ -306,7 +310,10 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
+    fn checksum_report<N: NodePrimitives>(
+        &self,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
+    ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);

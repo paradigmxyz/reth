@@ -1,6 +1,7 @@
 //! Command that runs pruning without any limits.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;
@@ -14,8 +15,8 @@ pub struct PruneCommand {
 
 impl PruneCommand {
     /// Execute the `prune` command
-    pub async fn execute(self) -> eyre::Result<()> {
-        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodePrimitives>(self) -> eyre::Result<()> {
+        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
         let prune_config = config.prune.unwrap_or_default();
 
         // Copy data from database to static files

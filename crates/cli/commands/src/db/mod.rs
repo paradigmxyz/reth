@@ -2,6 +2,7 @@ use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
+use reth_node_builder::primitives::NodePrimitives;
 use std::io::{self, Write};
 
 mod checksum;
@@ -53,7 +54,7 @@ pub enum Subcommands {
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
     ($env:expr, $tool:ident, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = $env.init::<N>(AccessRights::RO)?;
 
         let $tool = DbTool::new(provider_factory.clone())?;
         $command;
@@ -62,7 +63,7 @@ macro_rules! db_ro_exec {
 
 impl Command {
     /// Execute `db` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodePrimitives>(self) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain);
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
@@ -81,27 +82,27 @@ impl Command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(data_dir, &tool)?;
+                    command.execute::<N>(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(&tool)?;
+                    command.execute::<N>(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(&tool)?;
+                    command.execute::<N>(&tool)?;
                 });
             }
             Subcommands::Diff(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(&tool)?;
+                    command.execute::<N>(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(&tool)?;
+                    command.execute::<_, N>(&tool)?;
                 });
             }
             Subcommands::Drop { force } => {
@@ -120,13 +121,13 @@ impl Command {
                     }
                 }
 
-                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 let tool = DbTool::new(provider_factory)?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
-                command.execute(provider_factory)?;
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                command.execute::<_, N>(provider_factory)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
