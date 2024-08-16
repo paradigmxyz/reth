@@ -70,7 +70,7 @@ jobs:
       - run: go version
 
       - name: Build hive assets
-        run: .github/assets/hive/build_simulators.sh
+        run: .github/assets/hive/build_experimental_simulators.sh
 
       - name: Upload hive assets
         uses: actions/upload-artifact@v4
