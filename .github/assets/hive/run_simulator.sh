@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# set -x
+set -x
 
 cd hivetests/
 
@@ -7,6 +7,8 @@ sim="${1}"
 limit="${2}"
 
 run_hive() {
+    sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' clients/reth/reth.sh
+
     hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --client reth 2>&1 | tee /tmp/log || true
 }
 

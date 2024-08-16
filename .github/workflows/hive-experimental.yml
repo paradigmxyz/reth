@@ -216,8 +216,6 @@ jobs:
           path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
-        env:
-          FLAGS: "--engine.experimental"
         run: .github/assets/hive/run_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
 
       - name: Parse hive output
