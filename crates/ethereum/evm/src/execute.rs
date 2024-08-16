@@ -5,10 +5,9 @@ use crate::{
     taiko::{check_anchor_tx, check_anchor_tx_ontake, TaikoData},
     EthEvmConfig,
 };
-use anyhow::Result;
 use reth_chainspec::{ChainSpec, MAINNET};
 pub use reth_consensus::Consensus;
-pub use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
+pub use reth_ethereum_consensus::{EthBeaconConsensus, validate_block_post_execution};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -29,14 +28,15 @@ use reth_revm::{
         apply_beacon_root_contract_call, apply_blockhashes_update,
         apply_withdrawal_requests_contract_call, post_block_balance_increments,
     },
-    Evm, JournaledState, State,
+    Evm, State,
+    JournaledState,
 };
 use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    Address, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, HashSet, ResultAndState,
-    SpecId,
+    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    EVMError, HashSet, SpecId,
 };
 use std::sync::Arc;
+use anyhow::Result;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]

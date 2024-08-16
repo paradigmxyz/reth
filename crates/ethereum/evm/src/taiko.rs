@@ -1,10 +1,10 @@
 //! Taiko related functionality for the block executor.
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
-use lazy_static::lazy_static;
 use reth_primitives::{Block, Header, TransactionSigned, TxKind};
 use revm_primitives::{alloy_primitives::uint, Address, U256};
 use std::str::FromStr;
+use lazy_static::lazy_static;
+use anyhow::{bail, Context, Result, ensure, anyhow};
 
 /// Data required to validate a Taiko Block
 #[derive(Clone, Debug, Default)]
