@@ -97,7 +97,7 @@ impl Compact for Bytecode {
                 buf.put_slice(eof.raw().as_ref());
                 1 + eof.raw().as_ref().len()
             }
-            RevmBytecode::Eip7702s(delegation) => {
+            RevmBytecode::Eip7702(delegation) => {
                 buf.put_u8(4);
                 buf.put_slice(delegation.raw().as_ref());
                 1 + delegation.raw().as_ref().len()
