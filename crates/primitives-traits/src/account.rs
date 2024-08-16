@@ -5,7 +5,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
+use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, Eip7702Bytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
@@ -128,6 +128,9 @@ impl Compact for Bytecode {
                 // EOF bytecode object will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
             }
+            4 => Self(RevmBytecode::Eip7702(
+                Eip7702Bytecode::new_raw(bytes).expect("valid 7702 bytecode"),
+            )),
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])
@@ -160,7 +163,7 @@ impl From<Account> for AccountInfo {
 mod tests {
     use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
-    use revm_primitives::LegacyAnalyzedBytecode;
+    use revm_primitives::{Address, LegacyAnalyzedBytecode};
 
     #[test]
     fn test_account() {
@@ -223,6 +226,15 @@ mod tests {
         )));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
+
+        let (decoded, remainder) = Bytecode::from_compact(&buf, len);
+        assert_eq!(decoded, bytecode);
+        assert!(remainder.is_empty());
+
+        let mut buf = vec![];
+        let bytecode = Bytecode(RevmBytecode::new_eip7702(Address::with_last_byte(42)));
+        let len = bytecode.to_compact(&mut buf);
+        assert_eq!(len, 51);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);
         assert_eq!(decoded, bytecode);
