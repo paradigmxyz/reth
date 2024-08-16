@@ -50,7 +50,7 @@ fn fill(
     #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
         TxType::Legacy | TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
-        TxType::Eip1559 | TxType::Eip4844 => {
+        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
             let gas_price = base_fee
