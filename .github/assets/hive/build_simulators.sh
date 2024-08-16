@@ -7,6 +7,7 @@ mkdir hive_assets/
 cd hivetests
 go build .
 
+sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' clients/reth/reth.sh
 ./hive -client reth # first builds and caches the client
 
 # Run each hive command in the background for each simulator and wait
