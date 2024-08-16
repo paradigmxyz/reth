@@ -1,8 +1,8 @@
 //! The mode the auto seal miner is operating in.
 
 use futures_util::{stream::Fuse, StreamExt};
-use reth_primitives::TxHash;
-use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
+use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, TxHash};
+use reth_transaction_pool::{PoolTransaction, TransactionPool, ValidPoolTransaction};
 use std::{
     fmt,
     pin::Pin,
@@ -100,10 +100,25 @@ impl FixedBlockTimeMiner {
     where
         Pool: TransactionPool,
     {
+        // Prevents tx spams that breaks instant miner
         if self.interval.poll_tick(cx).is_ready() {
-            // drain the pool
-            return Poll::Ready(pool.best_transactions().collect())
+            let mut txs = Vec::new();
+            let mut cumulative_gas = 0;
+
+            for tx in pool.best_transactions() {
+                let next_gas = cumulative_gas + tx.transaction.gas_limit();
+
+                if next_gas > ETHEREUM_BLOCK_GAS_LIMIT {
+                    break
+                }
+
+                cumulative_gas = next_gas;
+                txs.push(tx);
+            }
+
+            return Poll::Ready(txs);
         }
+
         Poll::Pending
     }
 }
