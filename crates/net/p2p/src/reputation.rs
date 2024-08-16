@@ -131,20 +131,21 @@ pub struct ReputationChangeWeights {
 impl ReputationChangeWeights {
     /// Returns the quantifiable [`ReputationChange`] for the given [`ReputationChangeKind`] using
     /// the configured weights
-    pub fn change(&self, kind: ReputationChangeKind) -> ReputationChange {
-        match kind {
-            ReputationChangeKind::BadMessage => self.bad_message.into(),
-            ReputationChangeKind::BadBlock => self.bad_block.into(),
-            ReputationChangeKind::BadTransactions => self.bad_transactions.into(),
-            ReputationChangeKind::AlreadySeenTransaction => self.already_seen_transactions.into(),
-            ReputationChangeKind::Timeout => self.timeout.into(),
-            ReputationChangeKind::BadProtocol => self.bad_protocol.into(),
-            ReputationChangeKind::FailedToConnect => self.failed_to_connect.into(),
-            ReputationChangeKind::Dropped => self.dropped.into(),
-            ReputationChangeKind::Reset => DEFAULT_REPUTATION.into(),
-            ReputationChangeKind::Other(val) => val.into(),
-            ReputationChangeKind::BadAnnouncement => self.bad_announcement.into(),
-        }
+    pub fn change(&self, _kind: ReputationChangeKind) -> ReputationChange {
+        ReputationChange::default()
+        // match kind {
+        //     ReputationChangeKind::BadMessage => self.bad_message.into(),
+        //     ReputationChangeKind::BadBlock => self.bad_block.into(),
+        //     ReputationChangeKind::BadTransactions => self.bad_transactions.into(),
+        //     ReputationChangeKind::AlreadySeenTransaction =>
+        // self.already_seen_transactions.into(),     ReputationChangeKind::Timeout =>
+        // self.timeout.into(),     ReputationChangeKind::BadProtocol =>
+        // self.bad_protocol.into(),     ReputationChangeKind::FailedToConnect =>
+        // self.failed_to_connect.into(),     ReputationChangeKind::Dropped =>
+        // self.dropped.into(),     ReputationChangeKind::Reset =>
+        // DEFAULT_REPUTATION.into(),     ReputationChangeKind::Other(val) => val.into(),
+        //     ReputationChangeKind::BadAnnouncement => self.bad_announcement.into(),
+        // }
     }
 }
 

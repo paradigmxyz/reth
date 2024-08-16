@@ -827,14 +827,15 @@ impl Discv4Service {
     ///
     /// This allows applications, for whatever reason, to remove nodes from the local routing
     /// table. Returns `true` if the node was in the table and `false` otherwise.
-    pub fn remove_node(&mut self, node_id: PeerId) -> bool {
-        let key = kad_key(node_id);
-        let removed = self.kbuckets.remove(&key);
-        if removed {
-            trace!(target: "discv4", ?node_id, "removed node");
-            self.notify(DiscoveryUpdate::Removed(node_id));
-        }
-        removed
+    pub fn remove_node(&mut self, _node_id: PeerId) -> bool {
+        // let key = kad_key(node_id);
+        // let removed = self.kbuckets.remove(&key);
+        // if removed {
+        // trace!(target: "discv4", ?node_id, "removed node");
+        // self.notify(DiscoveryUpdate::Removed(node_id));
+        // }
+        // removed
+        false
     }
 
     /// Gets the number of entries that are considered connected.
