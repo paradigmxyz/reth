@@ -20,6 +20,7 @@ use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
     tree::TreeConfig,
 };
+use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
@@ -133,6 +134,21 @@ where
         let network_client = ctx.components().network().fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
+        let node_config = ctx.node_config();
+        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+            .maybe_skip_fcu(node_config.debug.skip_fcu)
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+                node_config.debug.reorg_frequency,
+            )
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
+            // during this run.
+            .maybe_store_messages(node_config.debug.engine_api_store.clone());
+
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
 
@@ -179,7 +195,7 @@ where
             ctx.components().block_executor().clone(),
             ctx.chain_spec(),
             network_client.clone(),
-            UnboundedReceiverStream::new(consensus_engine_rx),
+            Box::pin(consensus_engine_stream),
             pipeline,
             Box::new(ctx.task_executor().clone()),
             ctx.provider_factory().clone(),
