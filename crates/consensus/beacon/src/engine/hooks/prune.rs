@@ -9,6 +9,7 @@ use metrics::Counter;
 use reth_db_api::database::Database;
 use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::ProviderFactory;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -21,15 +22,15 @@ use tokio::sync::oneshot;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub struct PruneHook<DB> {
+pub struct PruneHook<DB, N> {
     /// The current state of the pruner.
-    pruner_state: PrunerState<DB>,
+    pruner_state: PrunerState<DB, N>,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
     metrics: Metrics,
 }
 
-impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
+impl<DB: fmt::Debug, N: fmt::Debug> fmt::Debug for PruneHook<DB, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PruneHook")
             .field("pruner_state", &self.pruner_state)
@@ -38,10 +39,10 @@ impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> PruneHook<DB> {
+impl<DB: Database + 'static, N: NodePrimitives> PruneHook<DB, N> {
     /// Create a new instance
     pub fn new(
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        pruner: Pruner<DB, ProviderFactory<DB, N>>,
         pruner_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self {
@@ -117,7 +118,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
+impl<DB: Database + 'static, N: NodePrimitives> EngineHook for PruneHook<DB, N> {
     fn name(&self) -> &'static str {
         "Prune"
     }
@@ -153,11 +154,11 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PrunerState<DB> {
+enum PrunerState<DB, N> {
     /// Pruner is idle.
-    Idle(Option<Pruner<DB, ProviderFactory<DB>>>),
+    Idle(Option<Pruner<DB, ProviderFactory<DB, N>>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<DB, ProviderFactory<DB>>>),
+    Running(oneshot::Receiver<PrunerWithResult<DB, ProviderFactory<DB, N>>>),
 }
 
 #[derive(reth_metrics::Metrics)]

@@ -12,6 +12,7 @@ use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
+use reth_primitives_traits::NodePrimitives;
 
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
@@ -266,7 +267,10 @@ impl NodeConfig {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> ProviderResult<Head> {
+    pub fn lookup_head<DB: Database, N: NodePrimitives>(
+        &self,
+        factory: ProviderFactory<DB, N>,
+    ) -> ProviderResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;

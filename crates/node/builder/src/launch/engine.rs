@@ -24,7 +24,7 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns};
+use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -58,7 +58,9 @@ impl EngineNodeLauncher {
 
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB, <T as NodeTypes>::Primitives>,
+    >,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi:
@@ -115,7 +117,7 @@ where
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
+            .with_blockchain_db(move |provider_factory| {
                 Ok(BlockchainProvider2::new(provider_factory)?)
             }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
@@ -154,10 +156,11 @@ where
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
-        hooks.add(StaticFileHook::new(
-            static_file_producer.clone(),
-            Box::new(ctx.task_executor().clone()),
-        ));
+        // TODO
+        // hooks.add(StaticFileHook::new(
+        //     static_file_producer.clone(),
+        //     Box::new(ctx.task_executor().clone()),
+        // ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         // Configure the pipeline

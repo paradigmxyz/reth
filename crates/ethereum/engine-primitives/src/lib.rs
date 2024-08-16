@@ -24,6 +24,12 @@ pub use reth_rpc_types::{
     ExecutionPayloadV1,
 };
 
+/// Add-ons w.r.t. l1 ethereum.
+#[derive(Debug, Clone)]
+pub struct EthPrimitiveTypes;
+
+impl reth_primitives_traits::NodePrimitives for EthPrimitiveTypes {}
+
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]

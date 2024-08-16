@@ -18,6 +18,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
@@ -58,13 +59,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [`BlockchainTree::make_canonical`]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB, E> {
+pub struct BlockchainTree<DB, E, N> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, E>,
+    externals: TreeExternals<DB, E, N>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -75,7 +76,7 @@ pub struct BlockchainTree<DB, E> {
     metrics: TreeMetrics,
 }
 
-impl<DB, E> BlockchainTree<DB, E> {
+impl<DB, E, N> BlockchainTree<DB, E, N> {
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are emitted by the tree.
@@ -89,10 +90,11 @@ impl<DB, E> BlockchainTree<DB, E> {
     }
 }
 
-impl<DB, E> BlockchainTree<DB, E>
+impl<DB, E, N> BlockchainTree<DB, E, N>
 where
     DB: Database + Clone,
     E: BlockExecutorProvider,
+    N: NodePrimitives,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -115,7 +117,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        mut externals: TreeExternals<DB, E>,
+        mut externals: TreeExternals<DB, E, N>,
         config: BlockchainTreeConfig,
         prune_modes: PruneModes,
     ) -> ProviderResult<Self> {
@@ -1501,7 +1503,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
+        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E, N>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }

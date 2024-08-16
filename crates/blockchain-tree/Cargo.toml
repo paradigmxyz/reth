@@ -28,6 +28,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
 reth-network.workspace = true
+reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
 
 # common

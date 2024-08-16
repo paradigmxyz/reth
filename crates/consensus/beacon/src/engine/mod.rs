@@ -11,6 +11,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     BlockClient,
 };
+use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -167,7 +168,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
-pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
+pub struct BeaconConsensusEngine<DB, BT, Client, NodeT>
 where
     DB: Database,
     Client: BlockClient,
@@ -176,31 +177,32 @@ where
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader,
-    EngineT: EngineTypes,
+    NodeT: NodeTypes,
 {
     /// Controls syncing triggered by engine updates.
-    sync: EngineSyncController<DB, Client>,
+    sync: EngineSyncController<DB, Client, NodeT::Primitives>,
     /// The type we can use to query both the database and the blockchain tree.
     blockchain: BT,
     /// Used for emitting updates about whether the engine is syncing or not.
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
-    engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
+    engine_message_stream: BoxStream<'static, BeaconEngineMessage<NodeT::Engine>>,
     /// A clone of the handle
-    handle: BeaconConsensusEngineHandle<EngineT>,
+    handle: BeaconConsensusEngineHandle<NodeT::Engine>,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// The payload store.
-    payload_builder: PayloadBuilderHandle<EngineT>,
+    payload_builder: PayloadBuilderHandle<NodeT::Engine>,
     /// Validator for execution payloads
     payload_validator: ExecutionPayloadValidator,
     /// Current blockchain tree action.
-    blockchain_tree_action: Option<BlockchainTreeAction<EngineT>>,
+    blockchain_tree_action: Option<BlockchainTreeAction<NodeT>>,
     /// Pending forkchoice update.
     /// It is recorded if we cannot process the forkchoice update because
     /// a hook with database read-write access is active.
     /// This is a temporary solution to always process missed FCUs.
-    pending_forkchoice_update: Option<PendingForkchoiceUpdate<EngineT::PayloadAttributes>>,
+    pending_forkchoice_update:
+        Option<PendingForkchoiceUpdate<<NodeT::Engine as PayloadTypes>::PayloadAttributes>>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -223,7 +225,7 @@ where
     metrics: EngineMetrics,
 }
 
-impl<DB, BT, Client, EngineT> BeaconConsensusEngine<DB, BT, Client, EngineT>
+impl<DB, BT, Client, NodeT> BeaconConsensusEngine<DB, BT, Client, NodeT>
 where
     DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
@@ -234,22 +236,22 @@ where
         + ChainSpecProvider
         + 'static,
     Client: BlockClient + 'static,
-    EngineT: EngineTypes + Unpin,
+    NodeT: NodeTypes + Unpin,
 {
     /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<DB, NodeT::Primitives>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        payload_builder: PayloadBuilderHandle<EngineT>,
+        payload_builder: PayloadBuilderHandle<NodeT::Engine>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<NodeT::Engine>)> {
         let (to_engine, rx) = mpsc::unbounded_channel();
         Self::with_channel(
             client,
@@ -283,18 +285,18 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn with_channel(
         client: Client,
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<DB, NodeT::Primitives>,
         blockchain: BT,
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        payload_builder: PayloadBuilderHandle<EngineT>,
+        payload_builder: PayloadBuilderHandle<NodeT::Engine>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
-        to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
-        engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
+        to_engine: UnboundedSender<BeaconEngineMessage<NodeT::Engine>>,
+        engine_message_stream: BoxStream<'static, BeaconEngineMessage<NodeT::Engine>>,
         hooks: EngineHooks,
-    ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
+    ) -> RethResult<(Self, BeaconConsensusEngineHandle<NodeT::Engine>)> {
         let event_sender = EventSender::default();
         let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
         let sync = EngineSyncController::new(
@@ -348,7 +350,7 @@ where
     }
 
     /// Set the next blockchain tree action.
-    fn set_blockchain_tree_action(&mut self, action: BlockchainTreeAction<EngineT>) {
+    fn set_blockchain_tree_action(&mut self, action: BlockchainTreeAction<NodeT>) {
         let previous_action = self.blockchain_tree_action.replace(action);
         debug_assert!(previous_action.is_none(), "Pre-existing action found");
     }
@@ -390,7 +392,9 @@ where
     fn on_forkchoice_updated_make_canonical_result(
         &mut self,
         state: ForkchoiceState,
-        mut attrs: Option<EngineT::PayloadAttributes>,
+        mut attrs: Option<
+            <NodeT::Engine as reth_payload_primitives::PayloadTypes>::PayloadAttributes,
+        >,
         make_canonical_result: Result<CanonicalOutcome, CanonicalError>,
         elapsed: Duration,
     ) -> Result<OnForkChoiceUpdated, CanonicalError> {
@@ -454,7 +458,7 @@ where
         &self,
         head: &BlockNumHash,
         header: &SealedHeader,
-        attrs: &mut Option<EngineT::PayloadAttributes>,
+        attrs: &mut Option<<NodeT::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
@@ -498,7 +502,7 @@ where
     fn on_forkchoice_updated(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<EngineT::PayloadAttributes>,
+        attrs: Option<<NodeT::Engine as PayloadTypes>::PayloadAttributes>,
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     ) {
         self.metrics.forkchoice_updated_messages.increment(1);
@@ -620,7 +624,7 @@ where
     ///
     /// The [`BeaconConsensusEngineHandle`] can be used to interact with this
     /// [`BeaconConsensusEngine`]
-    pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
+    pub fn handle(&self) -> BeaconConsensusEngineHandle<NodeT::Engine> {
         self.handle.clone()
     }
 
@@ -1156,7 +1160,7 @@ where
     /// return an error if the payload attributes are invalid.
     fn process_payload_attributes(
         &self,
-        attrs: EngineT::PayloadAttributes,
+        attrs: <NodeT::Engine as PayloadTypes>::PayloadAttributes,
         head: Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
@@ -1173,7 +1177,7 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
-        match <EngineT::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
+        match <<NodeT::Engine as PayloadTypes>::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,
         ) {
@@ -1595,7 +1599,7 @@ where
     /// so the state change should be handled accordingly.
     fn on_blockchain_tree_action(
         &mut self,
-        action: BlockchainTreeAction<EngineT>,
+        action: BlockchainTreeAction<NodeT>,
     ) -> RethResult<EngineEventOutcome> {
         match action {
             BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx } => {
@@ -1788,7 +1792,7 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, EngineT>
+impl<DB, BT, Client, NodeT> Future for BeaconConsensusEngine<DB, BT, Client, NodeT>
 where
     DB: Database + Unpin + 'static,
     Client: BlockClient + 'static,
@@ -1800,7 +1804,7 @@ where
         + ChainSpecProvider
         + Unpin
         + 'static,
-    EngineT: EngineTypes + Unpin,
+    NodeT: NodeTypes + Unpin,
 {
     type Output = Result<(), BeaconConsensusEngineError>;
 
@@ -1925,10 +1929,10 @@ where
     }
 }
 
-enum BlockchainTreeAction<EngineT: EngineTypes> {
+enum BlockchainTreeAction<NodeT: NodeTypes> {
     MakeForkchoiceHeadCanonical {
         state: ForkchoiceState,
-        attrs: Option<EngineT::PayloadAttributes>,
+        attrs: Option<<NodeT::Engine as PayloadTypes>::PayloadAttributes>,
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
     InsertNewPayload {

@@ -20,6 +20,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
 use reth_prune::Pruner;
 use reth_stages_api::Pipeline;
@@ -35,35 +36,37 @@ use std::{
 type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
-type EngineServiceType<DB, Client, T> = ChainOrchestrator<
+type EngineServiceType<DB, Client, T, N> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<T>>,
         EngineMessageStream<T>,
         BasicBlockDownloader<Client>,
     >,
-    PipelineSync<DB>,
+    PipelineSync<DB, N>,
 >;
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<DB, Client, E, T>
+pub struct EngineService<DB, Client, E, T, N>
 where
     DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
     T: EngineTypes,
+    N: NodePrimitives,
 {
-    orchestrator: EngineServiceType<DB, Client, T>,
-    _marker: PhantomData<E>,
+    orchestrator: EngineServiceType<DB, Client, T, N>,
+    _marker: PhantomData<(E, N)>,
 }
 
-impl<DB, Client, E, T> EngineService<DB, Client, E, T>
+impl<DB, Client, E, T, N> EngineService<DB, Client, E, T, N>
 where
     DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
     T: EngineTypes + 'static,
+    N: NodePrimitives + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
@@ -73,11 +76,11 @@ where
         chain_spec: Arc<ChainSpec>,
         client: Client,
         incoming_requests: EngineMessageStream<T>,
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<DB, N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
-        provider: ProviderFactory<DB>,
-        blockchain_db: BlockchainProvider2<DB>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        provider: ProviderFactory<DB, N>,
+        blockchain_db: BlockchainProvider2<DB, N>,
+        pruner: Pruner<DB, ProviderFactory<DB, N>>,
         payload_builder: PayloadBuilderHandle<T>,
         tree_config: TreeConfig,
     ) -> Self {
@@ -111,17 +114,18 @@ where
     }
 
     /// Returns a mutable reference to the orchestrator.
-    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<DB, Client, T> {
+    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<DB, Client, T, N> {
         &mut self.orchestrator
     }
 }
 
-impl<DB, Client, E, T> Stream for EngineService<DB, Client, E, T>
+impl<DB, Client, E, T, N> Stream for EngineService<DB, Client, E, T, N>
 where
     DB: Database + 'static,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
     T: EngineTypes + 'static,
+    N: NodePrimitives + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 

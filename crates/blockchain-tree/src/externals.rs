@@ -4,6 +4,7 @@ use reth_consensus::Consensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
     StatsReader,
@@ -21,19 +22,19 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - The executor factory to execute blocks with
 /// - The chain spec
 #[derive(Debug)]
-pub struct TreeExternals<DB, E> {
+pub struct TreeExternals<DB, E, N> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
-    pub(crate) provider_factory: ProviderFactory<DB>,
+    pub(crate) provider_factory: ProviderFactory<DB, N>,
     /// The consensus engine.
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
 }
 
-impl<DB, E> TreeExternals<DB, E> {
+impl<DB, E, N> TreeExternals<DB, E, N> {
     /// Create new tree externals.
     pub fn new(
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<DB, N>,
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
     ) -> Self {
@@ -41,7 +42,7 @@ impl<DB, E> TreeExternals<DB, E> {
     }
 }
 
-impl<DB: Database, E> TreeExternals<DB, E> {
+impl<DB: Database, E, N: NodePrimitives> TreeExternals<DB, E, N> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers

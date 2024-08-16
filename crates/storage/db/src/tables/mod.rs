@@ -99,6 +99,78 @@ pub trait TableViewer<R> {
     }
 }
 
+/// Defines a database table with a generic [`reth_db_api::table::Value`].
+#[macro_export]
+macro_rules! generic_table {
+    ($(#[$attr:meta])* $name:ident<Key = $key:ty, DefaultValueType = $default_value:ty $(, SubKey = $subkey:ty)? $(,)?>) => {
+        $(#[$attr])*
+        ///
+        #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to [`", stringify!($default_value), "`].")]
+        $(
+            #[doc = concat!("\n\nThis table's `DUPSORT` subkey is [`", stringify!($subkey), "`].")]
+        )?
+        pub struct $name<V = $default_value> {
+            _marker: std::marker::PhantomData<V>,
+        }
+
+        impl<V> std::fmt::Debug for $name<V> {
+            fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                unreachable!("this type cannot be instantiated")
+            }
+        }
+
+        impl<V: reth_db_api::table::Value + 'static> reth_db_api::table::Table for $name<V> {
+            const NAME: &'static str = stringify!($name);
+
+            type Key = $key;
+            type Value = V;
+        }
+
+        $(
+            impl<V: reth_db_api::table::Value + 'static> reth_db_api::table::DupSort for $name<V> {
+                type SubKey = $subkey;
+            }
+        )?
+    };
+}
+
+/// Defines a database table.
+#[macro_export]
+macro_rules! table {
+    ($(#[$attr:meta])* $name:ident<Key = $key:ty, Value = $value:ty $(, SubKey = $subkey:ty)? $(,)?>) => {
+        $(#[$attr])*
+        ///
+        #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to [`", stringify!($value), "`].")]
+        $(
+            #[doc = concat!("\n\nThis table's `DUPSORT` subkey is [`", stringify!($subkey), "`].")]
+        )?
+        pub struct $name {
+            _private: (),
+        }
+
+        // Ideally this implementation wouldn't exist, but it is necessary to derive `Debug`
+        // when a type is generic over `T: Table`. See: https://github.com/rust-lang/rust/issues/26925
+        impl fmt::Debug for $name {
+            fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+                unreachable!("this type cannot be instantiated")
+            }
+        }
+
+        impl reth_db_api::table::Table for $name {
+            const NAME: &'static str = table_names::$name;
+
+            type Key = $key;
+            type Value = $value;
+        }
+
+        $(
+            impl DupSort for $name {
+                type SubKey = $subkey;
+            }
+        )?
+    };
+}
+
 /// Defines all the tables in the database.
 #[macro_export]
 macro_rules! tables {
@@ -108,39 +180,13 @@ macro_rules! tables {
     (@view $name:ident $v:ident) => { $v.view::<$name>() };
     (@view $name:ident $v:ident $_subkey:ty) => { $v.view_dupsort::<$name>() };
 
-    ($( $(#[$attr:meta])* table $name:ident<Key = $key:ty, Value = $value:ty $(, SubKey = $subkey:ty)? $(,)?>; )*) => {
+    ($( $(#[$attr:meta])* $kind:ident $name:ident<Key = $key:ty $(,DefaultValueType = $default_value:ty)? $(,Value = $value:ty)? $(, SubKey = $subkey:ty)? $(,)?>; )*) => {
         // Table marker types.
         $(
-            $(#[$attr])*
-            ///
-            #[doc = concat!("Marker type representing a database table mapping [`", stringify!($key), "`] to [`", stringify!($value), "`].")]
-            $(
-                #[doc = concat!("\n\nThis table's `DUPSORT` subkey is [`", stringify!($subkey), "`].")]
-            )?
-            pub struct $name {
-                _private: (),
+            $kind! {
+                $(#[$attr])*
+                $name<Key = $key, $(DefaultValueType = $default_value)? $( Value = $value)? $(, SubKey = $subkey)?>
             }
-
-            // Ideally this implementation wouldn't exist, but it is necessary to derive `Debug`
-            // when a type is generic over `T: Table`. See: https://github.com/rust-lang/rust/issues/26925
-            impl fmt::Debug for $name {
-                fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    unreachable!("this type cannot be instantiated")
-                }
-            }
-
-            impl reth_db_api::table::Table for $name {
-                const NAME: &'static str = table_names::$name;
-
-                type Key = $key;
-                type Value = $value;
-            }
-
-            $(
-                impl DupSort for $name {
-                    type SubKey = $subkey;
-                }
-            )?
         )*
 
         // Tables enum.
@@ -280,7 +326,7 @@ tables! {
     table HeaderNumbers<Key = BlockHash, Value = BlockNumber>;
 
     /// Stores header bodies.
-    table Headers<Key = BlockNumber, Value = Header>;
+    generic_table  Headers<Key = BlockNumber, DefaultValueType = Header>;
 
     /// Stores block indices that contains indexes of transaction and the count of them.
     ///
@@ -294,7 +340,7 @@ tables! {
     table BlockWithdrawals<Key = BlockNumber, Value = StoredBlockWithdrawals>;
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<Key = TxNumber, Value = TransactionSignedNoHash>;
+    generic_table Transactions<Key = TxNumber, DefaultValueType = TransactionSignedNoHash>;
 
     /// Stores the mapping of the transaction hash to the transaction number.
     table TransactionHashNumbers<Key = TxHash, Value = TxNumber>;
@@ -305,7 +351,7 @@ tables! {
     table TransactionBlocks<Key = TxNumber, Value = BlockNumber>;
 
     /// Canonical only Stores transaction receipts.
-    table Receipts<Key = TxNumber, Value = Receipt>;
+    generic_table Receipts<Key = TxNumber, DefaultValueType = Receipt>;
 
     /// Stores all smart contract bytecodes.
     /// There will be multiple accounts that have same bytecode

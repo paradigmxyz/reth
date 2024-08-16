@@ -9,6 +9,7 @@
 
 use futures::FutureExt;
 use reth_db_api::database::Database;
+use reth_primitives_traits::NodePrimitives;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -78,25 +79,27 @@ pub enum BackfillEvent {
 
 /// Pipeline sync.
 #[derive(Debug)]
-pub struct PipelineSync<DB>
+pub struct PipelineSync<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// The type that can spawn the pipeline task.
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<DB>,
+    pipeline_state: PipelineState<DB, N>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
 }
 
-impl<DB> PipelineSync<DB>
+impl<DB, N> PipelineSync<DB, N>
 where
     DB: Database + 'static,
+    N: NodePrimitives,
 {
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<DB>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(pipeline: Pipeline<DB, N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -183,9 +186,10 @@ where
     }
 }
 
-impl<DB> BackfillSync for PipelineSync<DB>
+impl<DB, N> BackfillSync for PipelineSync<DB, N>
 where
     DB: Database + 'static,
+    N: NodePrimitives + 'static,
 {
     fn on_action(&mut self, event: BackfillAction) {
         match event {
@@ -221,14 +225,14 @@ where
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<DB: Database> {
+enum PipelineState<DB: Database, N: NodePrimitives> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<DB>>),
+    Idle(Option<Pipeline<DB, N>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<DB>>),
+    Running(oneshot::Receiver<PipelineWithResult<DB, N>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<DB: Database, N: NodePrimitives> PipelineState<DB, N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))

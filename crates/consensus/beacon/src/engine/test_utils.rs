@@ -14,7 +14,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthEngineTypes, EthPrimitiveTypes};
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
@@ -40,7 +40,7 @@ type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
-    BlockchainProvider<Arc<DatabaseEnv>>,
+    BlockchainProvider<Arc<DatabaseEnv>, EthPrimitiveTypes>,
     Arc<Either<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;

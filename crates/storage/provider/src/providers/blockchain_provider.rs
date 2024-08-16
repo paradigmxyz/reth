@@ -21,6 +21,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
@@ -38,15 +39,15 @@ use tracing::trace;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[allow(missing_debug_implementations)]
-pub struct BlockchainProvider2<DB> {
+pub struct BlockchainProvider2<DB, N> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    database: ProviderFactory<DB, N>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     canonical_in_memory_state: CanonicalInMemoryState,
 }
 
-impl<DB> Clone for BlockchainProvider2<DB> {
+impl<DB, N: NodePrimitives> Clone for BlockchainProvider2<DB, N> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
@@ -55,13 +56,14 @@ impl<DB> Clone for BlockchainProvider2<DB> {
     }
 }
 
-impl<DB> BlockchainProvider2<DB>
+impl<DB, N> BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// Create a new provider using only the database, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new(database: ProviderFactory<DB>) -> ProviderResult<Self> {
+    pub fn new(database: ProviderFactory<DB, N>) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best: ChainInfo = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
@@ -79,7 +81,7 @@ where
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
     /// `database`.
     pub fn with_latest(
-        database: ProviderFactory<DB>,
+        database: ProviderFactory<DB, N>,
         latest: SealedHeader,
     ) -> ProviderResult<Self> {
         let provider = database.provider()?;
@@ -135,9 +137,10 @@ where
     }
 }
 
-impl<DB> BlockchainProvider2<DB>
+impl<DB, N> BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// Ensures that the given block number is canonical (synced)
     ///
@@ -158,24 +161,26 @@ where
     }
 }
 
-impl<DB> DatabaseProviderFactory<DB> for BlockchainProvider2<DB>
+impl<DB, N> DatabaseProviderFactory<DB> for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.database.provider()
     }
 }
 
-impl<DB> StaticFileProviderFactory for BlockchainProvider2<DB> {
+impl<DB, N> StaticFileProviderFactory for BlockchainProvider2<DB, N> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.database.static_file_provider()
     }
 }
 
-impl<DB> HeaderProvider for BlockchainProvider2<DB>
+impl<DB, N> HeaderProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(*block_hash) {
@@ -324,9 +329,10 @@ where
     }
 }
 
-impl<DB> BlockHashReader for BlockchainProvider2<DB>
+impl<DB, N> BlockHashReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
@@ -366,9 +372,10 @@ where
     }
 }
 
-impl<DB> BlockNumReader for BlockchainProvider2<DB>
+impl<DB, N> BlockNumReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(self.canonical_in_memory_state.chain_info())
@@ -391,9 +398,10 @@ where
     }
 }
 
-impl<DB> BlockIdReader for BlockchainProvider2<DB>
+impl<DB, N> BlockIdReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
@@ -408,9 +416,10 @@ where
     }
 }
 
-impl<DB> BlockReader for BlockchainProvider2<DB>
+impl<DB, N> BlockReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
@@ -647,9 +656,10 @@ where
     }
 }
 
-impl<DB> TransactionsProvider for BlockchainProvider2<DB>
+impl<DB, N> TransactionsProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         self.database.transaction_id(tx_hash)
@@ -764,9 +774,10 @@ where
     }
 }
 
-impl<DB> ReceiptProvider for BlockchainProvider2<DB>
+impl<DB, N> ReceiptProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.database.receipt(id)
@@ -819,9 +830,10 @@ where
     }
 }
 
-impl<DB> ReceiptProviderIdExt for BlockchainProvider2<DB>
+impl<DB, N> ReceiptProviderIdExt for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
@@ -853,9 +865,10 @@ where
     }
 }
 
-impl<DB> WithdrawalsProvider for BlockchainProvider2<DB>
+impl<DB, N> WithdrawalsProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn withdrawals_by_block(
         &self,
@@ -888,9 +901,10 @@ where
     }
 }
 
-impl<DB> RequestsProvider for BlockchainProvider2<DB>
+impl<DB, N> RequestsProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn requests_by_block(
         &self,
@@ -909,9 +923,10 @@ where
     }
 }
 
-impl<DB> StageCheckpointReader for BlockchainProvider2<DB>
+impl<DB, N> StageCheckpointReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
@@ -926,9 +941,10 @@ where
     }
 }
 
-impl<DB> EvmEnvProvider for BlockchainProvider2<DB>
+impl<DB, N> EvmEnvProvider for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn fill_env_at<EvmConfig>(
         &self,
@@ -999,9 +1015,10 @@ where
     }
 }
 
-impl<DB> PruneCheckpointReader for BlockchainProvider2<DB>
+impl<DB, N> PruneCheckpointReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn get_prune_checkpoint(
         &self,
@@ -1015,18 +1032,20 @@ where
     }
 }
 
-impl<DB> ChainSpecProvider for BlockchainProvider2<DB>
+impl<DB, N> ChainSpecProvider for BlockchainProvider2<DB, N>
 where
     DB: Send + Sync,
+    N: NodePrimitives,
 {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.database.chain_spec()
     }
 }
 
-impl<DB> StateProviderFactory for BlockchainProvider2<DB>
+impl<DB, N> StateProviderFactory for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
@@ -1144,9 +1163,10 @@ where
     }
 }
 
-impl<DB> CanonChainTracker for BlockchainProvider2<DB>
+impl<DB, N> CanonChainTracker for BlockchainProvider2<DB, N>
 where
     DB: Send + Sync,
+    N: NodePrimitives,
     Self: BlockReader,
 {
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
@@ -1179,7 +1199,7 @@ where
     }
 }
 
-impl<DB> BlockReaderIdExt for BlockchainProvider2<DB>
+impl<DB, N> BlockReaderIdExt for BlockchainProvider2<DB, N>
 where
     Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
 {
@@ -1267,18 +1287,20 @@ where
     }
 }
 
-impl<DB> CanonStateSubscriptions for BlockchainProvider2<DB>
+impl<DB, N> CanonStateSubscriptions for BlockchainProvider2<DB, N>
 where
     DB: Send + Sync,
+    N: NodePrimitives,
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
 }
 
-impl<DB> ChangeSetReader for BlockchainProvider2<DB>
+impl<DB, N> ChangeSetReader for BlockchainProvider2<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     fn account_block_changeset(
         &self,
@@ -1288,9 +1310,10 @@ where
     }
 }
 
-impl<DB> AccountReader for BlockchainProvider2<DB>
+impl<DB, N> AccountReader for BlockchainProvider2<DB, N>
 where
     DB: Database + Sync + Send,
+    N: NodePrimitives,
 {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {

@@ -12,20 +12,21 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_fs_util as fs;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
-pub struct DbTool<DB: Database> {
+pub struct DbTool<DB: Database, N> {
     /// The provider factory that the db tool will use.
-    pub provider_factory: ProviderFactory<DB>,
+    pub provider_factory: ProviderFactory<DB, N>,
 }
 
-impl<DB: Database> DbTool<DB> {
+impl<DB: Database, N: NodePrimitives> DbTool<DB, N> {
     /// Takes a DB where the tables have already been created.
-    pub fn new(provider_factory: ProviderFactory<DB>) -> eyre::Result<Self> {
+    pub fn new(provider_factory: ProviderFactory<DB, N>) -> eyre::Result<Self> {
         // Disable timeout because we are entering a TUI which might read for a long time. We
         // disable on the [`DbTool`] level since it's only used in the CLI.
         provider_factory.provider()?.disable_long_read_transaction_safety();

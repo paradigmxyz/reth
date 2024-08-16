@@ -8,6 +8,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_node_builder::primitives::NodePrimitives;
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
@@ -102,12 +103,12 @@ impl EnvironmentArgs {
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory(
+    fn create_provider_factory<N: NodePrimitives>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider,
-    ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
+    ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>, N>> {
         let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
@@ -157,11 +158,11 @@ impl EnvironmentArgs {
 
 /// Environment built from [`EnvironmentArgs`].
 #[derive(Debug)]
-pub struct Environment {
+pub struct Environment<N> {
     /// Configuration for reth node
     pub config: Config,
     /// Provider factory.
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>, N>,
     /// Datadir path.
     pub data_dir: ChainPath<DataDirPath>,
 }

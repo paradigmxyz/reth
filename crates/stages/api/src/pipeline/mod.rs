@@ -6,7 +6,7 @@ use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
 use reth_db_api::database::Database;
-use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
+use reth_primitives_traits::{constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, NodePrimitives};
 use reth_provider::{
     writer::UnifiedStorageWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -36,10 +36,10 @@ pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [`Pipeline::run_as_fut`].
-pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
+pub type PipelineFut<DB, N> = Pin<Box<dyn Future<Output = PipelineWithResult<DB, N>> + Send>>;
 
 /// The pipeline type itself with the result of [`Pipeline::run_as_fut`]
-pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
+pub type PipelineWithResult<DB, N> = (Pipeline<DB, N>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -63,14 +63,14 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// # Defaults
 ///
 /// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<DB: Database> {
+pub struct Pipeline<DB: Database, N: NodePrimitives> {
     /// Provider factory.
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: ProviderFactory<DB, N>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<DB, N>,
     /// Sender for events the pipeline emits.
     event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
@@ -80,9 +80,10 @@ pub struct Pipeline<DB: Database> {
     metrics_tx: Option<MetricEventsSender>,
 }
 
-impl<DB> Pipeline<DB>
+impl<DB, N> Pipeline<DB, N>
 where
     DB: Database + 'static,
+    N: NodePrimitives + 'static,
 {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<DB> {
@@ -127,7 +128,7 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<DB> {
+    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<DB, N> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
@@ -487,8 +488,8 @@ where
     }
 }
 
-fn on_stage_error<DB: Database>(
-    factory: &ProviderFactory<DB>,
+fn on_stage_error<DB: Database, N: NodePrimitives>(
+    factory: &ProviderFactory<DB, N>,
     stage_id: StageId,
     prev_checkpoint: Option<StageCheckpoint>,
     err: StageError,
@@ -574,7 +575,7 @@ fn on_stage_error<DB: Database>(
     }
 }
 
-impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
+impl<DB: Database, N: NodePrimitives> std::fmt::Debug for Pipeline<DB, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

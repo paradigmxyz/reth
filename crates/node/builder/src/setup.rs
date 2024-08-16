@@ -13,6 +13,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_core::primitives::{BlockNumber, B256};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::ProviderFactory;
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -23,23 +24,24 @@ use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network
 #[allow(clippy::too_many_arguments)]
-pub fn build_networked_pipeline<DB, Client, Executor>(
+pub fn build_networked_pipeline<DB, Client, Executor, N>(
     config: &StageConfig,
     client: Client,
     consensus: Arc<dyn Consensus>,
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: ProviderFactory<DB, N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<DB, N>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle,
-) -> eyre::Result<Pipeline<DB>>
+) -> eyre::Result<Pipeline<DB, N>>
 where
     DB: Database + Unpin + Clone + 'static,
     Client: BlockClient + 'static,
     Executor: BlockExecutorProvider,
+    N: NodePrimitives,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -69,8 +71,8 @@ where
 
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
-pub fn build_pipeline<DB, H, B, Executor>(
-    provider_factory: ProviderFactory<DB>,
+pub fn build_pipeline<DB, H, B, Executor, N>(
+    provider_factory: ProviderFactory<DB, N>,
     stage_config: &StageConfig,
     header_downloader: H,
     body_downloader: B,
@@ -78,17 +80,18 @@ pub fn build_pipeline<DB, H, B, Executor>(
     max_block: Option<u64>,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<DB, N>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle,
-) -> eyre::Result<Pipeline<DB>>
+) -> eyre::Result<Pipeline<DB, N>>
 where
     DB: Database + Clone + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     Executor: BlockExecutorProvider,
+    N: NodePrimitives,
 {
-    let mut builder = Pipeline::builder();
+    let mut builder = Pipeline::<DB, N>::builder();
 
     if let Some(max_block) = max_block {
         debug!(target: "reth::cli", max_block, "Configuring builder to use max block");

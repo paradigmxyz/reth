@@ -5,6 +5,7 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
     StaticFileProviderFactory,
@@ -25,22 +26,23 @@ use tracing::{debug, trace};
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [`StaticFileProducer`] instance itself with the result of [`StaticFileProducerInner::run`]
-pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
+pub type StaticFileProducerWithResult<DB, N> =
+    (StaticFileProducer<DB, N>, StaticFileProducerResult);
 
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
 #[derive(Debug, Clone)]
-pub struct StaticFileProducer<DB>(Arc<Mutex<StaticFileProducerInner<DB>>>);
+pub struct StaticFileProducer<DB, N>(Arc<Mutex<StaticFileProducerInner<DB, N>>>);
 
-impl<DB: Database> StaticFileProducer<DB> {
+impl<DB: Database, N: NodePrimitives> StaticFileProducer<DB, N> {
     /// Creates a new [`StaticFileProducer`].
-    pub fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
+    pub fn new(provider_factory: ProviderFactory<DB, N>, prune_modes: PruneModes) -> Self {
         Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
     }
 }
 
-impl<DB> Deref for StaticFileProducer<DB> {
-    type Target = Arc<Mutex<StaticFileProducerInner<DB>>>;
+impl<DB, N> Deref for StaticFileProducer<DB, N> {
+    type Target = Arc<Mutex<StaticFileProducerInner<DB, N>>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -50,9 +52,9 @@ impl<DB> Deref for StaticFileProducer<DB> {
 /// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
 /// description.
 #[derive(Debug)]
-pub struct StaticFileProducerInner<DB> {
+pub struct StaticFileProducerInner<DB, N> {
     /// Provider factory
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: ProviderFactory<DB, N>,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
     /// files. See [`StaticFileProducerInner::get_static_file_targets`].
@@ -94,8 +96,8 @@ impl StaticFileTargets {
     }
 }
 
-impl<DB: Database> StaticFileProducerInner<DB> {
-    fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
+impl<DB: Database, N: NodePrimitives> StaticFileProducerInner<DB, N> {
+    fn new(provider_factory: ProviderFactory<DB, N>, prune_modes: PruneModes) -> Self {
         Self { provider_factory, prune_modes, event_sender: Default::default() }
     }
 

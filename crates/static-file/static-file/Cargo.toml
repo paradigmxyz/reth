@@ -19,6 +19,7 @@ reth-provider.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
+reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
 reth-stages-types.workspace = true

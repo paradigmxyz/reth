@@ -4,6 +4,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
 use reth_primitives::B256;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::sync::mpsc::{Receiver, SendError, Sender};
@@ -19,21 +20,21 @@ use tracing::{debug, error};
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<DB> {
+pub struct PersistenceService<DB, N> {
     /// The provider factory to use
-    provider: ProviderFactory<DB>,
+    provider: ProviderFactory<DB, N>,
     /// Incoming requests
     incoming: Receiver<PersistenceAction>,
     /// The pruner
-    pruner: Pruner<DB, ProviderFactory<DB>>,
+    pruner: Pruner<DB, ProviderFactory<DB, N>>,
 }
 
-impl<DB: Database> PersistenceService<DB> {
+impl<DB: Database, N: NodePrimitives> PersistenceService<DB, N> {
     /// Create a new persistence service
     pub const fn new(
-        provider: ProviderFactory<DB>,
+        provider: ProviderFactory<DB, N>,
         incoming: Receiver<PersistenceAction>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        pruner: Pruner<DB, ProviderFactory<DB, N>>,
     ) -> Self {
         Self { provider, incoming, pruner }
     }
@@ -47,9 +48,10 @@ impl<DB: Database> PersistenceService<DB> {
     }
 }
 
-impl<DB> PersistenceService<DB>
+impl<DB, N> PersistenceService<DB, N>
 where
     DB: Database,
+    N: NodePrimitives,
 {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
@@ -145,9 +147,9 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<DB: Database + 'static>(
-        provider_factory: ProviderFactory<DB>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+    pub fn spawn_service<DB: Database + 'static, N: NodePrimitives + 'static>(
+        provider_factory: ProviderFactory<DB, N>,
+        pruner: Pruner<DB, ProviderFactory<DB, N>>,
     ) -> Self {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();

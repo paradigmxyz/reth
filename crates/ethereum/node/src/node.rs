@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::{primitives::NodePrimitives, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,

@@ -20,7 +20,7 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::FullNodeTypes;
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -35,6 +35,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_primitives::{BlockNumber, Head, B256};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, FullProvider, ProviderFactory, ProviderResult,
@@ -46,7 +47,10 @@ use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, error, info, warn};
+use reth_tracing::{
+    tracing::{debug, error, info, warn},
+    tracing_subscriber::fmt::format::Full,
+};
 use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -62,13 +66,13 @@ pub trait WithTree {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;
 }
 
-impl<DB: Database> WithTree for BlockchainProvider<DB> {
+impl<DB: Database, N: NodePrimitives> WithTree for BlockchainProvider<DB, N> {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self {
         self.with_tree(tree)
     }
 }
 
-impl<DB: Database> WithTree for BlockchainProvider2<DB> {
+impl<DB: Database, N: NodePrimitives> WithTree for BlockchainProvider2<DB, N> {
     fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
         self
     }
@@ -383,7 +387,9 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
+    pub async fn create_provider_factory<N: NodePrimitives>(
+        &self,
+    ) -> eyre::Result<ProviderFactory<DB, N>> {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -410,7 +416,7 @@ where
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds an unwind-only pipeline
-            let pipeline = Pipeline::builder()
+            let pipeline = Pipeline::<DB, N>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
@@ -444,9 +450,9 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory(
+    pub async fn with_provider_factory<N: NodePrimitives>(
         self,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>> {
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB, N>>>> {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -457,9 +463,10 @@ where
     }
 }
 
-impl<DB> LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>
+impl<DB, N> LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB, N>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    N: NodePrimitives,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -467,7 +474,7 @@ where
     }
 
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB, N> {
         self.right()
     }
 
@@ -527,7 +534,7 @@ where
     /// prometheus.
     pub fn with_metrics_task(
         self,
-    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
+    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB, N>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
         let with_metrics =
@@ -544,12 +551,13 @@ where
     }
 }
 
-impl<DB> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>>
+impl<DB, N> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB, N>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    N: NodePrimitives + Send + Sync + 'static,
 {
     /// Returns the configured `ProviderFactory`.
-    const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    const fn provider_factory(&self) -> &ProviderFactory<DB, N> {
         &self.right().provider_factory
     }
 
@@ -567,8 +575,9 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where
         T: FullNodeTypes,
+        T: NodeTypes<Primitives = N>,
         T::Provider: FullProvider<DB>,
-        F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
+        F: FnOnce(ProviderFactory<DB, N>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
 
@@ -605,7 +614,7 @@ where
     }
 
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB, T::Primitives> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -721,7 +730,7 @@ where
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB, T::Primitives> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -740,7 +749,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<DB, T::Primitives> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 
@@ -904,8 +913,8 @@ pub struct WithConfigs {
 /// Helper container type to bundle the [`ProviderFactory`] and the metrics
 /// sender.
 #[derive(Debug, Clone)]
-pub struct WithMeteredProvider<DB> {
-    provider_factory: ProviderFactory<DB>,
+pub struct WithMeteredProvider<DB, N: NodePrimitives> {
+    provider_factory: ProviderFactory<DB, N>,
     metrics_sender: UnboundedSender<MetricEvent>,
 }
 
@@ -918,7 +927,7 @@ where
     T: FullNodeTypes,
     T::Provider: FullProvider<DB>,
 {
-    db_provider_container: WithMeteredProvider<DB>,
+    db_provider_container: WithMeteredProvider<DB, T::Primitives>,
     blockchain_db: T::Provider,
     canon_state_notification_sender: CanonStateNotificationSender,
     tree_config: BlockchainTreeConfig,
@@ -936,7 +945,7 @@ where
     T::Provider: FullProvider<DB>,
     CB: NodeComponentsBuilder<T>,
 {
-    db_provider_container: WithMeteredProvider<DB>,
+    db_provider_container: WithMeteredProvider<DB, T::Primitives>,
     tree_config: BlockchainTreeConfig,
     blockchain_db: T::Provider,
     node_adapter: NodeAdapter<T, CB::Components>,

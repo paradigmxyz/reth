@@ -10,6 +10,7 @@ use reth_etl::Collector;
 use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
@@ -81,7 +82,9 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<DB: Database, N: NodePrimitives>(
+    factory: ProviderFactory<DB, N>,
+) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -311,9 +314,9 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<DB: Database>(
+pub fn init_from_state_dump<DB: Database, N: NodePrimitives>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<DB, N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;

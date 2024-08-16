@@ -13,8 +13,8 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-
+use crate::{ConfigureEvm, EngineTypes};
+use reth_primitives_traits::NodePrimitives;
 /// The type that configures the essential types of an ethereum like node.
 ///
 /// This includes the primitive types of a node, the engine API types for communication with the

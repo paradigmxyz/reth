@@ -11,14 +11,14 @@ pub use exex::ExExLauncher;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine,
+    BeaconConsensusEngine, BeaconEngineMessage,
 };
 use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -100,7 +100,9 @@ impl DefaultNodeLauncher {
 
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider<<T as FullNodeTypes>::DB, <T as NodeTypes>::Primitives>,
+    >,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     AO::EthApi:
@@ -161,7 +163,7 @@ where
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
+            .with_blockchain_db(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory, tree)?)
             }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
@@ -178,7 +180,8 @@ where
 
         // create pipeline
         let network_client = ctx.components().network().fetch_client().await?;
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, consensus_engine_rx) =
+            unbounded_channel::<BeaconEngineMessage<<T as NodeTypes>::Engine>>();
 
         let node_config = ctx.node_config();
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
@@ -200,10 +203,11 @@ where
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
-        hooks.add(StaticFileHook::new(
-            static_file_producer.clone(),
-            Box::new(ctx.task_executor().clone()),
-        ));
+        // TODO
+        // hooks.add(StaticFileHook::new(
+        //     static_file_producer().clone(),
+        //     Box::new(ctx.task_executor().clone()),
+        // ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         // Configure the pipeline
@@ -285,20 +289,21 @@ where
         hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor().clone())));
 
         // Configure the consensus engine
-        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-            client,
-            pipeline,
-            ctx.blockchain_db().clone(),
-            Box::new(ctx.task_executor().clone()),
-            Box::new(ctx.components().network().clone()),
-            max_block,
-            ctx.components().payload_builder().clone(),
-            initial_target,
-            reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
-            consensus_engine_tx,
-            Box::pin(consensus_engine_stream),
-            hooks,
-        )?;
+        let (beacon_consensus_engine, beacon_engine_handle) =
+            BeaconConsensusEngine::<_, _, _, T>::with_channel(
+                client,
+                pipeline,
+                ctx.blockchain_db().clone(),
+                Box::new(ctx.task_executor().clone()),
+                Box::new(ctx.components().network().clone()),
+                max_block,
+                ctx.components().payload_builder().clone(),
+                initial_target,
+                reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
+                consensus_engine_tx,
+                Box::pin(consensus_engine_stream),
+                hooks,
+            )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(

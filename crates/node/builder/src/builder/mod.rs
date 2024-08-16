@@ -29,6 +29,7 @@ use reth_node_core::{
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -45,7 +46,8 @@ use crate::{
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB>>;
+pub type RethFullAdapter<DB, Types> =
+    FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB, <Types as NodeTypes>::Primitives>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.

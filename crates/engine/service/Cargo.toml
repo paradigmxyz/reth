@@ -20,6 +20,7 @@ reth-engine-primitives.workspace = true
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-network-p2p.workspace = true
+reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-provider.workspace = true

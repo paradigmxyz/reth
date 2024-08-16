@@ -54,6 +54,7 @@ reth-payload-validator.workspace = true
 reth-engine-service.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-tree.workspace = true
+reth-primitives-traits.workspace = true
 
 ## async
 futures.workspace = true

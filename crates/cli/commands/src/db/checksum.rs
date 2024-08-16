@@ -4,6 +4,7 @@ use clap::Parser;
 use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
+use reth_node_builder::{primitives::NodePrimitives, NodeTypes};
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,
@@ -33,7 +34,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db checksum` command
-    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
+    pub fn execute<N: NodePrimitives>(
+        self,
+        tool: &DbTool<Arc<DatabaseEnv>, NodePrimitives>,
+    ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
             tool,
@@ -45,8 +49,8 @@ impl Command {
     }
 }
 
-pub(crate) struct ChecksumViewer<'a, DB: Database> {
-    tool: &'a DbTool<DB>,
+pub(crate) struct ChecksumViewer<'a, DB: Database, T: NodeTypes> {
+    tool: &'a DbTool<DB, T>,
     start_key: Option<String>,
     end_key: Option<String>,
     limit: Option<usize>,
