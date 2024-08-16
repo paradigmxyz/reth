@@ -89,34 +89,18 @@ impl EthBeaconConsensus {
         Ok(())
     }
 
+    /// Checks difficulty change between blocks based on difficulty formulas
     fn validate_difficulty_increment(
         &self,
-        header: &Header,
-        parent: &Header,
+        header: &SealedHeader,
+        parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
         // Check difficulty for the block base on the current hardfork
         let calculated_difficulty;
 
-        if self.chain_spec.fork(EthereumHardfork::Byzantium).active_at_block(header.number) {
+        if self.chain_spec.fork(EthereumHardfork::GrayGlacier).active_at_block(header.number) {
             calculated_difficulty =
-                calc_difficulty_generic(header.timestamp, parent, BombDelay::Byzantium)
-                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
-        } else if self
-            .chain_spec
-            .fork(EthereumHardfork::Constantinople)
-            .active_at_block(header.number)
-        {
-            calculated_difficulty =
-                calc_difficulty_generic(header.timestamp, parent, BombDelay::Constantinople)
-                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
-        } else if self.chain_spec.fork(EthereumHardfork::MuirGlacier).active_at_block(header.number)
-        {
-            calculated_difficulty =
-                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip2384)
-                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
-        } else if self.chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
-            calculated_difficulty =
-                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip3554)
+                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip5133)
                     .map_err(|_| ConsensusError::DifficultyCalculationError)?;
         } else if self
             .chain_spec
@@ -126,15 +110,32 @@ impl EthBeaconConsensus {
             calculated_difficulty =
                 calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip4345)
                     .map_err(|_| ConsensusError::DifficultyCalculationError)?;
-        } else if self.chain_spec.fork(EthereumHardfork::GrayGlacier).active_at_block(header.number)
+        } else if self.chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
+            calculated_difficulty =
+                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip3554)
+                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::MuirGlacier).active_at_block(header.number)
         {
             calculated_difficulty =
-                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip5133)
+                calc_difficulty_generic(header.timestamp, parent, BombDelay::Eip2384)
+                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self
+            .chain_spec
+            .fork(EthereumHardfork::Constantinople)
+            .active_at_block(header.number)
+        {
+            calculated_difficulty =
+                calc_difficulty_generic(header.timestamp, parent, BombDelay::Constantinople)
+                    .map_err(|_| ConsensusError::DifficultyCalculationError)?;
+        } else if self.chain_spec.fork(EthereumHardfork::Byzantium).active_at_block(header.number) {
+            calculated_difficulty =
+                calc_difficulty_generic(header.timestamp, parent, BombDelay::Byzantium)
                     .map_err(|_| ConsensusError::DifficultyCalculationError)?;
         } else if self.chain_spec.fork(EthereumHardfork::Homestead).active_at_block(header.number) {
             calculated_difficulty = calc_difficulty_homestead(header.timestamp, parent)
                 .map_err(|_| ConsensusError::DifficultyCalculationError)?;
         } else {
+            // Frontier default
             calculated_difficulty = calc_difficulty_frontier(header.timestamp, parent)
                 .map_err(|_| ConsensusError::DifficultyCalculationError)?;
         }
@@ -291,10 +292,29 @@ impl Consensus for EthBeaconConsensus {
 mod tests {
     use super::*;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, B256};
+    use reth_primitives::{proofs, BlockNumber, B256};
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = Header { gas_limit, ..Default::default() };
+        header.seal(B256::ZERO)
+    }
+
+    fn header_with_difficulty_block_number_and_timestamp(
+        difficulty: U256,
+        number: BlockNumber,
+        timestamp: u64,
+    ) -> SealedHeader {
+        let header = Header { difficulty, number, timestamp, ..Default::default() };
+        header.seal(B256::ZERO)
+    }
+
+    fn header_with_difficulty_block_number_timestamp_and_ommers(
+        difficulty: U256,
+        number: BlockNumber,
+        timestamp: u64,
+        ommers_hash: B256,
+    ) -> SealedHeader {
+        let header = Header { difficulty, number, timestamp, ommers_hash, ..Default::default() };
         header.seal(B256::ZERO)
     }
 
@@ -378,5 +398,306 @@ mod tests {
         .seal_slow();
 
         assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
+    }
+
+    /// Test blocks difficulty for blocks 0 and 1
+    #[test]
+    fn test_difficulty_genesis_block() {
+        // Ensures that Frontier is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().frontier_activated().build());
+
+        let parent =
+            header_with_difficulty_block_number_and_timestamp(U256::from(17179869184u64), 0, 0);
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(17171480576u64),
+            1,
+            1438269988,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 500000 and 500001
+    #[test]
+    fn test_difficulty_frontier() {
+        // Ensures that Frontier is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().frontier_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(7545189127997u64),
+            500000,
+            1446832865,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(7541504953627u64),
+            500001,
+            1446832888,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 1149999 (`Frontier`) and 1150000 (`Homestead`)
+    #[test]
+    fn test_difficulty_frontier_homestead() {
+        // Ensures that Homestead is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().homestead_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(20513164863791u64),
+            1149999,
+            1457981342,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(20473100089179u64),
+            1150000,
+            1457981393,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// No changes of difficulty algo between `Homestead` and `Byzantium`, so we skip plenty of
+    /// hardforks
+    ///
+    /// Test blocks difficulty for blocks 3000000 and 3000001
+    #[test]
+    fn test_difficulty_spurious_dragon() {
+        // Ensures that SpuriousDragon is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().spurious_dragon_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(103975266902792u64),
+            3000000,
+            1484475035,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(103924766164956u64),
+            3000001,
+            1484475055,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 4369999 (`SpuriousDragon`) and 4370000 (`Byzantium`)
+    #[test]
+    fn test_difficulty_spurious_dragon_byzantium() {
+        // Ensures that SpuriousDragon is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().byzantium_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2997274096101735u64),
+            4369999,
+            1508131303,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2994347070619309u64),
+            4370000,
+            1508131331,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 6000000 and 6000001
+    #[test]
+    fn test_difficulty_byzantium() {
+        // Ensures that Byzantium is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().byzantium_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(3483739548912554u64),
+            6000000,
+            1532118564,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(3482038772646393u64),
+            6000001,
+            1532118585,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 7279999 (`Byzantium`) and 7280000 (`Constantinople`)
+    #[test]
+    fn test_difficulty_byzantium_constantinople() {
+        // Ensures that Constantinople is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().constantinople_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2958546502099724u64),
+            7279999,
+            1551383501,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2957101900364072u64),
+            7280000,
+            1551383524,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 9100000 and 9100001
+    #[test]
+    fn test_difficulty_istanbul() {
+        // Ensures that Istanbul is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().istanbul_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2475385893975275u64),
+            9100000,
+            1576239700,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2475935649789163u64),
+            9100001,
+            1576239714,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 9199999 (`Istanbul`) and 9200000 (`MuirGlacier`)
+    #[test]
+    fn test_difficulty_istanbul_muir_glacier() {
+        // Ensures that Muir Glacier is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().muir_glacier_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2462196499244987u64),
+            9199999,
+            1577953806,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(2458589766091800u64),
+            9200000,
+            1577953849,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 12244000 and 12244001
+    #[test]
+    fn test_difficulty_berlin() {
+        // Ensures that Berlin is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(6696239334037736u64),
+            12244000,
+            1618481223,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(6699510055891883u64),
+            12244001,
+            1618481230,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 12964999 (`Berlin`) and 12965000 (`London`)
+    #[test]
+    fn test_difficulty_berlin_london() {
+        // Ensures that London is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().london_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(7742493487903256u64),
+            12964999,
+            1628166812,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(7742494561645080u64),
+            12965000,
+            1628166822,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 13772999 (`London`) and 13773000 (`ArrowGlacier`)
+    #[test]
+    fn test_difficulty_london_arrow_glacier() {
+        // Ensures that ArrowGlacier is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().arrow_glacier_activated().build());
+
+        let parent = header_with_difficulty_block_number_and_timestamp(
+            U256::from(11869818951734368u64),
+            13772999,
+            1639079715,
+        );
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(11875615030204850u64),
+            13773000,
+            1639079723,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
+    }
+
+    /// Test blocks difficulty for blocks 15049999 (`ArrowGlacier`) and 15050000 (`GrayGlacier`)
+    #[test]
+    fn test_difficulty_arrow_glacier_gray_glacier() {
+        // Ensures that GrayGlacier is activated
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().gray_glacier_activated().build());
+
+        let parent = header_with_difficulty_block_number_timestamp_and_ommers(
+            U256::from(14296525396309425u64),
+            15049999,
+            1656586434,
+            B256::try_random().unwrap(),
+        );
+
+        let child = header_with_difficulty_block_number_and_timestamp(
+            U256::from(14303523301469775u64),
+            15050000,
+            1656586444,
+        );
+
+        assert_eq!(
+            EthBeaconConsensus::new(chain_spec).validate_difficulty_increment(&child, &parent),
+            Ok(())
+        );
     }
 }

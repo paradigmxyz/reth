@@ -145,9 +145,9 @@ pub fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256
     pdiff = pdiff.checked_mul(U256::from(time_adj)).ok_or(CalculatorError::OverflowError)?;
 
     if negative {
-        pdiff = pdiff.checked_sub(U256::from(1)).ok_or(CalculatorError::UnderflowError)?;
+        pdiff = parent.difficulty.checked_sub(pdiff).ok_or(CalculatorError::UnderflowError)?;
     } else {
-        pdiff = pdiff.checked_add(U256::from(1)).ok_or(CalculatorError::OverflowError)?;
+        pdiff = parent.difficulty.checked_add(pdiff).ok_or(CalculatorError::OverflowError)?;
     }
 
     if pdiff < min_difficulty() {

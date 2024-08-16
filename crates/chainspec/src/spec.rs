@@ -828,6 +828,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Muir Glacier at genesis.
+    pub fn muir_glacier_activated(mut self) -> Self {
+        self = self.istanbul_activated();
+        self.hardforks.insert(EthereumHardfork::MuirGlacier, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Berlin at genesis.
     pub fn berlin_activated(mut self) -> Self {
         self = self.istanbul_activated();
@@ -839,6 +846,20 @@ impl ChainSpecBuilder {
     pub fn london_activated(mut self) -> Self {
         self = self.berlin_activated();
         self.hardforks.insert(EthereumHardfork::London, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Arrow Glacier at genesis.
+    pub fn arrow_glacier_activated(mut self) -> Self {
+        self = self.london_activated();
+        self.hardforks.insert(EthereumHardfork::ArrowGlacier, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Gray Glacier at genesis.
+    pub fn gray_glacier_activated(mut self) -> Self {
+        self = self.arrow_glacier_activated();
+        self.hardforks.insert(EthereumHardfork::GrayGlacier, ForkCondition::Block(0));
         self
     }
 
