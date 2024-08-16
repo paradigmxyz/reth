@@ -308,9 +308,9 @@ where
                             ChainEvent::BackfillSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
                             }
-                            ChainEvent::FatalError => {
+                            ChainEvent::FatalError(error) => {
                                 error!(target: "reth::cli", "Fatal error in consensus engine");
-                                res = Err(eyre::eyre!("Fatal error in consensus engine"));
+                                res = Err(eyre::eyre!("Fatal error in consensus engine {error:?}"));
                                 break
                             }
                             ChainEvent::Handler(ev) => {

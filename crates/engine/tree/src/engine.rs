@@ -7,7 +7,6 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-use reth_blockchain_tree::error::InsertBlockFatalError;
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
@@ -93,7 +92,7 @@ where
                                 // bubble up the event
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
-                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
+                            HandlerEvent::FatalError(err) => Poll::Ready(HandlerEvent::FatalError(err)),
                         }
                     }
                     RequestHandlerEvent::Download(req) => {
@@ -195,7 +194,7 @@ where
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
         let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
-            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
+            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError("Polling Failure".into())))
         };
 
         let ev = match ev {
@@ -206,8 +205,8 @@ where
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
             }
             EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
-            EngineApiEvent::FatalBlockInsert(error) => {
-                RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError)
+            EngineApiEvent::ExecutionFailure(error) => {
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError(error))
             }
         };
         Poll::Ready(ev)
@@ -255,7 +254,7 @@ pub enum EngineApiEvent {
     /// Block download is needed.
     Download(DownloadRequest),
     /// Fatal insert block error needs to be bubbled up.
-    FatalBlockInsert(InsertBlockFatalError),
+    ExecutionFailure(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl EngineApiEvent {

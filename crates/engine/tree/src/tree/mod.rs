@@ -1398,7 +1398,7 @@ where
                     debug!(target: "engine", ?err, "failed to connect buffered block to tree");
                     if let Err(fatal) = self.on_insert_block_error(err) {
                         warn!(target: "engine", %fatal, "fatal error occurred while connecting buffered blocks");
-                        self.emit_event(EngineApiEvent::FatalBlockInsert(fatal));
+                        self.emit_event(EngineApiEvent::ExecutionFailure(fatal.into()));
                     }
                 }
             }
@@ -1645,7 +1645,7 @@ where
                 debug!(target: "engine", err=%err.kind(), "failed to insert downloaded block");
                 if let Err(fatal) = self.on_insert_block_error(err) {
                     warn!(target: "engine", %fatal, "fatal error occurred while inserting downloaded block");
-                    self.emit_event(EngineApiEvent::FatalBlockInsert(fatal));
+                    self.emit_event(EngineApiEvent::ExecutionFailure(fatal.into()));
                 }
             }
         }

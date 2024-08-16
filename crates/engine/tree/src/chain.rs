@@ -97,13 +97,13 @@ where
                             }
                             Err(err) => {
                                 tracing::error!( %err, "backfill sync failed");
-                                Poll::Ready(ChainEvent::FatalError)
+                                Poll::Ready(ChainEvent::FatalError(err.into()))
                             }
                         }
                     }
                     BackfillEvent::TaskDropped(err) => {
                         tracing::error!( %err, "backfill sync task dropped");
-                        return Poll::Ready(ChainEvent::FatalError);
+                        return Poll::Ready(ChainEvent::FatalError(err.into()));
                     }
                 },
                 Poll::Pending => {}
@@ -122,9 +122,9 @@ where
                             // bubble up the event
                             return Poll::Ready(ChainEvent::Handler(ev));
                         }
-                        HandlerEvent::FatalError => {
+                        HandlerEvent::FatalError(err) => {
                             error!(target: "engine::tree", "Fatal error");
-                            return Poll::Ready(ChainEvent::FatalError)
+                            return Poll::Ready(ChainEvent::FatalError(err))
                         }
                     }
                 }
@@ -161,7 +161,7 @@ pub enum ChainEvent<T> {
     /// Backfill sync finished
     BackfillSyncFinished,
     /// Fatal error
-    FatalError,
+    FatalError(Box<dyn std::error::Error + Send + Sync>),
     /// Event emitted by the handler
     Handler(T),
 }
@@ -189,14 +189,14 @@ pub trait ChainHandler: Send + Sync {
 }
 
 /// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum HandlerEvent<T> {
     /// Request an action to backfill sync
     BackfillAction(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
     /// Fatal error
-    FatalError,
+    FatalError(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].
