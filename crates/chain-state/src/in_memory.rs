@@ -1126,10 +1126,7 @@ mod tests {
         // Check the pending state
         assert_eq!(
             state.pending_state().unwrap(),
-            Arc::new(BlockState::with_parent(
-                block2.clone(),
-                Some(BlockState::new(block1.clone()))
-            ))
+            Arc::new(BlockState::with_parent(block2.clone(), Some(BlockState::new(block1))))
         );
 
         // Check the pending block
