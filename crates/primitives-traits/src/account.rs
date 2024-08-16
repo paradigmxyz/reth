@@ -76,7 +76,9 @@ impl Compact for Bytecode {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let bytecode = &self.0.bytecode()[..];
+        // TODO: this is a hack, ideally we should store the bytecode type first
+        let bytecode =
+            if self.0.is_eof() { self.0.original_byte_slice() } else { &self.0.bytecode()[..] };
         buf.put_u32(bytecode.len() as u32);
         buf.put_slice(bytecode);
         let len = match &self.0 {
@@ -226,6 +228,21 @@ mod tests {
         )));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
+
+        let (decoded, remainder) = Bytecode::from_compact(&buf, len);
+        assert_eq!(decoded, bytecode);
+        assert!(remainder.is_empty());
+
+        let mut buf = vec![];
+        let bytecode = Bytecode(
+            RevmBytecode::new_raw(
+                Bytes::from(
+                    &hex!("ef0001010004020001007c04006800008000056080806040526004361015e100035f80fd5f3560e01c8063964efccb14e1002e63f6b4dfb41415e1ffe434e1001d5f600319360112e1001060209060018060a01b035f54168152f35f80fd5f80fd34e100275f600319360112e1001a306bffffffffffffffffffffffff60a01b5f5416175f555f80f35f80fd5f80fda3646970667358221220d3bad1e010bf2bc1b82399d0fc56a03009ef435628e0d1ef547138fcfcb470d86c6578706572696d656e74616cf564736f6c637827302e382e32372d646576656c6f702e323032342e382e352b636f6d6d69742e38386366363036300066")
+                )
+            )
+        );
+        let len = bytecode.to_compact(&mut buf);
+        assert_eq!(len, 499);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);
         assert_eq!(decoded, bytecode);
