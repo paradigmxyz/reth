@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_network::Network;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -52,14 +51,9 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        Adapter<N>,
-        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
-    >,
-    N::AddOns: NodeAddOns<
-        Adapter<N>,
-        EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
-    >,
+    <<N::ComponentsBuilder as NodeComponentsBuilder<TmpNodeAdapter<N>>>::Components as NodeComponents<TmpNodeAdapter<N>>>::Network: PeersHandleProvider,
+    <N::AddOns as NodeAddOns<Adapter<N>>>::EthApi:
+        FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
