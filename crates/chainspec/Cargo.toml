@@ -50,3 +50,4 @@ arbitrary = [
     "alloy-chains/arbitrary"
 ]
 network = ["reth-network-peers"]
+taiko = ["reth-ethereum-forks/taiko"]

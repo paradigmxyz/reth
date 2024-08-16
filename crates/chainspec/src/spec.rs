@@ -118,6 +118,8 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "taiko")]
+            (Hardfork::Hekla, ForkCondition::Block(0)),
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -150,6 +152,10 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "taiko")]
+            (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (Hardfork::Ontake, ForkCondition::Block(20)), //todo
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -174,14 +180,16 @@ pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Byzantium, ForkCondition::Block(0)),
             (Hardfork::Constantinople, ForkCondition::Block(0)),
             (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(1561651)),
-            (Hardfork::Berlin, ForkCondition::Block(4460644)),
-            (Hardfork::London, ForkCondition::Block(5062605)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "taiko")]
+            (Hardfork::Hekla, ForkCondition::Block(0)),
         ]),
         deposit_contract: None,
         ..Default::default()

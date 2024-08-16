@@ -65,6 +65,12 @@ pub enum Hardfork {
     Regolith,
     /// Shanghai: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md>.
     Shanghai,
+    /// Hekla: the 1st taiko mainnet version: <>
+    #[cfg(feature = "taiko")]
+    Hekla,
+    /// Ontake: the 2nd taiko mainnet fork: <>
+    #[cfg(feature = "taiko")]
+    Ontake,
     /// Canyon:
     /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]

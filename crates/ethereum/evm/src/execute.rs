@@ -2,7 +2,8 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    taiko::{check_anchor_tx, TaikoData}, EthEvmConfig,
+    taiko::{check_anchor_tx, check_anchor_tx_ontake, TaikoData},
+    EthEvmConfig,
 };
 use reth_chainspec::{ChainSpec, MAINNET};
 pub use reth_consensus::Consensus;
@@ -16,7 +17,8 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, Hardfork, Header, Receipt, Request, Withdrawals, U256,
+    revm::config::revm_spec, BlockNumber, BlockWithSenders, Hardfork, Head, Header, Receipt,
+    Request, Withdrawals, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -31,7 +33,7 @@ use reth_revm::{
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
-    EVMError, HashSet,
+    EVMError, HashSet, SpecId,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -176,8 +178,28 @@ where
 
             // verify the anchor tx
             if is_anchor {
-                check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
+                let spec_id = revm_spec(
+                    &self.chain_spec,
+                    Head { number: block.number, ..Default::default() },
+                );
+                if spec_id.is_enabled_in(SpecId::ONTAKE) {
+                    check_anchor_tx_ontake(
+                        transaction,
+                        sender,
+                        &block.block,
+                        taiko_data.clone().unwrap(),
+                    )
                     .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
+                } else if spec_id.is_enabled_in(SpecId::HEKLA) {
+                    check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
+                        .map_err(|e| BlockExecutionError::CanonicalRevert {
+                            inner: e.to_string(),
+                        })?;
+                } else {
+                    return Err(BlockExecutionError::CanonicalRevert {
+                        inner: "unknown spec id for anchor".to_string(),
+                    });
+                }
             }
 
             // If the signature was not valid, the sender address will have been set to zero
@@ -211,6 +233,7 @@ where
             evm.tx_mut().taiko.is_anchor = is_anchor;
             // set the treasury address
             evm.tx_mut().taiko.treasury = taiko_data.clone().unwrap().l2_contract;
+            evm.tx_mut().taiko.basefee_ratio = taiko_data.clone().unwrap().basefee_ratio;
 
             // Execute transaction.
             let res = evm.transact().map_err(move |err| {

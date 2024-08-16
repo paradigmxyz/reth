@@ -504,8 +504,6 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 # raiko
-raiko-core = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-wip" }
-raiko-lib = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-wip" }
 anyhow = "1.0"
 
 [patch.crates-io]

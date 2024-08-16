@@ -52,6 +52,15 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
         }
     }
 
+    #[cfg(feature = "taiko")]
+    if chain_spec.is_taiko() {
+        if chain_spec.fork(Hardfork::Ontake).active_at_head(&block) {
+            return revm_primitives::ONTAKE;
+        } else if chain_spec.fork(Hardfork::Hekla).active_at_head(&block) {
+            return revm_primitives::HEKLA;
+        }
+    }
+
     if chain_spec.fork(Hardfork::Prague).active_at_head(&block) {
         revm_primitives::PRAGUE
     } else if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {

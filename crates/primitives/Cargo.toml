@@ -121,6 +121,7 @@ optimism = [
 taiko = [
     "revm-primitives/taiko",
     "revm/taiko",
+    "reth-ethereum-forks/taiko",
 ]
 alloy-compat = [
     "reth-primitives-traits/alloy-compat",
