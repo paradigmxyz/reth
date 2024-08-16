@@ -1493,11 +1493,8 @@ mod tests {
         }
         provider_rw.commit()?;
 
-        // Create a new provider and set the canonical head
+        // Create a new provider
         let provider = BlockchainProvider2::new(factory)?;
-        provider
-            .canonical_in_memory_state
-            .set_canonical_head(in_mem_blocks.first().unwrap().header.clone());
 
         // Set the pending block in memory
         let pending_block = in_mem_blocks.last().unwrap();
