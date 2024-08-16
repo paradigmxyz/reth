@@ -1462,3 +1462,79 @@ where
         state_provider.basic_account(address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use reth_chain_state::ExecutedBlock;
+    use reth_primitives::{BlockNumHash, B256};
+    use reth_storage_api::BlockIdReader;
+    use reth_testing_utils::generators::{self, random_block_range};
+
+    use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+
+    #[test]
+    fn test_block_id_reader() -> eyre::Result<()> {
+        // Initialize random number generator and provider factory
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks and split into database and in-memory blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+        let (db_blocks, in_mem_blocks) = blocks.split_at(5);
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in db_blocks {
+            provider_rw.insert_historical_block(
+                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        // Create a new provider and set the canonical head
+        let provider = BlockchainProvider2::new(factory)?;
+        provider
+            .canonical_in_memory_state
+            .set_canonical_head(in_mem_blocks.first().unwrap().header.clone());
+
+        // Set the pending block in memory
+        let pending_block = in_mem_blocks.last().unwrap();
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(pending_block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Set the safe block in memory
+        let safe_block = in_mem_blocks[in_mem_blocks.len() - 2].clone();
+        provider.canonical_in_memory_state.set_safe(safe_block.header.clone());
+
+        // Set the finalized block in memory
+        let finalized_block = in_mem_blocks[in_mem_blocks.len() - 3].clone();
+        provider.canonical_in_memory_state.set_finalized(finalized_block.header.clone());
+
+        // Verify the pending block number and hash
+        assert_eq!(
+            provider.pending_block_num_hash()?,
+            Some(BlockNumHash { number: pending_block.number, hash: pending_block.hash() })
+        );
+
+        // Verify the safe block number and hash
+        assert_eq!(
+            provider.safe_block_num_hash()?,
+            Some(BlockNumHash { number: safe_block.number, hash: safe_block.hash() })
+        );
+
+        // Verify the finalized block number and hash
+        assert_eq!(
+            provider.finalized_block_num_hash()?,
+            Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
+        );
+
+        Ok(())
+    }
+}
