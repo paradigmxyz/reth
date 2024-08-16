@@ -36,7 +36,7 @@ impl Command {
     /// Execute `db checksum` command
     pub fn execute<N: NodePrimitives>(
         self,
-        tool: &DbTool<Arc<DatabaseEnv>, NodePrimitives>,
+        tool: &DbTool<Arc<DatabaseEnv>, N>,
     ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
