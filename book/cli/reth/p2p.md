@@ -154,7 +154,7 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
-      --max-pending-imports <PENDING_IMPORTS>
+      --max-pending-imports <COUNT>
           Max number of transactions to import concurrently.
 
           [default: 4096]
