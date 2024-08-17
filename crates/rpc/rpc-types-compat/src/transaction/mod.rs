@@ -50,7 +50,7 @@ fn fill(
     #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
         TxType::Legacy | TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
-        TxType::Eip1559 | TxType::Eip4844 => {
+        TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
             let gas_price = base_fee
@@ -126,7 +126,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let chain_id = tx.transaction.chain_id();
     let access_list = tx.transaction.access_list().cloned();
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
-    let _authorization_list = tx.transaction.authorization_list();
+    let authorization_list = tx.transaction.authorization_list();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
 
@@ -154,5 +154,6 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
+        authorization_list,
     }
 }
