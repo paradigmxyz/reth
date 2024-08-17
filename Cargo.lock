@@ -6762,6 +6762,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
+ "reth-db-models",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
@@ -6796,6 +6797,21 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "reth-db-models"
+version = "1.0.5"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "modular-bitfield",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "reth-codecs",
+ "reth-primitives",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -8134,6 +8150,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap 6.0.1",
+ "eyre",
  "itertools 0.13.0",
  "metrics",
  "once_cell",
@@ -8664,7 +8681,7 @@ version = "1.0.5"
 dependencies = [
  "auto_impl",
  "reth-chainspec",
- "reth-db-api",
+ "reth-db-models",
  "reth-execution-types",
  "reth-primitives",
  "reth-prune-types",

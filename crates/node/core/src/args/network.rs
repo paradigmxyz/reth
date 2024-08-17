@@ -12,6 +12,7 @@ use reth_discv5::{
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
+        constants::tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         TransactionFetcherConfig, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -96,6 +97,12 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
+    /// Max number of seen transactions to remember per peer.
+    ///
+    /// Default is 320 transaction hashes.
+    #[arg(long = "max-seen-tx-history", value_name = "MAX_SEEN_TX_HISTORY", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    pub max_seen_tx_history: u32,
+
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
@@ -161,6 +168,7 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
+            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
         };
 
         // Configure basic network stack
@@ -261,6 +269,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         }
     }
 }
