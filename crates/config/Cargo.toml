@@ -22,6 +22,7 @@ humantime-serde.workspace = true
 
 # toml
 toml.workspace = true
+eyre.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

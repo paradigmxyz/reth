@@ -8,7 +8,6 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
-use reth_node_builder::NodeConfig;
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
@@ -67,7 +66,7 @@ impl EnvironmentArgs {
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
-        let mut config: Config = NodeConfig::load_path(config_path)
+        let mut config = Config::from_path(config_path)
             .inspect_err(
                 |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
             )

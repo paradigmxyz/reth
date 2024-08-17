@@ -6628,6 +6628,7 @@ dependencies = [
 name = "reth-config"
 version = "1.0.5"
 dependencies = [
+ "eyre",
  "humantime-serde",
  "reth-network-peers",
  "reth-network-types",

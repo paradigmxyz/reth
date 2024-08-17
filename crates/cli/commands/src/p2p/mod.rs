@@ -9,7 +9,6 @@ use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
-use reth_node_builder::NodeConfig;
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
@@ -83,7 +82,7 @@ impl Command {
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         // Load configuration
-        let mut config: Config = NodeConfig::load_path(&config_path).unwrap_or_default();
+        let mut config = Config::from_path(&config_path).unwrap_or_default();
 
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 

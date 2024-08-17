@@ -115,7 +115,7 @@ impl LaunchContext {
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
-        let mut toml_config = NodeConfig::load_path::<reth_config::Config>(&config_path)
+        let mut toml_config = reth_config::Config::from_path(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
@@ -972,7 +972,7 @@ mod tests {
             )
             .unwrap();
 
-            let loaded_config: Config = NodeConfig::load_path(config_path).unwrap();
+            let loaded_config = Config::from_path(config_path).unwrap();
 
             assert_eq!(reth_config, loaded_config);
         })
