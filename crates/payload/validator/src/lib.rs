@@ -165,7 +165,7 @@ impl ExecutionPayloadValidator {
             return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }
 
-        if self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
+        if !self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
             sealed_block.has_eip7702_transactions()
         {
             return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
