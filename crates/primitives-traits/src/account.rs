@@ -156,7 +156,7 @@ impl From<Account> for AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex_literal::hex, B256, U256};
+    use alloy_primitives::{hex_literal::hex, Address, B256, U256};
     use revm_primitives::LegacyAnalyzedBytecode;
 
     #[test]
