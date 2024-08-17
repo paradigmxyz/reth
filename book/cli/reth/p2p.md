@@ -154,12 +154,12 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
-      --max-tx-reqs <MAX_TX_REQS>
+      --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
 
           [default: 130]
 
-      --max-tx-reqs-peer <MAX_TX_REQS_PEER>
+      --max-tx-reqs-peer <COUNT>
           Max concurrent `GetPooledTransactions` requests per peer.
 
           [default: 1]

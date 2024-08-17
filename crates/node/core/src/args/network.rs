@@ -102,11 +102,11 @@ pub struct NetworkArgs {
     pub max_inbound_peers: Option<usize>,
 
     /// Max concurrent `GetPooledTransactions` requests.
-    #[arg(long = "max-tx-reqs", value_name = "MAX_TX_REQS", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
+    #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
     pub max_concurrent_tx_requests: u32,
 
     /// Max concurrent `GetPooledTransactions` requests per peer.
-    #[arg(long = "max-tx-reqs-peer", value_name = "MAX_TX_REQS_PEER", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER, verbatim_doc_comment)]
+    #[arg(long = "max-tx-reqs-peer", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER, verbatim_doc_comment)]
     pub max_concurrent_tx_requests_per_peer: u8,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
