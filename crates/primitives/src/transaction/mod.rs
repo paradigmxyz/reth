@@ -161,10 +161,10 @@ impl Transaction {
     pub const fn chain_id(&self) -> Option<u64> {
         match self {
             Self::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
-            Self::Eip2930(TxEip2930 { chain_id, .. })
-            | Self::Eip1559(TxEip1559 { chain_id, .. })
-            | Self::Eip4844(TxEip4844 { chain_id, .. })
-            | Self::Eip7702(TxEip7702 { chain_id, .. }) => Some(*chain_id),
+            Self::Eip2930(TxEip2930 { chain_id, .. }) |
+            Self::Eip1559(TxEip1559 { chain_id, .. }) |
+            Self::Eip4844(TxEip4844 { chain_id, .. }) |
+            Self::Eip7702(TxEip7702 { chain_id, .. }) => Some(*chain_id),
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => None,
         }
@@ -174,10 +174,10 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. })
-            | Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. })
-            | Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. })
-            | Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
+            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
+            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
+            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
         }
@@ -187,10 +187,10 @@ impl Transaction {
     /// [`TxKind::Create`] if the transaction is a contract creation.
     pub const fn kind(&self) -> TxKind {
         match self {
-            Self::Legacy(TxLegacy { to, .. })
-            | Self::Eip2930(TxEip2930 { to, .. })
-            | Self::Eip1559(TxEip1559 { to, .. })
-            | Self::Eip7702(TxEip7702 { to, .. }) => *to,
+            Self::Legacy(TxLegacy { to, .. }) |
+            Self::Eip2930(TxEip2930 { to, .. }) |
+            Self::Eip1559(TxEip1559 { to, .. }) |
+            Self::Eip7702(TxEip7702 { to, .. }) => *to,
             Self::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { to, .. }) => *to,
@@ -221,11 +221,11 @@ impl Transaction {
     /// Gets the transaction's value field.
     pub const fn value(&self) -> U256 {
         *match self {
-            Self::Legacy(TxLegacy { value, .. })
-            | Self::Eip2930(TxEip2930 { value, .. })
-            | Self::Eip1559(TxEip1559 { value, .. })
-            | Self::Eip4844(TxEip4844 { value, .. })
-            | Self::Eip7702(TxEip7702 { value, .. }) => value,
+            Self::Legacy(TxLegacy { value, .. }) |
+            Self::Eip2930(TxEip2930 { value, .. }) |
+            Self::Eip1559(TxEip1559 { value, .. }) |
+            Self::Eip4844(TxEip4844 { value, .. }) |
+            Self::Eip7702(TxEip7702 { value, .. }) => value,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { value, .. }) => value,
         }
@@ -234,11 +234,11 @@ impl Transaction {
     /// Get the transaction's nonce.
     pub const fn nonce(&self) -> u64 {
         match self {
-            Self::Legacy(TxLegacy { nonce, .. })
-            | Self::Eip2930(TxEip2930 { nonce, .. })
-            | Self::Eip1559(TxEip1559 { nonce, .. })
-            | Self::Eip4844(TxEip4844 { nonce, .. })
-            | Self::Eip7702(TxEip7702 { nonce, .. }) => *nonce,
+            Self::Legacy(TxLegacy { nonce, .. }) |
+            Self::Eip2930(TxEip2930 { nonce, .. }) |
+            Self::Eip1559(TxEip1559 { nonce, .. }) |
+            Self::Eip4844(TxEip4844 { nonce, .. }) |
+            Self::Eip7702(TxEip7702 { nonce, .. }) => *nonce,
             // Deposit transactions do not have nonces.
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => 0,
@@ -274,10 +274,10 @@ impl Transaction {
     pub const fn gas_limit(&self) -> u64 {
         match self {
             Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip2930(TxEip2930 { gas_limit, .. })
-            | Self::Eip1559(TxEip1559 { gas_limit, .. })
-            | Self::Eip4844(TxEip4844 { gas_limit, .. })
-            | Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
+            Self::Eip2930(TxEip2930 { gas_limit, .. }) |
+            Self::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
+            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
         }
@@ -298,11 +298,11 @@ impl Transaction {
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub const fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Self::Legacy(TxLegacy { gas_price, .. })
-            | Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Self::Eip1559(TxEip1559 { max_fee_per_gas, .. })
-            | Self::Eip4844(TxEip4844 { max_fee_per_gas, .. })
-            | Self::Eip7702(TxEip7702 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+            Self::Legacy(TxLegacy { gas_price, .. }) |
+            Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Self::Eip1559(TxEip1559 { max_fee_per_gas, .. }) |
+            Self::Eip4844(TxEip4844 { max_fee_per_gas, .. }) |
+            Self::Eip7702(TxEip7702 { max_fee_per_gas, .. }) => *max_fee_per_gas,
             // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
             // refundable.
             #[cfg(feature = "optimism")]
@@ -317,9 +317,9 @@ impl Transaction {
     pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => None,
-            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. })
-            | Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. })
-            | Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => {
+            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) |
+            Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => {
                 Some(*max_priority_fee_per_gas)
             }
             #[cfg(feature = "optimism")]
@@ -372,13 +372,11 @@ impl Transaction {
     /// non-EIP-1559 transactions.
     pub const fn priority_fee_or_price(&self) -> u128 {
         match self {
-            Self::Legacy(TxLegacy { gas_price, .. })
-            | Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
-            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. })
-            | Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. })
-            | Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => {
-                *max_priority_fee_per_gas
-            }
+            Self::Legacy(TxLegacy { gas_price, .. }) |
+            Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
+            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) |
+            Self::Eip7702(TxEip7702 { max_priority_fee_per_gas, .. }) => *max_priority_fee_per_gas,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => 0,
         }
@@ -433,11 +431,11 @@ impl Transaction {
     /// Get the transaction's input field.
     pub const fn input(&self) -> &Bytes {
         match self {
-            Self::Legacy(TxLegacy { input, .. })
-            | Self::Eip2930(TxEip2930 { input, .. })
-            | Self::Eip1559(TxEip1559 { input, .. })
-            | Self::Eip4844(TxEip4844 { input, .. })
-            | Self::Eip7702(TxEip7702 { input, .. }) => input,
+            Self::Legacy(TxLegacy { input, .. }) |
+            Self::Eip2930(TxEip2930 { input, .. }) |
+            Self::Eip1559(TxEip1559 { input, .. }) |
+            Self::Eip4844(TxEip4844 { input, .. }) |
+            Self::Eip7702(TxEip7702 { input, .. }) => input,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { input, .. }) => input,
         }
