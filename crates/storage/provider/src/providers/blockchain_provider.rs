@@ -43,7 +43,7 @@ pub struct BlockchainProvider2<DB> {
     database: ProviderFactory<DB>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
-    canonical_in_memory_state: CanonicalInMemoryState,
+    pub(super) canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<DB> Clone for BlockchainProvider2<DB> {
@@ -290,10 +290,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.headers_range(range.clone())?;
-        headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -329,10 +330,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_range(range.clone())?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -361,10 +363,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -1471,7 +1474,7 @@ mod tests {
 
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_primitives::B256;
-    use reth_storage_api::BlockHashReader;
+    use reth_storage_api::{BlockHashReader, HeaderProvider};
     use reth_testing_utils::generators::{self, random_block_range};
 
     use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
@@ -1524,6 +1527,103 @@ mod tests {
         assert_eq!(
             provider.canonical_hashes_range(0, 10)?,
             blocks.iter().map(|block| block.hash()).collect::<Vec<_>>()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_header_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+
+        let mut blocks_iter = blocks.clone().into_iter();
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in (0..5).map_while(|_| blocks_iter.next()) {
+            provider_rw.insert_historical_block(
+                block.seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Insert the rest of the blocks into the in-memory state
+        let chain = NewCanonicalChain::Commit {
+            new: blocks_iter
+                .map(|block| {
+                    let senders = block.senders().expect("failed to recover senders");
+                    ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(senders),
+                        Default::default(),
+                        Default::default(),
+                        Default::default(),
+                    )
+                })
+                .collect(),
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        let database_block = blocks.first().unwrap().clone();
+        let in_memory_block = blocks.last().unwrap().clone();
+
+        assert_eq!(provider.header(&database_block.hash())?, Some(database_block.header().clone()));
+        assert_eq!(
+            provider.header(&in_memory_block.hash())?,
+            Some(in_memory_block.header().clone())
+        );
+
+        assert_eq!(
+            provider.header_by_number(database_block.number)?,
+            Some(database_block.header().clone())
+        );
+        assert_eq!(
+            provider.header_by_number(in_memory_block.number)?,
+            Some(in_memory_block.header().clone())
+        );
+
+        assert_eq!(
+            provider.header_td_by_number(database_block.number)?,
+            Some(database_block.difficulty)
+        );
+        assert_eq!(
+            provider.header_td_by_number(in_memory_block.number)?,
+            Some(in_memory_block.difficulty)
+        );
+
+        assert_eq!(
+            provider.headers_range(0..=10)?,
+            blocks.iter().map(|b| b.header().clone()).collect::<Vec<_>>()
+        );
+
+        assert_eq!(
+            provider.sealed_header(database_block.number)?,
+            Some(database_block.header.clone())
+        );
+        assert_eq!(
+            provider.sealed_header(in_memory_block.number)?,
+            Some(in_memory_block.header.clone())
+        );
+
+        assert_eq!(
+            provider.sealed_headers_range(0..=10)?,
+            blocks.iter().map(|b| b.header.clone()).collect::<Vec<_>>()
+        );
+
+        assert_eq!(
+            provider.sealed_headers_while(0..=10, |header| header.number <= 8)?,
+            blocks
+                .iter()
+                .take_while(|header| header.number <= 8)
+                .map(|b| b.header.clone())
+                .collect::<Vec<_>>()
         );
 
         Ok(())
