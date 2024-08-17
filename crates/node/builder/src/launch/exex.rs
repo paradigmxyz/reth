@@ -1,13 +1,15 @@
 //! Support for launching execution extensions.
 
-use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
+use std::{fmt, fmt::Debug};
+
 use futures::future;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
-use std::{fmt, fmt::Debug};
+
+use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 
 /// Can launch execution extensions.
 pub struct ExExLauncher<Node: FullNodeComponents> {
