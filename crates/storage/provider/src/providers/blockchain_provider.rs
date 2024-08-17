@@ -1567,12 +1567,12 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
-        // Get finalized, safe, and canonical head blocks
+        // Get canonical, safe, and finalized blocks
         let canonical_block = blocks.latest().unwrap().clone();
         let safe_block = blocks.safe().unwrap().clone();
         let finalized_block = blocks.finalized().unwrap().clone();
 
-        // Set the latest block as the canonical head
+        // Set the canonical head, safe, and finalized blocks
         provider.set_canonical_head(canonical_block.header);
         provider.set_safe(safe_block.header);
         provider.set_finalized(finalized_block.header);
@@ -1755,19 +1755,114 @@ mod tests {
         let block_number = database_block.number;
         assert_eq!(
             provider.header_by_number_or_tag(block_number.into()).unwrap(),
-            Some(database_block.clone().unseal().header)
+            Some(database_block.header.clone().unseal())
         );
+        assert_eq!(
+            provider.sealed_header_by_number_or_tag(block_number.into()).unwrap(),
+            Some(database_block.header)
+        );
+
         assert_eq!(
             provider.header_by_number_or_tag(BlockNumberOrTag::Latest).unwrap(),
-            Some(canonical_block.header.unseal())
+            Some(canonical_block.header.clone().unseal())
         );
+        assert_eq!(
+            provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest).unwrap(),
+            Some(canonical_block.header)
+        );
+
         assert_eq!(
             provider.header_by_number_or_tag(BlockNumberOrTag::Safe).unwrap(),
-            Some(safe_block.header.unseal())
+            Some(safe_block.header.clone().unseal())
         );
         assert_eq!(
-            provider.header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
-            Some(finalized_block.header.unseal())
+            provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Safe).unwrap(),
+            Some(safe_block.header)
         );
+
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
+            Some(finalized_block.header.clone().unseal())
+        );
+        assert_eq!(
+            provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
+            Some(finalized_block.header)
+        );
+    }
+
+    #[test]
+    fn test_block_reader_id_ext_header_by_id() {
+        let (provider, blocks) = provider_with_random_blocks().unwrap();
+
+        let database_block = blocks.first().unwrap().clone();
+        let in_memory_block = blocks.last().unwrap().clone();
+
+        let block_number = database_block.number;
+        let block_hash = database_block.header.hash();
+
+        assert_eq!(
+            provider.header_by_id(block_number.into()).unwrap(),
+            Some(database_block.header.clone().unseal())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(block_number.into()).unwrap(),
+            Some(database_block.header.clone())
+        );
+
+        assert_eq!(
+            provider.header_by_id(block_hash.into()).unwrap(),
+            Some(database_block.header.clone().unseal())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(block_hash.into()).unwrap(),
+            Some(database_block.header)
+        );
+
+        let block_number = in_memory_block.number;
+        let block_hash = in_memory_block.header.hash();
+
+        assert_eq!(
+            provider.header_by_id(block_number.into()).unwrap(),
+            Some(in_memory_block.header.clone().unseal())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(block_number.into()).unwrap(),
+            Some(in_memory_block.header.clone())
+        );
+
+        assert_eq!(
+            provider.header_by_id(block_hash.into()).unwrap(),
+            Some(in_memory_block.header.clone().unseal())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(block_hash.into()).unwrap(),
+            Some(in_memory_block.header)
+        );
+    }
+
+    #[test]
+    fn test_block_reader_id_ext_ommers_by_id() {
+        let (provider, blocks) = provider_with_random_blocks().unwrap();
+
+        let database_block = blocks.first().unwrap().clone();
+        let in_memory_block = blocks.last().unwrap().clone();
+
+        let block_number = database_block.number;
+        let block_hash = database_block.header.hash();
+
+        assert_eq!(
+            provider.ommers_by_id(block_number.into()).unwrap(),
+            Some(database_block.ommers.clone())
+        );
+        assert_eq!(provider.ommers_by_id(block_hash.into()).unwrap(), Some(database_block.ommers));
+
+        let block_number = in_memory_block.number;
+        let block_hash = in_memory_block.header.hash();
+
+        assert_eq!(
+            provider.ommers_by_id(block_number.into()).unwrap(),
+            Some(in_memory_block.ommers.clone())
+        );
+        assert_eq!(provider.ommers_by_id(block_hash.into()).unwrap(), Some(in_memory_block.ommers));
     }
 }
