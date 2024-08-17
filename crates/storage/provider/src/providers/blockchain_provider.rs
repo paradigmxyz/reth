@@ -1675,7 +1675,7 @@ mod tests {
             })
         );
 
-        assert_eq!(provider.pending_block_and_receipts()?, Some((block.clone(), vec![])));
+        assert_eq!(provider.pending_block_and_receipts()?, Some((block, vec![])));
 
         Ok(())
     }
