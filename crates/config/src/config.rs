@@ -433,7 +433,7 @@ mod tests {
             .expect("Failed to write config file");
 
             // Load the config from the file
-            let loaded_config: Config = toml::de::from_str(
+            let loaded_config: Config = toml::from_str(
                 &std::fs::read_to_string(config_path).expect("Failed to read config file"),
             )
             .expect("Failed to deserialize config");
@@ -457,7 +457,7 @@ mod tests {
             .expect("Failed to write config file");
 
             // Load the config from the file
-            let loaded_config: Config = toml::de::from_str(
+            let loaded_config: Config = toml::from_str(
                 &std::fs::read_to_string(config_path).expect("Failed to read config file"),
             )
             .expect("Failed to deserialize config");

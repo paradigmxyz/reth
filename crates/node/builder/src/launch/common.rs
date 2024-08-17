@@ -980,7 +980,7 @@ mod tests {
             let loaded_config: Config = {
                 let config_str = std::fs::read_to_string(config_path)
                     .expect("Failed to read configuration from file");
-                toml::de::from_str(&config_str).expect("Failed to parse configuration from TOML")
+                toml::from_str(&config_str).expect("Failed to parse configuration from TOML")
             };
             assert_eq!(reth_config, loaded_config);
         })
