@@ -1469,12 +1469,12 @@ mod tests {
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_primitives::{BlockHashOrNumber, B256};
     use reth_storage_api::{BlockReader, BlockSource};
-    use reth_testing_utils::generators::{self, random_block_range};
+    use reth_testing_utils::generators::{self, random_block, random_block_range};
 
     use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
 
     #[test]
-    fn test_find_block_by_hash() -> eyre::Result<()> {
+    fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
@@ -1568,7 +1568,7 @@ mod tests {
     }
 
     #[test]
-    fn test_block() -> eyre::Result<()> {
+    fn test_block_reader_block() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
@@ -1631,6 +1631,50 @@ mod tests {
             provider.block(BlockHashOrNumber::Number(first_db_block.number))?,
             Some(first_db_block.clone().into())
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_pending_block() -> eyre::Result<()> {
+        // Initialize random number generator and provider factory
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate a random block
+        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None);
+
+        // Insert the block into the database
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_historical_block(
+            block.clone().seal_with_senders().expect("failed to seal block with senders"),
+        )?;
+        provider_rw.commit()?;
+
+        // Create a new provider
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Set the block as pending
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Assertions related to the pending block
+        assert_eq!(provider.pending_block()?, Some(block.clone()));
+
+        assert_eq!(
+            provider.pending_block_with_senders()?,
+            Some(reth_primitives::SealedBlockWithSenders {
+                block: block.clone(),
+                senders: block.senders().unwrap()
+            })
+        );
+
+        assert_eq!(provider.pending_block_and_receipts()?, Some((block.clone(), vec![])));
 
         Ok(())
     }
