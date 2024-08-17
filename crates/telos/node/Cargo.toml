@@ -1,0 +1,49 @@
+[package]
+name = "reth-node-telos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+antelope-client.workspace = true
+reth-primitives.workspace = true
+
+reth-auto-seal-consensus.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-beacon-consensus.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-evm-ethereum.workspace = true
+reth-network.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-node-ethereum.workspace = true
+reth-payload-builder.workspace = true
+reth-provider.workspace = true
+reth-rpc.workspace = true
+reth-tracing.workspace = true
+reth-transaction-pool.workspace = true
+
+clap.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0.122"
+tokio = "1.39.2"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+
+[features]
+telos = []
+
+[dev-dependencies]
+reth.workspace = true
+reth-chainspec.workspace = true
+reth-e2e-test-utils.workspace = true
+eyre.workspace = true
+
+telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "translator_integration"}
+testcontainers = "0.21.1"
