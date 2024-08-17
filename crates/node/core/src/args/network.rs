@@ -99,7 +99,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
-    #[arg(long = "max-pending-imports", value_name = "PENDING_IMPORTS", default_value_t = DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    #[arg(long = "max-pending-imports", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
     /// Max number of transactions to import concurrently.
     pub max_pending_pool_imports: usize,
 
