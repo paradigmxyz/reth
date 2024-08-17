@@ -4,7 +4,7 @@ use reth::{
     builder::{NodeBuilder, NodeConfig},
     tasks::{TaskManager},
 };
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpecBuilder, TEVMTESTNET};
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Genesis, B256};
@@ -67,7 +67,7 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
             .unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+            .chain(TEVMTESTNET.chain)
             .genesis(genesis)
             .cancun_activated()
             .build(),

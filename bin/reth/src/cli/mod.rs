@@ -271,6 +271,9 @@ mod tests {
     /// Tests that the log directory is parsed correctly. It's always tied to the specific chain's
     /// name
     #[test]
+    #[cfg(not(feature = "telos"))]
+    // NOTE: Test is disable since chan names are defined in the alloy,
+    // and telos chains fallbacks to the id, causing paths to end with 40 and 41
     fn parse_logs_path() {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         reth.logs.log_file_directory =

@@ -42,3 +42,6 @@ reth-primitives-traits.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+telos = []

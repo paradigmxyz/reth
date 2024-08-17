@@ -7,16 +7,23 @@ use std::{path::PathBuf, sync::Arc};
 
 use reth_chainspec::DEV;
 
+#[cfg(feature = "telos")]
+use reth_chainspec::{TEVMMAINNET, TEVMMAINNET_BASE, TEVMTESTNET, TEVMTESTNET_BASE};
+
 #[cfg(feature = "optimism")]
 use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
-#[cfg(not(feature = "optimism"))]
+#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["optimism", "optimism-sepolia", "base", "base-sepolia"];
-#[cfg(not(feature = "optimism"))]
+#[cfg(feature = "telos")]
+/// Chains supported by telos-reth
+pub const SUPPORTED_CHAINS: &[&str] =
+    &["tevmmainnet", "tevmtestnet", "tevmmainnet-base", "tevmtestnet-base"];
+#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
 
@@ -31,11 +38,11 @@ pub fn chain_help() -> String {
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
 pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        #[cfg(not(feature = "optimism"))]
+        #[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
         "mainnet" => MAINNET.clone(),
-        #[cfg(not(feature = "optimism"))]
+        #[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
         "sepolia" => SEPOLIA.clone(),
-        #[cfg(not(feature = "optimism"))]
+        #[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
@@ -46,6 +53,14 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "base" => BASE_MAINNET.clone(),
         #[cfg(feature = "optimism")]
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
+        #[cfg(feature = "telos")]
+        "tevmmainnet" => TEVMMAINNET.clone(),
+        #[cfg(feature = "telos")]
+        "tevmtestnet" => TEVMTESTNET.clone(),
+        #[cfg(feature = "telos")]
+        "tevmmainnet-base" => TEVMMAINNET_BASE.clone(),
+        #[cfg(feature = "telos")]
+        "tevmtestnet-base" => TEVMTESTNET_BASE.clone(),
         _ => {
             // try to read json from path first
             let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {

@@ -8,6 +8,11 @@ pub use ethereum::*;
 mod optimism;
 pub use optimism::*;
 
+#[cfg(feature = "telos")]
+mod telos;
+#[cfg(feature = "telos")]
+pub use telos::*;
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -46,4 +51,16 @@ pub fn base_testnet_nodes() -> Vec<NodeRecord> {
 /// Parses all the nodes
 pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<NodeRecord> {
     nodes.into_iter().map(|s| s.as_ref().parse().unwrap()).collect()
+}
+
+#[cfg(feature = "telos")]
+/// Returns parsed tevmmainnet nodes
+pub fn tevmmainnet_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&TEVMMAINNET_BOOTNODES[..])
+}
+
+#[cfg(feature = "telos")]
+/// Returns parsed tevmtestnet nodes
+pub fn tevmtestnet_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&TEVMTESTNET_BOOTNODES[..])
 }

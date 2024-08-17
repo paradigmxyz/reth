@@ -1,0 +1,13 @@
+{
+  "nonce": "0x0",
+  "timestamp": "0x61782354",
+  "extraData": "0x0ac53eebcfa1cf139272bf58540d6dc53f0d22785f9e3d74cb9bc333b597e1bf",
+  "gasLimit": "0x7fffffff",
+  "difficulty": "0x0",
+  "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "stateRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+  "number": "0xac53ec7",
+  "gasUsed": "0x0",
+  "parentHash": "0x87bb009caefe5447b3c4beafb6cc168d031a73eb9c6bb0718b5b5972448908c2"
+}
