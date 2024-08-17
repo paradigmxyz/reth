@@ -436,12 +436,12 @@ TxPool:
           [default: 1]
 
       --txpool.max-pending-txns <PENDING_TX_LISTENER_BUFFER_SIZE>
-          Bound on number of pending transactions, incoming from network, to buffer
+          Maximum number of pending transactions from the network to buffer
 
           [default: 2048]
 
       --txpool.max-new-txns <NEW_TX_LISTENER_BUFFER_SIZE>
-          Bound on number of new transactions to buffer
+          Maximum number of new transactions to buffer
 
           [default: 1024]
 
