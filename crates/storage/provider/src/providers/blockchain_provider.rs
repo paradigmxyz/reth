@@ -1488,27 +1488,57 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{ops::Deref, sync::Arc};
 
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-    use reth_primitives::{SealedBlock, B256};
+    use reth_primitives::{BlockNumberOrTag, SealedBlock, B256};
     use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReaderIdExt, HeaderProvider};
     use reth_testing_utils::generators::{self, random_block_range};
 
-    use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+    use crate::{
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory, CanonChainTracker,
+    };
 
     type ArcedTempDatabase = Arc<TempDatabase<DatabaseEnv>>;
 
+    struct SealedBlocks(Vec<SealedBlock>);
+
+    impl SealedBlocks {
+        fn latest(&self) -> Option<&SealedBlock> {
+            self.0.last()
+        }
+        fn safe(&self) -> Option<&SealedBlock> {
+            self.0.get(self.0.len() - 2)
+        }
+        fn finalized(&self) -> Option<&SealedBlock> {
+            self.0.get(self.0.len() - 3)
+        }
+    }
+
+    impl Deref for SealedBlocks {
+        type Target = Vec<SealedBlock>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl From<Vec<SealedBlock>> for SealedBlocks {
+        fn from(value: Vec<SealedBlock>) -> Self {
+            SealedBlocks(value)
+        }
+    }
+
     fn provider_with_random_blocks(
-    ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, Vec<SealedBlock>)> {
+    ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, SealedBlocks)> {
         let mut rng = generators::rng();
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+        let blocks: SealedBlocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1).into();
 
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
 
-        let mut blocks_iter = blocks.clone().into_iter();
+        let mut blocks_iter = blocks.0.clone().into_iter();
 
         // Insert first 5 blocks into the database
         for block in (0..5).map_while(|_| blocks_iter.next()) {
@@ -1536,6 +1566,16 @@ mod tests {
                 .collect(),
         };
         provider.canonical_in_memory_state.update_chain(chain);
+
+        // Get finalized, safe, and canonical head blocks
+        let canonical_block = blocks.latest().unwrap().clone();
+        let safe_block = blocks.safe().unwrap().clone();
+        let finalized_block = blocks.finalized().unwrap().clone();
+
+        // Set the latest block as the canonical head
+        provider.set_canonical_head(canonical_block.header);
+        provider.set_safe(safe_block.header);
+        provider.set_finalized(finalized_block.header);
 
         Ok((provider, blocks))
     }
@@ -1700,6 +1740,34 @@ mod tests {
         assert_eq!(
             provider.block_by_id(block_hash.into()).unwrap(),
             Some(in_memory_block.unseal())
+        );
+    }
+
+    #[test]
+    fn test_block_reader_id_ext_header_by_number_or_tag() {
+        let (provider, blocks) = provider_with_random_blocks().unwrap();
+
+        let database_block = blocks.first().unwrap().clone();
+        let canonical_block = blocks.latest().unwrap().clone();
+        let safe_block = blocks.safe().unwrap().clone();
+        let finalized_block = blocks.finalized().unwrap().clone();
+
+        let block_number = database_block.number;
+        assert_eq!(
+            provider.header_by_number_or_tag(block_number.into()).unwrap(),
+            Some(database_block.clone().unseal().header)
+        );
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Latest).unwrap(),
+            Some(canonical_block.header.unseal())
+        );
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Safe).unwrap(),
+            Some(safe_block.header.unseal())
+        );
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
+            Some(finalized_block.header.unseal())
         );
     }
 }
