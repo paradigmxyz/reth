@@ -431,7 +431,7 @@ fn account_and_storage_trie() {
     assert_eq!(root, computed_expected_root);
 
     // Check account trie
-    let account_updates = trie_updates.clone().into_sorted();
+    let account_updates = trie_updates.into_sorted();
     let account_updates = account_updates.account_nodes_ref();
     assert_eq!(account_updates.len(), 2);
 
