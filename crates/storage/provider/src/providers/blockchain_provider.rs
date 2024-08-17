@@ -1483,6 +1483,9 @@ mod tests {
         let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
         let (db_blocks, in_mem_blocks) = blocks.split_at(5);
 
+        let first_db_block = db_blocks.first().unwrap();
+        let first_in_mem_block = in_mem_blocks.first().unwrap();
+
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in db_blocks {
@@ -1496,30 +1499,23 @@ mod tests {
         let provider = BlockchainProvider2::new(factory)?;
 
         // No block in memory before setting in memory state
+        assert_eq!(provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?, None);
         assert_eq!(
-            provider.find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Any)?,
-            None
-        );
-        assert_eq!(
-            provider.find_block_by_hash(
-                in_mem_blocks.first().unwrap().hash(),
-                BlockSource::Canonical
-            )?,
+            provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
             None
         );
         // No pending block in memory
         assert_eq!(
-            provider
-                .find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Pending)?,
+            provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Pending)?,
             None
         );
 
         // Insert first block into the in-memory state
         let in_memory_block_senders =
-            in_mem_blocks.first().unwrap().senders().expect("failed to recover senders");
+            first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(in_mem_blocks.first().unwrap().clone()),
+                Arc::new(first_in_mem_block.clone()),
                 Arc::new(in_memory_block_senders),
                 Default::default(),
                 Default::default(),
@@ -1530,33 +1526,26 @@ mod tests {
 
         // Now the block should be found in memory
         assert_eq!(
-            provider.find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Any)?,
-            Some(in_mem_blocks.first().unwrap().clone().into())
+            provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
+            Some(first_in_mem_block.clone().into())
         );
         assert_eq!(
-            provider.find_block_by_hash(
-                in_mem_blocks.first().unwrap().hash(),
-                BlockSource::Canonical
-            )?,
-            Some(in_mem_blocks.first().unwrap().clone().into())
+            provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
+            Some(first_in_mem_block.clone().into())
         );
 
         // Find the first block in database by hash
         assert_eq!(
-            provider.find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Any)?,
-            Some(db_blocks.first().unwrap().clone().into())
+            provider.find_block_by_hash(first_db_block.hash(), BlockSource::Any)?,
+            Some(first_db_block.clone().into())
         );
         assert_eq!(
-            provider
-                .find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Canonical)?,
-            Some(db_blocks.first().unwrap().clone().into())
+            provider.find_block_by_hash(first_db_block.hash(), BlockSource::Canonical)?,
+            Some(first_db_block.clone().into())
         );
 
         // No pending block in database
-        assert_eq!(
-            provider.find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Pending)?,
-            None
-        );
+        assert_eq!(provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?, None);
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
