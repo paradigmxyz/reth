@@ -130,6 +130,8 @@ impl TransactionFetcher {
             config.soft_limit_byte_size_pooled_transactions_response;
         tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request =
             config.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
+        tx_fetcher.info.max_inflight_requests_per_peer = config.max_inflight_requests_per_peer;
+        tx_fetcher.info.max_inflight_requests = config.max_inflight_requests as usize;
         tx_fetcher
             .metrics
             .capacity_inflight_requests
@@ -170,7 +172,7 @@ impl TransactionFetcher {
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
-        if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
+        if *inflight_count < self.info.max_inflight_requests_per_peer {
             return true
         }
         false
@@ -185,13 +187,7 @@ impl TransactionFetcher {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
-        for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) && is_session_active(peer_id) {
-                return Some(peer_id)
-            }
-        }
-
-        None
+        fallback_peers.iter().find(|&peer_id| self.is_idle(peer_id) && is_session_active(peer_id))
     }
 
     /// Returns any idle peer for any hash pending fetch. If one is found, the corresponding
@@ -1290,6 +1286,8 @@ pub enum VerificationOutcome {
 pub struct TransactionFetcherInfo {
     /// Max inflight [`GetPooledTransactions`] requests.
     pub max_inflight_requests: usize,
+    /// Max inflight [`GetPooledTransactions`] requests per peer.
+    pub max_inflight_requests_per_peer: u8,
     /// Soft limit for the byte size of the expected [`PooledTransactions`] response, upon packing
     /// a [`GetPooledTransactions`] request with hashes (by default less than 2 MiB worth of
     /// transactions is requested).
@@ -1302,12 +1300,14 @@ pub struct TransactionFetcherInfo {
 impl TransactionFetcherInfo {
     /// Creates a new max
     pub const fn new(
-        max_inflight_requests: usize,
+        max_inflight_requests: u32,
+        max_inflight_requests_per_peer: u8,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,
     ) -> Self {
         Self {
-            max_inflight_requests,
+            max_inflight_requests: max_inflight_requests as usize,
+            max_inflight_requests_per_peer,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             soft_limit_byte_size_pooled_transactions_response,
         }
@@ -1317,7 +1317,8 @@ impl TransactionFetcherInfo {
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
-            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize * DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER as usize,
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         )
