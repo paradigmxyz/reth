@@ -1492,10 +1492,43 @@ mod tests {
 
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_primitives::B256;
-    use reth_storage_api::{BlockHashReader, BlockNumReader, HeaderProvider};
+    use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReaderIdExt, HeaderProvider};
     use reth_testing_utils::generators::{self, random_block_range};
 
     use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+
+    fn provider_with_random_blocks(
+    ) -> eyre::Result<(BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>, SealedBlock, SealedBlock)>
+    {
+        let mut rng = generators::rng();
+        let mut blocks = random_block_range(&mut rng, 0..=1, B256::ZERO, 0..1).into_iter();
+
+        let (database_block, in_memory_block) = (blocks.next().unwrap(), blocks.next().unwrap());
+
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.provider_rw()?;
+
+        // Insert one block in the database
+        provider_rw.insert_block(database_block.clone().seal_with_senders().unwrap())?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(provider_factory)?;
+
+        // Insert one block in the in-memory state
+        let in_memory_block_senders = in_memory_block.senders().unwrap();
+        let new_chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock::new(
+                in_memory_block.clone().into(),
+                in_memory_block_senders.into(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )],
+        };
+        provider.canonical_in_memory_state().update_chain(new_chain);
+
+        Ok((provider, database_block, in_memory_block))
+    }
 
     #[test]
     fn test_block_hash_reader() -> eyre::Result<()> {
@@ -1701,5 +1734,29 @@ mod tests {
         assert_eq!(provider.block_number(in_memory_block.hash())?, Some(in_memory_block.number));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_id_ext_block_by_id() {
+        let (provider, database_block, in_memory_block) = provider_with_random_blocks().unwrap();
+
+        let block_number = database_block.number;
+        let block_hash = database_block.header.hash();
+        assert_eq!(
+            provider.block_by_id(block_number.into()).unwrap(),
+            Some(database_block.clone().unseal())
+        );
+        assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
+
+        let block_number = in_memory_block.number;
+        let block_hash = in_memory_block.header.hash();
+        assert_eq!(
+            provider.block_by_id(block_number.into()).unwrap(),
+            Some(in_memory_block.clone().unseal())
+        );
+        assert_eq!(
+            provider.block_by_id(block_hash.into()).unwrap(),
+            Some(in_memory_block.unseal())
+        );
     }
 }
