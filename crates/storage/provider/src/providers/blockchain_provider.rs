@@ -1473,9 +1473,11 @@ mod tests {
     use std::sync::Arc;
 
     use eyre::OptionExt;
-    use reth_chain_state::{ExecutedBlock, NewCanonicalChain, CanonStateNotification, CanonStateSubscriptions};
-    use reth_primitives::B256;
+    use reth_chain_state::{
+        CanonStateNotification, CanonStateSubscriptions, ExecutedBlock, NewCanonicalChain,
+    };
     use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_primitives::B256;
     use reth_storage_api::{BlockHashReader, HeaderProvider};
     use reth_testing_utils::generators::{self, random_block_range};
 
@@ -1630,7 +1632,7 @@ mod tests {
 
         Ok(())
     }
-  
+
     #[tokio::test]
     async fn test_canon_state_subscriptions() -> eyre::Result<()> {
         let mut rng = generators::rng();
