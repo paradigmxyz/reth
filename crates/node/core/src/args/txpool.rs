@@ -70,7 +70,7 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.additional-validation-tasks", alias = "txpool.additional_validation_tasks", default_value_t = DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS)]
     pub additional_validation_tasks: usize,
 
-    /// Bound on number of pending transactions, incoming from network, to buffer
+    /// Maximum number of pending transactions from the network to buffer
     #[arg(long = "txpool.max-pending-txns", alias = "txpool.max_pending_txns", default_value_t = PENDING_TX_LISTENER_BUFFER_SIZE)]
     pub pending_tx_listener_buffer_size: usize,
 
