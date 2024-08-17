@@ -2809,8 +2809,6 @@ mod tests {
         test_harness.check_canon_head(fork_chain_last_hash);
     }
 
-    // Maybe try to add a test where inserting a block fails
-
     #[tokio::test]
     async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
         reth_tracing::init_test_tracing();
