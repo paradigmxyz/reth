@@ -169,6 +169,13 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --max-seen-tx-history <MAX_SEEN_TX_HISTORY>
+          Max number of seen transactions to remember per peer.
+
+          Default is 320 transaction hashes.
+
+          [default: 320]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
