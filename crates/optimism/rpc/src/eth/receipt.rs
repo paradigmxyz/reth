@@ -61,7 +61,9 @@ pub fn op_receipt_fields(
     } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
         op_fields.l1_fee = optimism_tx_meta.l1_fee;
         op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
-            dg + l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>()
+            dg.saturating_add(
+                l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>(),
+            )
         });
         op_fields.l1_fee_scalar = Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
         op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
