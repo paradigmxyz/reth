@@ -4,12 +4,13 @@
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
+use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
+use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::db::BundleState;
@@ -108,7 +109,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into())
+            return Err(EthApiError::ExceedsMaxProofWindow.into());
         }
 
         Ok(async move {
@@ -125,6 +126,37 @@ pub trait EthState: LoadState + SpawnBlocking {
                 Ok(from_primitive_account_proof(proof))
             })
             .await
+        })
+    }
+
+    /// Returns the account at the given address for the provided block identifier.
+    fn get_account(
+        &self,
+        address: Address,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<Account, Self::Error>> + Send {
+        self.spawn_blocking_io(move |this| {
+            let state = this.state_at_block_id(block_id)?;
+
+            let balance = state
+                .account_balance(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+            let nonce = state
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            // Provide a default `HashedStorage` value in order to
+            // get the storage root hash of the current state.
+            let storage_root = state
+                .hashed_storage_root(address, Default::default())
+                .map_err(Self::Error::from_eth_err)?;
+
+            let code = state.account_code(address).map_err(Self::Error::from_eth_err)?;
+            let code_hash = code.map(|code| code.hash_slow()).unwrap_or(KECCAK_EMPTY);
+
+            Ok(Account { balance, nonce, code_hash, storage_root })
         })
     }
 }
@@ -256,7 +288,7 @@ pub trait LoadState: EthApiTypes {
                     let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
                         EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
                     ))?;
-                    return Ok(U256::from(tx_count))
+                    return Ok(U256::from(tx_count));
                 }
             }
 
