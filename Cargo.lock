@@ -7696,7 +7696,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "toml",
  "tracing",
 ]
 

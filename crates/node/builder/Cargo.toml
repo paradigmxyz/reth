@@ -77,7 +77,6 @@ aquamarine.workspace = true
 eyre.workspace = true
 fdlimit.workspace = true
 rayon.workspace = true
-toml.workspace = true
 
 # tracing
 tracing.workspace = true

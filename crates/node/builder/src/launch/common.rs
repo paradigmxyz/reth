@@ -115,9 +115,8 @@ impl LaunchContext {
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
-        let mut toml_config: reth_config::Config =
-            toml::from_str(&std::fs::read_to_string(&config_path).unwrap_or_default())
-                .wrap_err_with(|| format!("Could not parse config file: {:?}", config_path))?;
+        let mut toml_config = NodeConfig::load_path::<reth_config::Config>(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
 
@@ -973,15 +972,8 @@ mod tests {
             )
             .unwrap();
 
-            let config_str =
-                toml::to_string(&reth_config).expect("Failed to serialize configuration to TOML");
-            std::fs::write(config_path, config_str).expect("Failed to write configuration to file");
+            let loaded_config: Config = NodeConfig::load_path(config_path).unwrap();
 
-            let loaded_config: Config = {
-                let config_str = std::fs::read_to_string(config_path)
-                    .expect("Failed to read configuration from file");
-                toml::from_str(&config_str).expect("Failed to parse configuration from TOML")
-            };
             assert_eq!(reth_config, loaded_config);
         })
     }
