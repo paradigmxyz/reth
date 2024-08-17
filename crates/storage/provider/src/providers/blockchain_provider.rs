@@ -163,7 +163,7 @@ where
             // database lookup
             let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
             let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None)
+                return Ok(None);
             };
             let tx_index = id - body_index.last_tx_num();
             Ok(Some((None, tx_index as usize)))
@@ -187,7 +187,7 @@ where
 
                 for tx_index in 0..block.body.len() {
                     if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)))
+                        return Ok(Some((Some(block_state), tx_index)));
                     }
 
                     in_memory_tx_num += 1;
@@ -306,7 +306,7 @@ where
                 // need to handle that situation.
                 headers.push(block_state.block().block().header.header().clone());
             } else {
-                break
+                break;
             }
         }
 
@@ -346,7 +346,7 @@ where
                 // need to handle that situation.
                 sealed_headers.push(block_state.block().block().header.clone());
             } else {
-                break
+                break;
             }
         }
 
@@ -377,13 +377,13 @@ where
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let header = block_state.block().block().header.clone();
                 if !predicate(&header) {
-                    break
+                    break;
                 }
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 sealed_headers.push(header);
             } else {
-                break
+                break;
             }
         }
 
@@ -427,7 +427,7 @@ where
                 // need to handle that situation.
                 hashes.push(block_state.hash());
             } else {
-                break
+                break;
             }
         }
 
@@ -648,7 +648,7 @@ where
                 // need to handle that situation.
                 blocks.push(block_state.block().block().clone().unseal());
             } else {
-                break
+                break;
             }
         }
 
@@ -678,7 +678,7 @@ where
                 // need to handle that situation.
                 blocks.push(BlockWithSenders { block: block.unseal(), senders });
             } else {
-                break
+                break;
             }
         }
 
@@ -708,7 +708,7 @@ where
                 // need to handle that situation.
                 blocks.push(SealedBlockWithSenders { block, senders });
             } else {
-                break
+                break;
             }
         }
 
@@ -723,7 +723,7 @@ where
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         // First, check the database
         if let Some(id) = self.database.transaction_id(tx_hash)? {
-            return Ok(Some(id))
+            return Ok(Some(id));
         }
 
         // If the transaction is not found in the database, check the in-memory state
@@ -750,7 +750,7 @@ where
                 .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
             for tx in &block_state.block().block().body {
                 if tx.hash() == tx_hash {
-                    return Ok(Some(in_memory_tx_id))
+                    return Ok(Some(in_memory_tx_id));
                 }
 
                 in_memory_tx_id += 1;
@@ -763,7 +763,7 @@ where
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         if let Some(block_state) = block_state {
@@ -780,7 +780,7 @@ where
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         if let Some(block_state) = block_state {
@@ -794,7 +794,7 @@ where
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
-            return Ok(Some(tx))
+            return Ok(Some(tx));
         }
 
         self.database.transaction_by_hash(hash)
@@ -807,7 +807,7 @@ where
         if let Some((tx, meta)) =
             self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
         {
-            return Ok(Some((tx, meta)))
+            return Ok(Some((tx, meta)));
         }
 
         self.database.transaction_by_hash_with_meta(tx_hash)
@@ -892,7 +892,7 @@ where
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         if let Some(block_state) = block_state {
@@ -916,7 +916,7 @@ where
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None)
+            return Ok(None);
         };
 
         if let Some(block_state) = block_state {
@@ -1018,7 +1018,7 @@ where
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
-            return Ok(None)
+            return Ok(None);
         }
 
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
@@ -1053,7 +1053,7 @@ where
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
         if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
-            return Ok(None)
+            return Ok(None);
         }
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
@@ -1263,7 +1263,7 @@ where
                 let pending_provider =
                     self.canonical_in_memory_state.state_provider(block_hash, historical);
 
-                return Ok(Some(Box::new(pending_provider)))
+                return Ok(Some(Box::new(pending_provider)));
             }
         }
         Ok(None)
@@ -1526,7 +1526,7 @@ mod tests {
 
     impl From<Vec<SealedBlock>> for SealedBlocks {
         fn from(value: Vec<SealedBlock>) -> Self {
-            SealedBlocks(value)
+            Self(value)
         }
     }
 
