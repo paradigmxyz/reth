@@ -39,7 +39,7 @@ pub mod tx_manager {
 
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
-    /// Default is 10 KiB, i.e. 320 transaction hashes.
+    /// Default is 320 transaction hashes.
     pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 10 * 1024 / 32;
 
     /// Default maximum pending pool imports to tolerate.
