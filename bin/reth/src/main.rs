@@ -35,30 +35,33 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) = Cli::<EngineArgs>::parse().run(|builder, engine_args| async move {
-        let enable_engine2 = engine_args.experimental;
-        match enable_engine2 {
-            true => {
-                let handle = builder
-                    .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
-                    .with_components(EthereumNode::components())
-                    .with_add_ons::<EthereumAddOns>()
-                    .launch_with_fn(|builder| {
-                        let launcher = EngineNodeLauncher::new(
-                            builder.task_executor().clone(),
-                            builder.config().datadir(),
-                        );
-                        builder.launch_with(launcher)
-                    })
-                    .await?;
-                handle.node_exit_future.await
-            }
-            false => {
-                let handle = builder.launch_node(EthereumNode::default()).await?;
-                handle.node_exit_future.await
-            }
-        }
-    }) {
+    if let Err(err) = Cli::<EngineArgs>::parse().run::<_, EthereumNode, BlockchainProvider2<_, _>, _>(
+        |builder, engine_args| async move {
+            // let enable_engine2 = engine_args.experimental;
+            // match enable_engine2 {
+            //     true => {
+            let handle = builder
+                // TODO bc2 not on rethfulladapter
+                // .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+                .with_components(EthereumNode::components())
+                .with_add_ons::<EthereumAddOns>()
+                .launch_with_fn(|builder| {
+                    let launcher = EngineNodeLauncher::new(
+                        builder.task_executor().clone(),
+                        builder.config().datadir(),
+                    );
+                    builder.launch_with(launcher)
+                })
+                .await?;
+            handle.node_exit_future.await
+            // }
+            // false => {
+            //     let handle = builder.launch_node(Default::default()).await?;
+            //     handle.node_exit_future.await
+            // }
+            // }
+        },
+    ) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }

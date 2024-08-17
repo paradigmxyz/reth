@@ -9,6 +9,7 @@ use crate::{
     macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_node_builder::NodeTypes;
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{
@@ -18,7 +19,9 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, FullNodeTypesAdapter};
+use reth_node_builder::{NodeBuilder, NodeBuilderWithTypes, RethFullAdapter, WithLaunchContext};
+use reth_provider::FullProvider;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -132,10 +135,18 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///     })
     ///     .unwrap();
     /// ````
-    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    pub fn run<L, T, Provider, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilderWithTypes<FullNodeTypesAdapter<T, Arc<DatabaseEnv>, Provider>>,
+            >,
+            Ext,
+        ) -> Fut,
+        T: NodeTypes,
+        T::Primitives: Clone,
         Fut: Future<Output = eyre::Result<()>>,
+        Provider: FullProvider<Arc<DatabaseEnv>>,
     {
         // add network name to logs dir
         self.logs.log_file_directory =
@@ -149,10 +160,14 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
-            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Init(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<T::Primitives>())
+            }
+            Commands::InitState(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<T::Primitives>())
+            }
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute(|chain_spec| block_executor!(chain_spec)),
+                command.execute::<_, _, T::Primitives>(|chain_spec| block_executor!(chain_spec)),
             ),
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -161,17 +176,24 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
                 runner.run_blocking_until_ctrl_c(command.execute())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<T::Primitives>())
+            }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
+                command
+                    .execute::<_, _, T::Primitives>(ctx, |chain_spec| block_executor!(chain_spec))
             }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<T>(ctx))
+            }
+            Commands::Recover(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<T::Primitives>(ctx))
+            }
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<T::Primitives>()),
         }
     }
 

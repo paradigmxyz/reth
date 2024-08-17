@@ -6,7 +6,7 @@ use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthPrimitiveTypes,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
@@ -64,7 +64,7 @@ impl EthereumNode {
 }
 
 impl NodeTypes for EthereumNode {
-    type Primitives = ();
+    type Primitives = EthPrimitiveTypes;
     type Engine = EthEngineTypes;
 }
 

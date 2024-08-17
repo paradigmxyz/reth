@@ -582,7 +582,7 @@ impl<DB: Database, N: NodePrimitives> EvmEnvProvider for ProviderFactory<DB, N> 
 impl<DB, N> ChainSpecProvider for ProviderFactory<DB, N>
 where
     DB: Send + Sync,
-    N: NodePrimitives,
+    N: Send + Sync,
 {
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()

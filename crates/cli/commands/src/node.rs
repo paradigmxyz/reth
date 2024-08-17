@@ -5,7 +5,10 @@ use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
-use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_builder::{
+    FullNodeTypes, FullNodeTypesAdapter, NodeBuilder, NodeBuilderWithTypes, NodeTypes,
+    RethFullAdapter, WithLaunchContext,
+};
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
@@ -16,6 +19,7 @@ use reth_node_core::{
     version,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
+use reth_provider::FullProvider;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -130,10 +134,21 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// closure.
-    pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
+    pub async fn execute<L, Fut, T, Provider>(
+        self,
+        ctx: CliContext,
+        launcher: L,
+    ) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilderWithTypes<FullNodeTypesAdapter<T, Arc<DatabaseEnv>, Provider>>,
+            >,
+            Ext,
+        ) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
+        T: NodeTypes,
+        Provider: FullProvider<Arc<DatabaseEnv>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
 
@@ -188,7 +203,8 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
-            .with_launch_context(ctx.task_executor);
+            .with_launch_context(ctx.task_executor)
+            .with_types_and_provider::<T, Provider>();
 
         launcher(builder, ext).await
     }

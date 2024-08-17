@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use reth_cli_runner::CliContext;
+use reth_node_api::{primitives::NodePrimitives, NodeTypes};
 
 mod build_block;
 mod execution;
@@ -33,13 +34,17 @@ pub enum Subcommands {
 
 impl Command {
     /// Execute `debug` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<T>(self, ctx: CliContext) -> eyre::Result<()>
+    where
+        T: NodeTypes,
+        T::Primitives: Clone,
+    {
         match self.command {
-            Subcommands::Execution(command) => command.execute(ctx).await,
-            Subcommands::Merkle(command) => command.execute(ctx).await,
-            Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
-            Subcommands::BuildBlock(command) => command.execute(ctx).await,
-            Subcommands::ReplayEngine(command) => command.execute(ctx).await,
+            Subcommands::Execution(command) => command.execute::<T::Primitives>(ctx).await,
+            Subcommands::Merkle(command) => command.execute::<T::Primitives>(ctx).await,
+            Subcommands::InMemoryMerkle(command) => command.execute::<T::Primitives>(ctx).await,
+            Subcommands::BuildBlock(command) => command.execute::<T::Primitives>(ctx).await,
+            Subcommands::ReplayEngine(command) => command.execute::<T>(ctx).await,
         }
     }
 }

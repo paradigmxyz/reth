@@ -20,6 +20,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
+use reth_node_api::primitives::NodePrimitives;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
@@ -56,18 +57,19 @@ pub struct Command {
 }
 
 impl Command {
-    fn build_pipeline<DB, Client>(
+    fn build_pipeline<DB, Client, N>(
         &self,
         config: &Config,
         client: Client,
         consensus: Arc<dyn Consensus>,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<DB, N>,
         task_executor: &TaskExecutor,
-        static_file_producer: StaticFileProducer<DB>,
-    ) -> eyre::Result<Pipeline<DB>>
+        static_file_producer: StaticFileProducer<DB, N>,
+    ) -> eyre::Result<Pipeline<DB, N>>
     where
         DB: Database + Unpin + Clone + 'static,
         Client: BlockClient + 'static,
+        N: NodePrimitives + Unpin + Clone + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
@@ -84,7 +86,7 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let pipeline = Pipeline::builder()
+        let pipeline = Pipeline::<_, N>::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
@@ -115,11 +117,11 @@ impl Command {
         Ok(pipeline)
     }
 
-    async fn build_network(
+    async fn build_network<N: NodePrimitives>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>, N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -156,8 +158,9 @@ impl Command {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodePrimitives + Clone>(self, ctx: CliContext) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));

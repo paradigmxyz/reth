@@ -14,9 +14,12 @@ use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
+use reth_ethereum_engine_primitives::EthPrimitiveTypes;
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_api::{primitives::NodePrimitives, NodeTypes};
+use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -52,11 +55,11 @@ pub struct Command {
 }
 
 impl Command {
-    async fn build_network(
+    async fn build_network<N: NodePrimitives>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>, N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -74,8 +77,9 @@ impl Command {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<T: NodeTypes>(self, ctx: CliContext) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<T::Primitives>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
@@ -108,97 +112,102 @@ impl Command {
             )
             .await?;
 
-        // Set up payload builder
-        #[cfg(not(feature = "optimism"))]
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        // TODO add PayloadBuilder as a chain type
+        // // Set up payload builder
+        // #[cfg(not(feature = "optimism"))]
+        // let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
-        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        );
+        // // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
+        // #[cfg(feature = "optimism")]
+        // let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+        //     reth_node_optimism::OptimismEvmConfig::default(),
+        // );
 
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            blockchain_db.clone(),
-            NoopTransactionPool::default(),
-            ctx.task_executor.clone(),
-            BasicPayloadJobGeneratorConfig::default(),
-            provider_factory.chain_spec(),
-            payload_builder,
-        );
+        // let payload_generator = BasicPayloadJobGenerator::with_builder(
+        //     blockchain_db.clone(),
+        //     NoopTransactionPool::default(),
+        //     ctx.task_executor.clone(),
+        //     BasicPayloadJobGeneratorConfig::default(),
+        //     provider_factory.chain_spec(),
+        //     payload_builder,
+        // );
 
-        #[cfg(feature = "optimism")]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+        // #[cfg(feature = "optimism")]
+        // let (payload_service, payload_builder): (
+        //     _,
+        //     PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
+        // ) = PayloadBuilderService::new(payload_generator,
+        // blockchain_db.canonical_state_stream());
 
-        #[cfg(not(feature = "optimism"))]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+        // #[cfg(not(feature = "optimism"))]
+        // let (payload_service, payload_builder): (
+        //     _,
+        //     PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
+        // ) = PayloadBuilderService::new(payload_generator,
+        // blockchain_db.canonical_state_stream());
 
-        ctx.task_executor.spawn_critical("payload builder service", payload_service);
+        // ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
-        // Configure the consensus engine
-        let network_client = network.fetch_client().await?;
-        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
-            network_client,
-            Pipeline::builder().build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
-            ),
-            blockchain_db.clone(),
-            Box::new(ctx.task_executor.clone()),
-            Box::new(network),
-            None,
-            payload_builder,
-            None,
-            u64::MAX,
-            EngineHooks::new(),
-        )?;
-        info!(target: "reth::cli", "Consensus engine initialized");
+        // // Configure the consensus engine
+        // let network_client = network.fetch_client().await?;
+        // let (beacon_consensus_engine, beacon_engine_handle) =
+        // // TODO(joshie) should use T: NodeTypes once this gets moved
+        // BeaconConsensusEngine::<_, _, _, T>::new(
+        //         network_client,
+        //         Pipeline::builder().build(
+        //             provider_factory.clone(),
+        //             StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
+        //         ),
+        //         blockchain_db.clone(),
+        //         Box::new(ctx.task_executor.clone()),
+        //         Box::new(network),
+        //         None,
+        //         payload_builder,
+        //         None,
+        //         u64::MAX,
+        //         EngineHooks::new(),
+        //     )?;
+        // info!(target: "reth::cli", "Consensus engine initialized");
 
-        // Run consensus engine to completion
-        let (tx, rx) = oneshot::channel();
-        info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
-            let res = beacon_consensus_engine.await;
-            let _ = tx.send(res);
-        });
+        // // Run consensus engine to completion
+        // let (tx, rx) = oneshot::channel();
+        // info!(target: "reth::cli", "Starting consensus engine");
+        // ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+        //     let res = beacon_consensus_engine.await;
+        //     let _ = tx.send(res);
+        // });
 
-        let engine_api_store = EngineMessageStore::new(self.engine_api_store.clone());
-        for filepath in engine_api_store.engine_messages_iter()? {
-            let contents =
-                fs::read(&filepath).wrap_err(format!("failed to read: {}", filepath.display()))?;
-            let message = serde_json::from_slice(&contents)
-                .wrap_err(format!("failed to parse: {}", filepath.display()))?;
-            debug!(target: "reth::cli", filepath = %filepath.display(), ?message, "Forwarding Engine API message");
-            match message {
-                StoredEngineApiMessage::ForkchoiceUpdated { state, payload_attrs } => {
-                    let response =
-                        beacon_engine_handle.fork_choice_updated(state, payload_attrs).await?;
-                    debug!(target: "reth::cli", ?response, "Received for forkchoice updated");
-                }
-                StoredEngineApiMessage::NewPayload { payload, cancun_fields } => {
-                    let response = beacon_engine_handle.new_payload(payload, cancun_fields).await?;
-                    debug!(target: "reth::cli", ?response, "Received for new payload");
-                }
-            };
+        // let engine_api_store = EngineMessageStore::new(self.engine_api_store.clone());
+        // for filepath in engine_api_store.engine_messages_iter()? {
+        //     let contents =
+        //         fs::read(&filepath).wrap_err(format!("failed to read: {}", filepath.display()))?;
+        //     let message = serde_json::from_slice(&contents)
+        //         .wrap_err(format!("failed to parse: {}", filepath.display()))?;
+        //     debug!(target: "reth::cli", filepath = %filepath.display(), ?message, "Forwarding
+        // Engine API message");     match message {
+        //         StoredEngineApiMessage::ForkchoiceUpdated { state, payload_attrs } => {
+        //             let response =
+        //                 beacon_engine_handle.fork_choice_updated(state, payload_attrs).await?;
+        //             debug!(target: "reth::cli", ?response, "Received for forkchoice updated");
+        //         }
+        //         StoredEngineApiMessage::NewPayload { payload, cancun_fields } => {
+        //             let response = beacon_engine_handle.new_payload(payload,
+        // cancun_fields).await?;             debug!(target: "reth::cli", ?response,
+        // "Received for new payload");         }
+        //     };
 
-            // Pause before next message
-            tokio::time::sleep(Duration::from_millis(self.interval)).await;
-        }
+        //     // Pause before next message
+        //     tokio::time::sleep(Duration::from_millis(self.interval)).await;
+        // }
 
-        info!(target: "reth::cli", "Finished replaying engine API messages");
+        // info!(target: "reth::cli", "Finished replaying engine API messages");
 
-        match rx.await? {
-            Ok(()) => info!("Beacon consensus engine exited successfully"),
-            Err(error) => {
-                error!(target: "reth::cli", %error, "Beacon consensus engine exited with an error")
-            }
-        };
+        // match rx.await? {
+        //     Ok(()) => info!("Beacon consensus engine exited successfully"),
+        //     Err(error) => {
+        //         error!(target: "reth::cli", %error, "Beacon consensus engine exited with an
+        // error")     }
+        // };
 
         Ok(())
     }

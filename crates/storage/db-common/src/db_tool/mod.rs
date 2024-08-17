@@ -32,12 +32,16 @@ impl<DB: Database, N: NodePrimitives> DbTool<DB, N> {
         provider_factory.provider()?.disable_long_read_transaction_safety();
         Ok(Self { provider_factory })
     }
+}
 
+impl<DB: Database, N: Send + Sync> DbTool<DB, N> {
     /// Get an [`Arc`] to the [`ChainSpec`].
     pub fn chain(&self) -> Arc<ChainSpec> {
         self.provider_factory.chain_spec()
     }
+}
 
+impl<DB: Database, N> DbTool<DB, N> {
     /// Grabs the contents of the table within a certain index range and places the
     /// entries into a [`HashMap`][std::collections::HashMap].
     ///

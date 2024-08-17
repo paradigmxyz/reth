@@ -18,7 +18,7 @@ use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::PayloadBuilderAttributes;
+use reth_node_api::{primitives::NodePrimitives, PayloadBuilderAttributes};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
@@ -81,9 +81,9 @@ impl Command {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(
+    fn lookup_best_block<N: NodePrimitives>(
         &self,
-        factory: ProviderFactory<Arc<DatabaseEnv>>,
+        factory: ProviderFactory<Arc<DatabaseEnv>, N>,
     ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
@@ -114,8 +114,8 @@ impl Command {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodePrimitives>(self, ctx: CliContext) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));

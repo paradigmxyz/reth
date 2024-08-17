@@ -2,7 +2,6 @@
 
 /// Configures all the primitive types of the node.
 // TODO(mattsse): this is currently a placeholder
-pub trait NodePrimitives {}
+pub use reth_primitives_traits::NodePrimitives;
 
 // TODO(mattsse): Placeholder
-impl NodePrimitives for () {}
