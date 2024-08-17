@@ -1483,8 +1483,10 @@ mod tests {
         let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
         let (db_blocks, in_mem_blocks) = blocks.split_at(5);
 
+        // Useful blocks
         let first_db_block = db_blocks.first().unwrap();
         let first_in_mem_block = in_mem_blocks.first().unwrap();
+        let last_in_mem_block = in_mem_blocks.last().unwrap();
 
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
@@ -1549,7 +1551,7 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(in_mem_blocks.last().unwrap().clone()),
+            block: Arc::new(last_in_mem_block.clone()),
             senders: Default::default(),
             execution_output: Default::default(),
             hashed_state: Default::default(),
@@ -1558,9 +1560,8 @@ mod tests {
 
         // Now the last block should be found in memory
         assert_eq!(
-            provider
-                .find_block_by_hash(in_mem_blocks.last().unwrap().hash(), BlockSource::Pending)?,
-            Some(in_mem_blocks.last().unwrap().clone().into())
+            provider.find_block_by_hash(last_in_mem_block.hash(), BlockSource::Pending)?,
+            Some(last_in_mem_block.clone().into())
         );
 
         Ok(())
