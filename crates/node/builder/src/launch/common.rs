@@ -1,10 +1,7 @@
 //! Helper types that can be used by launchers.
 
-use crate::{
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
-};
+use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
+
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -47,10 +44,15 @@ use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, St
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
     oneshot, watch,
+};
+
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::OnComponentInitializedHook,
+    BuilderContext, NodeAdapter,
 };
 
 /// Allows to set a tree viewer for a configured blockchain provider.
@@ -596,8 +598,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB> + WithTree>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -716,8 +717,7 @@ where
 impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB> + WithTree>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -915,8 +915,7 @@ pub struct WithMeteredProvider<DB> {
 pub struct WithMeteredProviders<DB, T>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB>>,
 {
     db_provider_container: WithMeteredProvider<DB>,
     blockchain_db: T::Provider,
@@ -932,8 +931,7 @@ where
 pub struct WithComponents<DB, T, CB>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB>>,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<DB>,
