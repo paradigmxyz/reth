@@ -97,13 +97,13 @@ where
                             }
                             Err(err) => {
                                 tracing::error!( %err, "backfill sync failed");
-                                Poll::Ready(ChainEvent::FatalError(err.into()))
+                                Poll::Ready(ChainEvent::FatalError)
                             }
                         }
                     }
                     BackfillEvent::TaskDropped(err) => {
                         tracing::error!( %err, "backfill sync task dropped");
-                        return Poll::Ready(ChainEvent::FatalError(err.into()));
+                        return Poll::Ready(ChainEvent::FatalError);
                     }
                 },
                 Poll::Pending => {}
@@ -122,9 +122,9 @@ where
                             // bubble up the event
                             return Poll::Ready(ChainEvent::Handler(ev));
                         }
-                        HandlerEvent::FatalError(err) => {
+                        HandlerEvent::FatalError => {
                             error!(target: "engine::tree", "Fatal error");
-                            return Poll::Ready(ChainEvent::FatalError(err))
+                            return Poll::Ready(ChainEvent::FatalError)
                         }
                     }
                 }
@@ -161,7 +161,7 @@ pub enum ChainEvent<T> {
     /// Backfill sync finished
     BackfillSyncFinished,
     /// Fatal error
-    FatalError(Box<dyn std::error::Error + Send + Sync>),
+    FatalError,
     /// Event emitted by the handler
     Handler(T),
 }
@@ -196,7 +196,7 @@ pub enum HandlerEvent<T> {
     /// Other event emitted by the handler
     Event(T),
     /// Fatal error
-    FatalError(Box<dyn std::error::Error + Send + Sync>),
+    FatalError,
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].

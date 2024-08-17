@@ -92,7 +92,7 @@ where
                                 // bubble up the event
                                 Poll::Ready(HandlerEvent::Event(ev))
                             }
-                            HandlerEvent::FatalError(err) => Poll::Ready(HandlerEvent::FatalError(err)),
+                            HandlerEvent::FatalError => Poll::Ready(HandlerEvent::FatalError),
                         }
                     }
                     RequestHandlerEvent::Download(req) => {
@@ -194,7 +194,7 @@ where
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
         let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
-            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError("Polling Failure".into())))
+            return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
         };
 
         let ev = match ev {
@@ -205,9 +205,6 @@ where
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
             }
             EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
-            EngineApiEvent::ExecutionFailure(error) => {
-                RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError(error))
-            }
         };
         Poll::Ready(ev)
     }
@@ -253,8 +250,6 @@ pub enum EngineApiEvent {
     BackfillAction(BackfillAction),
     /// Block download is needed.
     Download(DownloadRequest),
-    /// Fatal insert block error needs to be bubbled up.
-    ExecutionFailure(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl EngineApiEvent {
