@@ -4245,7 +4245,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -11177,7 +11177,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?branch=translator_integration#3071457984c8470f4201dc7b59ed6c69c1ce945b"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?branch=translator_integration#7c2580c40435ba97e34feaa47da99bc3f962a81b"
 dependencies = [
  "alloy",
  "alloy-consensus",

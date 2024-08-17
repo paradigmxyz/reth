@@ -11,7 +11,7 @@ use reth_primitives::{Genesis, B256};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use telos_consensus_client::client::ConsensusClient;
+use telos_consensus_client::client::{ConsensusClient, Error};
 use telos_consensus_client::config::AppConfig;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
@@ -84,7 +84,7 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
     Ok((node_config, jwt))
 }
 
-async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain_port: u16) {
+async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain_port: u16) -> eyre::Result<(), Error> {
     let config = AppConfig {
         chain_id: 41,
         execution_endpoint: format!("http://localhost:{}", reth_handle.execution_port),
@@ -100,7 +100,8 @@ async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain
     };
 
     let mut client_under_test = ConsensusClient::new(config).await;
-    _ = client_under_test.run().await;
+    let run_result = client_under_test.run().await;
+    run_result
 }
 
 #[tokio::test]
@@ -130,5 +131,6 @@ async fn testing_chain_sync() {
     _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     info!("Started Reth!");
 
-    start_consensus(reth_handle, ship_port, chain_port).await;
+    let consensus_result = start_consensus(reth_handle, ship_port, chain_port).await;
+    assert!(consensus_result.is_ok(), "Error with consensus client: {:?}", consensus_result.err().unwrap());
 }
