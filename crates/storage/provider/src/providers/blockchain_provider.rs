@@ -497,7 +497,6 @@ where
                 if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                     return Ok(Some(block_state.block().block().clone().unseal()));
                 }
-
                 self.database.block_by_number(num)
             }
         }
@@ -1468,7 +1467,7 @@ mod tests {
     use std::sync::Arc;
 
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_primitives::B256;
+    use reth_primitives::{BlockHashOrNumber, B256};
     use reth_storage_api::{BlockReader, BlockSource};
     use reth_testing_utils::generators::{self, random_block_range};
 
@@ -1573,6 +1572,74 @@ mod tests {
             provider
                 .find_block_by_hash(in_mem_blocks.last().unwrap().hash(), BlockSource::Pending)?,
             Some(in_mem_blocks.last().unwrap().clone().into())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block() -> eyre::Result<()> {
+        // Initialize random number generator and provider factory
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks and split into database and in-memory blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+        let (db_blocks, in_mem_blocks) = blocks.split_at(5);
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in db_blocks {
+            provider_rw.insert_historical_block(
+                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        // Create a new provider
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // First in memory block
+        let first_in_mem_block = in_mem_blocks.first().unwrap();
+        // First database block
+        let first_db_block = db_blocks.first().unwrap();
+
+        // First in memory block should not be found yet as not integrated to the in-memory state
+        assert_eq!(provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?, None);
+        assert_eq!(provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?, None);
+
+        // Insert first block into the in-memory state
+        let in_memory_block_senders =
+            first_in_mem_block.senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock::new(
+                Arc::new(first_in_mem_block.clone()),
+                Arc::new(in_memory_block_senders),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        // First in memory block should be found
+        assert_eq!(
+            provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
+            Some(first_in_mem_block.clone().into())
+        );
+        assert_eq!(
+            provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
+            Some(first_in_mem_block.clone().into())
+        );
+
+        // First database block should be found
+        assert_eq!(
+            provider.block(BlockHashOrNumber::Hash(first_db_block.hash()))?,
+            Some(first_db_block.clone().into())
+        );
+        assert_eq!(
+            provider.block(BlockHashOrNumber::Number(first_db_block.number))?,
+            Some(first_db_block.clone().into())
         );
 
         Ok(())
