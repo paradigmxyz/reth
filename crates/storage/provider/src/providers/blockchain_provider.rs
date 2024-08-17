@@ -402,15 +402,17 @@ where
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
+        let mut range = start..=end;
+
         let mut hashes = Vec::with_capacity((end - start + 1) as usize);
 
         // First, fetch the hashes from the database
         let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
-        hashes.append(&mut db_hashes);
 
-        let mut range = start..=end;
         // Advance the range iterator by the number of blocks fetched from the database
         range.nth(db_hashes.len() - 1);
+
+        hashes.append(&mut db_hashes);
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
@@ -1460,5 +1462,70 @@ where
         // use latest state provider
         let state_provider = self.latest()?;
         state_provider.basic_account(address)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_primitives::B256;
+    use reth_storage_api::BlockHashReader;
+    use reth_testing_utils::generators::{self, random_block_range};
+
+    use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+
+    #[test]
+    fn test_block_hash_reader() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+
+        let mut blocks_iter = blocks.clone().into_iter();
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in (0..5).map_while(|_| blocks_iter.next()) {
+            provider_rw.insert_historical_block(
+                block.seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Insert the rest of the blocks into the in-memory state
+        let chain = NewCanonicalChain::Commit {
+            new: blocks_iter
+                .map(|block| {
+                    let senders = block.senders().expect("failed to recover senders");
+                    ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(senders),
+                        Default::default(),
+                        Default::default(),
+                        Default::default(),
+                    )
+                })
+                .collect(),
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        let database_block = blocks.first().unwrap().clone();
+        let in_memory_block = blocks.last().unwrap().clone();
+
+        assert_eq!(provider.block_hash(database_block.number)?, Some(database_block.hash()));
+        assert_eq!(provider.block_hash(in_memory_block.number)?, Some(in_memory_block.hash()));
+
+        assert_eq!(
+            provider.canonical_hashes_range(0, 10)?,
+            blocks.iter().map(|block| block.hash()).collect::<Vec<_>>()
+        );
+
+        Ok(())
     }
 }

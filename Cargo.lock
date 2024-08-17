@@ -8134,6 +8134,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap 6.0.1",
+ "eyre",
  "itertools 0.13.0",
  "metrics",
  "once_cell",
