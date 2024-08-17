@@ -656,7 +656,7 @@ impl BlockState {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock {
     /// Sealed block the rest of fields refer to.
     pub block: Arc<SealedBlock>,
@@ -671,7 +671,7 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
-    /// `ExecutedBlock` constructor.
+    /// [`ExecutedBlock`] constructor.
     pub const fn new(
         block: Arc<SealedBlock>,
         senders: Arc<Vec<Address>>,
