@@ -1462,3 +1462,119 @@ where
         state_provider.basic_account(address)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_primitives::B256;
+    use reth_storage_api::{BlockReader, BlockSource};
+    use reth_testing_utils::generators::{self, random_block_range};
+
+    use crate::{providers::BlockchainProvider2, test_utils::create_test_provider_factory};
+
+    #[test]
+    fn test_find_block_by_hash() -> eyre::Result<()> {
+        // Initialize random number generator and provider factory
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks and split into database and in-memory blocks
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1);
+        let (db_blocks, in_mem_blocks) = blocks.split_at(5);
+
+        // Insert first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in db_blocks {
+            provider_rw.insert_historical_block(
+                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        // Create a new provider
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // No block in memory before setting in memory state
+        assert_eq!(
+            provider.find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Any)?,
+            None
+        );
+        assert_eq!(
+            provider.find_block_by_hash(
+                in_mem_blocks.first().unwrap().hash(),
+                BlockSource::Canonical
+            )?,
+            None
+        );
+        // No pending block in memory
+        assert_eq!(
+            provider
+                .find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Pending)?,
+            None
+        );
+
+        // Insert first block into the in-memory state
+        let in_memory_block_senders =
+            in_mem_blocks.first().unwrap().senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock::new(
+                Arc::new(in_mem_blocks.first().unwrap().clone()),
+                Arc::new(in_memory_block_senders),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        // Now the block should be found in memory
+        assert_eq!(
+            provider.find_block_by_hash(in_mem_blocks.first().unwrap().hash(), BlockSource::Any)?,
+            Some(in_mem_blocks.first().unwrap().clone().into())
+        );
+        assert_eq!(
+            provider.find_block_by_hash(
+                in_mem_blocks.first().unwrap().hash(),
+                BlockSource::Canonical
+            )?,
+            Some(in_mem_blocks.first().unwrap().clone().into())
+        );
+
+        // Find the first block in database by hash
+        assert_eq!(
+            provider.find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Any)?,
+            Some(db_blocks.first().unwrap().clone().into())
+        );
+        assert_eq!(
+            provider
+                .find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Canonical)?,
+            Some(db_blocks.first().unwrap().clone().into())
+        );
+
+        // No pending block in database
+        assert_eq!(
+            provider.find_block_by_hash(db_blocks.first().unwrap().hash(), BlockSource::Pending)?,
+            None
+        );
+
+        // Insert the last block into the pending state
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(in_mem_blocks.last().unwrap().clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Now the last block should be found in memory
+        assert_eq!(
+            provider
+                .find_block_by_hash(in_mem_blocks.last().unwrap().hash(), BlockSource::Pending)?,
+            Some(in_mem_blocks.last().unwrap().clone().into())
+        );
+
+        Ok(())
+    }
+}
