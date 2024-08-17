@@ -15,13 +15,14 @@ use std::{
 
 use futures::StreamExt;
 use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
+use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_network_types::{PeersHandle, ReputationChangeKind};
+use reth_network_types::ReputationChangeKind;
 use reth_primitives::{BlockBody, Header, B256};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;

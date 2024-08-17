@@ -7,7 +7,7 @@ use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    BlockDownloaderProvider, NetworkEvents,
+    BlockDownloaderProvider, NetworkEventListenerProvider,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::{

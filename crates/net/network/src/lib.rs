@@ -138,7 +138,10 @@ mod state;
 mod swarm;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_network_api::{NetworkInfo, Peers, PeersHandleProvider, PeersInfo};
+pub use reth_network_api::{
+    BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,
+};
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{
@@ -149,14 +152,11 @@ pub use session::{
 
 pub use builder::NetworkBuilder;
 pub use config::{NetworkConfig, NetworkConfigBuilder};
-pub use discovery::{Discovery, DiscoveryEvent};
+pub use discovery::Discovery;
 pub use fetch::FetchClient;
 pub use flattened_response::FlattenedResponse;
-pub use manager::{DiscoveredEvent, NetworkEvent, NetworkManager};
-pub use message::PeerRequest;
+pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
-pub use network::{
-    BlockDownloaderProvider, FullNetwork, NetworkEvents, NetworkHandle, NetworkProtocols,
-};
+pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};

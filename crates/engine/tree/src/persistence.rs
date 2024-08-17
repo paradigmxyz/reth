@@ -2,15 +2,14 @@
 
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
-use reth_primitives::{SealedBlock, B256};
+use reth_errors::ProviderError;
+use reth_primitives::B256;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
-use reth_prune::{Pruner, PrunerOutput};
-use std::sync::{
-    mpsc::{Receiver, SendError, Sender},
-    Arc,
-};
+use reth_prune::{Pruner, PrunerError, PrunerOutput};
+use std::sync::mpsc::{Receiver, SendError, Sender};
+use thiserror::Error;
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, error};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -41,10 +40,10 @@ impl<DB: Database> PersistenceService<DB> {
 
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
-    fn prune_before(&mut self, block_num: u64) -> PrunerOutput {
+    fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "tree::persistence", ?block_num, "Running pruner");
         // TODO: doing this properly depends on pruner segment changes
-        self.pruner.run(block_num).expect("todo: handle errors")
+        self.pruner.run(block_num)
     }
 }
 
@@ -54,59 +53,61 @@ where
 {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
-    pub fn run(mut self) {
+    pub fn run(mut self) -> Result<(), PersistenceError> {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
+                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
+                    let provider_rw = self.provider.provider_rw()?;
                     let sf_provider = self.provider.static_file_provider();
 
                     UnifiedStorageWriter::from(&provider_rw, &sf_provider)
-                        .remove_blocks_above(new_tip_num)
-                        .expect("todo: handle errors");
-                    UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)
-                        .expect("todo: handle errors");
+                        .remove_blocks_above(new_tip_num)?;
+                    UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
                 }
-                PersistenceAction::SaveBlocks((blocks, sender)) => {
-                    if blocks.is_empty() {
-                        todo!("return error or something");
-                    }
-                    let last_block_hash = blocks.last().unwrap().block().hash();
+                PersistenceAction::SaveBlocks(blocks, sender) => {
+                    let Some(last_block) = blocks.last() else {
+                        let _ = sender.send(None);
+                        continue
+                    };
 
-                    let provider_rw = self.provider.provider_rw().expect("todo: handle errors");
+                    let last_block_hash = last_block.block().hash();
+
+                    let provider_rw = self.provider.provider_rw()?;
                     let static_file_provider = self.provider.static_file_provider();
 
                     UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
-                        .save_blocks(&blocks)
-                        .expect("todo: handle errors");
-                    UnifiedStorageWriter::commit(provider_rw, static_file_provider)
-                        .expect("todo: handle errors");
+                        .save_blocks(&blocks)?;
+                    UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
 
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(last_block_hash);
+                    let _ = sender.send(Some(last_block_hash));
                 }
-                PersistenceAction::PruneBefore((block_num, sender)) => {
-                    let res = self.prune_before(block_num);
+                PersistenceAction::PruneBefore(block_num, sender) => {
+                    let res = self.prune_before(block_num)?;
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::WriteTransactions((block, sender)) => {
-                    unimplemented!()
-                    // let (block_num, td) =
-                    //     self.write_transactions(block).expect("todo: handle errors");
-                    // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
-
-                    // // we ignore the error because the caller may or may not care about the
-                    // result let _ = sender.send(());
-                }
             }
         }
+        Ok(())
     }
+}
+
+/// One of the errors that can happen when using the persistence service.
+#[derive(Debug, Error)]
+pub enum PersistenceError {
+    /// A pruner error
+    #[error(transparent)]
+    PrunerError(#[from] PrunerError),
+
+    /// A provider error
+    #[error(transparent)]
+    ProviderError(#[from] ProviderError),
 }
 
 /// A signal to the persistence service that part of the tree state can be persisted.
@@ -117,24 +118,17 @@ pub enum PersistenceAction {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
-
-    /// The given block has been added to the canonical chain, its transactions and headers will be
-    /// persisted for durability.
-    ///
-    /// This will first append the header and transactions to static files, then update the
-    /// checkpoints for headers and block bodies in the database.
-    WriteTransactions((Arc<SealedBlock>, oneshot::Sender<()>)),
+    SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<B256>>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
+    RemoveBlocksAbove(u64, oneshot::Sender<()>),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
-    PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
+    PruneBefore(u64, oneshot::Sender<PrunerOutput>),
 }
 
 /// A handle to the persistence service
@@ -165,7 +159,11 @@ impl PersistenceHandle {
         let db_service = PersistenceService::new(provider_factory, db_service_rx, pruner);
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
-            .spawn(|| db_service.run())
+            .spawn(|| {
+                if let Err(err) = db_service.run() {
+                    error!(target: "engine::persistence", ?err, "Persistence service failed");
+                }
+            })
             .unwrap();
 
         persistence_handle
@@ -186,31 +184,38 @@ impl PersistenceHandle {
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures. This value is returned in the receiver end
     /// of the sender argument.
-    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
-        if blocks.is_empty() {
-            let _ = tx.send(B256::default());
-            return;
-        }
-        self.send_action(PersistenceAction::SaveBlocks((blocks, tx)))
-            .expect("should be able to send");
+    ///
+    /// If there are no blocks to persist, then `None` is sent in the sender.
+    pub fn save_blocks(
+        &self,
+        blocks: Vec<ExecutedBlock>,
+        tx: oneshot::Sender<Option<B256>>,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
-    pub async fn remove_blocks_above(&self, block_num: u64) {
-        let (tx, rx) = oneshot::channel();
-        self.send_action(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
-            .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+    ///
+    /// When the operation completes, `()` is returned in the receiver end of the sender argument.
+    pub fn remove_blocks_above(
+        &self,
+        block_num: u64,
+        tx: oneshot::Sender<()>,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 
     /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_num: u64) -> PrunerOutput {
-        let (tx, rx) = oneshot::channel();
-        self.send_action(PersistenceAction::PruneBefore((block_num, tx)))
-            .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+    ///
+    /// The resulting [`PrunerOutput`] is returned in the receiver end of the sender argument.
+    pub fn prune_before(
+        &self,
+        block_num: u64,
+        tx: oneshot::Sender<PrunerOutput>,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.send_action(PersistenceAction::PruneBefore(block_num, tx))
     }
 }
 
@@ -226,7 +231,7 @@ mod tests {
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
 
-        let (finished_exex_height_tx, finished_exex_height_rx) =
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(
@@ -249,10 +254,10 @@ mod tests {
         let blocks = vec![];
         let (tx, rx) = oneshot::channel();
 
-        persistence_handle.save_blocks(blocks, tx);
+        persistence_handle.save_blocks(blocks, tx).unwrap();
 
         let hash = rx.await.unwrap();
-        assert_eq!(hash, B256::default());
+        assert_eq!(hash, None);
     }
 
     #[tokio::test]
@@ -268,9 +273,14 @@ mod tests {
         let blocks = vec![executed];
         let (tx, rx) = oneshot::channel();
 
-        persistence_handle.save_blocks(blocks, tx);
+        persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let actual_hash = rx.await.unwrap();
+        let actual_hash = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+            .await
+            .expect("test timed out")
+            .expect("channel closed unexpectedly")
+            .expect("no hash returned");
+
         assert_eq!(block_hash, actual_hash);
     }
 
@@ -284,9 +294,9 @@ mod tests {
         let last_hash = blocks.last().unwrap().block().hash();
         let (tx, rx) = oneshot::channel();
 
-        persistence_handle.save_blocks(blocks, tx);
+        persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let actual_hash = rx.await.unwrap();
+        let actual_hash = rx.await.unwrap().unwrap();
         assert_eq!(last_hash, actual_hash);
     }
 
@@ -302,9 +312,9 @@ mod tests {
             let last_hash = blocks.last().unwrap().block().hash();
             let (tx, rx) = oneshot::channel();
 
-            persistence_handle.save_blocks(blocks, tx);
+            persistence_handle.save_blocks(blocks, tx).unwrap();
 
-            let actual_hash = rx.await.unwrap();
+            let actual_hash = rx.await.unwrap().unwrap();
             assert_eq!(last_hash, actual_hash);
         }
     }

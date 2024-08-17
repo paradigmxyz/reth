@@ -1,13 +1,14 @@
 use super::{
-    metrics::StaticFileProviderMetrics, LoadedJar, StaticFileJarProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
+    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
+    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -114,8 +115,8 @@ pub struct StaticFileProviderInner {
     /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
     /// won't be able to be queried directly.
     load_filters: bool,
-    /// Maintains a map of `StaticFile` writers for each [`StaticFileSegment`]
-    writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
+    /// Maintains a writer set of [`StaticFileSegment`].
+    writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
@@ -866,6 +867,12 @@ impl StaticFileProvider {
                             };
                             return Err(err)
                         }
+                        // There is a very small chance of hitting a deadlock if two consecutive
+                        // static files share the same bucket in the
+                        // internal dashmap and we don't drop the current provider
+                        // before requesting the next one.
+                        drop(cursor);
+                        drop(provider);
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                         retrying = true;
@@ -898,14 +905,19 @@ impl StaticFileProvider {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
-        let mut provider = get_provider(range.start)?;
 
+        let mut provider = Some(get_provider(range.start)?);
         Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
-                    provider = get_provider(number).ok()?;
-                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                    // There is a very small chance of hitting a deadlock if two consecutive static
+                    // files share the same bucket in the internal dashmap and
+                    // we don't drop the current provider before requesting the
+                    // next one.
+                    provider.take();
+                    provider = Some(get_provider(number).ok()?);
+                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
         }))
@@ -1044,17 +1056,8 @@ impl StaticFileWriter for StaticFileProvider {
         }
 
         trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
-        Ok(match self.writers.entry(segment) {
-            DashMapEntry::Occupied(entry) => entry.into_ref(),
-            DashMapEntry::Vacant(entry) => {
-                let writer = StaticFileProviderRW::new(
-                    segment,
-                    block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-                entry.insert(writer)
-            }
+        self.writers.get_or_create(segment, || {
+            StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
         })
     }
 
@@ -1066,10 +1069,7 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn commit(&self) -> ProviderResult<()> {
-        for mut writer in self.writers.iter_mut() {
-            writer.commit()?;
-        }
-        Ok(())
+        self.writers.commit()
     }
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {

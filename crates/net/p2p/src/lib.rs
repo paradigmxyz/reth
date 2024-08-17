@@ -47,4 +47,11 @@ pub mod test_utils;
 
 pub mod reputation;
 
+pub use bodies::client::BodiesClient;
+pub use headers::client::HeadersClient;
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
+
+/// Helper trait that unifies network behaviour needed for fetching blocks.
+pub trait BlockClient: HeadersClient + BodiesClient + Unpin + Clone {}
+
+impl<T> BlockClient for T where T: HeadersClient + BodiesClient + Unpin + Clone {}

@@ -17,9 +17,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEvents, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
@@ -67,7 +67,7 @@ impl Command {
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
-        Client: HeadersClient + BodiesClient + Clone + 'static,
+        Client: BlockClient + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)

@@ -15,7 +15,7 @@ use reth_primitives::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,

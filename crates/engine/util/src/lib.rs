@@ -3,6 +3,7 @@
 use futures::Stream;
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
+use reth_payload_validator::ExecutionPayloadValidator;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -14,6 +15,9 @@ use skip_fcu::EngineSkipFcu;
 
 pub mod skip_new_payload;
 use skip_new_payload::EngineSkipNewPayload;
+
+pub mod reorg;
+use reorg::EngineReorg;
 
 /// The collection of stream extensions for engine API message stream.
 pub trait EngineMessageStreamExt<Engine: EngineTypes>:
@@ -85,6 +89,45 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     {
         if let Some(path) = maybe_path {
             Either::Left(self.store_messages(path))
+        } else {
+            Either::Right(self)
+        }
+    }
+
+    /// Creates reorgs with specified frequency.
+    fn reorg<Provider, Evm>(
+        self,
+        provider: Provider,
+        evm_config: Evm,
+        payload_validator: ExecutionPayloadValidator,
+        frequency: usize,
+    ) -> EngineReorg<Self, Engine, Provider, Evm>
+    where
+        Self: Sized,
+    {
+        EngineReorg::new(self, provider, evm_config, payload_validator, frequency)
+    }
+
+    /// If frequency is [Some], returns the stream that creates reorgs with
+    /// specified frequency. Otherwise, returns `Self`.
+    fn maybe_reorg<Provider, Evm>(
+        self,
+        provider: Provider,
+        evm_config: Evm,
+        payload_validator: ExecutionPayloadValidator,
+        frequency: Option<usize>,
+    ) -> Either<EngineReorg<Self, Engine, Provider, Evm>, Self>
+    where
+        Self: Sized,
+    {
+        if let Some(frequency) = frequency {
+            Either::Left(reorg::EngineReorg::new(
+                self,
+                provider,
+                evm_config,
+                payload_validator,
+                frequency,
+            ))
         } else {
             Either::Right(self)
         }

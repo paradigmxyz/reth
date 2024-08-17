@@ -2,15 +2,16 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{
     transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
 };
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
     pub Vec<B256>,

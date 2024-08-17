@@ -1,6 +1,9 @@
 use reth_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
 use revm::db::BundleState;
 use std::collections::HashMap;
 
@@ -21,6 +24,16 @@ pub trait StateRootProvider: Send + Sync {
     /// Returns the state root of the `HashedPostState` on top of the current state.
     fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
+    /// Returns the state root of the `HashedPostState` on top of the current state but re-uses the
+    /// intermediate nodes to speed up the computation. It's up to the caller to construct the
+    /// prefix sets and inform the provider of the trie paths that have changes.
+    fn hashed_state_root_from_nodes(
+        &self,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256>;
+
     /// Returns the state root of the BundleState on top of the current state with trie
     /// updates to be committed to the database.
     fn state_root_with_updates(
@@ -35,6 +48,15 @@ pub trait StateRootProvider: Send + Sync {
     fn hashed_state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns state root and trie updates.
+    /// See [`StateRootProvider::hashed_state_root_from_nodes`] for more info.
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
     /// Returns the storage root of the `HashedStorage` for target address on top of the current

@@ -9,6 +9,7 @@ Usage: reth p2p [OPTIONS] <COMMAND>
 Commands:
   header  Download block header
   body    Download block body
+  rlpx    RLPx commands
   help    Print this message or the help of the given subcommand(s)
 
 Options:

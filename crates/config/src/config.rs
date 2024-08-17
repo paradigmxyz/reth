@@ -736,6 +736,33 @@ nanos = 0
         let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
     }
 
+    // ensures prune config deserialization is backwards compatible
+    #[test]
+    fn test_backwards_compatibility_prune_full() {
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { distance = 16384 }
+#";
+        let _conf: Config = toml::from_str(s).unwrap();
+
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = 'full'
+#";
+        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
+        assert!(err.contains("invalid value: string \"full\""), "{}", err);
+    }
+
     #[test]
     fn test_conf_trust_nodes_only() {
         let trusted_nodes_only = r"#

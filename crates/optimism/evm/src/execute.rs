@@ -396,6 +396,11 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
@@ -407,10 +412,6 @@ where
 
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
-
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.number);
-        }
 
         Ok(())
     }

@@ -582,6 +582,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
                         if let Some(tx) = moved {
+                            trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
                             outcome.promoted.push(tx);
                         }
                     }

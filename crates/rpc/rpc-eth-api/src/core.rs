@@ -1,26 +1,25 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 
+use crate::helpers::{
+    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+    EthTransactions, FullEthApi,
+};
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    transaction::AccessListResult, Account, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64,
-    U256, U64,
+    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
+    simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
     TransactionRequest, Work,
 };
 use tracing::trace;
-
-use crate::helpers::{
-    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
-    EthTransactions, FullEthApi,
-};
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
@@ -193,6 +192,15 @@ pub trait EthApi {
     #[method(name = "getHeaderByHash")]
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>>;
 
+    /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
+    /// The transactions are packed into individual blocks. Overrides can be provided.
+    #[method(name = "simulateV1")]
+    async fn simulate_v1(
+        &self,
+        opts: SimBlock,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<SimulatedBlock>>;
+
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
     async fn call(
@@ -250,7 +258,11 @@ pub trait EthApi {
 
     /// Returns the account details by specifying an address and a block number/tag
     #[method(name = "getAccount")]
-    async fn get_account(&self, address: Address, block: BlockId) -> RpcResult<Account>;
+    async fn get_account(
+        &self,
+        address: Address,
+        block: BlockId,
+    ) -> RpcResult<reth_rpc_types::Account>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -563,6 +575,16 @@ where
         Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
     }
 
+    /// Handler for: `eth_simulateV1`
+    async fn simulate_v1(
+        &self,
+        opts: SimBlock,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<SimulatedBlock>> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        Ok(EthCall::simulate_v1(self, opts, block_number).await?)
+    }
+
     /// Handler for: `eth_call`
     async fn call(
         &self,
@@ -626,7 +648,11 @@ where
     }
 
     /// Handler for: `eth_getAccount`
-    async fn get_account(&self, _address: Address, _block: BlockId) -> RpcResult<Account> {
+    async fn get_account(
+        &self,
+        _address: Address,
+        _block: BlockId,
+    ) -> RpcResult<reth_rpc_types::Account> {
         Err(internal_rpc_err("unimplemented"))
     }
 

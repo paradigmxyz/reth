@@ -250,7 +250,8 @@ pub trait EthTransactions: LoadTransaction {
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
             let recovered = recover_raw_transaction(tx.clone())?;
-            let pool_transaction: <Self::Pool as TransactionPool>::Transaction = recovered.into();
+            let pool_transaction =
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
             // On optimism, transactions are forwarded directly to the sequencer to be included in
             // blocks that it builds.
@@ -388,27 +389,26 @@ pub trait EthTransactions: LoadTransaction {
                 ) => {
                     // As per the EIP, we follow the same semantics as EIP-1559.
                     Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                    chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
-                    to: match to {
-                        Some(TxKind::Call(to)) => to,
-                        _ => Address::default(),
-                    },
-                    access_list: access_list.unwrap_or_default(),
+                        chain_id: 0,
+                        nonce: nonce.unwrap_or_default(),
+                        max_priority_fee_per_gas: U256::from(
+                            max_priority_fee_per_gas.unwrap_or_default(),
+                        ),
+                        max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                        gas_limit: U256::from(gas.unwrap_or_default()),
+                        value: value.unwrap_or_default(),
+                        input: data.into_input().unwrap_or_default(),
+                        to: match to {
+                            Some(TxKind::Call(to)) => to,
+                            _ => Address::default(),
+                        },
+                        access_list: access_list.unwrap_or_default(),
 
-                    // eip-4844 specific.
-                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                    blob_versioned_hashes,
-                    sidecar,
-                }))
+                        // eip-4844 specific.
+                        max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
+                        blob_versioned_hashes,
+                        sidecar,
+                    }))
                 }
 
                 _ => None,

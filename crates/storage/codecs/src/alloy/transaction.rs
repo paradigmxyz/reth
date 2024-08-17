@@ -1,12 +1,12 @@
 use crate::Compact;
 use alloy_consensus::TxLegacy as AlloyTxLegacy;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
-use reth_codecs_derive::reth_codec;
 use serde::{Deserialize, Serialize};
 
 /// Legacy transaction.
-#[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Compact, Serialize, Deserialize)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
     chain_id: Option<ChainId>,
