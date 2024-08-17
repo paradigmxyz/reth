@@ -286,7 +286,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_pool_imports_info: PendingPoolImportsInfo::new(
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
-            bad_imports: LruCache::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS),
+            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -1615,7 +1615,7 @@ impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
+            seen_transactions: LruCache::new(DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER),
             request_tx,
             version,
             client_version,
