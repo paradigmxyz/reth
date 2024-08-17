@@ -969,7 +969,7 @@ where
                     self.on_tree_event(event);
                 }
                 Ok(())
-            },
+            }
         }
     }
 
