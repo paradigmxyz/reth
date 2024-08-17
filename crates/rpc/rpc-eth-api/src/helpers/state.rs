@@ -4,7 +4,7 @@
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
+use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
     StateRootProvider,
@@ -138,23 +138,19 @@ pub trait EthState: LoadState + SpawnBlocking {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
 
-            let balance = state
-                .account_balance(address)
+            let account = state
+                .basic_account(address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
-            let nonce = state
-                .account_nonce(address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default();
+            let balance = account.balance;
+            let nonce = account.nonce;
+            let code_hash = account.bytecode_hash.unwrap_or_default();
 
             // Provide a default `HashedStorage` value in order to
             // get the storage root hash of the current state.
             let storage_root = state
                 .hashed_storage_root(address, Default::default())
                 .map_err(Self::Error::from_eth_err)?;
-
-            let code = state.account_code(address).map_err(Self::Error::from_eth_err)?;
-            let code_hash = code.map(|code| code.hash_slow()).unwrap_or(KECCAK_EMPTY);
 
             Ok(Account { balance, nonce, code_hash, storage_root })
         })
