@@ -74,7 +74,7 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.max-pending-txns", alias = "txpool.max_pending_txns", default_value_t = PENDING_TX_LISTENER_BUFFER_SIZE)]
     pub pending_tx_listener_buffer_size: usize,
 
-    /// Bound on number of new transactions to buffer
+    /// Maximum number of new transactions to buffer
     #[arg(long = "txpool.max-new-txns", alias = "txpool.max_new_txns", default_value_t = NEW_TX_LISTENER_BUFFER_SIZE)]
     pub new_tx_listener_buffer_size: usize,
 }
