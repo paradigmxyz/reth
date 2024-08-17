@@ -500,23 +500,28 @@ where
     /// Run the engine API handler.
     ///
     /// This will block the current thread and process incoming messages.
-    pub fn run(mut self) -> Result<(), InsertBlockFatalError> {
+    pub fn run(mut self) {
         loop {
             match self.try_recv_engine_message() {
-                Ok(Some(msg)) => self.on_engine_message(msg)?,
+                Ok(Some(msg)) => {
+                    if let Err(fatal) = self.on_engine_message(msg) {
+                        error!(target: "engine", %fatal, "insert block fatal error");
+                        return
+                    }
+                }
                 Ok(None) => {
                     debug!(target: "engine", "received no engine message for some time, while waiting for persistence task to complete");
-                    return Ok(())
+                    return
                 }
                 Err(_err) => {
-                    error!(target: "engine", "Engine channel disconnected");
-                    return Ok(())
+                    error!(target: "engine", "engine channel disconnected");
+                    return
                 }
             }
 
             if let Err(err) = self.advance_persistence() {
                 error!(target: "engine", %err, "Advancing persistence failed");
-                break Ok(())
+                break
             }
         }
     }
@@ -538,7 +543,7 @@ where
         trace!(target: "engine", block_count = %blocks.len(), "received downloaded blocks");
         let batch = self.config.max_execute_block_batch_size().min(blocks.len());
         for block in blocks.drain(..batch) {
-            if let Ok(Some(event)) = self.on_downloaded_block(block) {
+            if let Some(event) = self.on_downloaded_block(block)? {
                 let needs_backfill = event.is_backfill_action();
                 self.on_tree_event(event);
                 if needs_backfill {
@@ -899,11 +904,8 @@ where
                     Ok(())
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
-                    if let Err(fatal) = self.on_backfill_sync_finished(ctrl) {
-                        Err(fatal)
-                    } else {
-                        Ok(())
-                    }
+                    self.on_backfill_sync_finished(ctrl)?;
+                    Ok(())
                 }
             },
             FromEngine::Request(request) => {
@@ -962,13 +964,11 @@ where
                     }
                 }
             }
-            FromEngine::DownloadedBlocks(blocks) => match self.on_downloaded(blocks) {
-                Ok(Some(event)) => {
+            FromEngine::DownloadedBlocks(blocks) => {
+                if let Some(event) = self.on_downloaded(blocks)? {
                     self.on_tree_event(event);
-                    Ok(())
                 }
-                Ok(None) => Ok(()),
-                Err(fatal) => Err(fatal),
+                Ok(())
             },
         }
     }
