@@ -204,6 +204,22 @@ impl Signature {
     }
 }
 
+impl From<alloy_primitives::Signature> for Signature {
+    fn from(value: alloy_primitives::Signature) -> Self {
+        Self { r: value.r(), s: value.s(), odd_y_parity: value.v().y_parity() }
+    }
+}
+
+impl From<alloy_rpc_types::Signature> for Signature {
+    fn from(value: alloy_rpc_types::Signature) -> Self {
+        let parity = value
+            .y_parity
+            .map(|parity| parity.0)
+            .unwrap_or_else(|| value.v % U256::from(2) == U256::from(1));
+        Self { r: value.r, s: value.s, odd_y_parity: parity }
+    }
+}
+
 /// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
 /// This doesn't check validity of the `v` value for optimism.
 #[inline]
