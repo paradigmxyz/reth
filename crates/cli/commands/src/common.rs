@@ -8,6 +8,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_node_builder::NodeConfig;
 use reth_node_core::{
     args::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
@@ -65,17 +66,12 @@ impl EnvironmentArgs {
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
-        let mut config = if config_path.exists() {
-            toml::from_str(
-                &std::fs::read_to_string(&config_path)
-                    .inspect_err(|e| warn!("Failed to read config file: {}", e))
-                    .unwrap_or_default(),
+
+        let mut config: Config = NodeConfig::load_path(config_path)
+            .inspect_err(
+                |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
             )
-            .inspect_err(|e| warn!("Failed to parse config file: {}", e))
-            .unwrap_or_default()
-        } else {
-            Config::default()
-        };
+            .unwrap_or_default();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {

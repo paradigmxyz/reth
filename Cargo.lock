@@ -7741,9 +7741,12 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
+ "serde",
  "serde_json",
  "shellexpand",
+ "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "vergen",
 ]

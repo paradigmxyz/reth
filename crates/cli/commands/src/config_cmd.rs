@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use eyre::{bail, WrapErr};
 use reth_config::Config;
+use reth_node_builder::NodeConfig;
 
 /// `reth config` command
 #[derive(Debug, Parser)]
@@ -30,11 +31,8 @@ impl Command {
                 bail!("Config file does not exist: {}", path.display());
             }
             // Read the configuration file
-            let config_str = std::fs::read_to_string(&path)
-                .wrap_err_with(|| format!("Could not read config file: {}", path.display()))?;
-            // Parse the configuration file
-            toml::de::from_str(&config_str)
-                .wrap_err_with(|| format!("Could not parse config file: {}", path.display()))?
+            NodeConfig::load_path::<Config>(&path)
+                .wrap_err_with(|| format!("Could not load config file: {}", path.display()))?
         };
         println!("{}", toml::to_string_pretty(&config)?);
         Ok(())
