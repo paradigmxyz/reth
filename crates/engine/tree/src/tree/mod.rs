@@ -3039,6 +3039,8 @@ mod tests {
         // extend base chain
         let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
         let fork_block = extension_chain.last().unwrap().block.clone();
+
+        test_harness.setup_range_insertion_for_valid_chain(extension_chain.clone());
         test_harness.insert_chain(extension_chain).await;
 
         // fcu to old_head
@@ -3051,8 +3053,7 @@ mod tests {
         // insert chain A blocks using newPayload
         test_harness.setup_range_insertion_for_valid_chain(chain_a.clone());
         for block in &chain_a {
-            let payload = block_to_payload_v1(block.block.clone());
-            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+            test_harness.send_new_payload(block.clone()).await;
         }
 
         test_harness.check_canon_chain_insertion(chain_a.clone()).await;
@@ -3060,8 +3061,7 @@ mod tests {
         // insert chain B blocks using newPayload
         test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
         for block in &chain_b {
-            let payload = block_to_payload_v1(block.block.clone());
-            test_harness.tree.on_new_payload(payload.into(), None).unwrap();
+            test_harness.send_new_payload(block.clone()).await;
         }
 
         test_harness.check_canon_chain_insertion(chain_b.clone()).await;

@@ -169,7 +169,7 @@ impl TestBlockBuilder {
             header: header.seal_slow(),
             body: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
             ommers: Vec::new(),
-            withdrawals: None,
+            withdrawals: Some(vec![].into()),
             requests: None,
         };
 
