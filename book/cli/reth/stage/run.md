@@ -223,7 +223,7 @@ Networking:
       --max-seen-tx-history <MAX_SEEN_TX_HISTORY>
           Max number of seen transactions to remember per peer.
 
-          Default is 10 KiB, i.e. 320 transaction hashes.
+          Default is 320 transaction hashes.
 
           [default: 320]
 
