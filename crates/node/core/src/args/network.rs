@@ -116,7 +116,7 @@ pub struct NetworkArgs {
     /// Max number of seen transactions to remember per peer.
     ///
     /// Default is 320 transaction hashes.
-    #[arg(long = "max-seen-tx-history", value_name = "MAX_SEEN_TX_HISTORY", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    #[arg(long = "max-seen-tx-history", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
     pub max_seen_tx_history: u32,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
