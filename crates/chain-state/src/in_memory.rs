@@ -1283,24 +1283,27 @@ mod tests {
     fn test_to_chain_notification() {
         // Generate 4 blocks
         let mut test_block_builder = TestBlockBuilder::default();
-        let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
-        let block2 = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let block3 = test_block_builder.get_executed_block_with_number(2, B256::random());
-        let block4 = test_block_builder.get_executed_block_with_number(3, B256::random());
+        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let block1 = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
+        let block1a = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
+        let block2 = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
+        let block2a = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
+
+        let sample_execution_outcome = ExecutionOutcome {
+            receipts: Receipts::from_iter([vec![], vec![]]),
+            requests: vec![Requests::default(), Requests::default()],
+            ..Default::default()
+        };
 
         // Test commit notification
-        let chain_commit = NewCanonicalChain::Commit { new: vec![block1.clone(), block2.clone()] };
+        let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![block1.sealed_block_with_senders(), block2.sealed_block_with_senders()],
-                    ExecutionOutcome {
-                        receipts: Receipts { receipt_vec: vec![vec![], vec![]] },
-                        requests: vec![Requests(vec![]), Requests(vec![])],
-                        ..Default::default()
-                    },
+                    vec![block0.sealed_block_with_senders(), block1.sealed_block_with_senders()],
+                    sample_execution_outcome.clone(),
                     None
                 ))
             }
@@ -1308,7 +1311,7 @@ mod tests {
 
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
-            new: vec![block3.clone(), block4.clone()],
+            new: vec![block1a.clone(), block2a.clone()],
             old: vec![block1.clone(), block2.clone()],
         };
 
@@ -1317,20 +1320,12 @@ mod tests {
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.sealed_block_with_senders(), block2.sealed_block_with_senders()],
-                    ExecutionOutcome {
-                        receipts: Receipts { receipt_vec: vec![vec![], vec![]] },
-                        requests: vec![Requests(vec![]), Requests(vec![])],
-                        ..Default::default()
-                    },
+                    sample_execution_outcome.clone(),
                     None
                 )),
                 new: Arc::new(Chain::new(
-                    vec![block3.sealed_block_with_senders(), block4.sealed_block_with_senders()],
-                    ExecutionOutcome {
-                        receipts: Receipts { receipt_vec: vec![vec![], vec![]] },
-                        requests: vec![Requests(vec![]), Requests(vec![])],
-                        ..Default::default()
-                    },
+                    vec![block1a.sealed_block_with_senders(), block2a.sealed_block_with_senders()],
+                    sample_execution_outcome,
                     None
                 ))
             }
