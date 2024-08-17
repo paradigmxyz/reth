@@ -289,6 +289,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn test_evm_with_spec_id() {
         let evm_config = EthEvmConfig::default();
 
@@ -411,6 +412,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn test_evm_with_env_inspector_and_spec_id() {
         let evm_config = EthEvmConfig::default();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();

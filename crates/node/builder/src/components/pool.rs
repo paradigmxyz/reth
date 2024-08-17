@@ -1,7 +1,10 @@
 //! Pool component for the node builder.
-use crate::{BuilderContext, FullNodeTypes};
-use reth_transaction_pool::TransactionPool;
+
 use std::future::Future;
+
+use reth_transaction_pool::TransactionPool;
+
+use crate::{BuilderContext, FullNodeTypes};
 
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes>: Send {

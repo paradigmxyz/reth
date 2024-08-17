@@ -1,12 +1,12 @@
 [package]
-name = "reth-db-api"
+name = "reth-db-models"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Database abstraction used in reth."
+description = "Database models used in storage module."
 
 [lints]
 workspace = true
@@ -14,24 +14,13 @@ workspace = true
 [dependencies]
 # reth
 reth-codecs.workspace = true
-reth-db-models.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec"] }
-reth-primitives-traits.workspace = true
-reth-prune-types.workspace = true
-reth-stages-types.workspace = true
-reth-storage-errors.workspace = true
-reth-trie-common.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 
-# metrics
-metrics.workspace = true
-
 # misc
-derive_more.workspace = true
 bytes.workspace = true
 
 # arbitrary utils
@@ -39,28 +28,14 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
-# reth libs with arbitrary
+# reth
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
 
-rand.workspace = true
-
-test-fuzz.workspace = true
-
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
-criterion.workspace = true
-iai-callgrind.workspace = true
-
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-
-
-assert_matches.workspace = true
+proptest.workspace = true
+test-fuzz.workspace = true
 
 [features]
 test-utils = ["arbitrary"]
@@ -69,4 +44,3 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
 ]
-optimism = ["reth-primitives/optimism"]
