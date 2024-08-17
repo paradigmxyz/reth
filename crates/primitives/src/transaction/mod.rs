@@ -853,7 +853,6 @@ impl reth_codecs::Compact for MockTransaction {
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
