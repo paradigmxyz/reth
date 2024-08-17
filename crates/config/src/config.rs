@@ -389,6 +389,7 @@ where
 mod tests {
     use super::{Config, EXTENSION};
     use reth_network_peers::TrustedPeer;
+    use reth_node_core::node_config::NodeConfig;
     use std::{str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
@@ -433,10 +434,7 @@ mod tests {
             .expect("Failed to write config file");
 
             // Load the config from the file
-            let loaded_config: Config = toml::from_str(
-                &std::fs::read_to_string(config_path).expect("Failed to read config file"),
-            )
-            .expect("Failed to deserialize config");
+            let loaded_config: Config = NodeConfig::load_path(config_path).unwrap();
 
             // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
@@ -457,10 +455,7 @@ mod tests {
             .expect("Failed to write config file");
 
             // Load the config from the file
-            let loaded_config: Config = toml::from_str(
-                &std::fs::read_to_string(config_path).expect("Failed to read config file"),
-            )
-            .expect("Failed to deserialize config");
+            let loaded_config: Config = NodeConfig::load_path(config_path).unwrap();
 
             // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);

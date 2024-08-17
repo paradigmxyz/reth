@@ -26,3 +26,4 @@ toml.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 reth-network-peers.workspace = true
+reth-node-core.workspace = true
