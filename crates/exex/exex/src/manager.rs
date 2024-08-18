@@ -574,7 +574,7 @@ mod tests {
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+        match exex_handle.send(&mut cx, &(22, notification)) {
             Poll::Ready(Ok(())) => {
                 // The notification should be skipped, so nothing should be sent.
                 // Since nothing is sent, we do not check for received notifications.
@@ -664,7 +664,7 @@ mod tests {
         let notification = ExExNotification::ChainCommitted { new: Arc::new(Chain::default()) };
 
         // Ensure the exex is ready to send the notification
-        let result = exex_handle.send(&mut cx, &(42, notification.clone()));
+        let result = exex_handle.send(&mut cx, &(42, notification));
         assert!(matches!(result, Poll::Ready(_)));
     }
 }
