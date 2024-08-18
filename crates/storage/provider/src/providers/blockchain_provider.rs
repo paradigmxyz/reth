@@ -163,7 +163,7 @@ where
             // database lookup
             let Some(block_number) = provider.transaction_block(id)? else { return Ok(None) };
             let Some(body_index) = provider.block_body_indices(block_number)? else {
-                return Ok(None);
+                return Ok(None)
             };
             let tx_index = id - body_index.last_tx_num();
             Ok(Some((None, tx_index as usize)))
@@ -187,7 +187,7 @@ where
 
                 for tx_index in 0..block.body.len() {
                     if id == in_memory_tx_num {
-                        return Ok(Some((Some(block_state), tx_index)));
+                        return Ok(Some((Some(block_state), tx_index)))
                     }
 
                     in_memory_tx_num += 1;
@@ -306,7 +306,7 @@ where
                 // need to handle that situation.
                 headers.push(block_state.block().block().header.header().clone());
             } else {
-                break;
+                break
             }
         }
 
@@ -346,7 +346,7 @@ where
                 // need to handle that situation.
                 sealed_headers.push(block_state.block().block().header.clone());
             } else {
-                break;
+                break
             }
         }
 
@@ -377,13 +377,13 @@ where
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
                 let header = block_state.block().block().header.clone();
                 if !predicate(&header) {
-                    break;
+                    break
                 }
                 // TODO: there might be an update between loop iterations, we
                 // need to handle that situation.
                 sealed_headers.push(header);
             } else {
-                break;
+                break
             }
         }
 
@@ -427,7 +427,7 @@ where
                 // need to handle that situation.
                 hashes.push(block_state.hash());
             } else {
-                break;
+                break
             }
         }
 
@@ -648,7 +648,7 @@ where
                 // need to handle that situation.
                 blocks.push(block_state.block().block().clone().unseal());
             } else {
-                break;
+                break
             }
         }
 
@@ -678,7 +678,7 @@ where
                 // need to handle that situation.
                 blocks.push(BlockWithSenders { block: block.unseal(), senders });
             } else {
-                break;
+                break
             }
         }
 
@@ -708,7 +708,7 @@ where
                 // need to handle that situation.
                 blocks.push(SealedBlockWithSenders { block, senders });
             } else {
-                break;
+                break
             }
         }
 
@@ -723,7 +723,7 @@ where
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         // First, check the database
         if let Some(id) = self.database.transaction_id(tx_hash)? {
-            return Ok(Some(id));
+            return Ok(Some(id))
         }
 
         // If the transaction is not found in the database, check the in-memory state
@@ -750,7 +750,7 @@ where
                 .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
             for tx in &block_state.block().block().body {
                 if tx.hash() == tx_hash {
-                    return Ok(Some(in_memory_tx_id));
+                    return Ok(Some(in_memory_tx_id))
                 }
 
                 in_memory_tx_id += 1;
@@ -763,7 +763,7 @@ where
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None);
+            return Ok(None)
         };
 
         if let Some(block_state) = block_state {
@@ -780,7 +780,7 @@ where
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None);
+            return Ok(None)
         };
 
         if let Some(block_state) = block_state {
@@ -794,7 +794,7 @@ where
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         if let Some(tx) = self.canonical_in_memory_state.transaction_by_hash(hash) {
-            return Ok(Some(tx));
+            return Ok(Some(tx))
         }
 
         self.database.transaction_by_hash(hash)
@@ -807,7 +807,7 @@ where
         if let Some((tx, meta)) =
             self.canonical_in_memory_state.transaction_by_hash_with_meta(tx_hash)
         {
-            return Ok(Some((tx, meta)));
+            return Ok(Some((tx, meta)))
         }
 
         self.database.transaction_by_hash_with_meta(tx_hash)
@@ -858,7 +858,7 @@ where
                 transactions.push(block_state.block().block().body.clone());
                 last_in_memory_block = Some(number);
             } else {
-                break;
+                break
             }
         }
 
@@ -892,7 +892,7 @@ where
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None);
+            return Ok(None)
         };
 
         if let Some(block_state) = block_state {
@@ -916,7 +916,7 @@ where
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
-            return Ok(None);
+            return Ok(None)
         };
 
         if let Some(block_state) = block_state {
@@ -1018,7 +1018,7 @@ where
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if !self.database.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
-            return Ok(None);
+            return Ok(None)
         }
 
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
@@ -1053,7 +1053,7 @@ where
         timestamp: u64,
     ) -> ProviderResult<Option<reth_primitives::Requests>> {
         if !self.database.chain_spec().is_prague_active_at_timestamp(timestamp) {
-            return Ok(None);
+            return Ok(None)
         }
         let Some(number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         if let Some(block) = self.canonical_in_memory_state.state_by_number(number) {
@@ -1263,7 +1263,7 @@ where
                 let pending_provider =
                     self.canonical_in_memory_state.state_provider(block_hash, historical);
 
-                return Ok(Some(Box::new(pending_provider)));
+                return Ok(Some(Box::new(pending_provider)))
             }
         }
         Ok(None)
@@ -1488,7 +1488,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, sync::Arc};
+    use std::sync::Arc;
 
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
@@ -1502,43 +1502,18 @@ mod tests {
 
     type ArcedTempDatabase = Arc<TempDatabase<DatabaseEnv>>;
 
-    struct SealedBlocks(Vec<SealedBlock>);
-
-    impl SealedBlocks {
-        fn latest(&self) -> Option<&SealedBlock> {
-            self.0.last()
-        }
-        fn safe(&self) -> Option<&SealedBlock> {
-            self.0.get(self.0.len() - 2)
-        }
-        fn finalized(&self) -> Option<&SealedBlock> {
-            self.0.get(self.0.len() - 3)
-        }
-    }
-
-    impl Deref for SealedBlocks {
-        type Target = Vec<SealedBlock>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    impl From<Vec<SealedBlock>> for SealedBlocks {
-        fn from(value: Vec<SealedBlock>) -> Self {
-            Self(value)
-        }
-    }
+    const BLOCK_COUNT: usize = 10;
 
     fn provider_with_random_blocks(
-    ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, SealedBlocks)> {
+    ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, Vec<SealedBlock>)> {
         let mut rng = generators::rng();
-        let blocks: SealedBlocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1).into();
+        let count = BLOCK_COUNT as u64;
+        let blocks = random_block_range(&mut rng, 0..=count, B256::ZERO, 0..1);
 
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
 
-        let mut blocks_iter = blocks.0.clone().into_iter();
+        let mut blocks_iter = blocks.clone().into_iter();
 
         // Insert first 5 blocks into the database
         for block in (0..5).map_while(|_| blocks_iter.next()) {
@@ -1568,9 +1543,9 @@ mod tests {
         provider.canonical_in_memory_state.update_chain(chain);
 
         // Get canonical, safe, and finalized blocks
-        let canonical_block = blocks.latest().unwrap().clone();
-        let safe_block = blocks.safe().unwrap().clone();
-        let finalized_block = blocks.finalized().unwrap().clone();
+        let canonical_block = blocks.get(BLOCK_COUNT - 1).unwrap().clone();
+        let safe_block = blocks.get(BLOCK_COUNT - 2).unwrap().clone();
+        let finalized_block = blocks.get(BLOCK_COUNT - 3).unwrap().clone();
 
         // Set the canonical head, safe, and finalized blocks
         provider.set_canonical_head(canonical_block.header);
@@ -1748,9 +1723,9 @@ mod tests {
         let (provider, blocks) = provider_with_random_blocks().unwrap();
 
         let database_block = blocks.first().unwrap().clone();
-        let canonical_block = blocks.latest().unwrap().clone();
-        let safe_block = blocks.safe().unwrap().clone();
-        let finalized_block = blocks.finalized().unwrap().clone();
+        let canonical_block = blocks.get(BLOCK_COUNT - 1).unwrap().clone();
+        let safe_block = blocks.get(BLOCK_COUNT - 2).unwrap().clone();
+        let finalized_block = blocks.get(BLOCK_COUNT - 3).unwrap().clone();
 
         let block_number = database_block.number;
         assert_eq!(
