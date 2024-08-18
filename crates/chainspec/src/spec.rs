@@ -1,4 +1,4 @@
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, ChainSpecTrait};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
@@ -814,7 +814,7 @@ impl From<Genesis> for ChainSpec {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
     /// The chain spec type.
-    type ChainSpec: ChainSpecTrait;
+    type ChainSpec: EthChainSpec;
 
     /// Get an [`Arc`] to the [`ChainSpec`].
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;

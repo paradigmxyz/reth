@@ -13,7 +13,7 @@ use reth_blockchain_tree_api::{
     InsertPayloadOk,
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecTrait};
+use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
 use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -616,7 +616,7 @@ where
 impl<DB, ChainSpec> ChainSpecProvider for BlockchainProvider<DB, ChainSpec>
 where
     DB: Send + Sync,
-    ChainSpec: ChainSpecTrait,
+    ChainSpec: EthChainSpec,
 {
     type ChainSpec = ChainSpec;
 

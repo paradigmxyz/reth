@@ -30,7 +30,7 @@ mod info;
 mod spec;
 
 mod api;
-pub use api::ChainSpecTrait;
+pub use api::EthChainSpec;
 
 /// Chain specific constants
 pub(crate) mod constants;

@@ -7,7 +7,7 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecTrait};
+use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
@@ -572,7 +572,7 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
 impl<DB, ChainSpec> ChainSpecProvider for ProviderFactory<DB, ChainSpec>
 where
     DB: Send + Sync,
-    ChainSpec: ChainSpecTrait,
+    ChainSpec: EthChainSpec,
 {
     type ChainSpec = ChainSpec;
     fn chain_spec(&self) -> Arc<ChainSpec> {

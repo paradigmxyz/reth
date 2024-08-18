@@ -6,11 +6,11 @@ use crate::{
     StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpec, ChainSpecTrait};
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database, ChainSpec: ChainSpecTrait>:
+pub trait FullProvider<DB: Database, ChainSpec: EthChainSpec>:
     DatabaseProviderFactory<DB>
     + StaticFileProviderFactory
     + BlockReaderIdExt
@@ -27,7 +27,7 @@ pub trait FullProvider<DB: Database, ChainSpec: ChainSpecTrait>:
 {
 }
 
-impl<T, DB: Database, ChainSpec: ChainSpecTrait> FullProvider<DB, ChainSpec> for T where
+impl<T, DB: Database, ChainSpec: EthChainSpec> FullProvider<DB, ChainSpec> for T where
     T: DatabaseProviderFactory<DB>
         + StaticFileProviderFactory
         + BlockReaderIdExt
