@@ -3204,6 +3204,7 @@ mod tests {
         test_harness.check_canon_block_added(buffered_block_hash).await;
     }
 
+    #[tokio::test]
     async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head() {
         reth_tracing::init_test_tracing();
 
