@@ -51,7 +51,7 @@ impl<DB: Database> PersistenceService<DB> {
         let start_time = Instant::now();
         // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
-        self.metrics.prune_before_duration.record(start_time.elapsed());
+        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
         result
     }
 }
@@ -95,7 +95,7 @@ where
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
         UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
-        self.metrics.remove_blocks_above_duration.record(start_time.elapsed());
+        self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(())
     }
 
@@ -110,7 +110,7 @@ where
             UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
             UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
         }
-        self.metrics.save_blocks_duration.record(start_time.elapsed());
+        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash)
     }
 }
