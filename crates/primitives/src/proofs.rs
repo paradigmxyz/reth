@@ -600,5 +600,46 @@ mod tests {
             expected_holesky_state_root, calculated_holesky_state_root,
             "holesky state root mismatch"
         );
+
+        #[cfg(feature = "telos")]
+        {
+	    use reth_chainspec::{TEVMMAINNET, TEVMMAINNET_BASE, TEVMTESTNET, TEVMTESTNET_BASE};
+
+            let expected_tevmmainnet_state_root =
+                b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+            let calculated_tevmmainnet_state_root =
+                state_root_ref_unhashed(&TEVMMAINNET.genesis.alloc);
+            assert_eq!(
+                expected_tevmmainnet_state_root, calculated_tevmmainnet_state_root,
+                "tevmmainnet state root mismatch"
+            );
+
+            let expected_tevmmainnet_base_state_root =
+                b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+            let calculated_tevmmainnet_base_state_root =
+                state_root_ref_unhashed(&TEVMMAINNET_BASE.genesis.alloc);
+            assert_eq!(
+                expected_tevmmainnet_base_state_root, calculated_tevmmainnet_base_state_root,
+                "tevmmainnet-base state root mismatch"
+            );
+
+            let expected_tevmtestnet_base_state_root =
+                b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+            let calculated_tevmtestnet_base_state_root =
+                state_root_ref_unhashed(&TEVMTESTNET_BASE.genesis.alloc);
+            assert_eq!(
+                expected_tevmtestnet_base_state_root, calculated_tevmtestnet_base_state_root,
+                "tevmtestnet-base state root mismatch"
+            );
+
+            let expected_tevmtestnet_state_root =
+                b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+            let calculated_tevmtestnet_state_root =
+                state_root_ref_unhashed(&TEVMTESTNET.genesis.alloc);
+            assert_eq!(
+                expected_tevmtestnet_state_root, calculated_tevmtestnet_state_root,
+                "tevmtestnet state root mismatch"
+            );
+        }
     }
 }

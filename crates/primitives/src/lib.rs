@@ -48,11 +48,6 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
     MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-#[cfg(feature = "telos")]
-pub use constants::{
-    TEVMMAINNET_BASE_GENESIS_HASH, TEVMMAINNET_GENESIS_HASH, TEVMTESTNET_BASE_GENESIS_HASH,
-    TEVMTESTNET_GENESIS_HASH,
-};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
@@ -129,6 +124,10 @@ pub use optimism::*;
 #[cfg(feature = "telos")]
 mod telos {
     pub use reth_chainspec::{TEVMMAINNET, TEVMMAINNET_BASE, TEVMTESTNET, TEVMTESTNET_BASE};
+    pub use reth_primitives_traits::constants::{
+	TEVMMAINNET_BASE_GENESIS_HASH, TEVMMAINNET_GENESIS_HASH, TEVMTESTNET_BASE_GENESIS_HASH,
+	TEVMTESTNET_GENESIS_HASH,
+    };
 }
 
 #[cfg(feature = "telos")]

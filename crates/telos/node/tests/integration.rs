@@ -100,8 +100,7 @@ async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain
     };
 
     let mut client_under_test = ConsensusClient::new(config).await;
-    let run_result = client_under_test.run().await;
-    run_result
+    client_under_test.run().await
 }
 
 #[tokio::test]
@@ -131,6 +130,7 @@ async fn testing_chain_sync() {
     _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     info!("Started Reth!");
 
-    let consensus_result = start_consensus(reth_handle, ship_port, chain_port).await;
-    assert!(consensus_result.is_ok(), "Error with consensus client: {:?}", consensus_result.err().unwrap());
+    if let Err(error) = start_consensus(reth_handle, ship_port, chain_port).await {
+	panic!("Error with consensus client: {error:?}");
+    }
 }

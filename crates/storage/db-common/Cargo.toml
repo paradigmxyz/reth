@@ -44,4 +44,4 @@ reth-primitives-traits.workspace = true
 workspace = true
 
 [features]
-telos = []
+telos = ["reth-primitives/telos"]

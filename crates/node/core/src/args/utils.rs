@@ -7,9 +7,6 @@ use std::{path::PathBuf, sync::Arc};
 
 use reth_chainspec::DEV;
 
-#[cfg(feature = "telos")]
-use reth_chainspec::{TEVMMAINNET, TEVMMAINNET_BASE, TEVMTESTNET, TEVMTESTNET_BASE};
-
 #[cfg(feature = "optimism")]
 use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
@@ -19,13 +16,13 @@ use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["optimism", "optimism-sepolia", "base", "base-sepolia"];
+#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
+/// Chains supported by reth. First value should be used as the default.
+pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
 #[cfg(feature = "telos")]
 /// Chains supported by telos-reth
 pub const SUPPORTED_CHAINS: &[&str] =
     &["tevmmainnet", "tevmtestnet", "tevmmainnet-base", "tevmtestnet-base"];
-#[cfg(all(not(feature = "optimism"), not(feature = "telos")))]
-/// Chains supported by reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
 
 /// The help info for the --chain flag
 pub fn chain_help() -> String {
@@ -54,13 +51,13 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         #[cfg(feature = "optimism")]
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         #[cfg(feature = "telos")]
-        "tevmmainnet" => TEVMMAINNET.clone(),
+        "tevmmainnet" => reth_chainspec::TEVMMAINNET.clone(),
         #[cfg(feature = "telos")]
-        "tevmtestnet" => TEVMTESTNET.clone(),
+        "tevmtestnet" => reth_chainspec::TEVMTESTNET.clone(),
         #[cfg(feature = "telos")]
-        "tevmmainnet-base" => TEVMMAINNET_BASE.clone(),
+        "tevmmainnet-base" => reth_chainspec::TEVMMAINNET_BASE.clone(),
         #[cfg(feature = "telos")]
-        "tevmtestnet-base" => TEVMTESTNET_BASE.clone(),
+        "tevmtestnet-base" => reth_chainspec::TEVMTESTNET_BASE.clone(),
         _ => {
             // try to read json from path first
             let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {

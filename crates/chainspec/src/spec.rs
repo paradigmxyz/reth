@@ -30,8 +30,6 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes,
 };
-#[cfg(feature = "telos")]
-use reth_network_peers::{tevmmainnet_nodes, tevmtestnet_nodes};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -824,12 +822,6 @@ impl ChainSpec {
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
         let chain = self.chain;
-        #[cfg(feature = "telos")]
-        match chain.id() {
-            40 => Some(tevmmainnet_nodes()),
-            41 => Some(tevmtestnet_nodes()),
-            _ => None,
-        };
         match chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),

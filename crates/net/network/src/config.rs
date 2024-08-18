@@ -13,10 +13,6 @@ use reth_primitives::{ForkFilter, Head};
 use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
-#[cfg(feature = "telos")]
-use reth_network_peers::{
-    tevmmainnet_nodes, tevmtestnet_nodes,
-};
 
 use crate::{
     error::NetworkError,
@@ -388,18 +384,6 @@ impl NetworkConfigBuilder {
     /// Convenience function for setting [`Self::boot_nodes`] to the sepolia boot nodes.
     pub fn sepolia_boot_nodes(self) -> Self {
         self.boot_nodes(sepolia_nodes())
-    }
-
-    #[cfg(feature = "telos")]
-    /// Convenience function for setting [Self::boot_nodes] to the tevmmainnet boot nodes.
-    pub fn tevmmainnet_boot_nodes(self) -> Self {
-        self.boot_nodes(tevmmainnet_nodes())
-    }
-
-    #[cfg(feature = "telos")]
-    /// Convenience function for setting [Self::boot_nodes] to the tevmtestnet boot nodes.
-    pub fn tevmtestnet_boot_nodes(self) -> Self {
-        self.boot_nodes(tevmtestnet_nodes())
     }
 
     /// Sets the boot nodes to use to bootstrap the configured discovery services (discv4 + discv5).
