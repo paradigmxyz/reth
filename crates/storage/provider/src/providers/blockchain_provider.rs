@@ -1507,8 +1507,8 @@ mod tests {
     fn provider_with_random_blocks(
     ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, Vec<SealedBlock>)> {
         let mut rng = generators::rng();
-        let count = BLOCK_COUNT as u64;
-        let blocks = random_block_range(&mut rng, 0..=count, B256::ZERO, 0..1);
+        let limit = BLOCK_COUNT as u64 - 1;
+        let blocks = random_block_range(&mut rng, 0..=limit, B256::ZERO, 0..1);
 
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
@@ -1639,12 +1639,15 @@ mod tests {
     fn test_block_num_reader() -> eyre::Result<()> {
         let (provider, blocks) = provider_with_random_blocks()?;
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let mid = BLOCK_COUNT / 2;
+        let database_blocks = blocks.get(0..mid).unwrap();
+        let in_memory_blocks = blocks.get(mid..).unwrap();
 
-        assert_eq!(provider.best_block_number()?, in_memory_block.number);
-        assert_eq!(provider.last_block_number()?, in_memory_block.number);
+        assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
+        assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
 
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.first().unwrap().clone();
         assert_eq!(provider.block_number(database_block.hash())?, Some(database_block.number));
         assert_eq!(provider.block_number(in_memory_block.hash())?, Some(in_memory_block.number));
 
