@@ -416,7 +416,6 @@ where
 mod tests {
     use super::{Config, EXTENSION};
     use reth_network_peers::TrustedPeer;
-    use reth_node_core::node_config::NodeConfig;
     use std::{path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
