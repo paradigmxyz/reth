@@ -11,3 +11,9 @@ pub enum ExExEvent {
     /// On reorgs, it's possible for the height to go down.
     FinishedHeight(BlockNumber),
 }
+
+impl Default for ExExEvent {
+    fn default() -> Self {
+        Self::FinishedHeight(0)
+    }
+}

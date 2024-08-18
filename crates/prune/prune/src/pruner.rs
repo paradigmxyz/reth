@@ -371,11 +371,11 @@ mod tests {
         assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that doesn't reach the threshold
-        finished_exex_height_tx.send(FinishedExExHeight::Height(second_block_number)).unwrap();
+        finished_exex_height_tx.send(second_block_number.into()).unwrap();
         assert!(!pruner.is_pruning_needed(third_block_number));
 
         // Adjust tip block number to the finished ExEx height that reaches the threshold
-        finished_exex_height_tx.send(FinishedExExHeight::Height(third_block_number)).unwrap();
+        finished_exex_height_tx.send(third_block_number.into()).unwrap();
         assert!(pruner.is_pruning_needed(third_block_number));
     }
 }

@@ -1,9 +1,10 @@
 use alloy_primitives::BlockNumber;
 
 /// The finished height of all `ExEx`'s.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum FinishedExExHeight {
     /// No `ExEx`'s are installed, so there is no finished height.
+    #[default]
     NoExExs,
     /// Not all `ExExs` have emitted a `FinishedHeight` event yet.
     NotReady,
@@ -21,5 +22,11 @@ impl FinishedExExHeight {
     /// Returns `true` if not all `ExExs` have emitted a `FinishedHeight` event yet.
     pub const fn is_not_ready(&self) -> bool {
         matches!(self, Self::NotReady)
+    }
+}
+
+impl From<u64> for FinishedExExHeight {
+    fn from(value: u64) -> Self {
+        Self::Height(value)
     }
 }

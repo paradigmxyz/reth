@@ -353,7 +353,7 @@ impl Future for ExExManager {
             }
         });
         if let Ok(finished_height) = finished_height {
-            let _ = self.finished_height.send(FinishedExExHeight::Height(finished_height));
+            let _ = self.finished_height.send(finished_height.into());
         }
 
         Poll::Pending
