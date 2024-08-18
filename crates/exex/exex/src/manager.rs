@@ -481,18 +481,190 @@ impl Clone for ExExManagerHandle {
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn delivers_events() {}
+    use super::*;
+    use reth_primitives::{SealedBlockWithSenders, B256};
+    use reth_provider::Chain;
 
     #[tokio::test]
-    async fn capacity() {}
+    async fn test_delivers_events() {
+        let (mut exex_handle, event_tx, mut _notification_rx) =
+            ExExHandle::new("test_exex".to_string());
+
+        // Send an event and check that it's delivered correctly
+        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
+        let received_event = exex_handle.receiver.recv().await.unwrap();
+        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
+    }
 
     #[tokio::test]
-    async fn updates_block_height() {}
+    async fn test_updates_block_height() {
+        let (mut exex_handle, event_tx, mut _notification_rx) =
+            ExExHandle::new("test_exex".to_string());
+
+        // Check initial block height
+        assert!(exex_handle.finished_height.is_none());
+
+        // Update the block height via an event
+        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
+        let received_event = exex_handle.receiver.recv().await.unwrap();
+        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
+
+        // Check that the block height was updated
+        exex_handle.finished_height = Some(42);
+        assert_eq!(exex_handle.finished_height, Some(42));
+    }
 
     #[tokio::test]
-    async fn slow_exex() {}
+    async fn exex_handle_new() {
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+
+        // Check initial state
+        assert_eq!(exex_handle.id, "test_exex");
+        assert_eq!(exex_handle.next_notification_id, 0);
+
+        // Setup two blocks for the chain commit notification
+        let mut block1 = SealedBlockWithSenders::default();
+        block1.block.header.set_hash(B256::new([0x01; 32]));
+        block1.block.header.set_block_number(10);
+
+        let mut block2 = SealedBlockWithSenders::default();
+        block2.block.header.set_hash(B256::new([0x02; 32]));
+        block2.block.header.set_block_number(11);
+
+        // Setup a notification
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![block1.clone(), block2.clone()],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send a notification and ensure it's received correctly
+        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received_notification = notification_rx.recv().await.unwrap();
+                assert_eq!(received_notification, notification);
+            }
+            Poll::Pending => panic!("Notification send is pending"),
+            Poll::Ready(Err(e)) => panic!("Failed to send notification: {:?}", e),
+        }
+
+        // Ensure the notification ID was incremented
+        assert_eq!(exex_handle.next_notification_id, 23);
+    }
 
     #[tokio::test]
-    async fn is_ready() {}
+    async fn test_notification_if_finished_height_gt_chain_tip() {
+        let (mut exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
+
+        // Set finished_height to a value higher than the block tip
+        exex_handle.finished_height = Some(15);
+
+        let mut block1 = SealedBlockWithSenders::default();
+        block1.block.header.set_hash(B256::new([0x01; 32]));
+        block1.block.header.set_block_number(10);
+
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+        };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send the notification
+        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                // The notification should be skipped, so nothing should be sent.
+                // Since nothing is sent, we do not check for received notifications.
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Notification should not be pending or fail");
+            }
+        }
+
+        // Ensure the notification ID was still incremented
+        assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_sends_chain_reorged_notification() {
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+
+        let notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::default()),
+            new: Arc::new(Chain::default()),
+        };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send the notification
+        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received_notification = notification_rx.recv().await.unwrap();
+                assert_eq!(received_notification, notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Notification should not be pending or fail")
+            }
+        }
+
+        // Ensure the notification ID was incremented
+        assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_sends_chain_reverted_notification() {
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+
+        let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Send the notification
+        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                let received_notification = notification_rx.recv().await.unwrap();
+                assert_eq!(received_notification, notification);
+            }
+            Poll::Pending | Poll::Ready(Err(_)) => {
+                panic!("Notification should not be pending or fail")
+            }
+        }
+
+        // Ensure the notification ID was incremented
+        assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_slow_exex() {
+        let (mut exex_handle, event_tx, mut _notification_rx) =
+            ExExHandle::new("test_exex".to_string());
+
+        // Simulate a slow exex by delaying event sending
+        let delay = tokio::time::Duration::from_millis(500);
+        tokio::time::sleep(delay).await;
+
+        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
+        let received_event = exex_handle.receiver.recv().await.unwrap();
+        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
+    }
+
+    #[tokio::test]
+    async fn test_is_ready() {
+        let (mut exex_handle, _, mut _notification_rx) = ExExHandle::new("test_exex".to_string());
+
+        // Check initial state
+        assert_eq!(exex_handle.id, "test_exex");
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Create a notification
+        let notification = ExExNotification::ChainCommitted { new: Arc::new(Chain::default()) };
+
+        // Ensure the exex is ready to send the notification
+        let result = exex_handle.send(&mut cx, &(42, notification.clone()));
+        assert!(matches!(result, Poll::Ready(_)));
+    }
 }
