@@ -16,7 +16,7 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
+    ops::{Deref, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
@@ -51,24 +51,6 @@ pub(crate) struct InMemoryState {
     pending: watch::Sender<Option<BlockState>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
-}
-
-/// Represents the result of a range lookup in the in-memory state.
-#[derive(Debug)]
-pub enum RangeLookupResult<T> {
-    /// No results were found for the specified range.
-    None,
-    /// Partial results were found for the specified range.
-    Partial {
-        /// The headers that were found in memory.
-        headers: Vec<T>,
-        /// The lowest value within the specified range that was not found in memory.
-        lowest: u64,
-        /// The highest value within the specified range that was not found in memory.
-        highest: u64,
-    },
-    /// Full results were found for the specified range.
-    Full(Vec<T>),
 }
 
 impl InMemoryState {
@@ -352,21 +334,19 @@ impl CanonicalInMemoryState {
         self.inner.in_memory_state.update_metrics();
     }
 
-    /// Performs a range lookup for block headers in the in-memory state and returns partial or full
-    /// results.
-    pub fn range_lookup(&self, start: u64, end: u64) -> RangeLookupResult<Header> {
+    /// Returns in-memory block headers given a range.
+    pub fn range_lookup(&self, range: RangeInclusive<u64>) -> Vec<Header> {
         let mut headers = Vec::new();
 
-        for num in start..=end {
+        for num in range {
             if let Some(block_state) = self.state_by_number(num) {
                 headers.push(block_state.block().block().header.header().clone());
-            } else if num == start {
-                return RangeLookupResult::None;
             } else {
-                return RangeLookupResult::Partial { headers, lowest: end, highest: num };
+                break;
             }
         }
-        RangeLookupResult::Full(headers)
+
+        headers
     }
 
     /// Returns in memory state corresponding the given hash.

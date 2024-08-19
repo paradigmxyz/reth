@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider, RangeLookupResult,
+    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider,
 };
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
@@ -223,23 +223,24 @@ where
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let mut headers = Vec::new();
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
+        let mut range = start..=end;
+        let mut headers = Vec::with_capacity((end - start + 1) as usize);
+
+        // First, fetch the headers from the database
+        let mut db_headers = self.database.headers_range(range.clone())?;
+
+        // Advance the range iterator by the number of headers fetched from the database
+        range.nth(db_headers.len() - 1);
+        
+        headers.append(&mut db_headers);
 
         // Perform range lookup in the in-memory state
-        match self.canonical_in_memory_state.range_lookup(start, end) {
-            RangeLookupResult::None => Ok(self.database.headers_range(start..=end)?),
-            RangeLookupResult::Partial { headers: mut in_memory_headers, lowest, highest } => {
-                // Retrieve remaining headers from the database
-                let mut db_headers = self.database.headers_range((highest)..=lowest)?;
-                headers.append(&mut in_memory_headers);
-                headers.append(&mut db_headers);
-                Ok(headers)
-            }
-            RangeLookupResult::Full(in_memory_headers) => Ok(in_memory_headers),
-        }
+        headers.append(&mut self.canonical_in_memory_state.range_lookup(range));
+
+        Ok(headers)
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
