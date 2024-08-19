@@ -12,6 +12,7 @@ pub enum ExExEvent {
     FinishedHeight(BlockNumber),
 }
 
+#[cfg(test)]
 impl Default for ExExEvent {
     fn default() -> Self {
         Self::FinishedHeight(0)
