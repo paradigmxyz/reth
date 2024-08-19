@@ -597,6 +597,10 @@ mod tests {
             new: Arc::new(Chain::default()),
         };
 
+        // Even if the finished height is higher than the tip of the new chain, the reorg
+        // notification should be received
+        exex_handle.finished_height = Some(u64::MAX);
+
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
         // Send the notification
@@ -619,6 +623,10 @@ mod tests {
         let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
+
+        // Even if the finished height is higher than the tip of the new chain, the reorg
+        // notification should be received
+        exex_handle.finished_height = Some(u64::MAX);
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
