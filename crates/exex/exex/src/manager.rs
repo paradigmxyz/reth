@@ -92,6 +92,10 @@ impl ExExHandle {
                     // Skip the chain commit notification if the finished height of the ExEx is
                     // higher than or equal to the tip of the new notification.
                     // I.e., the ExEx has already processed the notification.
+
+                    println!("finished_height: {}", finished_height);
+                    println!("new tip: {}", new.tip().number);
+
                     if finished_height >= new.tip().number {
                         debug!(
                             exex_id = %self.id,
@@ -128,6 +132,7 @@ impl ExExHandle {
             %notification_id,
             "Sending notification"
         );
+        println!("notification_id: {}", notification_id);
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
@@ -519,6 +524,42 @@ mod tests {
         // Check that the block height was updated
         let updated_exex_handle = &pinned_manager.exex_handles[0];
         assert_eq!(updated_exex_handle.finished_height, Some(42));
+    }
+
+    #[tokio::test]
+    async fn test_exex_manager_capacity() {
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
+
+        // Create an ExExManager with a small max capacity
+        let max_capacity = 2;
+        let mut exex_manager = ExExManager::new(vec![exex_handle_1], max_capacity);
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Setup a notification
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![Default::default()],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        // Send notifications to go over the max capacity
+        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+
+        // Pin the ExExManager to call the poll method
+        let mut pinned_manager = std::pin::pin!(exex_manager);
+
+        // Check that the next notification ID is 0
+        assert_eq!(pinned_manager.next_id, 0);
+
+        let _ = pinned_manager.as_mut().poll(&mut cx);
+
+        // After polling, the next notification ID should not exceed the max capacity
+        assert_eq!(pinned_manager.next_id, 2);
     }
 
     #[tokio::test]
