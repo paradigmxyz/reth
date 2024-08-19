@@ -225,8 +225,7 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts =
-        alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
+    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");

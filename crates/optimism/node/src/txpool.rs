@@ -29,6 +29,10 @@ pub struct OpTransactionValidator<Client, Tx> {
     inner: EthTransactionValidator<Client, Tx>,
     /// Additional block info required for validation.
     block_info: Arc<OpL1BlockInfo>,
+    /// If true, ensure that the transaction's sender has enough balance to cover the L1 gas fee
+    /// derived from the tracked L1 block info that is extracted from the first transaction in the
+    /// L2 block.
+    require_l1_data_gas_fee: bool,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -40,6 +44,18 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
     /// Returns the current block timestamp.
     fn block_timestamp(&self) -> u64 {
         self.block_info.timestamp.load(Ordering::Relaxed)
+    }
+
+    /// Whether to ensure that the transaction's sender has enough balance to also cover the L1 gas
+    /// fee.
+    pub fn require_l1_data_gas_fee(self, require_l1_data_gas_fee: bool) -> Self {
+        Self { require_l1_data_gas_fee, ..self }
+    }
+
+    /// Returns whether this validator also requires the transaction's sender to have enough balance
+    /// to cover the L1 gas fee.
+    pub const fn requires_l1_data_gas_fee(&self) -> bool {
+        self.require_l1_data_gas_fee
     }
 }
 
@@ -71,7 +87,7 @@ where
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
     ) -> Self {
-        Self { inner, block_info: Arc::new(block_info) }
+        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true }
     }
 
     /// Update the L1 block info.
@@ -101,6 +117,11 @@ where
         }
 
         let outcome = self.inner.validate_one(origin, transaction);
+
+        if !self.requires_l1_data_gas_fee() {
+            // no need to check L1 gas fee
+            return outcome
+        }
 
         // ensure that the account has enough balance to cover the L1 gas cost
         if let TransactionValidationOutcome::Valid {
