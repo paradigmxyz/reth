@@ -437,7 +437,7 @@ impl ExExManagerHandle {
     /// If this returns `false`, the owner of the handle should **NOT** send new notifications over
     /// the channel until the manager is ready again, as this can lead to unbounded memory growth.
     pub fn has_capacity(&self) -> bool {
-        self.current_capacity.load(Ordering::Relaxed) > 0
+        self.capacity() > 0
     }
 
     /// Returns `true` if there are `ExEx`'s installed in the node.
@@ -508,6 +508,15 @@ mod tests {
         assert!(!ExExManager::new(vec![], 0).handle.has_exexs());
 
         assert!(ExExManager::new(vec![exex_handle_1], 0).handle.has_exexs());
+    }
+
+    #[tokio::test]
+    async fn test_has_capacity() {
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
+
+        assert!(!ExExManager::new(vec![], 0).handle.has_capacity());
+
+        assert!(ExExManager::new(vec![exex_handle_1], 10).handle.has_capacity());
     }
 
     #[tokio::test]
