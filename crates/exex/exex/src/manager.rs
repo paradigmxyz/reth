@@ -519,6 +519,51 @@ mod tests {
         assert!(ExExManager::new(vec![exex_handle_1], 10).handle.has_capacity());
     }
 
+    #[test]
+    fn test_push_notification() {
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
+
+        // Create a mock ExExManager and add the exex_handle to it
+        let mut exex_manager = ExExManager::new(vec![exex_handle], 10);
+
+        // Define the notification for testing
+        let mut block1 = SealedBlockWithSenders::default();
+        block1.block.header.set_hash(B256::new([0x01; 32]));
+        block1.block.header.set_block_number(10);
+
+        let notification1 = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+        };
+
+        // Push the first notification
+        exex_manager.push_notification(notification1.clone());
+
+        // Verify the buffer contains the notification with the correct ID
+        assert_eq!(exex_manager.buffer.len(), 1);
+        assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
+        assert_eq!(exex_manager.next_id, 1);
+
+        // Push another notification
+        let mut block2 = SealedBlockWithSenders::default();
+        block2.block.header.set_hash(B256::new([0x02; 32]));
+        block2.block.header.set_block_number(20);
+
+        let notification2 = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
+        };
+
+        exex_manager.push_notification(notification2.clone());
+
+        // Verify the buffer contains both notifications with correct IDs
+        assert_eq!(exex_manager.buffer.len(), 2);
+        assert_eq!(exex_manager.buffer.get(0).unwrap().0, 0);
+        assert_eq!(exex_manager.buffer.get(0).unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().0, 1);
+        assert_eq!(exex_manager.buffer.get(1).unwrap().1, notification2);
+        assert_eq!(exex_manager.next_id, 2);
+    }
+
     #[tokio::test]
     async fn test_updates_block_height() {
         let (exex_handle, event_tx, mut _notification_rx) =
