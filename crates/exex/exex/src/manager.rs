@@ -498,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_block_height() {
-        let (mut exex_handle, event_tx, mut _notification_rx) =
+        let (exex_handle, event_tx, mut _notification_rx) =
             ExExHandle::new("test_exex".to_string());
 
         // Check initial block height
@@ -506,12 +506,19 @@ mod tests {
 
         // Update the block height via an event
         event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
-        let received_event = exex_handle.receiver.recv().await.unwrap();
-        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
+
+        // Create a mock ExExManager and add the exex_handle to it
+        let exex_manager = ExExManager::new(vec![exex_handle], 10);
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // Pin the ExExManager to call the poll method
+        let mut pinned_manager = std::pin::pin!(exex_manager);
+        let _ = pinned_manager.as_mut().poll(&mut cx);
 
         // Check that the block height was updated
-        exex_handle.finished_height = Some(42);
-        assert_eq!(exex_handle.finished_height, Some(42));
+        let updated_exex_handle = &pinned_manager.exex_handles[0];
+        assert_eq!(updated_exex_handle.finished_height, Some(42));
     }
 
     #[tokio::test]
