@@ -136,7 +136,7 @@ impl HashedPostState {
 }
 
 /// Representation of in-memory hashed storage.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Default)]
 pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
