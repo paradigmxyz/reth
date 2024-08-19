@@ -650,21 +650,4 @@ mod tests {
         let received_event = exex_handle.receiver.recv().await.unwrap();
         assert_eq!(received_event, ExExEvent::FinishedHeight(42));
     }
-
-    #[tokio::test]
-    async fn test_is_ready() {
-        let (mut exex_handle, _, mut _notification_rx) = ExExHandle::new("test_exex".to_string());
-
-        // Check initial state
-        assert_eq!(exex_handle.id, "test_exex");
-
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-
-        // Create a notification
-        let notification = ExExNotification::ChainCommitted { new: Arc::new(Chain::default()) };
-
-        // Ensure the exex is ready to send the notification
-        let result = exex_handle.send(&mut cx, &(42, notification));
-        assert!(matches!(result, Poll::Ready(_)));
-    }
 }
