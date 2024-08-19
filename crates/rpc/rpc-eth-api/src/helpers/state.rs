@@ -4,7 +4,7 @@
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
+use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
     StateRootProvider,
@@ -109,7 +109,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into());
+            return Err(EthApiError::ExceedsMaxProofWindow.into())
         }
 
         Ok(async move {
@@ -144,7 +144,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 .unwrap_or_default();
             let balance = account.balance;
             let nonce = account.nonce;
-            let code_hash = account.bytecode_hash.unwrap_or_default();
+            let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
 
             // Provide a default `HashedStorage` value in order to
             // get the storage root hash of the current state.
@@ -284,7 +284,7 @@ pub trait LoadState: EthApiTypes {
                     let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
                         EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
                     ))?;
-                    return Ok(U256::from(tx_count));
+                    return Ok(U256::from(tx_count))
                 }
             }
 
