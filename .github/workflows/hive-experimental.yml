@@ -216,7 +216,7 @@ jobs:
           path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
-        run: .github/assets/hive/run_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
+        run: .github/assets/hive/run_experimental_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
 
       - name: Parse hive output
         run: |
