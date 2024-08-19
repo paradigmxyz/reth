@@ -66,6 +66,7 @@ assert_matches.workspace = true
 test-utils = ["arbitrary"]
 arbitrary = [
     "reth-primitives/arbitrary",
+    "reth-db-models/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
 ]
