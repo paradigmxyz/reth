@@ -558,7 +558,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
-        let (mut exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
+        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
 
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(15);
@@ -577,7 +577,8 @@ mod tests {
         match exex_handle.send(&mut cx, &(22, notification)) {
             Poll::Ready(Ok(())) => {
                 // The notification should be skipped, so nothing should be sent.
-                // Since nothing is sent, we do not check for received notifications.
+                // Check that the receiver channel is indeed empty
+                assert!(notification_rx.try_recv().is_err(), "Receiver channel should be empty");
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail");
