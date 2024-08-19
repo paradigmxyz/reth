@@ -245,6 +245,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
+    /// Max number of seen transactions to store for each peer.
+    max_transactions_seen_by_peer_history: u32,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -286,7 +288,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_pool_imports_info: PendingPoolImportsInfo::new(
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
-            bad_imports: LruCache::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS),
+            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -295,6 +297,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
+            max_transactions_seen_by_peer_history: transactions_manager_config
+                .max_transactions_seen_by_peer_history,
             metrics,
         }
     }
@@ -904,7 +908,12 @@ where
                 peer_id, client_version, messages, version, ..
             } => {
                 // Insert a new peer into the peerset.
-                let peer = PeerMetadata::new(messages, version, client_version);
+                let peer = PeerMetadata::new(
+                    messages,
+                    version,
+                    client_version,
+                    self.max_transactions_seen_by_peer_history,
+                );
                 let peer = match self.peers.entry(peer_id) {
                     Entry::Occupied(mut entry) => {
                         entry.insert(peer);
@@ -1613,9 +1622,14 @@ pub struct PeerMetadata {
 
 impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
-    fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
+    fn new(
+        request_tx: PeerRequestSender,
+        version: EthVersion,
+        client_version: Arc<str>,
+        max_transactions_seen_by_peer: u32,
+    ) -> Self {
         Self {
-            seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
+            seen_transactions: LruCache::new(max_transactions_seen_by_peer),
             request_tx,
             version,
             client_version,
@@ -1782,6 +1796,7 @@ mod tests {
                 PeerRequestSender::new(peer_id, to_mock_session_tx),
                 version,
                 Arc::from(""),
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             ),
             to_mock_session_rx,
         )

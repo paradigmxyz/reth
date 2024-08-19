@@ -1,4 +1,7 @@
-use crate::{PoolSize, TransactionOrigin};
+use crate::{
+    pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
+    PoolSize, TransactionOrigin,
+};
 use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
 use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -39,6 +42,10 @@ pub struct PoolConfig {
     /// How to handle locally received transactions:
     /// [`TransactionOrigin::Local`](crate::TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
+    /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
+    pub pending_tx_listener_buffer_size: usize,
+    /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
+    pub new_tx_listener_buffer_size: usize,
 }
 
 impl PoolConfig {
@@ -62,6 +69,8 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
+            pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
+            new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
         }
     }
 }
