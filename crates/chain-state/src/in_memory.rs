@@ -16,7 +16,7 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::{Deref, RangeInclusive},
+    ops::RangeInclusive,
     sync::Arc,
     time::Instant,
 };
@@ -672,7 +672,7 @@ impl BlockState {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock {
     /// Sealed block the rest of fields refer to.
     pub block: Arc<SealedBlock>,
@@ -687,7 +687,7 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
-    /// `ExecutedBlock` constructor.
+    /// [`ExecutedBlock`] constructor.
     pub const fn new(
         block: Arc<SealedBlock>,
         senders: Arc<Vec<Address>>,
@@ -767,28 +767,34 @@ impl NewCanonicalChain {
 
     /// Converts the new chain into a notification that will be emitted to listeners
     pub fn to_chain_notification(&self) -> CanonStateNotification {
-        // TODO: do we need to merge execution outcome for multiblock commit or reorg?
-        //  implement this properly
         match self {
-            Self::Commit { new } => CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
-            Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                new: Arc::new(Chain::new(
-                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    new.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-                old: Arc::new(Chain::new(
-                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
-                    old.last().unwrap().execution_output.deref().clone(),
-                    None,
-                )),
-            },
+            Self::Commit { new } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Commit { new }
+            }
+            Self::Reorg { new, old } => {
+                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
+                    chain.append_block(
+                        exec.sealed_block_with_senders(),
+                        exec.execution_outcome().clone(),
+                    );
+                    chain
+                }));
+                CanonStateNotification::Reorg { new, old }
+            }
         }
     }
 
@@ -812,12 +818,12 @@ mod tests {
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{
-        Account, BlockNumber, Bytecode, Bytes, Receipt, StorageKey, StorageValue,
+        Account, BlockNumber, Bytecode, Bytes, Receipt, Requests, StorageKey, StorageValue,
     };
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage};
+    use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -891,9 +897,27 @@ mod tests {
             Ok(B256::random())
         }
 
+        fn hashed_state_root_from_nodes(
+            &self,
+            _nodes: TrieUpdates,
+            _post_state: HashedPostState,
+            _prefix_sets: TriePrefixSetsMut,
+        ) -> ProviderResult<B256> {
+            Ok(B256::random())
+        }
+
         fn hashed_state_root_with_updates(
             &self,
             _hashed_state: HashedPostState,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            Ok((B256::random(), TrieUpdates::default()))
+        }
+
+        fn hashed_state_root_from_nodes_with_updates(
+            &self,
+            _nodes: TrieUpdates,
+            _post_state: HashedPostState,
+            _prefix_sets: TriePrefixSetsMut,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
@@ -1269,5 +1293,58 @@ mod tests {
         let block_state_chain = chain[0].chain();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().block.number, 1);
+    }
+
+    #[test]
+    fn test_to_chain_notification() {
+        // Generate 4 blocks
+        let mut test_block_builder = TestBlockBuilder::default();
+        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let block1 = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
+        let block1a = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
+        let block2 = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
+        let block2a = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
+
+        let sample_execution_outcome = ExecutionOutcome {
+            receipts: Receipts::from_iter([vec![], vec![]]),
+            requests: vec![Requests::default(), Requests::default()],
+            ..Default::default()
+        };
+
+        // Test commit notification
+        let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
+
+        assert_eq!(
+            chain_commit.to_chain_notification(),
+            CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    vec![block0.sealed_block_with_senders(), block1.sealed_block_with_senders()],
+                    sample_execution_outcome.clone(),
+                    None
+                ))
+            }
+        );
+
+        // Test reorg notification
+        let chain_reorg = NewCanonicalChain::Reorg {
+            new: vec![block1a.clone(), block2a.clone()],
+            old: vec![block1.clone(), block2.clone()],
+        };
+
+        assert_eq!(
+            chain_reorg.to_chain_notification(),
+            CanonStateNotification::Reorg {
+                old: Arc::new(Chain::new(
+                    vec![block1.sealed_block_with_senders(), block2.sealed_block_with_senders()],
+                    sample_execution_outcome.clone(),
+                    None
+                )),
+                new: Arc::new(Chain::new(
+                    vec![block1a.sealed_block_with_senders(), block2a.sealed_block_with_senders()],
+                    sample_execution_outcome,
+                    None
+                ))
+            }
+        );
     }
 }

@@ -1,14 +1,5 @@
 //! Engine node related functionality.
 
-use crate::{
-    components::NodeComponents,
-    hooks::NodeHooks,
-    launch::{LaunchContext, LaunchNode},
-    rpc::{launch_rpc_servers, EthApiBuilderProvider},
-    setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
-    NodeHandle, NodeTypesAdapter,
-};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -20,6 +11,7 @@ use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
     tree::TreeConfig,
 };
+use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
@@ -41,6 +33,16 @@ use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::{
+    components::NodeComponents,
+    hooks::NodeHooks,
+    launch::{LaunchContext, LaunchNode},
+    rpc::{launch_rpc_servers, EthApiBuilderProvider},
+    setup::build_networked_pipeline,
+    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
+    NodeHandle, NodeTypesAdapter,
+};
+
 /// The engine node launcher.
 #[derive(Debug)]
 pub struct EngineNodeLauncher {
@@ -59,9 +61,12 @@ impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeL
 where
     T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer
+                    + AddDevSigners,
+    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -133,6 +138,21 @@ where
         let network_client = ctx.components().network().fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
+        let node_config = ctx.node_config();
+        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+            .maybe_skip_fcu(node_config.debug.skip_fcu)
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+                node_config.debug.reorg_frequency,
+            )
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
+            // during this run.
+            .maybe_store_messages(node_config.debug.engine_api_store.clone());
+
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
 
@@ -161,6 +181,9 @@ where
             pipeline_exex_handle,
         )?;
 
+        // The new engine writes directly to static files. This ensures that they're up to the tip.
+        pipeline.move_to_static_files()?;
+
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
@@ -179,7 +202,7 @@ where
             ctx.components().block_executor().clone(),
             ctx.chain_spec(),
             network_client.clone(),
-            UnboundedReceiverStream::new(consensus_engine_rx),
+            Box::pin(consensus_engine_stream),
             pipeline,
             Box::new(ctx.task_executor().clone()),
             ctx.provider_factory().clone(),

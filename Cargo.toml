@@ -104,6 +104,7 @@ members = [
     "crates/storage/codecs/derive/",
     "crates/storage/db-api/",
     "crates/storage/db-common",
+    "crates/storage/db-models/",
     "crates/storage/db/",
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
@@ -283,12 +284,13 @@ reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
-reth-consensus = { path = "crates/consensus/consensus" }
+reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
 reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
+reth-db-models = { path = "crates/storage/db-models"}
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }

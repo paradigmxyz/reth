@@ -499,6 +499,16 @@ impl PropagateKind {
             Self::Full(peer) | Self::Hash(peer) => peer,
         }
     }
+
+    /// Returns true if the transaction was sent as a full transaction
+    pub const fn is_full(&self) -> bool {
+        matches!(self, Self::Full(_))
+    }
+
+    /// Returns true if the transaction was sent as a hash
+    pub const fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash(_))
+    }
 }
 
 impl From<PropagateKind> for PeerId {

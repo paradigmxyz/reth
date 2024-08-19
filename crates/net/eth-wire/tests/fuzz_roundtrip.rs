@@ -49,7 +49,7 @@ macro_rules! fuzz_type_and_name {
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-    use reth_codecs::derive_arbitrary;
+    use reth_codecs::add_arbitrary_tests;
     use reth_eth_wire::{
         BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
         GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
@@ -78,7 +78,6 @@ pub mod fuzz_rlp {
 
     // see message below for why wrapper types are necessary for fuzzing types that do not have a
     // Default impl
-    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -89,6 +88,8 @@ pub mod fuzz_rlp {
         RlpEncodableWrapper,
         RlpDecodableWrapper,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(rlp)]
     struct HelloMessageWrapper(HelloMessage);
 
     impl Default for HelloMessageWrapper {
@@ -120,7 +121,6 @@ pub mod fuzz_rlp {
     //
     // We just provide a default value here so test-fuzz can auto-generate a corpus file for the
     // type.
-    #[derive_arbitrary(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -131,6 +131,8 @@ pub mod fuzz_rlp {
         RlpEncodableWrapper,
         RlpDecodableWrapper,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(rlp)]
     struct GetBlockHeadersWrapper(GetBlockHeaders);
 
     impl Default for GetBlockHeadersWrapper {

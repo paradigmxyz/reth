@@ -202,9 +202,10 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            let index = usize::from(index);
-            let uncle =
-                uncles.into_iter().nth(index).map(|header| uncle_block_from_header(header).into());
+            let uncle = uncles
+                .into_iter()
+                .nth(index.into())
+                .map(|header| uncle_block_from_header(header).into());
             Ok(uncle)
         }
     }
