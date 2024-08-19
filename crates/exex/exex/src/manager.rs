@@ -552,8 +552,8 @@ mod tests {
 
         // Verify the buffer contains both notifications with correct IDs
         assert_eq!(exex_manager.buffer.len(), 2);
-        assert_eq!(exex_manager.buffer.get(0).unwrap().0, 0);
-        assert_eq!(exex_manager.buffer.get(0).unwrap().1, notification1);
+        assert_eq!(exex_manager.buffer.front().unwrap().0, 0);
+        assert_eq!(exex_manager.buffer.front().unwrap().1, notification1);
         assert_eq!(exex_manager.buffer.get(1).unwrap().0, 1);
         assert_eq!(exex_manager.buffer.get(1).unwrap().1, notification2);
         assert_eq!(exex_manager.next_id, 2);
@@ -577,7 +577,7 @@ mod tests {
         };
 
         exex_manager.push_notification(notification1.clone());
-        exex_manager.push_notification(notification1.clone());
+        exex_manager.push_notification(notification1);
 
         // Update capacity
         exex_manager.update_capacity();
@@ -640,7 +640,7 @@ mod tests {
         // Send notifications to go over the max capacity
         exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
         exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
-        exex_manager.handle.exex_tx.send(notification.clone()).unwrap();
+        exex_manager.handle.exex_tx.send(notification).unwrap();
 
         // Pin the ExExManager to call the poll method
         let mut pinned_manager = std::pin::pin!(exex_manager);
