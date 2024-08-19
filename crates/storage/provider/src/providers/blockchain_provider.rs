@@ -8,9 +8,7 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider,
-};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -295,7 +293,7 @@ where
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
-        
+
         headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
