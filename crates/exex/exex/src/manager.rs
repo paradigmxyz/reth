@@ -502,6 +502,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_has_exexs() {
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string());
+
+        assert!(!ExExManager::new(vec![], 0).handle.has_exexs());
+
+        assert!(ExExManager::new(vec![exex_handle_1], 0).handle.has_exexs());
+    }
+
+    #[tokio::test]
     async fn test_updates_block_height() {
         let (exex_handle, event_tx, mut _notification_rx) =
             ExExHandle::new("test_exex".to_string());
