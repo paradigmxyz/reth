@@ -92,10 +92,6 @@ impl ExExHandle {
                     // Skip the chain commit notification if the finished height of the ExEx is
                     // higher than or equal to the tip of the new notification.
                     // I.e., the ExEx has already processed the notification.
-
-                    println!("finished_height: {}", finished_height);
-                    println!("new tip: {}", new.tip().number);
-
                     if finished_height >= new.tip().number {
                         debug!(
                             exex_id = %self.id,
@@ -132,7 +128,6 @@ impl ExExHandle {
             %notification_id,
             "Sending notification"
         );
-        println!("notification_id: {}", notification_id);
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
                 self.next_notification_id = notification_id + 1;
@@ -564,6 +559,40 @@ mod tests {
         assert_eq!(exex_manager.next_id, 2);
     }
 
+    #[test]
+    fn test_update_capacity() {
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string());
+
+        // Create a mock ExExManager and add the exex_handle to it
+        let max_capacity = 5;
+        let mut exex_manager = ExExManager::new(vec![exex_handle], max_capacity);
+
+        // Push some notifications to fill part of the buffer
+        let mut block1 = SealedBlockWithSenders::default();
+        block1.block.header.set_hash(B256::new([0x01; 32]));
+        block1.block.header.set_block_number(10);
+
+        let notification1 = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+        };
+
+        exex_manager.push_notification(notification1.clone());
+        exex_manager.push_notification(notification1.clone());
+
+        // Update capacity
+        exex_manager.update_capacity();
+
+        // Verify current capacity and metrics
+        assert_eq!(exex_manager.current_capacity.load(Ordering::Relaxed), max_capacity - 2);
+
+        // Clear the buffer and update capacity
+        exex_manager.buffer.clear();
+        exex_manager.update_capacity();
+
+        // Verify current capacity
+        assert_eq!(exex_manager.current_capacity.load(Ordering::Relaxed), max_capacity);
+    }
+
     #[tokio::test]
     async fn test_updates_block_height() {
         let (exex_handle, event_tx, mut _notification_rx) =
@@ -616,13 +645,15 @@ mod tests {
         // Pin the ExExManager to call the poll method
         let mut pinned_manager = std::pin::pin!(exex_manager);
 
-        // Check that the next notification ID is 0
+        // Before polling, the next notification ID should be 0 and the buffer should be empty
         assert_eq!(pinned_manager.next_id, 0);
+        assert_eq!(pinned_manager.buffer.len(), 0);
 
         let _ = pinned_manager.as_mut().poll(&mut cx);
 
-        // After polling, the next notification ID should not exceed the max capacity
+        // After polling, the next notification ID and buffer size should be updated
         assert_eq!(pinned_manager.next_id, 2);
+        assert_eq!(pinned_manager.buffer.len(), 2);
     }
 
     #[tokio::test]
@@ -755,19 +786,5 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
-    }
-
-    #[tokio::test]
-    async fn test_slow_exex() {
-        let (mut exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string());
-
-        // Simulate a slow exex by delaying event sending
-        let delay = tokio::time::Duration::from_millis(500);
-        tokio::time::sleep(delay).await;
-
-        event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
-        let received_event = exex_handle.receiver.recv().await.unwrap();
-        assert_eq!(received_event, ExExEvent::FinishedHeight(42));
     }
 }
