@@ -1497,10 +1497,6 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, HeaderProvider,
     };
     use reth_testing_utils::generators::{self, random_block, random_block_range};
-    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-    use reth_primitives::{BlockNumberOrTag, SealedBlock, B256};
-    use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReaderIdExt, HeaderProvider};
-    use reth_testing_utils::generators::{self, random_block_range};
 
     use crate::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, CanonChainTracker,
