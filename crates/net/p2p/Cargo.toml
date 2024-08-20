@@ -16,6 +16,7 @@ reth-primitives.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 reth-storage-errors.workspace = true
 
 # io
