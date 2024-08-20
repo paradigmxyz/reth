@@ -40,10 +40,10 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     }
 }
 
-/// Client trait for transforming [BlockId] into block numbers or hashes.
+/// Client trait for transforming [`BlockId`] into block numbers or hashes.
 ///
-/// Types that implement this trait must be able to resolve all variants of [BlockNumberOrTag] to
-/// block numbers or hashes. Automatic implementations for resolving [BlockNumberOrTag] variants
+/// Types that implement this trait must be able to resolve all variants of [`BlockNumberOrTag`] to
+/// block numbers or hashes. Automatic implementations for resolving [`BlockNumberOrTag`] variants
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
 ///
@@ -62,14 +62,12 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.number))
             }
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::FinalizedBlockNotFound),
-            },
-            BlockNumberOrTag::Safe => match self.safe_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::SafeBlockNotFound),
-            },
+            BlockNumberOrTag::Finalized => {
+                self.finalized_block_number()?.ok_or(ProviderError::FinalizedBlockNotFound)?
+            }
+            BlockNumberOrTag::Safe => {
+                self.safe_block_number()?.ok_or(ProviderError::SafeBlockNotFound)?
+            }
         };
         Ok(Some(num))
     }

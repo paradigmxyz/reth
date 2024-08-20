@@ -3,16 +3,13 @@
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
-use reth_primitives::{SealedBlock, B256};
+use reth_primitives::B256;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
-use std::sync::{
-    mpsc::{Receiver, SendError, Sender},
-    Arc,
-};
+use std::sync::mpsc::{Receiver, SendError, Sender};
 use thiserror::Error;
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, error};
 
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
@@ -60,7 +57,7 @@ where
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
+                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let provider_rw = self.provider.provider_rw()?;
                     let sf_provider = self.provider.static_file_provider();
 
@@ -71,7 +68,7 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
                 }
-                PersistenceAction::SaveBlocks((blocks, sender)) => {
+                PersistenceAction::SaveBlocks(blocks, sender) => {
                     let Some(last_block) = blocks.last() else {
                         let _ = sender.send(None);
                         continue
@@ -89,20 +86,11 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(Some(last_block_hash));
                 }
-                PersistenceAction::PruneBefore((block_num, sender)) => {
+                PersistenceAction::PruneBefore(block_num, sender) => {
                     let res = self.prune_before(block_num)?;
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
-                }
-                PersistenceAction::WriteTransactions((block, sender)) => {
-                    unimplemented!()
-                    // let (block_num, td) =
-                    //     self.write_transactions(block).expect("todo: handle errors");
-                    // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
-
-                    // // we ignore the error because the caller may or may not care about the
-                    // result let _ = sender.send(());
                 }
             }
         }
@@ -130,24 +118,17 @@ pub enum PersistenceAction {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<Option<B256>>)),
-
-    /// The given block has been added to the canonical chain, its transactions and headers will be
-    /// persisted for durability.
-    ///
-    /// This will first append the header and transactions to static files, then update the
-    /// checkpoints for headers and block bodies in the database.
-    WriteTransactions((Arc<SealedBlock>, oneshot::Sender<()>)),
+    SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<B256>>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
+    RemoveBlocksAbove(u64, oneshot::Sender<()>),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
-    PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
+    PruneBefore(u64, oneshot::Sender<PrunerOutput>),
 }
 
 /// A handle to the persistence service
@@ -178,7 +159,11 @@ impl PersistenceHandle {
         let db_service = PersistenceService::new(provider_factory, db_service_rx, pruner);
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
-            .spawn(|| db_service.run())
+            .spawn(|| {
+                if let Err(err) = db_service.run() {
+                    error!(target: "engine::persistence", ?err, "Persistence service failed");
+                }
+            })
             .unwrap();
 
         persistence_handle
@@ -206,7 +191,7 @@ impl PersistenceHandle {
         blocks: Vec<ExecutedBlock>,
         tx: oneshot::Sender<Option<B256>>,
     ) -> Result<(), SendError<PersistenceAction>> {
-        self.send_action(PersistenceAction::SaveBlocks((blocks, tx)))
+        self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
@@ -218,7 +203,7 @@ impl PersistenceHandle {
         block_num: u64,
         tx: oneshot::Sender<()>,
     ) -> Result<(), SendError<PersistenceAction>> {
-        self.send_action(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
+        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 
     /// Tells the persistence service to remove block data before the given hash, according to the
@@ -230,7 +215,7 @@ impl PersistenceHandle {
         block_num: u64,
         tx: oneshot::Sender<PrunerOutput>,
     ) -> Result<(), SendError<PersistenceAction>> {
-        self.send_action(PersistenceAction::PruneBefore((block_num, tx)))
+        self.send_action(PersistenceAction::PruneBefore(block_num, tx))
     }
 }
 
@@ -246,7 +231,7 @@ mod tests {
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
 
-        let (finished_exex_height_tx, finished_exex_height_rx) =
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
         let pruner = Pruner::<_, ProviderFactory<_>>::new(
@@ -290,7 +275,12 @@ mod tests {
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
 
-        let actual_hash = rx.await.unwrap().unwrap();
+        let actual_hash = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+            .await
+            .expect("test timed out")
+            .expect("channel closed unexpectedly")
+            .expect("no hash returned");
+
         assert_eq!(block_hash, actual_hash);
     }
 

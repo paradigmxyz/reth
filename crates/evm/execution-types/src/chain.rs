@@ -1,5 +1,11 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
+#[cfg(not(feature = "std"))]
+use alloc::{borrow::Cow, collections::BTreeMap};
+use core::{fmt, ops::RangeInclusive};
+#[cfg(feature = "std")]
+use std::{borrow::Cow, collections::BTreeMap};
+
 use crate::ExecutionOutcome;
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
@@ -8,7 +14,6 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///
@@ -512,7 +517,7 @@ mod tests {
 
     #[test]
     fn chain_append() {
-        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -642,7 +647,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

@@ -26,15 +26,12 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
     ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send {
         async move {
             // get all receipts for the block
-            let all_receipts = match self
+            let all_receipts = self
                 .cache()
                 .get_receipts(meta.block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-            {
-                Some(recpts) => recpts,
-                None => return Err(EthApiError::UnknownBlockNumber.into()),
-            };
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
             Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
         }

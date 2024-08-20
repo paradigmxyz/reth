@@ -758,6 +758,8 @@ impl From<Genesis> for ChainSpec {
             (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
             (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
+            #[cfg(feature = "optimism")]
+            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -806,6 +808,13 @@ impl From<Genesis> for ChainSpec {
             ..Default::default()
         }
     }
+}
+
+/// A trait for reading the current [`ChainSpec`].
+#[auto_impl::auto_impl(&, Arc)]
+pub trait ChainSpecProvider: Send + Sync {
+    /// Get an [`Arc`] to the [`ChainSpec`].
+    fn chain_spec(&self) -> Arc<ChainSpec>;
 }
 
 /// A helper to build custom chain specs
@@ -1002,6 +1011,14 @@ impl ChainSpecBuilder {
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
         self.hardforks.insert(OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Granite at genesis
+    #[cfg(feature = "optimism")]
+    pub fn granite_activated(mut self) -> Self {
+        self = self.fjord_activated();
+        self.hardforks.insert(OptimismHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1674,7 +1691,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1720627201, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
+                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 1725984001 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1725984001, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
                 ),
             ],
         );
@@ -1712,7 +1733,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1716998400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 0 },
+                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478399, ..Default::default() },
+                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x75, 0xde, 0xa4, 0x1e]), next: 0 },
                 ),
             ],
         );
@@ -1769,7 +1798,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1716998400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 0 },
+                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478399, ..Default::default() },
+                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 1723478400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1723478400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x5e, 0xdf, 0xa3, 0xb6]), next: 0 },
                 ),
             ],
         );
@@ -2616,7 +2653,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
+            ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -2638,6 +2675,7 @@ Post-merge hard forks (timestamp based):
         "canyonTime": 30,
         "ecotoneTime": 40,
         "fjordTime": 50,
+        "graniteTime": 51,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -2657,6 +2695,8 @@ Post-merge hard forks (timestamp based):
         assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
+        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -2679,12 +2719,14 @@ Post-merge hard forks (timestamp based):
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
     }
 
     #[cfg(feature = "optimism")]
@@ -2698,6 +2740,7 @@ Post-merge hard forks (timestamp based):
         "canyonTime": 30,
         "ecotoneTime": 40,
         "fjordTime": 50,
+        "graniteTime": 51,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -2718,6 +2761,8 @@ Post-merge hard forks (timestamp based):
         assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(40)).as_ref());
         let actual_fjord_timestamp = genesis.config.extra_fields.get("fjordTime");
         assert_eq!(actual_fjord_timestamp, Some(serde_json::Value::from(50)).as_ref());
+        let actual_granite_timestamp = genesis.config.extra_fields.get("graniteTime");
+        assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -2747,12 +2792,14 @@ Post-merge hard forks (timestamp based):
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Granite, 51));
     }
 
     #[cfg(feature = "optimism")]

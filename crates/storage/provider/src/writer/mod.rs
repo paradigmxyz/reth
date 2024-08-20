@@ -155,6 +155,8 @@ where
         let first_number = first_block.number;
         let last_block_number = last_block.number;
 
+        debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
+
         // Only write receipts to static files if there is no receipt pruning configured.
         let mut state_writer = if self.database().prune_modes_ref().has_receipts_pruning() {
             UnifiedStorageWriter::from_database(self.database())
@@ -164,8 +166,6 @@ where
                 self.static_file().get_writer(first_block.number, StaticFileSegment::Receipts)?,
             )
         };
-
-        debug!(target: "provider::storage_writer", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
         // TODO: remove all the clones and do performant / batched writes for each type of object
         // instead of a loop over all blocks,
@@ -1413,7 +1413,6 @@ mod tests {
                         Vec::new()
                     )
                     .hash_state_slow(),
-                    Default::default()
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (

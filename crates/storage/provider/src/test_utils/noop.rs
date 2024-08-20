@@ -4,23 +4,29 @@ use std::{
     sync::Arc,
 };
 
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
+use reth_chain_state::{
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
+    ForkChoiceSubscriptions,
+};
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StorageKey, StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash,
-    TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
+    BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::{
     providers::StaticFileProvider,
@@ -317,9 +323,27 @@ impl StateRootProvider for NoopProvider {
         Ok(B256::default())
     }
 
+    fn hashed_state_root_from_nodes(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
+
     fn hashed_state_root_with_updates(
         &self,
         _state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok((B256::default(), TrieUpdates::default()))
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
@@ -439,6 +463,32 @@ impl StateProviderFactory for NoopProvider {
         Ok(Box::new(*self))
     }
 
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+
+                // only look at historical state
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+        }
+    }
+
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(*self)))
     }
@@ -503,5 +553,17 @@ impl StaticFileProviderFactory for NoopProvider {
 impl CanonStateSubscriptions for NoopProvider {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         broadcast::channel(1).1
+    }
+}
+
+impl ForkChoiceSubscriptions for NoopProvider {
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
     }
 }

@@ -3,7 +3,7 @@ use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::{ChainSpec, MAINNET};
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
 use std::fmt::{Debug, Display};
 
@@ -12,9 +12,10 @@ use std::fmt::{Debug, Display};
 ///
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
-#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.

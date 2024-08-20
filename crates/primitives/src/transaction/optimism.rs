@@ -3,13 +3,16 @@ use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
 };
 use bytes::Buf;
-use reth_codecs::{reth_codec, Compact};
+use core::mem;
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
-use std::mem;
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TxDeposit {
     /// Hash that uniquely identifies the source of the deposit.
     pub source_hash: B256,

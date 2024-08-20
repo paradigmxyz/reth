@@ -62,7 +62,6 @@ tokio = { workspace = true, default-features = false, features = [
     "macros",
 ] }
 tokio-stream.workspace = true
-once_cell.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 criterion.workspace = true

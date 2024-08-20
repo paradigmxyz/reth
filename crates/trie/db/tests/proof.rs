@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_db_api::database::Database;
 use reth_primitives::{
@@ -11,7 +10,10 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{proof::Proof, Nibbles, StateRoot};
 use reth_trie_common::{AccountProof, StorageProof};
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot};
-use std::{str::FromStr, sync::Arc};
+use std::{
+    str::FromStr,
+    sync::{Arc, LazyLock},
+};
 
 /*
     World State (sampled from <https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture/6413#6413>)
@@ -24,7 +26,7 @@ use std::{str::FromStr, sync::Arc};
 
     All expected testspec results were obtained from querying proof RPC on the running geth instance `geth init crates/trie/testdata/proof-genesis.json && geth --http`.
 */
-static TEST_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+static TEST_SPEC: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     ChainSpec {
         chain: Chain::from_id(12345),
         genesis: serde_json::from_str(include_str!("../../trie/testdata/proof-genesis.json"))
@@ -46,10 +48,8 @@ fn insert_genesis<DB: Database>(
 
     // Hash accounts and insert them into hashing table.
     let genesis = chain_spec.genesis();
-    let alloc_accounts = genesis
-        .alloc
-        .iter()
-        .map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
+    let alloc_accounts =
+        genesis.alloc.iter().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

@@ -22,7 +22,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
-assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-tempfile.workspace = true
 jsonrpsee = { workspace = true, features = ["server"] }
