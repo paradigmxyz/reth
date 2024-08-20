@@ -38,7 +38,6 @@ use tracing::trace;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
-
 pub struct EthFilter<Provider, Pool, Eth> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Provider, Pool, Transaction>>,
