@@ -216,7 +216,9 @@ jobs:
           path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
-        run: .github/assets/hive/run_experimental_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
+        run: |
+          sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' hivetests/clients/reth/reth.sh
+          .github/assets/hive/run_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
 
       - name: Parse hive output
         run: |
