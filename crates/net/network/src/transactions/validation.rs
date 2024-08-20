@@ -311,10 +311,7 @@ impl FilterAnnouncement for EthMessageFilter {
             }
         });
         self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
-        (
-            if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
-            ValidAnnouncementData::from_partially_valid_data(msg),
-        )
+        (if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok }, msg.into())
     }
 
     fn filter_valid_entries_66(
@@ -327,7 +324,7 @@ impl FilterAnnouncement for EthMessageFilter {
             "validating eth66 announcement data.."
         );
 
-        (FilterOutcome::Ok, ValidAnnouncementData::from_partially_valid_data(partially_valid_data))
+        (FilterOutcome::Ok, partially_valid_data.into())
     }
 }
 
