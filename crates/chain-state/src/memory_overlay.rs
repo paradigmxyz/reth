@@ -39,8 +39,8 @@ impl MemoryOverlayStateProvider {
         let mut hashed_post_state = HashedPostState::default();
         let mut trie_updates = TrieUpdates::default();
         for block in in_memory.iter().rev() {
-            hashed_post_state.extend(block.hashed_state.as_ref().clone());
-            trie_updates.extend(block.trie.as_ref().clone());
+            hashed_post_state.extend_ref(block.hashed_state.as_ref());
+            trie_updates.extend_ref(block.trie.as_ref());
         }
         Self { in_memory, hashed_post_state, trie_updates, historical }
     }
