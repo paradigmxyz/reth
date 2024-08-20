@@ -8,7 +8,10 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    MemoryOverlayStateProvider,
+};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -37,13 +40,13 @@ use tracing::trace;
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct BlockchainProvider2<DB> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
-    canonical_in_memory_state: CanonicalInMemoryState,
+    pub(super) canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<DB> Clone for BlockchainProvider2<DB> {
@@ -290,10 +293,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.headers_range(range.clone())?;
-        headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -329,10 +333,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_range(range.clone())?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -361,10 +366,11 @@ where
 
         // First, fetch the headers from the database
         let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
-        sealed_headers.append(&mut db_headers);
 
         // Advance the range iterator by the number of headers fetched from the database
         range.nth(db_headers.len() - 1);
+
+        sealed_headers.append(&mut db_headers);
 
         // Fetch the remaining headers from the in-memory state
         for num in range {
@@ -402,15 +408,17 @@ where
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
+        let mut range = start..=end;
+
         let mut hashes = Vec::with_capacity((end - start + 1) as usize);
 
         // First, fetch the hashes from the database
         let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
-        hashes.append(&mut db_hashes);
 
-        let mut range = start..=end;
         // Advance the range iterator by the number of blocks fetched from the database
         range.nth(db_hashes.len() - 1);
+
+        hashes.append(&mut db_hashes);
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
@@ -849,7 +857,7 @@ where
                 transactions.push(block_state.block().block().body.clone());
                 last_in_memory_block = Some(number);
             } else {
-                break;
+                break
             }
         }
 
@@ -1422,6 +1430,21 @@ where
     }
 }
 
+impl<DB> ForkChoiceSubscriptions for BlockchainProvider2<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_safe_block();
+        ForkChoiceNotifications(receiver)
+    }
+
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
+        ForkChoiceNotifications(receiver)
+    }
+}
+
 impl<DB> ChangeSetReader for BlockchainProvider2<DB>
 where
     DB: Database,
@@ -1474,6 +1497,10 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, HeaderProvider,
     };
     use reth_testing_utils::generators::{self, random_block, random_block_range};
+    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+    use reth_primitives::{BlockNumberOrTag, SealedBlock, B256};
+    use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReaderIdExt, HeaderProvider};
+    use reth_testing_utils::generators::{self, random_block_range};
 
     use crate::{
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, CanonChainTracker,

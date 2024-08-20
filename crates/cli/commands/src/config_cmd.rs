@@ -25,11 +25,12 @@ impl Command {
             Config::default()
         } else {
             let path = self.config.clone().unwrap_or_default();
-            // confy will create the file if it doesn't exist; we don't want this
+            // Check if the file exists
             if !path.exists() {
                 bail!("Config file does not exist: {}", path.display());
             }
-            confy::load_path::<Config>(&path)
+            // Read the configuration file
+            Config::from_path(&path)
                 .wrap_err_with(|| format!("Could not load config file: {}", path.display()))?
         };
         println!("{}", toml::to_string_pretty(&config)?);
