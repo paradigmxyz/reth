@@ -2002,6 +2002,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(None)
     }
 
+    /// Returns the ommers for the block with matching id from the database.
+    ///
+    /// If the block is not found, this returns `None`.
+    /// If the block exists, but no ommers are found in the database, this
+    /// returns `None`.
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
@@ -2010,9 +2015,8 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers =
-                self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers).unwrap_or_default();
-            return Ok(Some(ommers))
+            let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
+            return Ok(ommers)
         }
 
         Ok(None)

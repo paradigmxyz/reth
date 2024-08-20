@@ -1806,18 +1806,24 @@ mod tests {
         let block_hash = database_block.header.hash();
 
         assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap(),
-            Some(database_block.ommers.clone())
+            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
+            database_block.ommers
         );
-        assert_eq!(provider.ommers_by_id(block_hash.into()).unwrap(), Some(database_block.ommers));
+        assert_eq!(
+            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
+            database_block.ommers
+        );
 
         let block_number = in_memory_block.number;
         let block_hash = in_memory_block.header.hash();
 
         assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap(),
-            Some(in_memory_block.ommers.clone())
+            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
+            in_memory_block.ommers
         );
-        assert_eq!(provider.ommers_by_id(block_hash.into()).unwrap(), Some(in_memory_block.ommers));
+        assert_eq!(
+            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
+            in_memory_block.ommers
+        );
     }
 }
