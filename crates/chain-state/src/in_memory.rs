@@ -464,6 +464,16 @@ impl CanonicalInMemoryState {
         self.inner.canon_state_notification_sender.subscribe()
     }
 
+    /// Subscribe to new safe block events.
+    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.chain_info_tracker.subscribe_to_safe_block()
+    }
+
+    /// Subscribe to new finalized block events.
+    pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.chain_info_tracker.subscribe_to_finalized_block()
+    }
+
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
     pub fn notify_canon_state(&self, event: CanonStateNotification) {
         self.inner.canon_state_notification_sender.send(event).ok();
