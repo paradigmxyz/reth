@@ -2010,8 +2010,9 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            let ommers =
+                self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers).unwrap_or_default();
+            return Ok(Some(ommers))
         }
 
         Ok(None)
