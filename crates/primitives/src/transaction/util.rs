@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "zkvm"))]
 pub(crate) mod secp256k1 {
     use super::*;
     use crate::{keccak256, Address, Signature};
@@ -43,6 +44,65 @@ pub(crate) mod secp256k1 {
         // strip out the first byte because that should be the SECP256K1_TAG_PUBKEY_UNCOMPRESSED
         // tag returned by libsecp's uncompressed pubkey serialization
         let hash = keccak256(&public.serialize_uncompressed()[1..]);
+        Address::from_slice(&hash[12..])
+    }
+}
+
+#[cfg(target_os = "zkvm")]
+pub(crate) mod secp256k1 {
+    use super::*;
+    use crate::{keccak256, Address, Signature};
+
+    pub(crate) use k256::ecdsa::Error;
+    use k256::{
+        ecdsa::{RecoveryId, Signature as K256Signature, SigningKey, VerifyingKey},
+        elliptic_curve::sec1::ToEncodedPoint,
+        PublicKey,
+    };
+    use revm_primitives::{B256, U256};
+
+    /// Recovers the address of the sender using secp256k1 pubkey recovery.
+    ///
+    /// Converts the public key into an ethereum address by hashing the public key with keccak256.
+    ///
+    /// This does not ensure that the `s` value in the signature is low, and _just_ wraps the
+    /// underlying secp256k1 library.
+    pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+        let recid = RecoveryId::from_byte(sig[64]).expect("recovery ID is valid");
+        let sig = K256Signature::from_slice(&sig.as_slice()[..64])?;
+        let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &sig, recid)?;
+        let pubkey = PublicKey::from(&recovered_key);
+        Ok(public_key_to_address(pubkey))
+    }
+
+    /// Signs message with the given secret key.
+    /// Returns the corresponding signature.
+    pub fn sign_message(secret: B256, message: B256) -> Result<Signature, secp256k1::Error> {
+        let key = SigningKey::from_bytes(secret.as_slice().into())?;
+        let (sig, rec_id) = key.sign_recoverable(message.as_slice())?;
+
+        let signature = Signature {
+            r: U256::try_from_be_slice(&sig.r().to_bytes())
+                .expect("The slice has at most 32 bytes"),
+            s: U256::try_from_be_slice(&sig.s().to_bytes())
+                .expect("The slice has at most 32 bytes"),
+            odd_y_parity: rec_id.is_y_odd(),
+        };
+
+        Ok(signature)
+    }
+
+    /// Converts a public key into an ethereum address by hashing the encoded public key with
+    /// keccak256.
+    pub fn public_key_to_address(public: PublicKey) -> Address {
+        let pubkey_bytes =
+            public.to_encoded_point(false).as_bytes().try_into().expect("The slice has 65 bytes");
+        public_key_bytes_to_address(&pubkey_bytes)
+    }
+
+    fn public_key_bytes_to_address(public: &[u8; 65]) -> Address {
+        // Strip out first byte of sec1 encoded pubkey
+        let hash = keccak256(&public[1..]);
         Address::from_slice(&hash[12..])
     }
 }

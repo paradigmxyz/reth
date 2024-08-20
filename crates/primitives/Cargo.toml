@@ -35,6 +35,7 @@ secp256k1 = { workspace = true, features = [
     "rand",
 ] }
 # for eip-4844
+k256 = { version = "0.13.3", features = ["ecdsa"] }
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
