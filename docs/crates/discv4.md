@@ -1,6 +1,6 @@
 # Discv4
 
-The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, lets jump into `disc4`.
+The `discv4` crate plays an important role in Reth, enabling discovery of other peers across the network. It is recommended to know how [Kademlia distributed hash tables](https://en.wikipedia.org/wiki/Kademlia) and [Ethereum's node discovery protocol](https://github.com/ethereum/devp2p/blob/master/discv4.md) work before reading through this chapter. While all concepts will be explained through the following sections, reading through the links above will make understanding this chapter much easier! With that note out of the way, let's jump into `discv4`.
 
 ## Starting the Node Discovery Protocol
 As mentioned in the network and stages chapters, when the node is first started up, the `node::Command::execute()` function is called, which initializes the node and starts to run the Reth pipeline. Throughout the initialization of the node, there are many processes that are started. One of the processes that is initialized is the p2p network which starts the node discovery protocol amongst other tasks.  
@@ -24,7 +24,7 @@ As mentioned in the network and stages chapters, when the node is first started 
     }
 ```
 
-During this process, a new `NetworkManager` is created through the `NetworkManager::new()` function, which starts the discovery protocol through a handful of newly spawned tasks. Lets take a look at how this actually works under the hood. 
+During this process, a new `NetworkManager` is created through the `NetworkManager::new()` function, which starts the discovery protocol through a handful of newly spawned tasks. Let's take a look at how this actually works under the hood. 
 
 [File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs#L89)
 ```rust ignore
@@ -153,7 +153,7 @@ impl Discv4 {
 }
 ```
 
-To better understand what is actually happening when the disc_v4 service is created, lets take a deeper look at the `Discv4Service::new()` function.
+To better understand what is actually happening when the disc_v4 service is created, let's take a deeper look at the `Discv4Service::new()` function.
 
 [File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L495)
 ```rust ignore
@@ -214,7 +214,7 @@ Once the `Discv4Service::new()` function completes, allowing the `Discv4::bind()
 ## Polling the Discv4Service and Discovery Events
 In Rust, the owner of a [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html#) is responsible for advancing the computation by polling the future. This is done by calling `Future::poll`.
 
-Lets take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections.
+Let's take a detailed look at how `Discv4Service::poll` works under the hood. This function has many moving parts, so we will break it up into smaller sections.
 
 [File: crates/net/discv4/src/lib.rs](https://github.com/paradigmxyz/reth/blob/530e7e8961b8f82ae2c675d16c368dd266ceba7d/crates/net/discv4/src/lib.rs#L495)
 ```rust ignore
@@ -306,4 +306,4 @@ where
 
 Every time that the network is polled, the `Discovery::poll()` is also called to handle all `DiscoveryEvent`s ready to be processed. There are two types of `DiscoveryEvent`s, `DiscoveryEvent::Discovered` and `DiscoveryEvent::EnrForkId`. If a new node is discovered, the new peer is added to the node's peers. If an ENR fork Id is received, the event is pushed to a queue of messages that will later be handled by the `NetworkState`.
 
-Lets recap everything that we covered. The `discv4` crate enables the node to discover new peers across the network. When the node is started, a `NetworkManager` is created which initializes a new `Discovery` type, which initializes the `Discv4Service`. When the `Discv4Service` is polled, all `Discv4Command`s, `IngressEvent`s and `DiscV4Event`s are handled until the `queued_events` are empty. This process repeats every time the `NetworkState` is polled to allow the node discover and communicate with new peers across the network.
+Let's recap everything that we covered. The `discv4` crate enables the node to discover new peers across the network. When the node is started, a `NetworkManager` is created which initializes a new `Discovery` type, which initializes the `Discv4Service`. When the `Discv4Service` is polled, all `Discv4Command`s, `IngressEvent`s and `DiscV4Event`s are handled until the `queued_events` are empty. This process repeats every time the `NetworkState` is polled to allow the node discover and communicate with new peers across the network.
