@@ -317,24 +317,24 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>>,
-        <N::AddOns as NodeAddOns<
+        N::AddOns: NodeAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
-        >>::EthApi: EthApiBuilderProvider<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        > + FullEthApiServer + AddDevSigners,
-        <<N::AddOns as NodeAddOns<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        >>::EthApi as EthApiTypes>::NetworkTypes:
-            alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            EthApi: EthApiBuilderProvider<
+                        NodeAdapter<
+                            RethFullAdapter<DB, N>,
+                            <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+                        >
+                    >
+                        + FullEthApiServer<
+                            NetworkTypes: alloy_network::Network<
+                                TransactionResponse = reth_rpc_types::Transaction
+                            >
+                        >
+                        + AddDevSigners
+        >,
     {
         self.node(node).launch().await
     }
@@ -378,8 +378,7 @@ impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<NodeAdapter<T, CB::Components>, EthApi: FullEthApiServer + AddDevSigners>,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig {
@@ -476,12 +475,13 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    AO::EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
-        + FullEthApiServer
-        + AddDevSigners,
-    <AO::EthApi as EthApiTypes>::NetworkTypes:
-        alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    AO: NodeAddOns<
+        NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
+    >,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(

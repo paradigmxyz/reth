@@ -59,11 +59,13 @@ impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeL
 where
     T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
-    <AO::EthApi as EthApiTypes>::NetworkTypes:
-        alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
+    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -178,6 +180,9 @@ where
             pipeline_exex_handle,
         )?;
 
+        // The new engine writes directly to static files. This ensures that they're up to the tip.
+        pipeline.move_to_static_files()?;
+
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
@@ -234,7 +239,6 @@ where
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-                database.clone(),
             ),
         );
 

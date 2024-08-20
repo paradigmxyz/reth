@@ -1691,7 +1691,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1720627201, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
+                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 1725984001 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1725984001, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
                 ),
             ],
         );
@@ -2649,7 +2653,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
+            ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
