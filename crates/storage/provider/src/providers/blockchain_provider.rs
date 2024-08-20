@@ -8,7 +8,10 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProvider};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    MemoryOverlayStateProvider,
+};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -1425,6 +1428,21 @@ where
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.canonical_in_memory_state.subscribe_canon_state()
+    }
+}
+
+impl<DB> ForkChoiceSubscriptions for BlockchainProvider2<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_safe_block();
+        ForkChoiceNotifications(receiver)
+    }
+
+    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
+        ForkChoiceNotifications(receiver)
     }
 }
 
