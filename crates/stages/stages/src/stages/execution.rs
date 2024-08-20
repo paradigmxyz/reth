@@ -3,10 +3,14 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{BlockNumber, Header, StaticFileSegment};
+use reth_primitives::{
+    BlockNumber, BlockWithSenders, Header, Receipt, Receipts, Request, Requests, StaticFileSegment,
+};
 use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -14,6 +18,7 @@ use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, StateWriter, StatsReader, TransactionVariant,
 };
+use reth_prune::{PruneMode, MINIMUM_PRUNING_DISTANCE};
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -23,11 +28,13 @@ use reth_stages_api::{
 };
 use std::{
     cmp::Ordering,
+    collections::HashSet,
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
+use tokio::sync::oneshot::error::TryRecvError;
 use tracing::*;
 
 /// The execution stage executes all transactions and
@@ -226,7 +233,7 @@ where
         ));
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
-        executor.set_prune_modes(prune_modes);
+        executor.set_prune_modes(prune_modes.clone());
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -248,6 +255,41 @@ where
         let mut cumulative_gas = 0;
         let batch_start = Instant::now();
 
+        let (receipts_tx, mut receipts_rx) = tokio::sync::oneshot::channel();
+        let (validation_tx, mut validation_rx) = tokio::sync::mpsc::unbounded_channel::<(
+            Arc<BlockWithSenders>,
+            Vec<Receipt>,
+            Vec<Request>,
+            PruneModes,
+        )>();
+        let chainspec = provider.chain_spec().clone();
+
+        tokio::task::spawn(async move {
+            let mut all_requests: Vec<Requests> = vec![];
+            let mut all_receipts =
+                Receipts { receipt_vec: Vec::with_capacity((max_block - start_block) as usize) };
+
+            while let Some((block, receipts, requests, _)) = validation_rx.recv().await {
+                if let Err(err) = validate_block_post_execution(
+                    &block,
+                    &chainspec,
+                    receipts.as_slice(),
+                    requests.as_slice(),
+                ) {
+                    let _ = receipts_tx.send(Err(StageError::Block {
+                        block: Box::new(block.header.clone().seal_slow()),
+                        error: BlockErrorKind::Execution(BlockExecutionError::Consensus(err)),
+                    }));
+                    return
+                }
+                // TODO: pruner
+                all_receipts.push(receipts.into_iter().map(Some).collect());
+                all_requests.push(requests.into())
+            }
+
+            let _ = receipts_tx.send(Ok((all_receipts, all_requests)));
+        });
+
         let mut blocks = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
@@ -258,9 +300,11 @@ where
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             // we need the block's transactions but we don't need the transaction hashes
-            let block = provider
-                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            let block = Arc::new(
+                provider
+                    .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?,
+            );
 
             fetch_block_duration += fetch_block_start.elapsed();
 
@@ -272,12 +316,15 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
-                StageError::Block {
-                    block: Box::new(block.header.clone().seal_slow()),
-                    error: BlockErrorKind::Execution(error),
-                }
-            })?;
+            let (receipts, requests) =
+                executor.execute((block.as_ref(), td).into()).map_err(|error| {
+                    StageError::Block {
+                        block: Box::new(block.header.clone().seal_slow()),
+                        error: BlockErrorKind::Execution(error),
+                    }
+                })?;
+            let _ = validation_tx.send((block.clone(), receipts, requests, prune_modes.clone()));
+
             execution_duration += execute_start.elapsed();
 
             // Log execution throughput
@@ -320,11 +367,40 @@ where
             ) {
                 break
             }
+
+            // Check if previous block validations have failed
+            if let Ok(err) = receipts_rx.try_recv() {
+                // If we have received a message inside the loop, it means that a previous block
+                // failed its validation.
+                err?;
+                unreachable!();
+            }
         }
+
+        // By dropping tx, the validation background task will end by sending all accumulated
+        // receipts and requests
+        drop(validation_tx);
+        let (receipts, requests) = loop {
+            match receipts_rx.try_recv() {
+                Ok(result) => {
+                    break result?;
+                }
+                Err(TryRecvError::Empty) => {
+                    // sleep for a bit to avoid busy-waiting
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue
+                }
+                _ => unreachable!(),
+            }
+        };
+        debug!(
+            target: "sync::stages::execution",
+            "Received validated receipts and requests"
+        );
 
         // prepare execution output for writing
         let time = Instant::now();
-        let ExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
+        let ExecutionOutcome { bundle, first_block, .. } = executor.finalize();
         let state = ExecutionOutcome::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
@@ -344,7 +420,7 @@ where
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
                 let hash = block.header.hash_slow();
-                block.seal(hash)
+                Arc::try_unwrap(block).expect("validation task has ended").seal(hash)
             });
 
             let previous_input =

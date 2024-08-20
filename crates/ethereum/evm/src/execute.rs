@@ -20,7 +20,8 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
+    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Receipts, Request, Requests,
+    U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -415,6 +416,28 @@ where
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
+
+    fn execute(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<(Vec<Receipt>, Vec<Request>), Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
+        let EthExecuteOutput { receipts, requests, gas_used: _ } =
+            self.executor.execute_without_verification(block, total_difficulty)?;
+
+        // prepare the state according to the prune mode
+        let retention = self.batch_record.bundle_retention(block.number);
+        self.executor.state.merge_transitions(retention);
+
+        // validation should done externally
+
+        Ok((receipts, requests))
+    }
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;

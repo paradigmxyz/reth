@@ -26,6 +26,7 @@ reth-network-p2p.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-prune.workspace = true
 reth-prune-types.workspace = true
@@ -34,6 +35,7 @@ reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-ethereum-consensus.workspace = true
 
 reth-testing-utils = { workspace = true, optional = true }
 

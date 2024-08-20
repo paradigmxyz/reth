@@ -7,7 +7,7 @@ pub use reth_storage_errors::provider::ProviderError;
 
 use core::fmt::Display;
 
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, Request, Requests};
 use reth_prune_types::PruneModes;
 use revm_primitives::db::Database;
 
@@ -43,6 +43,15 @@ pub trait BatchExecutor<DB> {
     type Output;
     /// The error type returned by the executor.
     type Error;
+
+    /// Executes the next block in the batch and updates the state internally. Returns the
+    /// unverified output.
+    fn execute(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<(Vec<Receipt>, Vec<Request>), Self::Error> {
+        todo!()
+    }
 
     /// Executes the next block in the batch, verifies the output and updates the state internally.
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
