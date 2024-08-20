@@ -858,18 +858,18 @@ where
         }
 
         if self.persistence_state.in_progress() {
-            let mut rx = self
+            let (mut rx, start_time) = self
                 .persistence_state
                 .rx
                 .take()
                 .expect("if a persistence task is in progress Receiver must be Some");
-
-            // Check if persistence has completed
+            // Check if persistence has complete
             match rx.try_recv() {
                 Ok(last_persisted_block_hash) => {
+                    self.metrics.persistence_duration.record(start_time.elapsed());
                     let Some(last_persisted_block_hash) = last_persisted_block_hash else {
-                        // if this happened, then we persisted no blocks because we sent an empty
-                        // vec of blocks
+                        // if this happened, then we persisted no blocks because we sent an
+                        // empty vec of blocks
                         warn!(target: "engine", "Persistence task completed but did not persist any blocks");
                         return Ok(())
                     };
@@ -883,7 +883,7 @@ where
                     }
                 }
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
-                Err(TryRecvError::Empty) => self.persistence_state.rx = Some(rx),
+                Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
         }
         Ok(())
@@ -1993,7 +1993,7 @@ pub struct PersistenceState {
     last_persisted_block_hash: B256,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
-    rx: Option<oneshot::Receiver<Option<B256>>>,
+    rx: Option<(oneshot::Receiver<Option<B256>>, Instant)>,
     /// The last persisted block number.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -2009,7 +2009,7 @@ impl PersistenceState {
 
     /// Sets state for a started persistence task.
     fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
-        self.rx = Some(rx);
+        self.rx = Some((rx, Instant::now()));
     }
 
     /// Sets state for a finished persistence task.
