@@ -527,7 +527,6 @@ secp256k1 = { version = "0.29", default-features = false, features = [
 c-kzg = "1.0.0"
 
 # config
-confy = "0.6"
 toml = "0.8"
 
 # misc-testing
