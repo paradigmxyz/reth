@@ -15,7 +15,7 @@ use reth_rpc_types::{
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use tracing::trace;
 
 use crate::{
@@ -360,7 +360,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 impl<T> EthApiServer<Transaction<T::NetworkTypes>, Block<T::NetworkTypes>> for T
 where
     T: FullEthApi,
-    T::TransactionBuilder: TransactionBuilder<Transaction = Transaction<T::NetworkTypes>>,
+    T::TransactionCompat: TransactionCompat<Transaction = Transaction<T::NetworkTypes>>,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
@@ -493,7 +493,7 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await?
-            .map(|tx| tx.into_transaction::<T::TransactionBuilder>()))
+            .map(|tx| tx.into_transaction::<T::TransactionCompat>()))
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`

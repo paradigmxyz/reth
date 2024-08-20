@@ -19,7 +19,7 @@ use reth_rpc_types::{
     },
     FilteredParams, Header, Log, Transaction,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
@@ -77,7 +77,7 @@ where
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionBuilder<Transaction = Transaction> + Clone + 'static,
+    Eth: TransactionCompat<Transaction = Transaction> + Clone + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -109,7 +109,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
     // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
-    Eth: TransactionBuilder<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = Transaction>,
 {
     match kind {
         SubscriptionKind::NewHeads => {

@@ -22,9 +22,9 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi: EthApiTypes> {
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
-    pub filter: EthFilter<Provider, Pool, EthApi::TransactionBuilder>,
+    pub filter: EthFilter<Provider, Pool, EthApi::TransactionCompat>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionBuilder>,
+    pub pubsub: EthPubSub<Provider, Pool, Events, Network, EthApi::TransactionCompat>,
 }
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi>
@@ -139,7 +139,7 @@ impl EthFilterApiBuilder {
     /// Builds the [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer), for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
-    ) -> EthFilter<Provider, Pool, Eth::TransactionBuilder>
+    ) -> EthFilter<Provider, Pool, Eth::TransactionCompat>
     where
         Provider: Send + Sync + Clone + 'static,
         Pool: Send + Sync + Clone + 'static,
@@ -164,7 +164,7 @@ impl EthPubSubApiBuilder {
     /// Builds the [`EthPubSubApiServer`](reth_rpc_eth_api::EthPubSubApiServer), for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events, Eth>,
-    ) -> EthPubSub<Provider, Pool, Events, Network, Eth::TransactionBuilder>
+    ) -> EthPubSub<Provider, Pool, Events, Network, Eth::TransactionCompat>
     where
         Provider: Clone,
         Pool: Clone,

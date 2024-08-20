@@ -32,7 +32,7 @@ use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -110,7 +110,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,
 {

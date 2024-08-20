@@ -21,7 +21,7 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError, Transaction};
@@ -198,7 +198,7 @@ pub trait EthTransactions: LoadTransaction {
     ) -> impl Future<Output = Result<Option<Transaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        Self::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Self::NetworkTypes>>,
+        Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
@@ -206,7 +206,7 @@ pub trait EthTransactions: LoadTransaction {
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
-                    return Ok(Some(Self::TransactionBuilder::from_recovered_with_block_context(
+                    return Ok(Some(Self::TransactionCompat::from_recovered_with_block_context(
                         tx,
                         block_hash,
                         block_number,

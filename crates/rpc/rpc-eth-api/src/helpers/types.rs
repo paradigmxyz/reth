@@ -22,15 +22,15 @@ pub trait EthApiTypes: Send + Sync + Clone {
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     type NetworkTypes: Network;
     /// Conversion methods for transaction RPC type.
-    type TransactionBuilder: Send + Sync + Clone + fmt::Debug;
+    type TransactionCompat: Send + Sync + Clone + fmt::Debug;
     /// Conversion methods for block RPC type.
-    type BlockBuilder: BlockBuilder<TxBuilder = Self::TransactionBuilder>;
+    type BlockBuilder: BlockBuilder<TxBuilder = Self::TransactionCompat>;
 }
 
 impl EthApiTypes for () {
     type Error = EthApiError;
     type NetworkTypes = AnyNetwork;
-    type TransactionBuilder = ();
+    type TransactionCompat = ();
     type BlockBuilder = ();
 }
 

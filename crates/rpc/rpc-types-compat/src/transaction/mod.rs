@@ -13,7 +13,7 @@ use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecover
 use reth_rpc_types::{Transaction, WithOtherFields};
 
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionBuilder: Send + Sync + Unpin + Clone + fmt::Debug {
+pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
     type Transaction: Send + Clone + Default + fmt::Debug;
 
@@ -126,7 +126,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     }
 }
 
-impl TransactionBuilder for () {
+impl TransactionCompat for () {
     // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
     // `alloy_network::AnyNetwork`
     type Transaction = WithOtherFields<Transaction>;

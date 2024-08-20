@@ -129,7 +129,7 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionBuilder = EthTxBuilder;
+    type TransactionCompat = EthTxBuilder;
     type BlockBuilder = EthBlockBuilder<EthTxBuilder>;
 }
 

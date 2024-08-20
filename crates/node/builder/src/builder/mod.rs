@@ -30,7 +30,7 @@ use reth_node_core::{
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
@@ -332,7 +332,7 @@ where
                         + FullEthApiServer<
                             NetworkTypes: alloy_network::Network<
                                 TransactionResponse = reth_rpc_types::Transaction
-                            >, TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>
+                            >, TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>
                         >
                         + AddDevSigners
         >,
@@ -481,7 +481,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,
 {

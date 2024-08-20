@@ -25,7 +25,7 @@ use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind, Transaction,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use tokio::{
@@ -144,7 +144,7 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
-    Eth: TransactionBuilder<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = Transaction>,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
@@ -244,7 +244,7 @@ impl<Provider, Pool, Eth> EthFilterApiServer<Eth::Transaction> for EthFilter<Pro
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Eth: TransactionBuilder<Transaction = Transaction> + Clone + 'static,
+    Eth: TransactionCompat<Transaction = Transaction> + Clone + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -583,7 +583,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, Eth> {
 impl<T, Eth> FullTransactionsReceiver<T, Eth>
 where
     T: PoolTransaction + 'static,
-    Eth: TransactionBuilder,
+    Eth: TransactionCompat,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -612,7 +612,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 impl<T, Eth> FullTransactionsFilter<Eth::Transaction> for FullTransactionsReceiver<T, Eth>
 where
     T: PoolTransaction + 'static,
-    Eth: TransactionBuilder + 'static,
+    Eth: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<Eth::Transaction> {
         Self::drain(self).await

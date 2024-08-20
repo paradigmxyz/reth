@@ -16,4 +16,4 @@ pub mod proof;
 pub mod transaction;
 
 pub use block::BlockBuilder;
-pub use transaction::TransactionBuilder;
+pub use transaction::TransactionCompat;

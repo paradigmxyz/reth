@@ -168,7 +168,7 @@ use reth_rpc_eth_api::{
         Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt, UpdateRawTxForwarder,
     },
     Block, EthApiServer, EthApiTypes, FullEthApiServer, RawTransactionForwarder, Transaction,
-    TransactionBuilder,
+    TransactionCompat,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
@@ -232,7 +232,7 @@ where
     EvmConfig: ConfigureEvm,
     EthApi: FullEthApiServer<
         NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-        TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+        TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
     >,
 {
     let module_config = module_config.into();
@@ -442,7 +442,7 @@ where
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         >,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
@@ -511,7 +511,7 @@ where
     where
         EthApi: FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         >,
     {
         let mut modules = TransportRpcModules::default();
@@ -988,7 +988,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: FullEthApiServer<
         NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-        TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
+        TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
     >,
 {
     /// Configures the auth module that includes the
@@ -1105,7 +1105,7 @@ where
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => {
-                            TxPoolApi::<_, EthApi::TransactionBuilder>::new(self.pool.clone())
+                            TxPoolApi::<_, EthApi::TransactionCompat>::new(self.pool.clone())
                                 .into_rpc()
                                 .into()
                         }

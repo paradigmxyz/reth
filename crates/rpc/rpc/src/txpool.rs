@@ -8,7 +8,7 @@ use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
     Transaction,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
 use tracing::trace;
 
@@ -33,7 +33,7 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
     // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
-    Eth: TransactionBuilder<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = Transaction>,
 {
     fn content(&self) -> TxpoolContent {
         #[inline]
@@ -42,7 +42,7 @@ where
             content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
         ) where
             Tx: PoolTransaction,
-            Eth: TransactionBuilder<Transaction = Transaction>,
+            Eth: TransactionCompat<Transaction = Transaction>,
         {
             content
                 .entry(tx.sender())
@@ -68,7 +68,7 @@ where
 impl<Pool, Eth> TxPoolApiServer for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: TransactionBuilder<Transaction = Transaction> + 'static,
+    Eth: TransactionCompat<Transaction = Transaction> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.

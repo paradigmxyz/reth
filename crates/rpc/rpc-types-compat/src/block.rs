@@ -8,12 +8,12 @@ use reth_primitives::{
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
-use crate::TransactionBuilder;
+use crate::TransactionCompat;
 
 /// Builds RPC block w.r.t. network.
 pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
     /// RPC transaction type builder of network.
-    type TxBuilder: TransactionBuilder;
+    type TxBuilder: TransactionCompat;
 
     /// Converts the given primitive block into a [Block] response with the given
     /// [`BlockTransactionsKind`]
@@ -24,7 +24,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         total_difficulty: U256,
         kind: BlockTransactionsKind,
         block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
         match kind {
             BlockTransactionsKind::Hashes => {
                 Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
@@ -44,7 +44,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         mut block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
         let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
         let block_number = block.block.number;
         let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -69,7 +69,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
             })
             .collect::<Vec<_>>();
 
-        Ok(from_block_with_transactions::<<Self::TxBuilder as TransactionBuilder>::Transaction>(
+        Ok(from_block_with_transactions::<<Self::TxBuilder as TransactionCompat>::Transaction>(
             block_length,
             block_hash,
             block.block,
@@ -87,11 +87,11 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Block<<Self::TxBuilder as TransactionBuilder>::Transaction> {
+    ) -> Block<<Self::TxBuilder as TransactionCompat>::Transaction> {
         let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-        from_block_with_transactions::<<Self::TxBuilder as TransactionBuilder>::Transaction>(
+        from_block_with_transactions::<<Self::TxBuilder as TransactionCompat>::Transaction>(
             block.length(),
             block_hash,
             block.block,
@@ -108,7 +108,7 @@ impl BlockBuilder for () {
         _block: BlockWithSenders,
         _total_difficulty: U256,
         _block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionBuilder>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
         Ok(Block::default())
     }
 }

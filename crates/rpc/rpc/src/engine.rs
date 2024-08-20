@@ -9,7 +9,7 @@ use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
     SyncStatus, TransactionRequest,
 };
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -38,8 +38,8 @@ impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
     Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>> + EthApiTypes,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
-    Eth::TransactionBuilder: TransactionBuilder<Transaction = Transaction<Eth::NetworkTypes>>,
-    EthFilter: EthFilterApiServer<<Eth::TransactionBuilder as TransactionBuilder>::Transaction>,
+    Eth::TransactionCompat: TransactionCompat<Transaction = Transaction<Eth::NetworkTypes>>,
+    EthFilter: EthFilterApiServer<<Eth::TransactionCompat as TransactionCompat>::Transaction>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
