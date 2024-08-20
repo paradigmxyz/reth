@@ -75,6 +75,8 @@ thiserror.workspace = true
 derive_more.workspace = true
 
 [dev-dependencies]
+alloy-consensus.workspace = true
+
 reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
