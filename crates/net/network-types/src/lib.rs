@@ -19,7 +19,7 @@ pub mod session;
 /// [`BackoffKind`] definition.
 mod backoff;
 
-pub use reth_network_p2p::reputation::{Reputation, ReputationChangeKind, ReputationChangeWeights};
+pub use peers::reputation::{Reputation, ReputationChangeKind, ReputationChangeWeights};
 
 pub use backoff::BackoffKind;
 pub use peers::{
