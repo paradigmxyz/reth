@@ -169,12 +169,11 @@ impl CanonicalInMemoryState {
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let head_state = in_memory_state.head_state();
-        let header = match head_state {
-            Some(state) => state.block().block().header.clone(),
-            None => SealedHeader::default(),
-        };
+        let header =
+            head_state.map(|state| state.block().block().header.clone()).unwrap_or_default();
+
         let chain_info_tracker = ChainInfoTracker::new(header, finalized);
-        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+        let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
         let inner = CanonicalInMemoryStateInner {
@@ -196,7 +195,7 @@ impl CanonicalInMemoryState {
     pub fn with_head(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head, finalized);
         let in_memory_state = InMemoryState::default();
-        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+        let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
         let inner = CanonicalInMemoryStateInner {
             chain_info_tracker,

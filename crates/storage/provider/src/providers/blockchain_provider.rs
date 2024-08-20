@@ -37,7 +37,7 @@ use tracing::trace;
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct BlockchainProvider2<DB> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
