@@ -1489,11 +1489,13 @@ where
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-  
+
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-    use reth_primitives::{BlockNumberOrTag, SealedBlock, B256};
-    use reth_storage_api::{BlockHashReader, BlockNumReader, BlockReaderIdExt, HeaderProvider};
+    use reth_primitives::{BlockNumHash, BlockNumberOrTag, SealedBlock, B256};
+    use reth_storage_api::{
+        BlockHashReader, BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider,
+    };
     use reth_testing_utils::generators::{self, random_block_range};
 
     use crate::{
@@ -1825,5 +1827,50 @@ mod tests {
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
             in_memory_block.ommers
         );
+    }
+
+    #[test]
+    fn test_block_id_reader() -> eyre::Result<()> {
+        // Create a new provider
+        let (provider, _, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
+
+        // Set the pending block in memory
+        let pending_block = in_memory_blocks.last().unwrap();
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(pending_block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Set the safe block in memory
+        let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
+        provider.canonical_in_memory_state.set_safe(safe_block.header.clone());
+
+        // Set the finalized block in memory
+        let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
+        provider.canonical_in_memory_state.set_finalized(finalized_block.header.clone());
+
+        // Verify the pending block number and hash
+        assert_eq!(
+            provider.pending_block_num_hash()?,
+            Some(BlockNumHash { number: pending_block.number, hash: pending_block.hash() })
+        );
+
+        // Verify the safe block number and hash
+        assert_eq!(
+            provider.safe_block_num_hash()?,
+            Some(BlockNumHash { number: safe_block.number, hash: safe_block.hash() })
+        );
+
+        // Verify the finalized block number and hash
+        assert_eq!(
+            provider.finalized_block_num_hash()?,
+            Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
+        );
+
+        Ok(())
     }
 }
