@@ -112,12 +112,7 @@ impl InMemoryState {
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.borrow().as_ref().map(|state| {
-            Arc::new(BlockState::with_parent(
-                state.block.clone(),
-                state.parent.clone().map(|p| (*p).clone()),
-            ))
-        })
+        self.pending.borrow().as_ref().map(|state| Arc::new(state.clone()))
     }
 
     #[cfg(test)]
