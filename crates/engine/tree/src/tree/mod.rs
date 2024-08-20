@@ -251,9 +251,9 @@ impl TreeState {
             }
         }
 
-        new_chain.reverse();
-
         if current_hash == self.current_canonical_head.hash {
+            new_chain.reverse();
+
             // Simple extension of the current chain
             return Some(NewCanonicalChain::Commit { new: new_chain });
         }
@@ -264,7 +264,7 @@ impl TreeState {
 
         while old_hash != current_hash {
             if let Some(block) = self.blocks_by_hash.get(&old_hash) {
-                old_chain.insert(0, block.clone());
+                old_chain.push(block.clone());
                 old_hash = block.block.parent_hash;
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
@@ -279,7 +279,7 @@ impl TreeState {
 
             if let Some(block) = self.blocks_by_hash.get(&current_hash) {
                 if self.is_fork(block.block.hash()) {
-                    new_chain.insert(0, block.clone());
+                    new_chain.push(block.clone());
                     current_hash = block.block.parent_hash;
                 }
             } else {
@@ -288,6 +288,8 @@ impl TreeState {
                 return None;
             }
         }
+        new_chain.reverse();
+        old_chain.reverse();
 
         Some(NewCanonicalChain::Reorg { new: new_chain, old: old_chain })
     }
