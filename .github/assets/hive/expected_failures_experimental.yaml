@@ -42,6 +42,7 @@ engine-withdrawals:
 engine-api:
   - Invalid Missing Ancestor Syncing ReOrg, GasLimit, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Paris) (reth)
   - Re-org to Previously Validated Sidechain Payload (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Paris) (reth)
