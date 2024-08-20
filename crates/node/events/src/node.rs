@@ -463,8 +463,6 @@ where
         let mut this = self.project();
 
         while this.info_interval.poll_tick(cx).is_ready() {
-            let freelist = OptionalField(this.state.freelist());
-
             if let Some(CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }) =
                 &this.state.current_stage
             {
@@ -477,7 +475,6 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
-                            %freelist,
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -490,7 +487,6 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
-                            %freelist,
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -502,7 +498,6 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
-                            %freelist,
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -514,7 +509,6 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
-                            %freelist,
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -531,7 +525,6 @@ where
                     info!(
                         target: "reth::cli",
                         connected_peers = this.state.num_connected_peers(),
-                        %freelist,
                         %latest_block,
                         "Status"
                     );
@@ -540,7 +533,6 @@ where
                 info!(
                     target: "reth::cli",
                     connected_peers = this.state.num_connected_peers(),
-                    %freelist,
                     "Status"
                 );
             }
