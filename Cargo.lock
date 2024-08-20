@@ -1858,18 +1858,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "confy"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45b1f4c00870f07dc34adcac82bb6a72cc5aabca8536ba1797e01df51d2ce9a0"
-dependencies = [
- "directories",
- "serde",
- "thiserror",
- "toml",
-]
-
-[[package]]
 name = "console"
 version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,15 +2402,6 @@ dependencies = [
  "const-oid",
  "crypto-common",
  "subtle",
-]
-
-[[package]]
-name = "directories"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a49173b84e034382284f27f1af4dcbbd231ffa358c0fe316541a7337f376a35"
-dependencies = [
- "dirs-sys",
 ]
 
 [[package]]
@@ -6226,7 +6205,6 @@ dependencies = [
  "aquamarine",
  "backon",
  "clap",
- "confy",
  "discv5",
  "eyre",
  "fdlimit",
@@ -6551,7 +6529,6 @@ dependencies = [
  "backon",
  "clap",
  "comfy-table",
- "confy",
  "crossterm",
  "eyre",
  "fdlimit",
@@ -6658,7 +6635,7 @@ dependencies = [
 name = "reth-config"
 version = "1.0.5"
 dependencies = [
- "confy",
+ "eyre",
  "humantime-serde",
  "reth-network-peers",
  "reth-network-types",
@@ -7693,7 +7670,6 @@ name = "reth-node-builder"
 version = "1.0.5"
 dependencies = [
  "aquamarine",
- "confy",
  "eyre",
  "fdlimit",
  "futures",
@@ -7788,9 +7764,12 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
+ "serde",
  "serde_json",
  "shellexpand",
+ "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "vergen",
 ]

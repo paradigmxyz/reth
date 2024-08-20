@@ -65,7 +65,8 @@ impl EnvironmentArgs {
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
-        let mut config: Config = confy::load_path(config_path)
+
+        let mut config = Config::from_path(config_path)
             .inspect_err(
                 |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
             )
