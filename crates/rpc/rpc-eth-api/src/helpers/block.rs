@@ -189,7 +189,6 @@ pub trait EthBlocks: LoadBlock {
         index: Index,
     ) -> impl Future<Output = Result<Option<Block>, Self::Error>> + Send {
         async move {
-            
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
                 LoadBlock::provider(self)

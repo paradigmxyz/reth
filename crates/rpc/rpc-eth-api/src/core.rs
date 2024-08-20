@@ -12,7 +12,12 @@ use reth_primitives::{
 };
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
-    serde_helpers::JsonStorageKey, simulate::{SimBlock, SimulatedBlock}, state::{EvmOverrides, StateOverride}, AnyTransactionReceipt, Block, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction, TransactionRequest, Work
+    serde_helpers::JsonStorageKey,
+    simulate::{SimBlock, SimulatedBlock},
+    state::{EvmOverrides, StateOverride},
+    AnyTransactionReceipt, Block, BlockOverrides, Bundle, EIP1186AccountProofResponse,
+    EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    TransactionRequest, Work,
 };
 use tracing::trace;
 
