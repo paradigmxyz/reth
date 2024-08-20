@@ -653,17 +653,6 @@ pub struct ValidAnnouncementData {
 
 handle_mempool_data_map_impl!(ValidAnnouncementData,);
 
-impl From<PartiallyValidData<Eth68TxMetadata>> for ValidAnnouncementData {
-    /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
-    /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
-    /// version set to `None`.
-    fn from(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
-        let PartiallyValidData { data, version } = data;
-        let version = version.expect("should have eth version for conversion");
-        Self { data, version }
-    }
-}
-
 impl ValidAnnouncementData {
     /// Destructs returning only the valid hashes and the announcement message version. Caution! If
     /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
@@ -671,6 +660,17 @@ impl ValidAnnouncementData {
         let hashes = self.data.into_keys().collect::<HashSet<_>>();
 
         (RequestTxHashes::new(hashes), self.version)
+    }
+
+    /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
+    /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
+    /// version set to `None`.
+    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
+        let PartiallyValidData { data, version } = data;
+
+        let version = version.expect("should have eth version for conversion");
+
+        Self { data, version }
     }
 
     /// Destructs returning the validated data.
