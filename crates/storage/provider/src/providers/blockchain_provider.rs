@@ -1500,23 +1500,28 @@ mod tests {
         providers::BlockchainProvider2, test_utils::create_test_provider_factory, CanonChainTracker,
     };
 
-    type ArcedTempDatabase = Arc<TempDatabase<DatabaseEnv>>;
+    const TEST_BLOCKS_COUNT: usize = 5;
 
-    const BLOCK_COUNT: usize = 10;
-
+    #[allow(clippy::type_complexity)]
     fn provider_with_random_blocks(
-    ) -> eyre::Result<(BlockchainProvider2<ArcedTempDatabase>, Vec<SealedBlock>)> {
+        database_blocks: usize,
+        in_memory_blocks: usize,
+    ) -> eyre::Result<(
+        BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
+        Vec<SealedBlock>,
+        Vec<SealedBlock>,
+    )> {
         let mut rng = generators::rng();
-        let limit = BLOCK_COUNT as u64 - 1;
-        let blocks = random_block_range(&mut rng, 0..=limit, B256::ZERO, 0..1);
+        let block_range = (database_blocks + in_memory_blocks - 1) as u64;
+        let blocks = random_block_range(&mut rng, 0..=block_range, B256::ZERO, 0..1);
 
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
 
         let mut blocks_iter = blocks.clone().into_iter();
 
-        // Insert first 5 blocks into the database
-        for block in (0..5).map_while(|_| blocks_iter.next()) {
+        // Insert data blocks into the database
+        for block in (0..database_blocks).map_while(|_| blocks_iter.next()) {
             provider_rw.insert_historical_block(
                 block.seal_with_senders().expect("failed to seal block with senders"),
             )?;
@@ -1543,31 +1548,38 @@ mod tests {
         provider.canonical_in_memory_state.update_chain(chain);
 
         // Get canonical, safe, and finalized blocks
-        let canonical_block = blocks.get(BLOCK_COUNT - 1).unwrap().clone();
-        let safe_block = blocks.get(BLOCK_COUNT - 2).unwrap().clone();
-        let finalized_block = blocks.get(BLOCK_COUNT - 3).unwrap().clone();
+        let block_count = database_blocks + in_memory_blocks;
+        let canonical_block = blocks.get(block_count - 1).unwrap().clone();
+        let safe_block = blocks.get(block_count - 2).unwrap().clone();
+        let finalized_block = blocks.get(block_count - 3).unwrap().clone();
 
         // Set the canonical head, safe, and finalized blocks
         provider.set_canonical_head(canonical_block.header);
         provider.set_safe(safe_block.header);
         provider.set_finalized(finalized_block.header);
 
-        Ok((provider, blocks))
+        let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
+        Ok((provider, database_blocks.to_vec(), in_memory_blocks.to_vec()))
     }
 
     #[test]
     fn test_block_hash_reader() -> eyre::Result<()> {
-        let (provider, blocks) = provider_with_random_blocks()?;
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT)?;
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         assert_eq!(provider.block_hash(database_block.number)?, Some(database_block.hash()));
         assert_eq!(provider.block_hash(in_memory_block.number)?, Some(in_memory_block.hash()));
 
         assert_eq!(
             provider.canonical_hashes_range(0, 10)?,
-            blocks.iter().map(|block| block.hash()).collect::<Vec<_>>()
+            [database_blocks, in_memory_blocks]
+                .concat()
+                .iter()
+                .map(|block| block.hash())
+                .collect::<Vec<_>>()
         );
 
         Ok(())
@@ -1575,10 +1587,12 @@ mod tests {
 
     #[test]
     fn test_header_provider() -> eyre::Result<()> {
-        let (provider, blocks) = provider_with_random_blocks()?;
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
+        let blocks = [database_blocks, in_memory_blocks].concat();
 
         assert_eq!(provider.header(&database_block.hash())?, Some(database_block.header().clone()));
         assert_eq!(
@@ -1637,11 +1651,8 @@ mod tests {
 
     #[test]
     fn test_block_num_reader() -> eyre::Result<()> {
-        let (provider, blocks) = provider_with_random_blocks()?;
-
-        let mid = BLOCK_COUNT / 2;
-        let database_blocks = blocks.get(0..mid).unwrap();
-        let in_memory_blocks = blocks.get(mid..).unwrap();
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
         assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
         assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
@@ -1656,10 +1667,11 @@ mod tests {
 
     #[test]
     fn test_block_reader_id_ext_block_by_id() {
-        let (provider, blocks) = provider_with_random_blocks().unwrap();
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
@@ -1683,12 +1695,15 @@ mod tests {
 
     #[test]
     fn test_block_reader_id_ext_header_by_number_or_tag() {
-        let (provider, blocks) = provider_with_random_blocks().unwrap();
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
-        let database_block = blocks.first().unwrap().clone();
-        let canonical_block = blocks.get(BLOCK_COUNT - 1).unwrap().clone();
-        let safe_block = blocks.get(BLOCK_COUNT - 2).unwrap().clone();
-        let finalized_block = blocks.get(BLOCK_COUNT - 3).unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+
+        let in_memory_block_count = in_memory_blocks.len();
+        let canonical_block = in_memory_blocks.get(in_memory_block_count - 1).unwrap().clone();
+        let safe_block = in_memory_blocks.get(in_memory_block_count - 2).unwrap().clone();
+        let finalized_block = in_memory_blocks.get(in_memory_block_count - 3).unwrap().clone();
 
         let block_number = database_block.number;
         assert_eq!(
@@ -1730,10 +1745,11 @@ mod tests {
 
     #[test]
     fn test_block_reader_id_ext_header_by_id() {
-        let (provider, blocks) = provider_with_random_blocks().unwrap();
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
@@ -1780,10 +1796,11 @@ mod tests {
 
     #[test]
     fn test_block_reader_id_ext_ommers_by_id() {
-        let (provider, blocks) = provider_with_random_blocks().unwrap();
+        let (provider, database_blocks, in_memory_blocks) =
+            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
 
-        let database_block = blocks.first().unwrap().clone();
-        let in_memory_block = blocks.last().unwrap().clone();
+        let database_block = database_blocks.first().unwrap().clone();
+        let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
