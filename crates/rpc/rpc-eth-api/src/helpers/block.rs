@@ -205,7 +205,7 @@ pub trait EthBlocks: LoadBlock {
             let uncle = uncles
                 .into_iter()
                 .nth(index.into())
-                .map(|header| uncle_block_from_header(header).into());
+                .map(|header| uncle_block_from_header(header));
             Ok(uncle)
         }
     }
