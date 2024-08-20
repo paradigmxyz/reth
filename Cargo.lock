@@ -7595,7 +7595,6 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
- "serde",
  "tokio",
  "tracing",
 ]

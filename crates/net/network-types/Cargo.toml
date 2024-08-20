@@ -17,7 +17,7 @@ reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
 reth-ethereum-forks.workspace = true
 
-# io
+# misc
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true }

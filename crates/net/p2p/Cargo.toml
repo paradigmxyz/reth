@@ -19,9 +19,6 @@ reth-network-peers.workspace = true
 reth-network-types.workspace = true
 reth-storage-errors.workspace = true
 
-# io
-serde = { workspace = true, optional = true }
-
 # async
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -42,5 +39,4 @@ tokio = { workspace = true, features = ["full"] }
 [features]
 default = ["std"]
 test-utils = ["reth-consensus/test-utils", "parking_lot"]
-serde = ["dep:serde"]
 std = ["reth-consensus/std"]
