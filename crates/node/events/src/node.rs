@@ -6,7 +6,6 @@ use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
-use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
 use reth_network::NetworkEvent;
 use reth_network_api::PeersInfo;
 use reth_primitives::{constants, BlockNumber, B256};
@@ -31,11 +30,7 @@ const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 /// connections, current processing stage, and the latest block information. It provides
 /// methods to handle different types of events that affect the node's state, such as pipeline
 /// events, network events, and consensus engine events.
-struct NodeState<DB> {
-    /// Database environment.
-    /// Used for freelist calculation reported in the "Status" log message.
-    /// See [`EventHandler::poll`].
-    db: DB,
+struct NodeState {
     /// Information about connected peers.
     peers_info: Option<Box<dyn PeersInfo>>,
     /// The stage currently being executed.
@@ -52,14 +47,12 @@ struct NodeState<DB> {
     finalized_block_hash: Option<B256>,
 }
 
-impl<DB> NodeState<DB> {
+impl NodeState {
     const fn new(
-        db: DB,
         peers_info: Option<Box<dyn PeersInfo>>,
         latest_block: Option<BlockNumber>,
     ) -> Self {
         Self {
-            db,
             peers_info,
             current_stage: None,
             latest_block,
@@ -332,12 +325,6 @@ impl<DB> NodeState<DB> {
     }
 }
 
-impl<DB: DatabaseMetadata> NodeState<DB> {
-    fn freelist(&self) -> Option<usize> {
-        self.db.metadata().freelist_size()
-    }
-}
-
 /// Helper type for formatting of optional fields:
 /// - If [Some(x)], then `x` is written
 /// - If [None], then `None` is written
@@ -423,16 +410,14 @@ impl From<StaticFileProducerEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E, DB>(
+pub async fn handle_events<E>(
     peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
-    db: DB,
 ) where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata + Database + 'static,
 {
-    let state = NodeState::new(db, peers_info, latest_block_number);
+    let state = NodeState::new(peers_info, latest_block_number);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
@@ -444,18 +429,17 @@ pub async fn handle_events<E, DB>(
 
 /// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
-struct EventHandler<E, DB> {
-    state: NodeState<DB>,
+struct EventHandler<E> {
+    state: NodeState,
     #[pin]
     events: E,
     #[pin]
     info_interval: Interval,
 }
 
-impl<E, DB> Future for EventHandler<E, DB>
+impl<E> Future for EventHandler<E>
 where
     E: Stream<Item = NodeEvent> + Unpin,
-    DB: DatabaseMetadata + Database + 'static,
 {
     type Output = ();
 

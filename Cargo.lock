@@ -7817,7 +7817,6 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
- "reth-db-api",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
