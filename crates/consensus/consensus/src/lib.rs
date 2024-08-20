@@ -298,9 +298,7 @@ pub enum ConsensusError {
     ParentBeaconBlockRootUnexpected,
 
     /// Error when blob gas used exceeds the maximum allowed.
-    #[display(
-        "blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}"
-    )]
+    #[display("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
     BlobGasUsedExceedsMaxBlobGasPerBlock {
         /// The actual blob gas used.
         blob_gas_used: u64,
@@ -342,9 +340,11 @@ pub enum ConsensusError {
     BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
-    #[display("invalid excess blob gas: {diff}; \
+    #[display(
+        "invalid excess blob gas: {diff}; \
             parent excess blob gas: {parent_excess_blob_gas}, \
-            parent blob gas used: {parent_blob_gas_used}")]
+            parent blob gas used: {parent_blob_gas_used}"
+    )]
     ExcessBlobGasDiff {
         /// The excess blob gas diff.
         diff: GotExpected<u64>,
