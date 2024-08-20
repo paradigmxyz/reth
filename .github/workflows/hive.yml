@@ -179,7 +179,7 @@ jobs:
     needs:
       - prepare-reth
       - prepare-hive
-    name: run ${{ matrix.engine }} - ${{ matrix.sim }}
+    name: run ${{ matrix.engine }} - ${{ matrix.sim }}${{ matrix.limit && format(' - {0}', matrix.limit) }}
     runs-on:
       group: Reth
     permissions:
@@ -222,7 +222,19 @@ jobs:
           sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' hivetests/clients/reth/reth.sh
 
       - name: Run ${{ matrix.sim }} simulator
-        run: .github/assets/hive/run_simulator.sh "${{ matrix.sim }}$" "${{matrix.limit}}/${{join(matrix.include, '|')}}"
+        run: |
+          LIMIT="${{ matrix.limit }}"
+          TESTS="${{ join(matrix.include, '|') }}"
+          if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
+            FILTER="$LIMIT/$TESTS"
+          elif [ -n "$LIMIT" ]; then
+            FILTER="$LIMIT"
+          elif [ -n "$TESTS" ]; then
+            FILTER="$TESTS"
+          else
+            FILTER=""
+          fi
+          .github/assets/hive/run_simulator.sh "${{ matrix.sim }}" "$FILTER"
 
       - name: Parse hive output
         run: |
