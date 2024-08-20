@@ -5,7 +5,7 @@ use crate::{
     EvmEnvProvider, HeaderProvider, StageCheckpointReader, StateProviderFactory,
     StaticFileProviderFactory, TransactionsProvider,
 };
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
 use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.
@@ -19,6 +19,7 @@ pub trait FullProvider<DB: Database>:
     + ChainSpecProvider
     + ChangeSetReader
     + CanonStateSubscriptions
+    + ForkChoiceSubscriptions
     + StageCheckpointReader
     + Clone
     + Unpin
@@ -36,6 +37,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
         + ChainSpecProvider
         + ChangeSetReader
         + CanonStateSubscriptions
+        + ForkChoiceSubscriptions
         + StageCheckpointReader
         + Clone
         + Unpin
