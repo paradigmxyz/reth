@@ -152,10 +152,10 @@ impl TreeState {
 
     /// Determines if the given block is part of a fork by checking that these
     /// conditions are true:
-    /// * walking back from the target hash to verify that the target
-    ///   hash is not part of an extension of the canonical chain.
-    /// * walking back from the current head to verify that the target
-    ///   hash is not already part of the canonical chain.
+    /// * walking back from the target hash to verify that the target hash is not part of an
+    ///   extension of the canonical chain.
+    /// * walking back from the current head to verify that the target hash is not already part of
+    ///   the canonical chain.
     fn is_fork(&self, target_hash: B256) -> bool {
         // verify that the given hash is not part of an extension of the canon chain.
         let mut current_hash = target_hash;
