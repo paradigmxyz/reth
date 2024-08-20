@@ -150,13 +150,24 @@ impl TreeState {
         }
     }
 
-    /// Determines if the given block is part of a fork by walking back the
-    /// chain from the given hash and checking if the current canonical head
-    /// is part of it.
-    fn is_fork(&self, block_hash: B256) -> bool {
-        let target_hash = self.canonical_block_hash();
-        let mut current_hash = block_hash;
+    /// Determines if the given block is part of a fork by checking that these
+    /// conditions are true:
+    /// * walking back from the target hash to verify that the target hash is not part of an
+    ///   extension of the canonical chain.
+    /// * walking back from the current head to verify that the target hash is not already part of
+    ///   the canonical chain.
+    fn is_fork(&self, target_hash: B256) -> bool {
+        // verify that the given hash is not part of an extension of the canon chain.
+        let mut current_hash = target_hash;
+        while let Some(current_block) = self.block_by_hash(current_hash) {
+            if current_block.hash() == self.canonical_block_hash() {
+                return false
+            }
+            current_hash = current_block.header.parent_hash;
+        }
 
+        // verify that the given hash is not already part of the canon chain
+        current_hash = self.canonical_block_hash();
         while let Some(current_block) = self.block_by_hash(current_hash) {
             if current_block.hash() == target_hash {
                 return false
@@ -240,9 +251,9 @@ impl TreeState {
             }
         }
 
-        new_chain.reverse();
-
         if current_hash == self.current_canonical_head.hash {
+            new_chain.reverse();
+
             // Simple extension of the current chain
             return Some(NewCanonicalChain::Commit { new: new_chain });
         }
@@ -267,14 +278,18 @@ impl TreeState {
             }
 
             if let Some(block) = self.blocks_by_hash.get(&current_hash) {
-                new_chain.insert(0, block.clone());
-                current_hash = block.block.parent_hash;
+                if self.is_fork(block.block.hash()) {
+                    new_chain.push(block.clone());
+                    current_hash = block.block.parent_hash;
+                }
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "consensus::engine", invalid_hash=?current_hash, "New chain block not found in TreeState");
                 return None;
             }
         }
+        new_chain.reverse();
+        old_chain.reverse();
 
         Some(NewCanonicalChain::Reorg { new: new_chain, old: old_chain })
     }
@@ -2034,6 +2049,7 @@ mod tests {
     use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
+    use reth_trie::updates::TrieUpdates;
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
@@ -2260,16 +2276,8 @@ mod tests {
             &mut self,
             chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
         ) {
-            for _ in chain.clone() {
-                let event = self.from_tree_rx.recv().await.unwrap();
-                match event {
-                    EngineApiEvent::BeaconConsensus(
-                        BeaconConsensusEngineEvent::ForkBlockAdded(block),
-                    ) => {
-                        assert!(chain.clone().into_iter().any(|b| b.hash() == block.hash()));
-                    }
-                    _ => panic!("Unexpected event: {:#?}", event),
-                }
+            for block in chain {
+                self.check_fork_block_added(block.block.hash()).await;
             }
         }
 
@@ -2294,6 +2302,18 @@ mod tests {
             }
         }
 
+        async fn check_fork_block_added(&mut self, expected_hash: B256) {
+            let event = self.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
+                    block,
+                )) => {
+                    assert!(block.hash() == expected_hash);
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
         fn persist_blocks(&self, blocks: Vec<SealedBlockWithSenders>) {
             let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
@@ -2310,6 +2330,14 @@ mod tests {
 
         fn setup_range_insertion_for_valid_chain(&mut self, chain: Vec<SealedBlockWithSenders>) {
             self.setup_range_insertion_for_chain(chain, None)
+        }
+
+        fn setup_range_insertion_for_invalid_chain(
+            &mut self,
+            chain: Vec<SealedBlockWithSenders>,
+            index: usize,
+        ) {
+            self.setup_range_insertion_for_chain(chain, Some(index))
         }
 
         fn setup_range_insertion_for_chain(
@@ -2682,6 +2710,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tree_state_on_new_head_deep_fork() {
+        reth_tracing::init_test_tracing();
+
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let mut test_block_builder = TestBlockBuilder::default();
+
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        // set last block as the current canonical head
+        let last_block = blocks.last().unwrap().block.clone();
+
+        tree_state.set_canonical_head(last_block.num_hash());
+
+        // create a fork chain from last_block
+        let chain_a = test_block_builder.create_fork(&last_block, 10);
+        let chain_b = test_block_builder.create_fork(&last_block, 10);
+
+        for block in &chain_a {
+            tree_state.insert_executed(ExecutedBlock {
+                block: Arc::new(block.block.clone()),
+                senders: Arc::new(block.senders.clone()),
+                execution_output: Arc::new(ExecutionOutcome::default()),
+                hashed_state: Arc::new(HashedPostState::default()),
+                trie: Arc::new(TrieUpdates::default()),
+            });
+        }
+        tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
+
+        for block in &chain_b {
+            tree_state.insert_executed(ExecutedBlock {
+                block: Arc::new(block.block.clone()),
+                senders: Arc::new(block.senders.clone()),
+                execution_output: Arc::new(ExecutionOutcome::default()),
+                hashed_state: Arc::new(HashedPostState::default()),
+                trie: Arc::new(TrieUpdates::default()),
+            });
+        }
+
+        // reorg case
+        let result = tree_state.on_new_head(chain_b.first().unwrap().block.hash());
+        assert!(matches!(result, Some(NewCanonicalChain::Reorg { .. })));
+        if let Some(NewCanonicalChain::Reorg { new, old }) = result {
+            assert_eq!(new.len(), 1);
+            assert_eq!(new[0].block.hash(), chain_b[0].block.hash());
+
+            assert_eq!(old.len(), chain_a.len());
+            for (index, block) in chain_a.iter().enumerate() {
+                assert_eq!(old[index].block.hash(), block.block.hash());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_get_canonical_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -3024,7 +3109,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_engine_tree_forks_with_older_canonical_head() {
+    async fn test_engine_tree_valid_forks_with_older_canonical_head() {
         reth_tracing::init_test_tracing();
 
         let chain_spec = MAINNET.clone();
@@ -3119,5 +3204,99 @@ mod tests {
         // both blocks are added to the canon chain in order
         test_harness.check_canon_block_added(non_buffered_block_hash).await;
         test_harness.check_canon_block_added(buffered_block_hash).await;
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head() {
+        reth_tracing::init_test_tracing();
+
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        // create base chain and setup test harness with it
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        let old_head = base_chain.first().unwrap().block();
+
+        // extend base chain
+        let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
+        let fork_block = extension_chain.last().unwrap().block.clone();
+        test_harness.insert_chain(extension_chain).await;
+
+        // fcu to old_head
+        test_harness.fcu_to(old_head.hash(), ForkchoiceStatus::Valid).await;
+
+        // create two competing chains starting from fork_block, one of them invalid
+        let total_fork_elements = 10;
+        let chain_a = test_harness.block_builder.create_fork(&fork_block, total_fork_elements);
+        let chain_b = test_harness.block_builder.create_fork(&fork_block, total_fork_elements);
+
+        // insert chain B blocks using newPayload
+        test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
+        for block in &chain_b {
+            test_harness.send_new_payload(block.clone()).await;
+            test_harness.send_fcu(block.hash(), ForkchoiceStatus::Valid).await;
+            test_harness.check_canon_block_added(block.hash()).await;
+            test_harness.check_canon_commit(block.hash()).await;
+            test_harness.check_fcu(block.hash(), ForkchoiceStatus::Valid).await;
+        }
+
+        // insert chain A blocks using newPayload, one of the blocks will be invalid
+        let invalid_index = 3;
+        test_harness.setup_range_insertion_for_invalid_chain(chain_a.clone(), invalid_index);
+        for block in &chain_a {
+            test_harness.send_new_payload(block.clone()).await;
+        }
+
+        // check canon chain insertion up to the invalid index and taking into
+        // account reversed ordering
+        test_harness
+            .check_fork_chain_insertion(
+                chain_a[..chain_a.len() - invalid_index - 1].iter().cloned(),
+            )
+            .await;
+
+        // send FCU to make the tip of chain A, expect invalid
+        let chain_a_tip_hash = chain_a.last().unwrap().hash();
+        test_harness.fcu_to(chain_a_tip_hash, ForkchoiceStatus::Invalid).await;
+
+        // send FCU to make the tip of chain B the new head
+        let chain_b_tip_hash = chain_b.last().unwrap().hash();
+
+        // verify the new canonical head
+        test_harness.check_canon_head(chain_b_tip_hash);
+
+        // verify the canonical head didn't change
+        test_harness.check_canon_head(chain_b_tip_hash);
+    }
+
+    #[tokio::test]
+    async fn test_engine_tree_reorg_with_missing_ancestor_expecting_valid() {
+        reth_tracing::init_test_tracing();
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+
+        let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..6).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        // create a side chain with an invalid block
+        let side_chain =
+            test_harness.block_builder.create_fork(base_chain.last().unwrap().block(), 15);
+        let invalid_index = 9;
+
+        test_harness.setup_range_insertion_for_invalid_chain(side_chain.clone(), invalid_index);
+
+        for (index, block) in side_chain.iter().enumerate() {
+            test_harness.send_new_payload(block.clone()).await;
+
+            if index < side_chain.len() - invalid_index - 1 {
+                test_harness.send_fcu(block.block.hash(), ForkchoiceStatus::Valid).await;
+            }
+        }
+
+        // Try to do a forkchoice update to a block after the invalid one
+        let fork_tip_hash = side_chain.last().unwrap().hash();
+        test_harness.send_fcu(fork_tip_hash, ForkchoiceStatus::Invalid).await;
     }
 }
