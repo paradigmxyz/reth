@@ -223,7 +223,7 @@ jobs:
         run: |
           sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' hivetests/clients/reth/reth.sh
 
-      - name: Run ${{ matrix.sim }} simulator
+      - name: Run simulator
         run: |
           LIMIT="${{ matrix.scenario.limit }}"
           TESTS="${{ join(matrix.scenario.include, '|') }}"
