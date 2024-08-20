@@ -1,14 +1,5 @@
 //! Engine node related functionality.
 
-use crate::{
-    components::NodeComponents,
-    hooks::NodeHooks,
-    launch::{LaunchContext, LaunchNode},
-    rpc::{launch_rpc_servers, EthApiBuilderProvider},
-    setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
-    NodeHandle, NodeTypesAdapter,
-};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -42,6 +33,16 @@ use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::{
+    components::NodeComponents,
+    hooks::NodeHooks,
+    launch::{LaunchContext, LaunchNode},
+    rpc::{launch_rpc_servers, EthApiBuilderProvider},
+    setup::build_networked_pipeline,
+    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
+    NodeHandle, NodeTypesAdapter,
+};
+
 /// The engine node launcher.
 #[derive(Debug)]
 pub struct EngineNodeLauncher {
@@ -60,9 +61,12 @@ impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeL
 where
     T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer
+                    + AddDevSigners,
+    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -177,6 +181,9 @@ where
             pipeline_exex_handle,
         )?;
 
+        // The new engine writes directly to static files. This ensures that they're up to the tip.
+        pipeline.move_to_static_files()?;
+
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
@@ -233,7 +240,6 @@ where
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-                database.clone(),
             ),
         );
 
