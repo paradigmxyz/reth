@@ -85,8 +85,10 @@ jobs:
         engine: [regular, experimental]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
-        sim: [smoke/genesis, smoke/network, ethereum/sync]
-        include:
+        scenario:
+          - sim: smoke/genesis
+          - sim: smoke/network
+          - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
           - sim: devp2p
@@ -179,7 +181,7 @@ jobs:
     needs:
       - prepare-reth
       - prepare-hive
-    name: run ${{ matrix.engine }} - ${{ matrix.sim }}${{ matrix.limit && format(' - {0}', matrix.limit) }}
+    name: run ${{ matrix.engine }} - ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
       group: Reth
     permissions:
@@ -223,8 +225,8 @@ jobs:
 
       - name: Run ${{ matrix.sim }} simulator
         run: |
-          LIMIT="${{ matrix.limit }}"
-          TESTS="${{ join(matrix.include, '|') }}"
+          LIMIT="${{ matrix.scenario.limit }}"
+          TESTS="${{ join(matrix.scenario.include, '|') }}"
           if [ -n "$LIMIT" ] && [ -n "$TESTS" ]; then
             FILTER="$LIMIT/$TESTS"
           elif [ -n "$LIMIT" ]; then
@@ -234,7 +236,7 @@ jobs:
           else
             FILTER=""
           fi
-          .github/assets/hive/run_simulator.sh "${{ matrix.sim }}" "$FILTER"
+          .github/assets/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
       - name: Parse hive output
         run: |
