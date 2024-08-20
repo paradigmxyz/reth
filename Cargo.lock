@@ -7798,7 +7798,6 @@ name = "reth-node-ethereum"
 version = "1.0.5"
 dependencies = [
  "alloy-genesis",
- "alloy-network",
  "alloy-primitives",
  "eyre",
  "futures",

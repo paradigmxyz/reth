@@ -2380,9 +2380,11 @@ mod tests {
         assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
         assert!(peer.seen_transactions.contains(eip1559_tx.transaction.hash()));
         peer.seen_transactions.contains(eip4844_tx.transaction.hash());
+        println!("{:?}", propagated.0);
 
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate);
+        println!("{:?}", propagated.0);
         assert!(propagated.0.is_empty());
     }
 }

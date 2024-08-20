@@ -28,9 +28,6 @@ reth-beacon-consensus.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
 
-# ethereum
-alloy-network.workspace = true
-
 # misc
 eyre.workspace = true
 

@@ -15,7 +15,7 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, EthApiTypes, FullNodeTypes, NodeAddOns};
+use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -27,6 +27,7 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -64,6 +65,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,
 {

@@ -24,7 +24,7 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::{helpers::AddDevSigners, EthApiTypes, FullEthApiServer},
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -32,6 +32,7 @@ use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types_compat::TransactionBuilder;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -109,6 +110,7 @@ where
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionBuilder: TransactionBuilder<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,
 {
