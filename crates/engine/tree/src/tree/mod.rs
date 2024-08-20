@@ -48,7 +48,7 @@ use std::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
@@ -853,29 +853,32 @@ where
         }
 
         if self.persistence_state.in_progress() {
-            if let Some((mut rx, start_time)) = self.persistence_state.rx.take() {
-                // Check if persistence has complete
-                match rx.try_recv() {
-                    Ok(last_persisted_block_hash) => {
-                        self.metrics.persistence_duration.record(start_time.elapsed());
-                        let Some(last_persisted_block_hash) = last_persisted_block_hash else {
-                            // if this happened, then we persisted no blocks because we sent an
-                            // empty vec of blocks
-                            warn!(target: "engine", "Persistence task completed but did not persist any blocks");
-                            return Ok(())
-                        };
-                        if let Some(block) =
-                            self.state.tree_state.block_by_hash(last_persisted_block_hash)
-                        {
-                            self.persistence_state.finish(last_persisted_block_hash, block.number);
-                            self.on_new_persisted_block();
-                        } else {
-                            error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
-                        }
+            let (mut rx, start_time) = self
+                .persistence_state
+                .rx
+                .take()
+                .expect("if a persistence task is in progress Receiver must be Some");
+            // Check if persistence has complete
+            match rx.try_recv() {
+                Ok(last_persisted_block_hash) => {
+                    self.metrics.persistence_duration.record(start_time.elapsed());
+                    let Some(last_persisted_block_hash) = last_persisted_block_hash else {
+                        // if this happened, then we persisted no blocks because we sent an
+                        // empty vec of blocks
+                        warn!(target: "engine", "Persistence task completed but did not persist any blocks");
+                        return Ok(())
+                    };
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
+                        self.on_new_persisted_block();
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                     }
-                    Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
-                    Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
                 }
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
         }
         Ok(())
@@ -2005,17 +2008,11 @@ impl PersistenceState {
     }
 
     /// Sets state for a finished persistence task.
-    fn finish(
-        &mut self,
-        last_persisted_block_hash: B256,
-        last_persisted_block_number: u64,
-    ) -> Duration {
+    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
         trace!(target: "engine", block= %last_persisted_block_number, hash=%last_persisted_block_hash, "updating persistence state");
-        let duration =
-            self.rx.take().map(|(_, start_time)| start_time.elapsed()).unwrap_or_default();
+        self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
-        duration
     }
 }
 
