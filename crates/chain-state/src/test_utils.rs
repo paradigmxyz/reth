@@ -5,11 +5,11 @@ use crate::{
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
-    proofs::{calculate_receipt_root, calculate_transaction_root},
+    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     Address, BlockNumber, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
     Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, B256, U256,
 };
@@ -156,7 +156,12 @@ impl TestBlockBuilder {
                 ),
             )])),
             // use the number as the timestamp so it is monotonically increasing
-            timestamp: number,
+            timestamp: number +
+                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
+            withdrawals_root: Some(calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
             ..Default::default()
         };
 
@@ -164,7 +169,7 @@ impl TestBlockBuilder {
             header: header.seal_slow(),
             body: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
             ommers: Vec::new(),
-            withdrawals: None,
+            withdrawals: Some(vec![].into()),
             requests: None,
         };
 

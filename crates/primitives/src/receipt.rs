@@ -5,7 +5,7 @@ use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
-use derive_more::{Deref, DerefMut, From, IntoIterator};
+use derive_more::{DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
@@ -74,7 +74,7 @@ impl Receipt {
     Serialize,
     Deserialize,
     From,
-    Deref,
+    derive_more::Deref,
     DerefMut,
     IntoIterator,
 )]

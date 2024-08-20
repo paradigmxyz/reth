@@ -220,6 +220,11 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --max-pending-imports <COUNT>
+          Max number of transactions to import concurrently.
+
+          [default: 4096]
+
       --max-seen-tx-history <MAX_SEEN_TX_HISTORY>
           Max number of seen transactions to remember per peer.
 
