@@ -2088,7 +2088,6 @@ mod tests {
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
     struct MockTransaction(Transaction);
 
-    #[cfg(feature = "arbitrary")]
     impl<'a> arbitrary::Arbitrary<'a> for MockTransaction {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut transaction = u.arbitrary::<Transaction>()?;
@@ -2123,7 +2122,6 @@ mod tests {
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
     struct MockTransactionSignedNoHash(TransactionSignedNoHash);
 
-    #[cfg(feature = "arbitrary")]
     impl<'a> arbitrary::Arbitrary<'a> for MockTransactionSignedNoHash {
         fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
             let mut transaction_signed_no_hash = u.arbitrary::<TransactionSignedNoHash>()?;

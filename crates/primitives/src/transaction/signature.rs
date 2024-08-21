@@ -195,7 +195,12 @@ impl Signature {
         //
         // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
         if *self == Self::optimism_deposit_tx_signature() {
-            return SignatureWithParity::new(self.r(), self.s(), Parity::Parity(false));
+            let parity = match chain_id {
+                Some(chain_id) => Parity::Parity(false).with_chain_id(chain_id),
+                None => Parity::Parity(false),
+            };
+
+            return SignatureWithParity::new(self.r(), self.s(), parity);
         }
 
         SignatureWithParity::new(self.r(), self.s(), parity)
