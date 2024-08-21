@@ -111,8 +111,8 @@ impl InMemoryState {
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
-    pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.borrow().as_ref().map(|state| Arc::new(state.clone()))
+    pub(crate) fn pending_state(&self) -> Option<BlockState> {
+        self.pending.borrow().clone()
     }
 
     #[cfg(test)]
@@ -347,7 +347,7 @@ impl CanonicalInMemoryState {
     }
 
     /// Returns the in memory pending state.
-    pub fn pending_state(&self) -> Option<Arc<BlockState>> {
+    pub fn pending_state(&self) -> Option<BlockState> {
         self.inner.in_memory_state.pending_state()
     }
 
@@ -1131,7 +1131,7 @@ mod tests {
         // Check the pending state
         assert_eq!(
             state.pending_state().unwrap(),
-            Arc::new(BlockState::with_parent(block2.clone(), Some(BlockState::new(block1))))
+            BlockState::with_parent(block2.clone(), Some(BlockState::new(block1)))
         );
 
         // Check the pending block
