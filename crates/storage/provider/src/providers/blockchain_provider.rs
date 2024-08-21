@@ -2130,14 +2130,16 @@ mod tests {
         let (database_changesets, database_state) = random_changeset_range(
             &mut rng,
             &database_blocks,
-            accounts.iter().cloned().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            accounts.into_iter().map(|(address, account)| (address, (account, Vec::new()))),
             0..0,
             0..0,
         );
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            accounts.iter().cloned().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            database_state
+                .iter()
+                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
             0..0,
             0..0,
         );
