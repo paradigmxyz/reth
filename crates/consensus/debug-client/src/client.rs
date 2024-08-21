@@ -152,27 +152,27 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
 
 /// Cancun "new payload" event.
 #[derive(Debug)]
-struct ExecutionNewPayload {
-    execution_payload_v3: ExecutionPayloadV3,
-    versioned_hashes: Vec<B256>,
-    parent_beacon_block_root: B256,
+pub struct ExecutionNewPayload {
+    pub execution_payload_v3: ExecutionPayloadV3,
+    pub versioned_hashes: Vec<B256>,
+    pub parent_beacon_block_root: B256,
 }
 
 impl ExecutionNewPayload {
     /// Get block hash from block in the payload
-    const fn block_hash(&self) -> B256 {
+    pub const fn block_hash(&self) -> B256 {
         self.execution_payload_v3.payload_inner.payload_inner.block_hash
     }
 
     /// Get block number from block in the payload
-    const fn block_number(&self) -> u64 {
+    pub const fn block_number(&self) -> u64 {
         self.execution_payload_v3.payload_inner.payload_inner.block_number
     }
 }
 
 /// Convert a rich block from RPC / Etherscan to params for an execution client's "new payload"
 /// method. Assumes that the block contains full transactions.
-fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
+pub fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
     let transactions = match &block.transactions {
         BlockTransactions::Full(txs) => txs.clone(),
         // Empty array gets deserialized as BlockTransactions::Hashes.
