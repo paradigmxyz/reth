@@ -124,6 +124,7 @@ jobs:
             limit: cancun
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
+            rpc_type: eth
             include:
               - eth_blockNumber
               - eth_call
@@ -142,8 +143,10 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-              # debug_ rpc methods
-              - debug_
+          - sim: ethereum/rpc-compat
+            rpc_type: debug
+            # debug_ rpc methods
+            include: [debug_]
           # Pyspec cancun jobs
           # TODO: enable when https://github.com/ethereum/hive/issues/1147 is fixed
           #- sim: pyspec
@@ -181,7 +184,7 @@ jobs:
     needs:
       - prepare-reth
       - prepare-hive
-    name: run ${{ matrix.engine }} - ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    name: run ${{ matrix.engine }} - ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}${{ matrix.scenario.rpc_type && format(' - {0}', matrix.scenario.rpc_type) }}
     runs-on:
       group: Reth
     permissions:
@@ -236,6 +239,7 @@ jobs:
           else
             FILTER=""
           fi
+          echo "$FILTER"
           .github/assets/hive/run_simulator.sh "${{ matrix.scenario.sim }}" "$FILTER"
 
       - name: Parse hive output
