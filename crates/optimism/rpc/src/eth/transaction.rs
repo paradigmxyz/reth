@@ -10,7 +10,7 @@ use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecover
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, RawTransactionForwarder, TransactionBuilder,
+    EthApiTypes, RawTransactionForwarder, TransactionCompat,
 };
 use reth_rpc_eth_types::EthStateCache;
 use revm::L1BlockInfo;
@@ -122,8 +122,8 @@ pub struct OpTxBuilder<Eth> {
     _l1_builders: PhantomData<Eth>,
 }
 
-impl<Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>>
-    TransactionBuilder for OpTxBuilder<Eth>
+impl<Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>>
+    TransactionCompat for OpTxBuilder<Eth>
 {
     type Transaction = <Optimism as Network>::TransactionResponse;
 

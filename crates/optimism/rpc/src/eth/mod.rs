@@ -29,7 +29,7 @@ use reth_rpc_eth_api::{
     EthApiTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_rpc_types_compat::TransactionBuilder;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -96,11 +96,11 @@ where
     Self: Send + Sync,
     N: FullNodeComponents,
     // todo: replace constraint when op and l1 don't use same tx type in alloy
-    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
+    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-    type TransactionBuilder = OpTxBuilder<Eth>;
+    type TransactionCompat = OpTxBuilder<Eth>;
 }
 
 impl<N, Eth> EthApiSpec for OpEthApi<N, Eth>
@@ -133,7 +133,7 @@ impl<N, Eth> SpawnBlocking for OpEthApi<N, Eth>
 where
     Self: Send + Sync + Clone + 'static,
     N: FullNodeComponents,
-    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
+    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -181,7 +181,7 @@ impl<N, Eth> LoadState for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
     N: FullNodeComponents,
-    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse>,
+    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
@@ -238,7 +238,7 @@ impl<N, Eth> BuilderProvider<N> for OpEthApi<N, Eth>
 where
     Self: Send,
     N: FullNodeComponents,
-    Eth: TransactionBuilder<Transaction = <Optimism as Network>::TransactionResponse> + 'static,
+    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse> + 'static,
 {
     type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
 

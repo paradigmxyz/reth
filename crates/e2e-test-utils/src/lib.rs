@@ -14,10 +14,11 @@ use reth::{
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, EthApiTypes,
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeAddOns, NodeComponents, RethFullAdapter,
+    components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
+    NodeAdapter, NodeAddOns, NodeComponents, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
+use reth_rpc_types_compat::TransactionCompat;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -52,11 +53,19 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
-    <<N::ComponentsBuilder as NodeComponentsBuilder<TmpNodeAdapter<N>>>::Components as NodeComponents<TmpNodeAdapter<N>>>::Network: PeersHandleProvider,
-    <N::AddOns as NodeAddOns<Adapter<N>>>::EthApi:
-        FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
-        <<N::AddOns as NodeAddOns<Adapter<N>>>::EthApi as EthApiTypes>::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
 
+    N::ComponentsBuilder: NodeComponentsBuilder<
+        TmpNodeAdapter<N>,
+        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
+    >,
+    N::AddOns: NodeAddOns<
+        Adapter<N>,
+        EthApi: FullEthApiServer<
+            NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+        > + AddDevSigners
+                    + EthApiBuilderProvider<Adapter<N>>,
+    >,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
