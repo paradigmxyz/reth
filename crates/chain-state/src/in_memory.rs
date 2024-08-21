@@ -567,12 +567,12 @@ pub struct BlockState {
 
 #[allow(dead_code)]
 impl BlockState {
-    /// `BlockState` constructor.
+    /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlock) -> Self {
         Self { block, parent: None }
     }
 
-    /// `BlockState` constructor with parent.
+    /// [`BlockState`] constructor with parent.
     pub fn with_parent(block: ExecutedBlock, parent: Option<Self>) -> Self {
         Self { block, parent: parent.map(Box::new) }
     }
@@ -657,7 +657,7 @@ impl BlockState {
         chain
     }
 
-    /// Appends the parent chain of this `BlockState` to the given vector.
+    /// Appends the parent chain of this [`BlockState`] to the given vector.
     pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
         chain.extend(self.parent_state_chain());
     }
