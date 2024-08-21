@@ -186,6 +186,11 @@ Networking:
 
           [default: 320]
 
+      --max-pending-imports <COUNT>
+          Max number of transactions to import concurrently.
+
+          [default: 4096]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
@@ -451,6 +456,16 @@ TxPool:
           Number of additional transaction validation tasks to spawn
 
           [default: 1]
+
+      --txpool.max-pending-txns <PENDING_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of pending transactions from the network to buffer
+
+          [default: 2048]
+
+      --txpool.max-new-txns <NEW_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of new transactions to buffer
+
+          [default: 1024]
 
 Builder:
       --builder.extradata <EXTRADATA>
