@@ -8743,6 +8743,7 @@ dependencies = [
 name = "reth-testing-utils"
 version = "1.0.5"
 dependencies = [
+ "alloy-eips",
  "alloy-genesis",
  "rand 0.8.5",
  "reth-primitives",
