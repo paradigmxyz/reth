@@ -25,7 +25,7 @@ pub struct DevMiningTask<Client, Pool: TransactionPool, Executor, ExecutedBlock>
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
-    client: Client,
+    client: Client, 
     /// The active miner
     miner: MiningMode,
     /// Single active future that inserts a new block into `storage`
