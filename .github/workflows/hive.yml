@@ -3,10 +3,10 @@
 name: hive
 
 on:
-  workflow_dispatch:
-  schedule:
-    # every day
-    - cron: "0 0 * * *"
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
