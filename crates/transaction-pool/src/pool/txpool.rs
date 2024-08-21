@@ -322,7 +322,9 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all().collect()
     }
     /// Returns an iterator over all transactions from the pending sub-pool
-    pub(crate) fn pending_transactions_iter(&self) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    pub(crate) fn pending_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.pending_pool.all()
     }
 
