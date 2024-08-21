@@ -126,13 +126,13 @@ pub enum TrieWitnessError {
     /// RLP decoding error.
     Rlp(alloy_rlp::Error),
     /// Missing storage multiproof.
-    #[display(fmt = "missing storage multiproof for {_0}")]
+    #[display("missing storage multiproof for {_0}")]
     MissingStorageMultiProof(B256),
     /// Missing account.
-    #[display(fmt = "missing account {_0}")]
+    #[display("missing account {_0}")]
     MissingAccount(B256),
     /// Missing target node.
-    #[display(fmt = "target node missing from proof {_0:?}")]
+    #[display("target node missing from proof {_0:?}")]
     MissingTargetNode(Nibbles),
 }
 

@@ -152,6 +152,10 @@ impl StorageTrieUpdates {
 
     /// Extends storage trie updates.
     pub fn extend(&mut self, other: Self) {
+        if other.is_deleted {
+            self.storage_nodes.clear();
+            self.removed_nodes.clear();
+        }
         self.is_deleted |= other.is_deleted;
         self.storage_nodes.extend(ExcludeEmptyFromPair::from_iter(other.storage_nodes));
         self.removed_nodes.extend(ExcludeEmpty::from_iter(other.removed_nodes));
