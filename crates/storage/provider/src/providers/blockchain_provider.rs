@@ -1435,12 +1435,12 @@ impl<DB> ForkChoiceSubscriptions for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
-    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
     }
 
-    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
         let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
     }
