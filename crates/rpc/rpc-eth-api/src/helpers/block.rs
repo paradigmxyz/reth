@@ -202,11 +202,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            let uncle = uncles
-                .into_iter()
-                .nth(index.into())
-                .map(uncle_block_from_header);
-            Ok(uncle)
+            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
         }
     }
 }
