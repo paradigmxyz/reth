@@ -1912,15 +1912,15 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory.clone())?;
+        let provider = BlockchainProvider2::new(factory)?;
 
         // Insert the first block into the in-memory state
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders.clone()),
+                Arc::new(first_in_mem_block),
+                Arc::new(in_memory_block_senders),
                 Default::default(),
                 Default::default(),
                 Default::default(),
