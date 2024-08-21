@@ -344,7 +344,8 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Returns the configured [`PruneConfig`]
     pub fn prune_config(&self) -> Option<PruneConfig> {
-        self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
+        // Prefer node_config if it exists, otherwise fallback to toml_config.
+        self.node_config().prune_config().or_else(|| self.toml_config().prune.clone())
     }
 
     /// Returns the configured [`PruneModes`], returning the default if no config was available.
