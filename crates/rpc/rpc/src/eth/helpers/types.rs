@@ -1,13 +1,10 @@
 //! L1 `eth` API types.
 
-use std::marker::PhantomData;
-
 use alloy_network::{Ethereum, Network};
-use derive_more::Constructor;
 use reth_primitives::{Address, BlockNumber, TransactionSignedEcRecovered, TxKind, B256};
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
-    BlockCompat, TransactionCompat,
+    TransactionCompat,
 };
 
 /// Builds RPC transaction response for l1.
@@ -74,14 +71,4 @@ where
             other: Default::default(),
         }
     }
-}
-
-/// Builds a RPC block response for l1.
-#[derive(Debug, Clone, Copy, Constructor)]
-pub struct EthBlockBuilder<TxB> {
-    _tx_builder: PhantomData<TxB>,
-}
-
-impl<TxB: TransactionCompat> BlockCompat for EthBlockBuilder<TxB> {
-    type TxCompat = TxB;
 }

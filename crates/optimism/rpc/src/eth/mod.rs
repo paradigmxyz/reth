@@ -20,7 +20,7 @@ use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_rpc::eth::{core::EthApiInner, DevSigner, EthBlockBuilder};
+use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
@@ -101,7 +101,6 @@ where
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
     type TransactionBuilder = OpTxBuilder<Eth>;
-    type BlockBuilder = EthBlockBuilder<OpTxBuilder<Eth>>;
 }
 
 impl<N, Eth> EthApiSpec for OpEthApi<N, Eth>

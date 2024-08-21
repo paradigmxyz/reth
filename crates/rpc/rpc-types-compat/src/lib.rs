@@ -15,5 +15,4 @@ pub mod engine;
 pub mod proof;
 pub mod transaction;
 
-pub use block::BlockCompat;
 pub use transaction::TransactionCompat;

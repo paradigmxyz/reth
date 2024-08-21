@@ -7,7 +7,10 @@ use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, Tra
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
-use reth_rpc_types_compat::{block::uncle_block_from_header, BlockCompat, TransactionCompat};
+use reth_rpc_types_compat::{
+    block::{from_block, uncle_block_from_header},
+    TransactionCompat,
+};
 
 use crate::{Block, FromEthApiError, Transaction};
 
@@ -28,7 +31,6 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
     where
         Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
-        Self::BlockCompat: BlockCompat<TxCompat = Self::TransactionCompat>,
     {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
     }
@@ -44,7 +46,6 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
-        Self::BlockCompat: BlockCompat<TxCompat = Self::TransactionCompat>,
     {
         async move {
             let block = match self.block_with_senders(block_id).await? {
@@ -56,7 +57,7 @@ pub trait EthBlocks: LoadBlock {
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::UnknownBlockNumber)?;
-            let block = Self::BlockCompat::from_block(
+            let block = from_block::<Self::TransactionCompat>(
                 block.unseal(),
                 total_difficulty,
                 full.into(),

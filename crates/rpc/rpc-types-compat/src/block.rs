@@ -1,7 +1,5 @@
 //! Compatibility functions for rpc `Block` type.
 
-use std::fmt;
-
 use alloy_rlp::Encodable;
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
@@ -10,108 +8,89 @@ use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind
 
 use crate::TransactionCompat;
 
-/// Builds RPC block w.r.t. network.
-pub trait BlockCompat: Send + Sync + Unpin + fmt::Debug {
-    /// RPC transaction type conversions w.r.t. network.
-    type TxCompat: TransactionCompat;
-
-    /// Converts the given primitive block into a [Block] response with the given
-    /// [`BlockTransactionsKind`]
-    ///
-    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
-    fn from_block(
-        block: BlockWithSenders,
-        total_difficulty: U256,
-        kind: BlockTransactionsKind,
-        block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
-        match kind {
-            BlockTransactionsKind::Hashes => {
-                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
-            }
-            BlockTransactionsKind::Full => {
-                Self::from_block_full(block, total_difficulty, block_hash)
-            }
+/// Converts the given primitive block into a [`Block`] response with the given
+/// [`BlockTransactionsKind`]
+///
+/// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
+pub fn from_block<T: TransactionCompat>(
+    block: BlockWithSenders,
+    total_difficulty: U256,
+    kind: BlockTransactionsKind,
+    block_hash: Option<B256>,
+) -> Result<Block<T::Transaction>, BlockError> {
+    match kind {
+        BlockTransactionsKind::Hashes => {
+            Ok(from_block_with_tx_hashes::<T::Transaction>(block, total_difficulty, block_hash))
         }
-    }
-
-    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-    /// total difficulty to populate its field in the rpc response.
-    ///
-    /// This will populate the `transactions` field with the _full_
-    /// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
-    fn from_block_full(
-        mut block: BlockWithSenders,
-        total_difficulty: U256,
-        block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
-        let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
-        let block_number = block.block.number;
-        let base_fee_per_gas = block.block.base_fee_per_gas;
-
-        // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
-        // `from_block_with_transactions`, however we need to compute the length before
-        let block_length = block.block.length();
-        let body = std::mem::take(&mut block.block.body);
-        let transactions_with_senders = body.into_iter().zip(block.senders);
-        let transactions = transactions_with_senders
-            .enumerate()
-            .map(|(idx, (tx, sender))| {
-                let signed_tx_ec_recovered = tx.with_signer(sender);
-
-                Self::TxCompat::from_recovered_with_block_context(
-                    signed_tx_ec_recovered,
-                    block_hash,
-                    block_number,
-                    base_fee_per_gas,
-                    idx,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        Ok(from_block_with_transactions::<<Self::TxCompat as TransactionCompat>::Transaction>(
-            block_length,
-            block_hash,
-            block.block,
-            total_difficulty,
-            BlockTransactions::Full(transactions),
-        ))
-    }
-
-    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
-    /// total difficulty to populate its field in the rpc response.
-    ///
-    /// This will populate the `transactions` field with only the hashes of the transactions in the
-    /// block: [`BlockTransactions::Hashes`]
-    fn from_block_with_tx_hashes(
-        block: BlockWithSenders,
-        total_difficulty: U256,
-        block_hash: Option<B256>,
-    ) -> Block<<Self::TxCompat as TransactionCompat>::Transaction> {
-        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
-        let transactions = block.body.iter().map(|tx| tx.hash()).collect();
-
-        from_block_with_transactions::<<Self::TxCompat as TransactionCompat>::Transaction>(
-            block.length(),
-            block_hash,
-            block.block,
-            total_difficulty,
-            BlockTransactions::Hashes(transactions),
-        )
+        BlockTransactionsKind::Full => from_block_full::<T>(block, total_difficulty, block_hash),
     }
 }
 
-impl BlockCompat for () {
-    type TxCompat = ();
+/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
+/// total difficulty to populate its field in the rpc response.
+///
+/// This will populate the `transactions` field with only the hashes of the transactions in the
+/// block: [`BlockTransactions::Hashes`]
+pub fn from_block_with_tx_hashes<T>(
+    block: BlockWithSenders,
+    total_difficulty: U256,
+    block_hash: Option<B256>,
+) -> Block<T> {
+    let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
+    let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-    fn from_block_full(
-        _block: BlockWithSenders,
-        _total_difficulty: U256,
-        _block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
-        Ok(Block::default())
-    }
+    from_block_with_transactions(
+        block.length(),
+        block_hash,
+        block.block,
+        total_difficulty,
+        BlockTransactions::Hashes(transactions),
+    )
 }
+
+/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
+/// total difficulty to populate its field in the rpc response.
+///
+/// This will populate the `transactions` field with the _full_
+/// [`Transaction`] objects: [`BlockTransactions::Full`]
+pub fn from_block_full<T: TransactionCompat>(
+    mut block: BlockWithSenders,
+    total_difficulty: U256,
+    block_hash: Option<B256>,
+) -> Result<Block<T::Transaction>, BlockError> {
+    let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
+    let block_number = block.block.number;
+    let base_fee_per_gas = block.block.base_fee_per_gas;
+
+    // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
+    // `from_block_with_transactions`, however we need to compute the length before
+    let block_length = block.block.length();
+    let body = std::mem::take(&mut block.block.body);
+    let transactions_with_senders = body.into_iter().zip(block.senders);
+    let transactions = transactions_with_senders
+        .enumerate()
+        .map(|(idx, (tx, sender))| {
+            let signed_tx_ec_recovered = tx.with_signer(sender);
+
+            T::from_recovered_with_block_context(
+                signed_tx_ec_recovered,
+                block_hash,
+                block_number,
+                base_fee_per_gas,
+                idx,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    Ok(from_block_with_transactions(
+        block_length,
+        block_hash,
+        block.block,
+        total_difficulty,
+        BlockTransactions::Full(transactions),
+    ))
+}
+
 /// Converts from a [`reth_primitives::SealedHeader`] to a [`reth_rpc_types::Header`]
 ///
 /// # Note

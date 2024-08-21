@@ -22,15 +22,12 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: Network;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
-    /// Conversion methods for block RPC type.
-    type BlockCompat;
 }
 
 impl EthApiTypes for () {
     type Error = EthApiError;
     type NetworkTypes = AnyNetwork;
     type TransactionCompat = ();
-    type BlockCompat = ();
 }
 
 /// Adapter for network specific transaction type.

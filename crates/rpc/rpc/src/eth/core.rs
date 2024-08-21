@@ -22,7 +22,7 @@ use reth_tasks::{
 };
 use tokio::sync::Mutex;
 
-use crate::eth::{EthBlockBuilder, EthTxBuilder};
+use crate::eth::EthTxBuilder;
 
 /// `Eth` API implementation.
 ///
@@ -130,7 +130,6 @@ where
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
-    type BlockCompat = EthBlockBuilder<EthTxBuilder>;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
