@@ -666,7 +666,7 @@ where
         blocks.append(&mut database_blocks);
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(database_blocks.len() - 1);
+        range.nth(blocks.len() - 1);
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
@@ -696,7 +696,7 @@ where
         blocks.append(&mut database_blocks);
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(database_blocks.len() - 1);
+        range.nth(blocks.len() - 1);
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
