@@ -7,7 +7,7 @@ use derive_more::Constructor;
 use reth_primitives::{Address, BlockNumber, TransactionSignedEcRecovered, TxKind, B256};
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
-    BlockBuilder, TransactionCompat,
+    BlockCompat, TransactionCompat,
 };
 
 /// Builds RPC transaction response for l1.
@@ -82,6 +82,6 @@ pub struct EthBlockBuilder<TxB> {
     _tx_builder: PhantomData<TxB>,
 }
 
-impl<TxB: TransactionCompat> BlockBuilder for EthBlockBuilder<TxB> {
-    type TxBuilder = TxB;
+impl<TxB: TransactionCompat> BlockCompat for EthBlockBuilder<TxB> {
+    type TxCompat = TxB;
 }

@@ -7,7 +7,7 @@ use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, Tra
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
-use reth_rpc_types_compat::{block::uncle_block_from_header, BlockBuilder, TransactionCompat};
+use reth_rpc_types_compat::{block::uncle_block_from_header, BlockCompat, TransactionCompat};
 
 use crate::{Block, FromEthApiError, Transaction};
 
@@ -54,7 +54,7 @@ pub trait EthBlocks: LoadBlock {
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::UnknownBlockNumber)?;
-            let block = Self::BlockBuilder::from_block(
+            let block = Self::BlockCompat::from_block(
                 block.unseal(),
                 total_difficulty,
                 full.into(),

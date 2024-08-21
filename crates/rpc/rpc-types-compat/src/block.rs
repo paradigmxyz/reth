@@ -11,9 +11,9 @@ use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind
 use crate::TransactionCompat;
 
 /// Builds RPC block w.r.t. network.
-pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
-    /// RPC transaction type builder of network.
-    type TxBuilder: TransactionCompat;
+pub trait BlockCompat: Send + Sync + Unpin + fmt::Debug {
+    /// RPC transaction type conversions w.r.t. network.
+    type TxCompat: TransactionCompat;
 
     /// Converts the given primitive block into a [Block] response with the given
     /// [`BlockTransactionsKind`]
@@ -24,7 +24,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         total_difficulty: U256,
         kind: BlockTransactionsKind,
         block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
         match kind {
             BlockTransactionsKind::Hashes => {
                 Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
@@ -44,7 +44,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         mut block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
         let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
         let block_number = block.block.number;
         let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -59,7 +59,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
             .map(|(idx, (tx, sender))| {
                 let signed_tx_ec_recovered = tx.with_signer(sender);
 
-                Self::TxBuilder::from_recovered_with_block_context(
+                Self::TxCompat::from_recovered_with_block_context(
                     signed_tx_ec_recovered,
                     block_hash,
                     block_number,
@@ -69,7 +69,7 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
             })
             .collect::<Vec<_>>();
 
-        Ok(from_block_with_transactions::<<Self::TxBuilder as TransactionCompat>::Transaction>(
+        Ok(from_block_with_transactions::<<Self::TxCompat as TransactionCompat>::Transaction>(
             block_length,
             block_hash,
             block.block,
@@ -87,11 +87,11 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
         block: BlockWithSenders,
         total_difficulty: U256,
         block_hash: Option<B256>,
-    ) -> Block<<Self::TxBuilder as TransactionCompat>::Transaction> {
+    ) -> Block<<Self::TxCompat as TransactionCompat>::Transaction> {
         let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
-        from_block_with_transactions::<<Self::TxBuilder as TransactionCompat>::Transaction>(
+        from_block_with_transactions::<<Self::TxCompat as TransactionCompat>::Transaction>(
             block.length(),
             block_hash,
             block.block,
@@ -101,14 +101,14 @@ pub trait BlockBuilder: Send + Sync + Unpin + fmt::Debug {
     }
 }
 
-impl BlockBuilder for () {
-    type TxBuilder = ();
+impl BlockCompat for () {
+    type TxCompat = ();
 
     fn from_block_full(
         _block: BlockWithSenders,
         _total_difficulty: U256,
         _block_hash: Option<B256>,
-    ) -> Result<Block<<Self::TxBuilder as TransactionCompat>::Transaction>, BlockError> {
+    ) -> Result<Block<<Self::TxCompat as TransactionCompat>::Transaction>, BlockError> {
         Ok(Block::default())
     }
 }

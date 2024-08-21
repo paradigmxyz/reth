@@ -18,7 +18,7 @@ pub mod filter;
 pub mod helpers;
 pub mod pubsub;
 
-pub use reth_rpc_types_compat::{BlockBuilder, TransactionCompat};
+pub use reth_rpc_types_compat::{BlockCompat, TransactionCompat};
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};

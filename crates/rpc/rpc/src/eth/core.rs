@@ -130,7 +130,7 @@ where
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
-    type BlockBuilder = EthBlockBuilder<EthTxBuilder>;
+    type BlockCompat = EthBlockBuilder<EthTxBuilder>;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
