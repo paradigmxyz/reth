@@ -242,9 +242,9 @@ mod tests {
 
         let tip = 20000;
         let blocks = [
-            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5),
-            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1),
-            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
+            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5, None),
+            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1, None),
+            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5, None),
         ]
         .concat();
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
