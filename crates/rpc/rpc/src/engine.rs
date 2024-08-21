@@ -36,9 +36,11 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 #[async_trait::async_trait]
 impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>> + EthApiTypes,
-    Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
-    Eth::TransactionCompat: TransactionCompat<Transaction = Transaction<Eth::NetworkTypes>>,
+    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>>
+        + EthApiTypes<
+            NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<Transaction = Transaction<Eth::NetworkTypes>>,
+        >,
     EthFilter: EthFilterApiServer<<Eth::TransactionCompat as TransactionCompat>::Transaction>,
 {
     /// Handler for: `eth_syncing`

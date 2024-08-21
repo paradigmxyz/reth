@@ -809,8 +809,9 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: EthApiTypes,
-    EthApi::NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    EthApi: EthApiTypes<
+        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+    >,
 {
     /// Register Eth Namespace
     ///
