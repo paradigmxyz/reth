@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy_network::Ethereum;
 use derive_more::Deref;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
@@ -34,6 +35,12 @@ use tokio::sync::Mutex;
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+}
+
+impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -119,6 +126,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
+    type NetworkTypes = Ethereum;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -126,12 +134,6 @@ impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
-    }
-}
-
-impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
-    fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
     }
 }
 
@@ -509,7 +511,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -531,7 +533,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -554,7 +556,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -577,7 +579,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

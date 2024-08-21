@@ -19,12 +19,12 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError};
+use crate::{FromEthApiError, IntoEthApiError, Transaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
@@ -195,7 +195,7 @@ pub trait EthTransactions: LoadTransaction {
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Transaction>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Transaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {

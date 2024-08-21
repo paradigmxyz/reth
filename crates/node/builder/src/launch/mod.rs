@@ -106,8 +106,9 @@ where
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
