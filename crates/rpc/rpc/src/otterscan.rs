@@ -233,7 +233,11 @@ where
                 OtsTransactionReceipt { receipt, timestamp }
             })
             .collect();
-        Ok(OtsBlockTransactions { fullblock: block.inner.into(), receipts })
+
+        // use `transaction_count` to indicate the paginate information
+        let mut block = OtsBlockTransactions { fullblock: block.inner.into(), receipts };
+        block.fullblock.transaction_count = tx_len;
+        Ok(block)
     }
 
     /// Handler for `searchTransactionsBefore`
