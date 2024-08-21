@@ -1544,7 +1544,7 @@ mod tests {
                 provider_rw.static_file_provider().latest_writer(StaticFileSegment::Receipts)?;
             let block_number = block.number as usize;
             for receipt in receipts.get(block_number).unwrap() {
-                writer.append_receipt(block.number, &receipt)?;
+                writer.append_receipt(block.number, receipt)?;
             }
         }
         provider_rw.commit()?;
@@ -1557,10 +1557,8 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome = ExecutionOutcome {
-                        receipts: block_receipts.clone().into(),
-                        ..Default::default()
-                    };
+                    let execution_outcome =
+                        ExecutionOutcome { receipts: block_receipts.into(), ..Default::default() };
 
                     ExecutedBlock::new(
                         Arc::new(block),
