@@ -52,7 +52,7 @@ pub fn from_block_with_tx_hashes<T>(
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with the _full_
-/// [`Transaction`] objects: [`BlockTransactions::Full`]
+/// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
 pub fn from_block_full<T: TransactionCompat>(
     mut block: BlockWithSenders,
     total_difficulty: U256,
