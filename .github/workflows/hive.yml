@@ -3,10 +3,10 @@
 name: hive
 
 on:
-  pull_request:
-  merge_group:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # every day
+    - cron: "0 0 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -148,7 +148,7 @@ jobs:
             # debug_ rpc methods
             include: [debug_]
           # Pyspec cancun jobs
-          # TODO: enable when https://github.com/ethereum/hive/issues/1147 is fixed
+          # TODO: uncomment when https://github.com/ethereum/hive/issues/1147 is fixed
           #- sim: pyspec
           #  include: [cancun/eip4844]
           #- sim: pyspec
