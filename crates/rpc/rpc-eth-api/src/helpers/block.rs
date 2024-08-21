@@ -28,6 +28,7 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
     where
         Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
+        Self::BlockCompat: BlockCompat<TxCompat = Self::TransactionCompat>,
     {
         async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
     }
@@ -43,6 +44,7 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
+        Self::BlockCompat: BlockCompat<TxCompat = Self::TransactionCompat>,
     {
         async move {
             let block = match self.block_with_senders(block_id).await? {

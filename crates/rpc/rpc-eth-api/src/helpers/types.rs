@@ -5,7 +5,6 @@ use std::{error::Error, fmt};
 use alloy_network::{AnyNetwork, Network};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types::Rich;
-use reth_rpc_types_compat::BlockCompat;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -24,7 +23,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
     /// Conversion methods for block RPC type.
-    type BlockCompat: BlockCompat<TxCompat = Self::TransactionCompat>;
+    type BlockCompat;
 }
 
 impl EthApiTypes for () {
