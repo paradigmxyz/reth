@@ -36,15 +36,6 @@ pub struct Signature {
     pub odd_y_parity: bool,
 }
 
-impl Signature {
-    /// Returns the signature for the optimism deposit transactions, which don't include a
-    /// signature.
-    #[cfg(feature = "optimism")]
-    pub const fn optimism_deposit_tx_signature() -> Self {
-        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
-    }
-}
-
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for Signature {
     fn to_compact<B>(&self, buf: &mut B) -> usize
@@ -198,7 +189,23 @@ impl Signature {
             None => EncodableSignature::v(self),
         };
 
+        #[cfg(feature = "optimism")]
+        // pre bedrock system transactions were sent from the zero address as legacy
+        // transactions with an empty signature
+        //
+        // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
+        if *self == Self::optimism_deposit_tx_signature() {
+            return SignatureWithParity::new(self.r(), self.s(), Parity::Parity(false));
+        }
+
         SignatureWithParity::new(self.r(), self.s(), parity)
+    }
+
+    /// Returns the signature for the optimism deposit transactions, which don't include a
+    /// signature.
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_deposit_tx_signature() -> Self {
+        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
 }
 
