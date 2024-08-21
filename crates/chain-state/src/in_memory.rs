@@ -111,8 +111,8 @@ impl InMemoryState {
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
-    pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.borrow().as_ref().map(|state| Arc::new(state.clone()))
+    pub(crate) fn pending_state(&self) -> Option<BlockState> {
+        self.pending.borrow().clone()
     }
 
     #[cfg(test)]
@@ -347,7 +347,7 @@ impl CanonicalInMemoryState {
     }
 
     /// Returns the in memory pending state.
-    pub fn pending_state(&self) -> Option<Arc<BlockState>> {
+    pub fn pending_state(&self) -> Option<BlockState> {
         self.inner.in_memory_state.pending_state()
     }
 
@@ -465,12 +465,12 @@ impl CanonicalInMemoryState {
 
     /// Subscribe to new safe block events.
     pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
-        self.inner.chain_info_tracker.subscribe_to_safe_block()
+        self.inner.chain_info_tracker.subscribe_safe_block()
     }
 
     /// Subscribe to new finalized block events.
     pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
-        self.inner.chain_info_tracker.subscribe_to_finalized_block()
+        self.inner.chain_info_tracker.subscribe_finalized_block()
     }
 
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
@@ -1131,7 +1131,7 @@ mod tests {
         // Check the pending state
         assert_eq!(
             state.pending_state().unwrap(),
-            Arc::new(BlockState::with_parent(block2.clone(), Some(BlockState::new(block1))))
+            BlockState::with_parent(block2.clone(), Some(BlockState::new(block1)))
         );
 
         // Check the pending block

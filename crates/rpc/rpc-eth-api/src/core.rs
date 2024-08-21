@@ -272,7 +272,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<reth_rpc_types::Account>;
+    ) -> RpcResult<Option<reth_rpc_types::Account>>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -674,7 +674,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<reth_rpc_types::Account> {
+    ) -> RpcResult<Option<reth_rpc_types::Account>> {
         trace!(target: "rpc::eth", "Serving eth_getAccount");
         Ok(EthState::get_account(self, address, block).await?)
     }

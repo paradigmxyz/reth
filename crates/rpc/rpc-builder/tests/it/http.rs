@@ -176,6 +176,9 @@ where
     EthApiClient::<Transaction, RichBlock>::protocol_version(client).await.unwrap();
     EthApiClient::<Transaction, RichBlock>::chain_id(client).await.unwrap();
     EthApiClient::<Transaction, RichBlock>::accounts(client).await.unwrap();
+    EthApiClient::<Transaction, RichBlock>::get_account(client, address, block_number.into())
+        .await
+        .unwrap();
     EthApiClient::<Transaction, RichBlock>::block_number(client).await.unwrap();
     EthApiClient::<Transaction, RichBlock>::get_code(client, address, None).await.unwrap();
     EthApiClient::<Transaction, RichBlock>::send_raw_transaction(client, tx).await.unwrap();

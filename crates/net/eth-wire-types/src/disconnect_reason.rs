@@ -14,43 +14,43 @@ use thiserror::Error;
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
     #[default]
-    #[display(fmt = "disconnect requested")]
+    #[display("disconnect requested")]
     DisconnectRequested = 0x00,
     /// TCP related error
-    #[display(fmt = "TCP sub-system error")]
+    #[display("TCP sub-system error")]
     TcpSubsystemError = 0x01,
     /// Breach of protocol at the transport or p2p level
-    #[display(fmt = "breach of protocol, e.g. a malformed message, bad RLP, etc.")]
+    #[display("breach of protocol, e.g. a malformed message, bad RLP, etc.")]
     ProtocolBreach = 0x02,
     /// Node has no matching protocols.
-    #[display(fmt = "useless peer")]
+    #[display("useless peer")]
     UselessPeer = 0x03,
     /// Either the remote or local node has too many peers.
-    #[display(fmt = "too many peers")]
+    #[display("too many peers")]
     TooManyPeers = 0x04,
     /// Already connected to the peer.
-    #[display(fmt = "already connected")]
+    #[display("already connected")]
     AlreadyConnected = 0x05,
     /// `p2p` protocol version is incompatible
-    #[display(fmt = "incompatible P2P protocol version")]
+    #[display("incompatible P2P protocol version")]
     IncompatibleP2PProtocolVersion = 0x06,
     /// Received a null node identity.
-    #[display(fmt = "null node identity received - this is automatically invalid")]
+    #[display("null node identity received - this is automatically invalid")]
     NullNodeIdentity = 0x07,
     /// Reason when the client is shutting down.
-    #[display(fmt = "client quitting")]
+    #[display("client quitting")]
     ClientQuitting = 0x08,
     /// When the received handshake's identify is different from what is expected.
-    #[display(fmt = "unexpected identity in handshake")]
+    #[display("unexpected identity in handshake")]
     UnexpectedHandshakeIdentity = 0x09,
     /// The node is connected to itself
-    #[display(fmt = "identity is the same as this node (i.e. connected to itself)")]
+    #[display("identity is the same as this node (i.e. connected to itself)")]
     ConnectedToSelf = 0x0a,
     /// Peer or local node did not respond to a ping in time.
-    #[display(fmt = "ping timeout")]
+    #[display("ping timeout")]
     PingTimeout = 0x0b,
     /// Peer or local node violated a subprotocol-specific rule.
-    #[display(fmt = "some other reason specific to a subprotocol")]
+    #[display("some other reason specific to a subprotocol")]
     SubprotocolSpecific = 0x10,
 }
 
