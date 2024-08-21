@@ -175,6 +175,7 @@ where
     EthApiClient::protocol_version(client).await.unwrap();
     EthApiClient::chain_id(client).await.unwrap();
     EthApiClient::accounts(client).await.unwrap();
+    EthApiClient::get_account(client, address, block_number.into()).await.unwrap();
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();

@@ -439,7 +439,7 @@ bytes = "1.5"
 clap = "4"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "6.0"
-derive_more = "0.99.17"
+derive_more = { version = "1", features = ["full"] }
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
@@ -527,7 +527,6 @@ secp256k1 = { version = "0.29", default-features = false, features = [
 c-kzg = "1.0.0"
 
 # config
-confy = "0.6"
 toml = "0.8"
 
 # misc-testing
