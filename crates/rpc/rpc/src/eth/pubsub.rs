@@ -19,7 +19,7 @@ use reth_rpc_types::{
     },
     FilteredParams, Header, Log, Transaction,
 };
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
@@ -137,7 +137,7 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(Eth::from_recovered(
+                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered::<Eth>(
                                 tx.transaction.to_recovered_transaction(),
                             )))
                         });

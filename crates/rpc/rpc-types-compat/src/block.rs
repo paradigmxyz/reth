@@ -6,7 +6,7 @@ use reth_primitives::{
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
-use crate::TransactionCompat;
+use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
@@ -72,7 +72,7 @@ pub fn from_block_full<T: TransactionCompat>(
         .map(|(idx, (tx, sender))| {
             let signed_tx_ec_recovered = tx.with_signer(sender);
 
-            T::from_recovered_with_block_context(
+            from_recovered_with_block_context::<T>(
                 signed_tx_ec_recovered,
                 block_hash,
                 block_number,

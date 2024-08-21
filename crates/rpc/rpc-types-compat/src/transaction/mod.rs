@@ -12,6 +12,27 @@ use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxType, B256};
 use reth_rpc_types::{Transaction, WithOtherFields};
 
+/// Create a new rpc transaction result for a mined transaction, using the given block hash,
+/// number, and tx index fields to populate the corresponding fields in the rpc result.
+///
+/// The block hash, number, and tx index fields should be from the original block where the
+/// transaction was mined.
+pub fn from_recovered_with_block_context<T: TransactionCompat>(
+    tx: TransactionSignedEcRecovered,
+    block_hash: B256,
+    block_number: BlockNumber,
+    base_fee: Option<u64>,
+    tx_index: usize,
+) -> T::Transaction {
+    T::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+}
+
+/// Create a new rpc transaction result for a _pending_ signed transaction, setting block
+/// environment related fields to `None`.
+pub fn from_recovered<T: TransactionCompat>(tx: TransactionSignedEcRecovered) -> T::Transaction {
+    T::fill(tx, None, None, None, None)
+}
+
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
@@ -52,26 +73,21 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
         base_fee: Option<u64>,
         transaction_index: Option<usize>,
     ) -> Self::Transaction;
+}
 
-    /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
-    /// environment related fields to `None`.
-    fn from_recovered(tx: TransactionSignedEcRecovered) -> Self::Transaction {
-        Self::fill(tx, None, None, None, None)
-    }
+impl TransactionCompat for () {
+    // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
+    // `alloy_network::AnyNetwork`
+    type Transaction = WithOtherFields<Transaction>;
 
-    /// Create a new rpc transaction result for a mined transaction, using the given block hash,
-    /// number, and tx index fields to populate the corresponding fields in the rpc result.
-    ///
-    /// The block hash, number, and tx index fields should be from the original block where the
-    /// transaction was mined.
-    fn from_recovered_with_block_context(
-        tx: TransactionSignedEcRecovered,
-        block_hash: B256,
-        block_number: BlockNumber,
-        base_fee: Option<u64>,
-        tx_index: usize,
+    fn fill(
+        _tx: TransactionSignedEcRecovered,
+        _block_hash: Option<B256>,
+        _block_number: Option<BlockNumber>,
+        _base_fee: Option<u64>,
+        _transaction_index: Option<usize>,
     ) -> Self::Transaction {
-        Self::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+        WithOtherFields::default()
     }
 }
 
@@ -123,21 +139,5 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
-    }
-}
-
-impl TransactionCompat for () {
-    // this noop impl depends on integration in `reth_rpc_eth_api::EthApiTypes` noop impl, and
-    // `alloy_network::AnyNetwork`
-    type Transaction = WithOtherFields<Transaction>;
-
-    fn fill(
-        _tx: TransactionSignedEcRecovered,
-        _block_hash: Option<B256>,
-        _block_number: Option<BlockNumber>,
-        _base_fee: Option<u64>,
-        _transaction_index: Option<usize>,
-    ) -> Self::Transaction {
-        WithOtherFields::default()
     }
 }

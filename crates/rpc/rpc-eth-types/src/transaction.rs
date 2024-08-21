@@ -4,7 +4,10 @@
 
 use reth_primitives::{TransactionSignedEcRecovered, B256};
 use reth_rpc_types::TransactionInfo;
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::{
+    transaction::{from_recovered, from_recovered_with_block_context},
+    TransactionCompat,
+};
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -39,9 +42,9 @@ impl TransactionSource {
     /// Conversion into network specific transaction type.
     pub fn into_transaction<T: TransactionCompat>(self) -> T::Transaction {
         match self {
-            Self::Pool(tx) => T::from_recovered(tx),
+            Self::Pool(tx) => from_recovered::<T>(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
-                T::from_recovered_with_block_context(
+                from_recovered_with_block_context::<T>(
                     transaction,
                     block_hash,
                     block_number,

@@ -8,7 +8,7 @@ use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
     Transaction,
 };
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
 use tracing::trace;
 
@@ -47,7 +47,7 @@ where
             content
                 .entry(tx.sender())
                 .or_default()
-                .insert(tx.nonce().to_string(), Eth::from_recovered(tx.clone().into()));
+                .insert(tx.nonce().to_string(), from_recovered::<Eth>(tx.clone().into()));
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();

@@ -25,7 +25,7 @@ use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind, Transaction,
 };
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use tokio::{
@@ -596,7 +596,7 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            pending_txs.push(Eth::from_recovered(tx.transaction.to_recovered_transaction()))
+            pending_txs.push(from_recovered::<Eth>(tx.transaction.to_recovered_transaction()))
         }
         FilterChanges::Transactions(pending_txs)
     }
