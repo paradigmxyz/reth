@@ -221,6 +221,9 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
         last: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.first_after(&last));
+        if self.storage_trie_cleared {
+            return Ok(in_memory)
+        }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(last.clone())?;
