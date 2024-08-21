@@ -1,16 +1,28 @@
 use derive_more::Constructor;
 
 use super::{
+    DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 
 /// Configuration for managing transactions within the network.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TransactionsManagerConfig {
     /// Configuration for fetching transactions.
     pub transaction_fetcher_config: TransactionFetcherConfig,
+    /// Max number of seen transactions to store for each peer.
+    pub max_transactions_seen_by_peer_history: u32,
+}
+
+impl Default for TransactionsManagerConfig {
+    fn default() -> Self {
+        Self {
+            transaction_fetcher_config: TransactionFetcherConfig::default(),
+            max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+        }
+    }
 }
 
 /// Configuration for fetching transactions.

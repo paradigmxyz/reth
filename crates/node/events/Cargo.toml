@@ -18,7 +18,6 @@ reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
-reth-db-api.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 

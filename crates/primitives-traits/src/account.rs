@@ -4,13 +4,14 @@ use alloy_primitives::{keccak256, Bytes, B256, U256};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{reth_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
-#[reth_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
@@ -32,16 +33,6 @@ impl Account {
         self.nonce == 0 &&
             self.balance.is_zero() &&
             self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
-    }
-
-    /// Makes an [Account] from [`GenesisAccount`] type
-    pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Self {
-            // nonce must exist, so we default to zero when converting a genesis account
-            nonce: value.nonce.unwrap_or_default(),
-            balance: value.balance,
-            bytecode_hash: value.code.as_ref().map(keccak256),
-        }
     }
 
     /// Returns an account bytecode's hash.
@@ -125,6 +116,16 @@ impl Compact for Bytecode {
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])
+    }
+}
+
+impl From<&GenesisAccount> for Account {
+    fn from(value: &GenesisAccount) -> Self {
+        Self {
+            nonce: value.nonce.unwrap_or_default(),
+            balance: value.balance,
+            bytecode_hash: value.code.as_ref().map(keccak256),
+        }
     }
 }
 

@@ -161,7 +161,12 @@ where
                 ctx.task_executor().clone(),
                 blob_store.clone(),
             )
-            .map(OpTransactionValidator::new);
+            .map(|validator| {
+                OpTransactionValidator::new(validator)
+                    // In --dev mode we can't require gas fees because we're unable to decode the L1
+                    // block info
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
+            });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,

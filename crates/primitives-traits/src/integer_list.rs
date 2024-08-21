@@ -143,10 +143,10 @@ impl<'a> Arbitrary<'a> for IntegerList {
 #[derive(Debug, derive_more::Display)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
-    #[display(fmt = "the provided input is invalid")]
+    #[display("the provided input is invalid")]
     InvalidInput,
     /// Failed to deserialize data into type.
-    #[display(fmt = "failed to deserialize data into type")]
+    #[display("failed to deserialize data into type")]
     FailedToDeserialize,
 }
 

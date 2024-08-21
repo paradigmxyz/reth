@@ -1,19 +1,20 @@
 //! Dummy blocks and data for tests
 use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_primitives::Log;
-use alloy_rlp::Decodable;
+use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
     alloy_primitives, b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header,
-    Receipt, Requests, SealedBlock, SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256,
-    U256,
+    Receipt, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader, Signature, Transaction,
+    TransactionSigned, TxKind, TxLegacy, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{
     db::BundleState,
     primitives::{AccountInfo, HashMap},
 };
+use std::str::FromStr;
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: SealedBlock) {
@@ -57,7 +58,53 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     // StageCheckpoints is not updated in tests
 }
 
-const BLOCK_RLP: [u8; 610] = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0");
+pub(crate) static TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
+    header: SealedHeader::new(
+        Header {
+            parent_hash: hex!("c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f")
+                .into(),
+            ommers_hash: hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+                .into(),
+            beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
+            state_root: hex!("50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d")
+                .into(),
+            transactions_root: hex!(
+                "0967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192"
+            )
+            .into(),
+            receipts_root: hex!("e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290d")
+                .into(),
+            difficulty: U256::from(131_072),
+            number: 1,
+            gas_limit: 1_000_000,
+            gas_used: 14_352,
+            timestamp: 1_000,
+            ..Default::default()
+        },
+        hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
+    ),
+    body: vec![TransactionSigned {
+        hash: hex!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397").into(),
+        signature: Signature {
+            r: U256::from_str(
+                "51983300959770368863831494747186777928121405155922056726144551509338672451120",
+            )
+            .unwrap(),
+            s: U256::from_str(
+                "29056683545955299640297374067888344259176096769870751649153779895496107008675",
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        },
+        transaction: Transaction::Legacy(TxLegacy {
+            gas_price: 10,
+            gas_limit: 400_000,
+            to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
+            ..Default::default()
+        }),
+    }],
+    ..Default::default()
+});
 
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
@@ -175,7 +222,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
         b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
     );
 
-    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    let mut block = TEST_BLOCK.clone();
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
@@ -237,7 +284,7 @@ fn block2(
         b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
 
-    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    let mut block = TEST_BLOCK.clone();
 
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
@@ -303,7 +350,7 @@ fn block3(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    let mut block = TEST_BLOCK.clone();
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
@@ -394,7 +441,7 @@ fn block4(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    let mut block = TEST_BLOCK.clone();
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
@@ -480,7 +527,7 @@ fn block5(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+    let mut block = TEST_BLOCK.clone();
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;

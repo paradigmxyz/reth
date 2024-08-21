@@ -104,6 +104,7 @@ members = [
     "crates/storage/codecs/derive/",
     "crates/storage/db-api/",
     "crates/storage/db-common",
+    "crates/storage/db-models/",
     "crates/storage/db/",
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
@@ -283,12 +284,13 @@ reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
-reth-consensus = { path = "crates/consensus/consensus" }
+reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
 reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
+reth-db-models = { path = "crates/storage/db-models"}
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
@@ -437,7 +439,7 @@ bytes = "1.5"
 clap = "4"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "6.0"
-derive_more = "0.99.17"
+derive_more = { version = "1", features = ["full"] }
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
@@ -525,7 +527,6 @@ secp256k1 = { version = "0.29", default-features = false, features = [
 c-kzg = "1.0.0"
 
 # config
-confy = "0.6"
 toml = "0.8"
 
 # misc-testing

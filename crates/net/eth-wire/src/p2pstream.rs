@@ -8,7 +8,7 @@ use crate::{
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_codecs::derive_arbitrary;
+use reth_codecs::add_arbitrary_tests;
 use reth_metrics::metrics::counter;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
@@ -642,9 +642,10 @@ where
 }
 
 /// This represents only the reserved `p2p` subprotocol messages.
-#[derive_arbitrary(rlp)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
     Hello(HelloMessage),
