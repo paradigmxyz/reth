@@ -7803,6 +7803,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "strum",
  "tempfile",
  "tokio",
  "toml",

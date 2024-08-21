@@ -29,7 +29,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, error, info};
+use reth_tracing::tracing::{debug, error, info, warn};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -196,6 +196,13 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
+        // TODO: implement methods which convert this value into an actual function
+        if let Some(ref hook_type) = ctx.node_config().debug.bad_block_hook {
+            warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
+        }
+
+        let bad_block_hook = Box::new(|_, _, _, _| {});
+
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
             ctx.consensus(),
@@ -210,6 +217,7 @@ where
             pruner,
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
+            bad_block_hook,
         );
 
         let event_sender = EventSender::default();

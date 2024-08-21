@@ -24,12 +24,12 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipt, Receipts, Requests,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
+    BlockExecutionOutput, BlockReader, ExecutionOutcome, ProviderError, StateProviderBox,
+    StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -40,9 +40,10 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::HashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::Debug,
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -61,6 +62,16 @@ mod config;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
+
+/// This exists only to share the hook definition across many function definitions easily
+pub type InvalidBlockHook = Box<
+    dyn Fn(
+            SealedBlockWithSenders,
+            SealedHeader,
+            BlockExecutionOutput<Receipt>,
+            Option<(TrieUpdates, B256)>,
+        ) + Send,
+>;
 
 /// Keeps track of the state of the tree.
 ///
@@ -377,7 +388,7 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
@@ -414,6 +425,8 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
+    /// An invalid block hook
+    invalid_block_hook: InvalidBlockHook,
 }
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
@@ -454,7 +467,13 @@ where
             config,
             metrics: Default::default(),
             incoming_tx,
+            invalid_block_hook: Box::new(|_, _, _, _| {}),
         }
+    }
+
+    /// Sets the invalid block hook to be the given function
+    fn set_invalid_block_hook(&mut self, invalid_block_hook: InvalidBlockHook) {
+        self.invalid_block_hook = invalid_block_hook;
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -472,6 +491,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
+        invalid_block_hook: InvalidBlockHook,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -489,7 +509,7 @@ where
             header.num_hash(),
         );
 
-        let task = Self::new(
+        let mut task = Self::new(
             provider,
             executor_provider,
             consensus,
@@ -502,6 +522,7 @@ where
             payload_builder,
             config,
         );
+        task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         (incoming, outgoing)
@@ -1742,10 +1763,14 @@ where
         let output = executor.execute((&block, U256::MAX).into())?;
         debug!(target: "engine", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
-        self.consensus.validate_block_post_execution(
+        if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
-        )?;
+        ) {
+            // call post-block hook
+            (self.invalid_block_hook)(block.seal_slow(), parent_block, output, None);
+            return Err(err.into())
+        }
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
@@ -1753,6 +1778,13 @@ where
         let (state_root, trie_output) =
             state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
+            // call post-block hook
+            (self.invalid_block_hook)(
+                block.clone().seal_slow(),
+                parent_block,
+                output,
+                Some((trie_output, state_root)),
+            );
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
             )
@@ -1996,6 +2028,27 @@ where
             }
             Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
         }
+    }
+}
+
+impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTreeHandler<P, E, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineApiTreeHandler")
+            .field("provider", &self.provider)
+            .field("executor_provider", &self.executor_provider)
+            .field("consensus", &self.consensus)
+            .field("payload_validator", &self.payload_validator)
+            .field("state", &self.state)
+            .field("incoming_tx", &self.incoming_tx)
+            .field("persistence", &self.persistence)
+            .field("persistence_state", &self.persistence_state)
+            .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("payload_builder", &self.payload_builder)
+            .field("config", &self.config)
+            .field("metrics", &self.metrics)
+            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
+            .finish()
     }
 }
 
