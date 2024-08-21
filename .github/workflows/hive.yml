@@ -142,9 +142,8 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-          # debug_ rpc methods
-          - sim: ethereum/rpc-compat
-            include: [debug_]
+              # debug_ rpc methods
+              - debug_
           # Pyspec cancun jobs
           - sim: pyspec
             include: [cancun/eip4844]
