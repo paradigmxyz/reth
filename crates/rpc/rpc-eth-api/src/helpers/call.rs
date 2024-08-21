@@ -259,31 +259,24 @@ pub trait EthCall: Call + LoadPendingBlock {
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
-        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
+        let (_, mut env) = self.inspect(&mut db, env, &mut inspector)?;
         let access_list = inspector.into_access_list();
-
-        match result.result {
+        env.tx.access_list = access_list.to_vec();
+        let (res, _) = self.transact(&mut db, env.clone())?;
+        match res.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
-            ExecutionResult::Success { .. } => {}
-        };
-
-        let cfg_with_spec_id =
-            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
-
-        // calculate the gas used using the access list
-        request.access_list = Some(access_list.clone());
-        let gas_used =
-            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
-
-        Ok(AccessListResult { access_list, gas_used, error: None })
+            ExecutionResult::Success { gas_used, .. } => {
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error: None })
+            }
+        }
     }
 }
 
