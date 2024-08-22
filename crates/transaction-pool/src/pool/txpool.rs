@@ -321,6 +321,12 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pending_pool.all().collect()
     }
+    /// Returns an iterator over all transactions from the pending sub-pool
+    pub(crate) fn pending_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.pending_pool.all()
+    }
 
     /// Returns all transactions from parked pools
     pub(crate) fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -582,6 +588,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     let moved = self.move_transaction(current, move_to, &id);
                     if matches!(move_to, SubPool::Pending) {
                         if let Some(tx) = moved {
+                            trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
                             outcome.promoted.push(tx);
                         }
                     }

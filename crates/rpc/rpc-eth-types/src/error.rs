@@ -16,7 +16,9 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+#[cfg(feature = "js-tracer")]
+use revm_inspectors::tracing::js::JsInspectorError;
+use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
 /// Result alias
@@ -191,6 +193,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
+#[cfg(feature = "js-tracer")]
 impl From<JsInspectorError> for EthApiError {
     fn from(error: JsInspectorError) -> Self {
         match error {
@@ -378,11 +381,6 @@ pub enum RpcInvalidTransactionError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
-    /// Unexpected [`InvalidTransaction`](revm::primitives::InvalidTransaction) error, Optimism
-    /// errors should not be handled on this level.
-    // TODO: Remove when optimism feature removed in revm
-    #[error("unexpected transaction error")]
-    UnexpectedTransactionError,
 }
 
 impl RpcInvalidTransactionError {
@@ -477,13 +475,13 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[allow(unreachable_patterns)]
-            _ => {
+            err => {
                 error!(target: "rpc",
                     ?err,
                     "unexpected transaction error"
                 );
 
-                Self::UnexpectedTransactionError
+                Self::other(internal_rpc_err(format!("unexpected transaction error: {err}")))
             }
         }
     }

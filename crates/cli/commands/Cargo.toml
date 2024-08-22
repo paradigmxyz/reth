@@ -20,11 +20,14 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
+reth-ecies.workspace = true
+reth-eth-wire.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-node-events.workspace = true
@@ -51,10 +54,10 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 backon.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # io
 fdlimit.workspace = true
-confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # tui

@@ -11,8 +11,6 @@ pub use handle::{
     SessionCommand,
 };
 
-pub use crate::message::PeerRequestSender;
-
 pub use reth_network_api::{Direction, PeerInfo};
 
 use std::{
@@ -28,13 +26,12 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    multiplex::RlpxProtocolMultiplexer,
-    DisconnectReason, EthVersion, HelloMessageWithProtocols, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    capability::CapabilityMessage, errors::EthStreamError, multiplex::RlpxProtocolMultiplexer,
+    Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, Status,
+    UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_network_api::PeerRequestSender;
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
@@ -44,7 +41,7 @@ use secp256k1::SecretKey;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
@@ -349,7 +346,18 @@ impl SessionManager {
     /// Sends a message to the peer's session
     pub fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage) {
         if let Some(session) = self.active_sessions.get_mut(peer_id) {
-            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
+            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
+                |e| {
+                    if let TrySendError::Full(_) = e {
+                        debug!(
+                            target: "net::session",
+                            ?peer_id,
+                            "session command buffer full, dropping message"
+                        );
+                        self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+                    }
+                },
+            );
         }
     }
 

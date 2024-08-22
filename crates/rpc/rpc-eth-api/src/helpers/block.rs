@@ -6,7 +6,7 @@ use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
+use reth_rpc_types::{AnyTransactionReceipt, Block, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::FromEthApiError;
@@ -187,7 +187,7 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         index: Index,
-    ) -> impl Future<Output = Result<Option<RichBlock>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<Block>, Self::Error>> + Send {
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
@@ -202,10 +202,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            let index = usize::from(index);
-            let uncle =
-                uncles.into_iter().nth(index).map(|header| uncle_block_from_header(header).into());
-            Ok(uncle)
+            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
         }
     }
 }

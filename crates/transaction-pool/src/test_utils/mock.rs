@@ -722,7 +722,7 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the encoded length of the transaction.
     fn encoded_length(&self) -> usize {
-        0
+        self.size()
     }
 
     /// Returns the chain ID associated with the transaction.

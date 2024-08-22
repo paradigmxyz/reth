@@ -1,7 +1,7 @@
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    NetworkEvents, PeerRequest,
+    NetworkEventListenerProvider, PeerRequest,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};

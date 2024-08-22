@@ -440,10 +440,10 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
-    #[display(fmt = "{_0}")]
+    #[display("{_0}")]
     Enode(Multiaddr),
     /// A signed node record.
-    #[display(fmt = "{_0:?}")]
+    #[display("{_0:?}")]
     Enr(discv5::Enr),
 }
 

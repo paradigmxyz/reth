@@ -347,6 +347,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
     /// Returns all transactions that where submitted as [TransactionOrigin::Local]
     fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::Local)
@@ -360,6 +366,25 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns all transactions that where submitted as [TransactionOrigin::External]
     fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::External)
     }
 
     /// Returns a set of all senders of transactions in the pool
@@ -503,6 +528,16 @@ impl PropagateKind {
         match self {
             Self::Full(peer) | Self::Hash(peer) => peer,
         }
+    }
+
+    /// Returns true if the transaction was sent as a full transaction
+    pub const fn is_full(&self) -> bool {
+        matches!(self, Self::Full(_))
+    }
+
+    /// Returns true if the transaction was sent as a hash
+    pub const fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash(_))
     }
 }
 
@@ -1333,5 +1368,165 @@ impl<Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Stream
                 None => return Poll::Ready(None),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::{
+        constants::eip4844::DATA_GAS_PER_BLOB, Signature, TransactionSigned, TxEip1559, TxEip2930,
+        TxEip4844, TxEip7702, TxLegacy,
+    };
+
+    #[test]
+    fn test_pool_size_invariants() {
+        let pool_size = PoolSize {
+            pending: 10,
+            pending_size: 1000,
+            blob: 5,
+            blob_size: 500,
+            basefee: 8,
+            basefee_size: 800,
+            queued: 7,
+            queued_size: 700,
+            total: 10 + 5 + 8 + 7, // Correct total
+        };
+
+        // Call the assert_invariants method to check if the invariants are correct
+        pool_size.assert_invariants();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_pool_size_invariants_fail() {
+        let pool_size = PoolSize {
+            pending: 10,
+            pending_size: 1000,
+            blob: 5,
+            blob_size: 500,
+            basefee: 8,
+            basefee_size: 800,
+            queued: 7,
+            queued_size: 700,
+            total: 10 + 5 + 8, // Incorrect total
+        };
+
+        // Call the assert_invariants method, which should panic
+        pool_size.assert_invariants();
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_legacy() {
+        // Create a legacy transaction with specific parameters
+        let tx = Transaction::Legacy(TxLegacy {
+            gas_price: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip2930() {
+        // Create an EIP-2930 transaction with specific parameters
+        let tx = Transaction::Eip2930(TxEip2930 {
+            gas_price: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip1559() {
+        // Create an EIP-1559 transaction with specific parameters
+        let tx = Transaction::Eip1559(TxEip1559 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip4844() {
+        // Create an EIP-4844 transaction with specific parameters
+        let tx = Transaction::Eip4844(TxEip4844 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            max_fee_per_blob_gas: 5,
+            blob_versioned_hashes: vec![B256::default()],
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 300);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::Missing);
+        let expected_cost =
+            U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);
+        assert_eq!(pooled_tx.cost, expected_cost);
+    }
+
+    #[test]
+    fn test_eth_pooled_transaction_new_eip7702() {
+        // Init an EIP-7702 transaction with specific parameters
+        let tx = Transaction::Eip7702(TxEip7702 {
+            max_fee_per_gas: 10,
+            gas_limit: 1000,
+            value: U256::from(100),
+            ..Default::default()
+        });
+        let signature = Signature::default();
+        let signed_tx = TransactionSigned::from_transaction_and_signature(tx, signature);
+        let transaction =
+            TransactionSignedEcRecovered::from_signed_transaction(signed_tx, Default::default());
+        let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
+
+        // Check that the pooled transaction is created correctly
+        assert_eq!(pooled_tx.transaction, transaction);
+        assert_eq!(pooled_tx.encoded_length, 200);
+        assert_eq!(pooled_tx.blob_sidecar, EthBlobTransactionSidecar::None);
+        assert_eq!(pooled_tx.cost, U256::from(100) + U256::from(10 * 1000));
     }
 }
