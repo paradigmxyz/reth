@@ -165,7 +165,7 @@ where
             let Some(body_index) = provider.block_body_indices(block_number)? else {
                 return Ok(None)
             };
-            let tx_index =  body_index.last_tx_num() - id;
+            let tx_index = body_index.last_tx_num() - id;
             Ok(Some((None, tx_index as usize)))
         } else {
             // Otherwise, iterate through in-memory blocks and find the transaction with the
