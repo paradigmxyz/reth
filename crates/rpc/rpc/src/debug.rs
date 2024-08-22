@@ -33,9 +33,10 @@ use revm::{
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
+#[cfg(feature = "js-tracer")]
+use revm_inspectors::tracing::js::JsInspector;
 use revm_inspectors::tracing::{
-    js::{JsInspector, TransactionContext},
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
 use revm_primitives::{keccak256, HashMap};
 use std::sync::Arc;
@@ -388,6 +389,11 @@ where
                         return Ok(frame)
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
@@ -671,7 +677,8 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        transaction_context: Option<TransactionContext>,
+        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
+        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -737,6 +744,11 @@ where
                         return Ok((frame.into(), res.state))
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
                     let mut inspector = JsInspector::with_transaction_context(

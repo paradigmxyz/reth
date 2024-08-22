@@ -50,7 +50,6 @@ dyn-clone.workspace = true
 tracing.workspace = true
 
 [features]
-default = ["js-tracer"]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
 optimism = [
