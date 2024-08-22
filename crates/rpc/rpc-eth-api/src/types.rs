@@ -1,4 +1,4 @@
-//! Trait for specifying `eth` API types that may be network dependent.
+//! Trait for specifying `eth` network dependent API types.
 
 use std::error::Error;
 
@@ -19,6 +19,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
+    // todo: remove restriction `reth_rpc_types::Transaction`
     type NetworkTypes: Network<TransactionResponse = Transaction>;
 }
 
