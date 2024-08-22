@@ -710,3 +710,33 @@ async fn test_connect_many() {
         assert_eq!(peer.network().num_connected_peers(), 4);
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_disconnect_then_connect() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create(2).await;
+
+    net.for_each(|peer| assert_eq!(0, peer.num_peers()));
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+
+    handle0.disconnect_peer(*handle1.peer_id());
+
+    let (peer, _) = listener0.next_session_closed().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+
+    handle0.connect_peer(*handle1.peer_id(), handle1.local_addr());
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+}

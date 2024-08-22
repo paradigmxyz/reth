@@ -102,7 +102,14 @@ impl Peers for NoopNetwork {
 
     fn disconnect_peer_with_reason(&self, _peer: PeerId, _reason: DisconnectReason) {}
 
-    fn reconnect_peer(&self, _addr: SocketAddr, _peer: PeerId) {}
+    fn connect_peer_kind(
+        &self,
+        _peer: PeerId,
+        _kind: PeerKind,
+        _tcp_addr: SocketAddr,
+        _udp_addr: Option<SocketAddr>,
+    ) {
+    }
 
     fn reputation_change(&self, _peer_id: PeerId, _kind: ReputationChangeKind) {}
 
