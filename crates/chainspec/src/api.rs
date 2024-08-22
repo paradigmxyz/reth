@@ -1,7 +1,6 @@
+use crate::ChainSpec;
 use alloy_chains::Chain;
 use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
-
-use crate::ChainSpec;
 
 /// Trait representing type configuring a chain spec.
 pub trait EthChainSpec: Send + Sync + Unpin + 'static {

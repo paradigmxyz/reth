@@ -1,6 +1,5 @@
-use alloy_primitives::{address, b256};
-
 use crate::spec::DepositContract;
+use alloy_primitives::{address, b256};
 
 /// Deposit contract address: `0x00000000219ab540356cbb839cbe05303d7705fa`
 pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(

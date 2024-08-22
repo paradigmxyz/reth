@@ -10,7 +10,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use alloy_chains::{Chain, ChainKind, NamedChain};
-
 pub use info::ChainInfo;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
