@@ -10,6 +10,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use alloy_chains::{Chain, ChainKind, NamedChain};
+
 pub use info::ChainInfo;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
@@ -28,6 +29,9 @@ mod info;
 
 /// The chain spec module.
 mod spec;
+
+mod api;
+pub use api::EthChainSpec;
 
 /// Chain specific constants
 pub(crate) mod constants;

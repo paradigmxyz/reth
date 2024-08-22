@@ -12,6 +12,7 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 use alloy_primitives::U256;
 use derive_more::Deref;
 use op_alloy_network::{Network, Optimism};
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
@@ -109,7 +110,10 @@ where
     N: FullNodeComponents,
 {
     #[inline]
-    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader + StageCheckpointReader {
+    fn provider(
+        &self,
+    ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
+    {
         self.inner.provider()
     }
 
@@ -157,7 +161,9 @@ where
     N: FullNodeComponents,
 {
     #[inline]
-    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider {
+    fn provider(
+        &self,
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec> {
         self.inner.provider()
     }
 
@@ -184,7 +190,7 @@ where
     Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
         self.inner.provider()
     }
 

@@ -276,6 +276,7 @@ mod tests {
                     None,
                     Some((number == non_empty_block_number) as u8),
                     None,
+                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -318,8 +319,13 @@ mod tests {
         };
 
         // Seed only once with full input range
-        let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
+        let seed = random_block_range(
+            &mut rng,
+            stage_progress + 1..=previous_stage,
+            B256::ZERO,
+            0..2,
+            None,
+        );
         runner
             .db
             .insert_blocks(seed.iter(), StorageKind::Static)
@@ -353,7 +359,7 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10, None);
         db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -479,7 +485,8 @@ mod tests {
             let end = input.target();
             let mut rng = generators::rng();
 
-            let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
+            let blocks =
+                random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2, None);
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }

@@ -24,7 +24,7 @@ use reth_rpc_types::{
 use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionCompat};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError, Transaction};
+use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
@@ -188,17 +188,18 @@ pub trait EthTransactions: LoadTransaction {
         })
     }
 
-    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    /// Get transaction by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Transaction<Self::NetworkTypes>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
-        Self::TransactionCompat: TransactionCompat<Transaction = Transaction<Self::NetworkTypes>>,
+        Self::TransactionCompat:
+            TransactionCompat<Transaction = RpcTransaction<Self::NetworkTypes>>,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
