@@ -676,8 +676,7 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
-        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
+        _transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -754,7 +753,7 @@ where
                         revm_inspectors::tracing::js::JsInspector::with_transaction_context(
                             code,
                             config,
-                            transaction_context.unwrap_or_default(),
+                            _transaction_context.unwrap_or_default(),
                         )
                         .map_err(Eth::Error::from_eth_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;

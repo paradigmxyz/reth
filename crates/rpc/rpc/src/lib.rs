@@ -2,6 +2,9 @@
 //!
 //! Provides the implementation of all RPC interfaces.
 //!
+//! ## Feature Flags
+//!
+//! - `js-tracer`: Enables support for `debug_` Javascript tracer.
 //!
 //! ## Note on blocking behaviour
 //!
