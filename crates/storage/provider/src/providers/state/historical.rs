@@ -138,7 +138,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             tracing::warn!(
                 target: "provider::historical_sp",
                 target = self.block_number,
-                "Attempt to calculate state root for an old block might result in OOM, tread carefully"
+                "Attempt to calculate state root for an old block might result in OOM"
             );
         }
 
@@ -155,7 +155,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             tracing::warn!(
                 target: "provider::historical_sp",
                 target = self.block_number,
-                "Attempt to calculate storage root for an old block might result in OOM, tread carefully"
+                "Attempt to calculate storage root for an old block might result in OOM"
             );
         }
 
