@@ -10,9 +10,8 @@ use reth_beacon_consensus::{
 };
 use reth_blockchain_tree::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
-    BlockAttachment, BlockBuffer, BlockStatus,
+    BlockBuffer, BlockStatus2, InsertPayloadOk2,
 };
-use reth_blockchain_tree_api::InsertPayloadOk;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
@@ -665,17 +664,17 @@ where
             match self.insert_block_without_senders(block) {
                 Ok(status) => {
                     let status = match status {
-                        InsertPayloadOk::Inserted(BlockStatus::Valid(_)) => {
+                        InsertPayloadOk2::Inserted(BlockStatus2::Valid) => {
                             latest_valid_hash = Some(block_hash);
                             self.try_connect_buffered_blocks(num_hash);
                             PayloadStatusEnum::Valid
                         }
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
+                        InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid) => {
                             latest_valid_hash = Some(block_hash);
                             PayloadStatusEnum::Valid
                         }
-                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                        InsertPayloadOk2::Inserted(BlockStatus2::Disconnected { .. }) |
+                        InsertPayloadOk2::AlreadySeen(BlockStatus2::Disconnected { .. }) => {
                             // not known to be invalid, but we don't know anything else
                             PayloadStatusEnum::Syncing
                         }
@@ -1404,12 +1403,7 @@ where
                 Ok(res) => {
                     debug!(target: "engine", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_sync_target_head(child_num_hash.hash) &&
-                        matches!(
-                            res,
-                            InsertPayloadOk::Inserted(BlockStatus::Valid(
-                                BlockAttachment::Canonical
-                            ))
-                        )
+                        matches!(res, InsertPayloadOk2::Inserted(BlockStatus2::Valid))
                     {
                         self.make_canonical(child_num_hash.hash);
                     }
@@ -1640,7 +1634,7 @@ where
 
         // try to append the block
         match self.insert_block(block) {
-            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
+            Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid)) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
                     trace!(target: "engine", "appended downloaded sync target block");
                     // we just inserted the current sync target block, we can try to make it
@@ -1652,12 +1646,15 @@ where
                 trace!(target: "engine", "appended downloaded block");
                 self.try_connect_buffered_blocks(block_num_hash);
             }
-            Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
+            Ok(InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
+                head,
+                missing_ancestor,
+            })) => {
                 // block is not connected to the canonical head, we need to download
                 // its missing branch first
                 return self.on_disconnected_downloaded_block(block_num_hash, missing_ancestor, head)
             }
-            Ok(InsertPayloadOk::AlreadySeen(_)) => {
+            Ok(InsertPayloadOk2::AlreadySeen(_)) => {
                 trace!(target: "engine", "downloaded block already executed");
             }
             Err(err) => {
@@ -1673,7 +1670,7 @@ where
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
+    ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
             Err(block) => Err(InsertBlockErrorTwo::sender_recovery_error(block)),
@@ -1683,7 +1680,7 @@ where
     fn insert_block(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
+    ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo> {
         self.insert_block_inner(block.clone())
             .map_err(|kind| InsertBlockErrorTwo::new(block.block, kind))
     }
@@ -1691,10 +1688,9 @@ where
     fn insert_block_inner(
         &mut self,
         block: SealedBlockWithSenders,
-    ) -> Result<InsertPayloadOk, InsertBlockErrorKindTwo> {
+    ) -> Result<InsertPayloadOk2, InsertBlockErrorKindTwo> {
         if self.block_by_hash(block.hash())?.is_some() {
-            let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
-            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
+            return Ok(InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid))
         }
 
         let start = Instant::now();
@@ -1714,7 +1710,7 @@ where
 
             self.state.buffer.insert_block(block);
 
-            return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+            return Ok(InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
                 head: self.state.tree_state.current_canonical_head,
                 missing_ancestor,
             }))
@@ -1791,9 +1787,7 @@ where
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
-        let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
-
-        Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
+        Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2176,7 +2170,7 @@ mod tests {
         fn insert_block(
             &mut self,
             block: SealedBlockWithSenders,
-        ) -> Result<InsertPayloadOk, InsertBlockErrorTwo> {
+        ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo> {
             let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
             self.extend_execution_outcome([execution_outcome]);
             self.tree.provider.add_state_root(block.state_root);
@@ -2524,7 +2518,7 @@ mod tests {
         let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
         assert_eq!(
             outcome,
-            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+            InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
                 head: test_harness.tree.state.tree_state.current_canonical_head,
                 missing_ancestor: sealed.parent_num_hash()
             })
