@@ -123,12 +123,12 @@ impl ChainInfoTracker {
     }
 
     /// Subscribe to the finalized block.
-    pub fn subscribe_to_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
         self.inner.finalized_block.subscribe()
     }
 
     /// Subscribe to the safe block.
-    pub fn subscribe_to_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
         self.inner.safe_block.subscribe()
     }
 }

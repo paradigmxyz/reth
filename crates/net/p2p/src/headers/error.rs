@@ -10,7 +10,7 @@ pub type HeadersDownloaderResult<T> = Result<T, HeadersDownloaderError>;
 pub enum HeadersDownloaderError {
     /// The downloaded header cannot be attached to the local head,
     /// but is valid otherwise.
-    #[display(fmt = "valid downloaded header cannot be attached to the local head: {error}")]
+    #[display("valid downloaded header cannot be attached to the local head: {error}")]
     DetachedHead {
         /// The local head we attempted to attach to.
         local_head: Box<SealedHeader>,
