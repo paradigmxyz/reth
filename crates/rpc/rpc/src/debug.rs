@@ -622,17 +622,15 @@ where
                     db.commit(res.state);
                 }
 
-                // Merge all state transitions
-                db.merge_transitions(BundleRetention::Reverts);
-
-                // Take the bundle state
-                let bundle_state = db.take_bundle();
+                // No need to merge transitions and create the bundle state, we will use Revm's
+                // cache directly.
 
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
-                // referenced accounts + storage slots.
-                let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+                // referenced accounts + storage slots. Cache is a superset of `BundleState`, so we
+                // can just query it to get the latest state of all accounts and storage slots.
+                let mut hashed_state = HashedPostState::default();
                 for (address, account) in db.cache.accounts {
                     let hashed_address = keccak256(address);
                     hashed_state.accounts.insert(
