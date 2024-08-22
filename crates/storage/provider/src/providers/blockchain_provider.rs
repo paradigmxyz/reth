@@ -129,7 +129,8 @@ where
     /// Fetches a range of data from both in-memory state and storage.
     ///
     /// - `fetch_db_range`: Retrieves a range of items from the database.
-    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None` is returned.
+    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
+    ///   is returned.
     fn fetch_db_mem_range<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
