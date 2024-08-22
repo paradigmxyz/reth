@@ -266,6 +266,13 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 
+[profile.reproducible]
+inherits = "release"
+debug = false
+panic = "abort"
+codegen-units = 1
+overflow-checks = true
+
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
