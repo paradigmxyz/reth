@@ -84,8 +84,8 @@ jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
-default = ["js-tracer"]
-js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+#default = ["js-tracer"]
+js-tracer = ["revm-inspectors/js-tracer"]
 optimism = [
     "reth-primitives/optimism",
     "reth-rpc-types-compat/optimism",

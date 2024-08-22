@@ -59,4 +59,5 @@ serde_json.workspace = true
 
 
 [features]
+default = ["js-tracer"]
 js-tracer = ["revm-inspectors/js-tracer"]
