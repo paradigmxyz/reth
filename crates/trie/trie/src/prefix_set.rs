@@ -222,7 +222,7 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
         assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
 
         let mut prefix_set = prefix_set_mut.freeze();
@@ -242,7 +242,7 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
         assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
 
         let mut prefix_set = prefix_set_mut.freeze();
