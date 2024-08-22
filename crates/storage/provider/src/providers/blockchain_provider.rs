@@ -1491,6 +1491,11 @@ where
 mod tests {
     use std::{ops::Range, sync::Arc, time::Instant};
 
+    use crate::{
+        providers::BlockchainProvider2,
+        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
+        BlockWriter, CanonChainTracker, StaticFileWriter,
+    };
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1504,23 +1509,18 @@ mod tests {
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
         BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
-        B256,
+        Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
+        WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt,
     };
     use revm::db::BundleState;
-
-    use crate::{
-        providers::BlockchainProvider2,
-        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        BlockWriter, CanonChainTracker, StaticFileWriter,
-    };
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -1529,9 +1529,17 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> (Vec<SealedBlock>, Vec<SealedBlock>) {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
-        let blocks = random_block_range(rng, 0..=block_range, B256::ZERO, 0..1, requests_count);
+        let blocks = random_block_range(
+            rng,
+            0..=block_range,
+            B256::ZERO,
+            0..1,
+            requests_count,
+            withdrawals_count,
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
@@ -1543,14 +1551,20 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
     )> {
-        let (database_blocks, in_memory_blocks) =
-            random_blocks(rng, database_blocks, in_memory_blocks, requests_count);
+        let (database_blocks, in_memory_blocks) = random_blocks(
+            rng,
+            database_blocks,
+            in_memory_blocks,
+            requests_count,
+            withdrawals_count,
+        );
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
@@ -1622,6 +1636,7 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
@@ -1634,6 +1649,7 @@ mod tests {
             database_blocks,
             in_memory_blocks,
             requests_count,
+            withdrawals_count,
         )
     }
 
@@ -1644,7 +1660,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None);
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1738,7 +1754,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None);
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1802,12 +1818,17 @@ mod tests {
     #[test]
     fn test_block_reader_pending_block() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         // Generate a random block
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None);
+        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None, None);
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
@@ -1838,8 +1859,13 @@ mod tests {
     fn test_block_reader_ommers() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
 
@@ -1870,8 +1896,13 @@ mod tests {
     #[test]
     fn test_block_hash_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1894,8 +1925,13 @@ mod tests {
     #[test]
     fn test_header_provider() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2001,10 +2037,69 @@ mod tests {
     }
 
     #[test]
+    fn test_withdrawals_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let (provider, database_blocks, in_memory_blocks, _) =
+            provider_with_chain_spec_and_random_blocks(
+                &mut rng,
+                chain_spec.clone(),
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT,
+                None,
+                Some(1..3),
+            )?;
+        let blocks = [database_blocks, in_memory_blocks].concat();
+
+        let shainghai_timestamp =
+            chain_spec.hardforks.fork(EthereumHardfork::Shanghai).as_timestamp().unwrap();
+
+        assert_eq!(
+            provider
+                .withdrawals_by_block(
+                    reth_primitives::BlockHashOrNumber::Number(15),
+                    shainghai_timestamp
+                )
+                .expect("could not call withdrawals by block"),
+            Some(Withdrawals::new(vec![])),
+            "Expected withdrawals_by_block to return empty list if block does not exist"
+        );
+
+        for block in blocks.clone() {
+            assert_eq!(
+                provider
+                    .withdrawals_by_block(
+                        reth_primitives::BlockHashOrNumber::Number(block.number),
+                        shainghai_timestamp
+                    )?
+                    .unwrap(),
+                block.withdrawals.unwrap(),
+                "Expected withdrawals_by_block to return correct withdrawals"
+            );
+        }
+
+        let canonical_block_num = provider.best_block_number().unwrap();
+        let canonical_block = blocks.get(canonical_block_num as usize).unwrap();
+
+        assert_eq!(
+            Some(provider.latest_withdrawal()?.unwrap()),
+            canonical_block.withdrawals.clone().unwrap().pop(),
+            "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_block_num_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
         assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
@@ -2020,14 +2115,23 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_block_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
+        let provider_block =
+            provider.block_by_id(block_number.into()).unwrap().unwrap().withdrawals;
+        println!("provider_block {:#?}", provider_block);
+        println!("db block withdrawals {:#?}", database_block.withdrawals);
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(database_block.clone().unseal())
@@ -2051,8 +2155,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_header_by_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -2104,8 +2213,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_header_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2158,8 +2272,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2194,8 +2313,13 @@ mod tests {
     #[test]
     fn test_receipt_provider_id_ext_receipts_by_block_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2230,8 +2354,13 @@ mod tests {
     #[test]
     fn test_receipt_provider_id_ext_receipts_by_block_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -2265,7 +2394,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let (database_blocks, in_memory_blocks) =
-            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None);
+            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None, None);
 
         let first_database_block = database_blocks.first().map(|block| block.number).unwrap();
         let last_database_block = database_blocks.last().map(|block| block.number).unwrap();
@@ -2387,6 +2516,7 @@ mod tests {
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
                 Some(1..2),
+                None,
             )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2410,8 +2540,13 @@ mod tests {
     #[test]
     fn test_canon_state_tracker() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let before = Instant::now();
         provider.on_forkchoice_update_received(&Default::default());
@@ -2436,8 +2571,13 @@ mod tests {
     fn test_block_id_reader() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();

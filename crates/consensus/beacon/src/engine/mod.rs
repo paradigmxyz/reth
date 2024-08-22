@@ -2230,8 +2230,8 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
@@ -2289,8 +2289,8 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
@@ -2305,7 +2305,8 @@ mod tests {
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let next_head = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0), None);
+            let next_head =
+                random_block(&mut rng, 2, Some(block1.hash()), None, Some(0), None, None);
             let next_forkchoice_state = ForkchoiceState {
                 head_block_hash: next_head.hash(),
                 finalized_block_hash: block1.hash(),
@@ -2357,8 +2358,8 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
@@ -2404,16 +2405,19 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let mut block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let mut block1 =
+                random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
             block1.header.set_difficulty(U256::from(1));
 
             // a second pre-merge block
-            let mut block2 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let mut block2 =
+                random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
             block2.header.set_difficulty(U256::from(1));
 
             // a transition block
-            let mut block3 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let mut block3 =
+                random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
             block3.header.set_difficulty(U256::from(1));
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
@@ -2461,8 +2465,8 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
 
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
@@ -2525,7 +2529,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    block_to_payload_v1(random_block(&mut rng, 0, None, None, Some(0), None)),
+                    block_to_payload_v1(random_block(&mut rng, 0, None, None, Some(0), None, None)),
                     None,
                 )
                 .await;
@@ -2536,7 +2540,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    block_to_payload_v1(random_block(&mut rng, 1, None, None, Some(0), None)),
+                    block_to_payload_v1(random_block(&mut rng, 1, None, None, Some(0), None, None)),
                     None,
                 )
                 .await;
@@ -2565,9 +2569,9 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
-            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None);
-            let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
+            let block1 = random_block(&mut rng, 1, Some(genesis.hash()), None, Some(0), None, None);
+            let block2 = random_block(&mut rng, 2, Some(block1.hash()), None, Some(0), None, None);
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
@@ -2635,8 +2639,15 @@ mod tests {
 
             let genesis =
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
-            let block1 =
-                random_block(&mut rng, 1, Some(chain_spec.genesis_hash()), None, Some(0), None);
+            let block1 = random_block(
+                &mut rng,
+                1,
+                Some(chain_spec.genesis_hash()),
+                None,
+                Some(0),
+                None,
+                None,
+            );
 
             // TODO: add transactions that transfer from the alloc accounts, generating the new
             // block tx and state root
@@ -2686,7 +2697,7 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, None, None, Some(0), None);
+            let genesis = random_block(&mut rng, 0, None, None, Some(0), None, None);
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
@@ -2715,7 +2726,7 @@ mod tests {
 
             // Send new payload
             let parent = rng.gen();
-            let block = random_block(&mut rng, 2, Some(parent), None, Some(0), None);
+            let block = random_block(&mut rng, 2, Some(parent), None, Some(0), None, None);
             let res = env.send_new_payload(block_to_payload_v1(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
