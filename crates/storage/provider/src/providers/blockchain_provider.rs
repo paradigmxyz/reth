@@ -2361,7 +2361,7 @@ mod tests {
     fn test_canon_state_tracker() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT)?;
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
 
         let before = Instant::now();
         provider.on_forkchoice_update_received(&Default::default());
