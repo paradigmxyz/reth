@@ -22,10 +22,10 @@ The CI runs a couple of workflows:
 - **[release-dist]**: Publishes Reth to external package managers
 - **[dependencies]**: Runs `cargo update` periodically to keep dependencies current
 - **[stale]**: Marks issues as stale if there has been no activity
-
-### Maintenance
-
 - **[docker]**: Publishes the Docker image.
+
+### Integration Testing
+
 - **[assertoor]**: Runs Assertoor tests on Reth pairs.
 - **[hive]**: Runs `ethereum/hive` tests.
 
