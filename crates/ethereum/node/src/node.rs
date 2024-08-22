@@ -5,6 +5,7 @@ use std::sync::Arc;
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -46,7 +47,7 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes,
+        Node: FullNodeTypes<ChainSpec = ChainSpec>,
         <Node as NodeTypes>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -66,6 +67,7 @@ impl EthereumNode {
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
+    type ChainSpec = ChainSpec;
 }
 
 /// Add-ons w.r.t. l1 ethereum.
@@ -78,7 +80,7 @@ impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -103,7 +105,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type EVM = EthEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;
@@ -132,7 +134,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -210,7 +212,7 @@ impl<EVM> EthereumPayloadBuilder<EVM> {
 
 impl<Node, Evm, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder<Evm>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
     Evm: ConfigureEvm,
     Pool: TransactionPool + Unpin + 'static,
     <Node as NodeTypes>::Engine: PayloadTypes<
@@ -282,7 +284,7 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 

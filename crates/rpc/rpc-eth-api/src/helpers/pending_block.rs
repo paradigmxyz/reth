@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use futures::Future;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
@@ -47,7 +47,10 @@ pub trait LoadPendingBlock: EthApiTypes {
     /// Data access in default (L1) trait method implementations.
     fn provider(
         &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory;
+    ) -> impl BlockReaderIdExt
+           + EvmEnvProvider
+           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
     ///

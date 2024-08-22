@@ -26,6 +26,7 @@ reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
 reth-network-api.workspace = true
+reth-chainspec.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true

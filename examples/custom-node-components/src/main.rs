@@ -10,6 +10,7 @@ use reth::{
         blobstore::InMemoryBlobStore, EthTransactionPool, TransactionValidationTaskExecutor,
     },
 };
+use reth_chainspec::ChainSpec;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::PoolConfig;
@@ -45,7 +46,7 @@ pub struct CustomPoolBuilder {
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
 impl<Node> PoolBuilder<Node> for CustomPoolBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
 

@@ -207,7 +207,7 @@ pub struct MyExecutorBuilder {
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type EVM = MyEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;

@@ -368,7 +368,7 @@ impl<Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder
 #[cfg(test)]
 mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::BaseFeeParams;
+    use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, B256, U64};
@@ -391,7 +391,7 @@ mod tests {
     fn build_test_eth_api<
         P: BlockReaderIdExt
             + BlockReader
-            + ChainSpecProvider
+            + ChainSpecProvider<ChainSpec = ChainSpec>
             + EvmEnvProvider
             + StateProviderFactory
             + Unpin
