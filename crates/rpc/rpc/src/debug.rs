@@ -33,8 +33,6 @@ use revm::{
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
-#[cfg(feature = "js-tracer")]
-use revm_inspectors::tracing::js::JsInspector;
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
@@ -408,7 +406,8 @@ where
                             let db = db.0;
 
                             let mut inspector =
-                                JsInspector::new(code, config).map_err(Eth::Error::from_eth_err)?;
+                                revm_inspectors::tracing::js::JsInspector::new(code, config)
+                                    .map_err(Eth::Error::from_eth_err)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
                             inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
@@ -751,12 +750,13 @@ where
                 #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-                    let mut inspector = JsInspector::with_transaction_context(
-                        code,
-                        config,
-                        transaction_context.unwrap_or_default(),
-                    )
-                    .map_err(Eth::Error::from_eth_err)?;
+                    let mut inspector =
+                        revm_inspectors::tracing::js::JsInspector::with_transaction_context(
+                            code,
+                            config,
+                            transaction_context.unwrap_or_default(),
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
