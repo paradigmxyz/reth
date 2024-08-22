@@ -99,21 +99,6 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         ))
     }
 
-    /// Returns a row, searching it by a key using a
-    /// `mask` to only read certain columns from the row.
-    ///
-    /// **May return false positives.**
-    ///
-    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
-    /// stored in file.
-    pub fn row_by_key_with_cols(
-        &mut self,
-        _key: &[u8],
-        _mask: usize,
-    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        Err(NippyJarError::UnsupportedFilterQuery)
-    }
-
     /// Returns a row by its number by using a `mask` to only read certain columns from the row.
     pub fn row_by_number_with_cols(
         &mut self,
