@@ -8,7 +8,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
-    StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_rpc_api::DebugApiServer;
@@ -27,7 +27,7 @@ use reth_rpc_types::{
     BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_trie::{HashedPostState, HashedStorage, TrieAccount};
+use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
     db::{states::bundle_state::BundleRetention, CacheDB},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
@@ -650,24 +650,14 @@ where
                         .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
                     if let Some(account) = account.account {
-                        let storage_root = db
-                            .database
-                            .hashed_storage_root(address, storage.clone())
-                            .map_err(Eth::Error::from_eth_err);
-
-                        state_preimages.insert(
-                            hashed_address,
-                            alloy_rlp::encode(TrieAccount::from((
-                                account.info.clone(),
-                                storage_root?,
-                            ))),
-                        );
+                        state_preimages.insert(hashed_address, alloy_rlp::encode(address));
 
                         for (slot, value) in account.storage {
-                            let hashed_slot = keccak256(B256::from(slot));
+                            let slot = B256::from(slot);
+                            let hashed_slot = keccak256(slot);
                             storage.storage.insert(hashed_slot, value);
 
-                            state_preimages.insert(hashed_slot, alloy_rlp::encode(value));
+                            state_preimages.insert(hashed_slot, alloy_rlp::encode(slot));
                         }
                     }
                 }
