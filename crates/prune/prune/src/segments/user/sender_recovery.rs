@@ -101,7 +101,7 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
+        let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3, None);
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();

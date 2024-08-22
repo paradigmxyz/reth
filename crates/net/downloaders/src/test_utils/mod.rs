@@ -21,7 +21,7 @@ pub(crate) fn generate_bodies(
     range: RangeInclusive<u64>,
 ) -> (Vec<SealedHeader>, HashMap<B256, BlockBody>) {
     let mut rng = generators::rng();
-    let blocks = random_block_range(&mut rng, range, B256::ZERO, 0..2);
+    let blocks = random_block_range(&mut rng, range, B256::ZERO, 0..2, None);
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
     let bodies = blocks
