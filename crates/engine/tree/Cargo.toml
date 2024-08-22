@@ -34,6 +34,7 @@ reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie.workspace = true
+similar-asserts.workspace = true
 
 # common
 futures.workspace = true

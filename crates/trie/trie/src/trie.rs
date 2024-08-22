@@ -154,6 +154,7 @@ where
 
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
+        let target = Nibbles::from_nibbles_unchecked(reth_primitives::hex!("0206020a0d"));
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
@@ -183,6 +184,7 @@ where
         while let Some(node) = account_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
+                    if node.key.starts_with(&target) { println!("adding branch {node:?}"); }
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
@@ -223,6 +225,8 @@ where
                     } else {
                         storage_root_calculator.root()?
                     };
+
+                    if Nibbles::unpack(&hashed_address).starts_with(&target) { println!("adding leaf {hashed_address}: {account:?} {storage_root}"); }
 
                     account_rlp.clear();
                     let account = TrieAccount::from((account, storage_root));

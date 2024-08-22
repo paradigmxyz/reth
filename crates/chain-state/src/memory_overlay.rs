@@ -119,12 +119,15 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let prefix_sets = hashed_state.construct_prefix_sets();
-        self.hashed_state_root_from_nodes_with_updates(
-            TrieUpdates::default(),
-            hashed_state,
-            prefix_sets,
-        )
+        // self.hashed_state_root_from_nodes_with_updates(
+        //     TrieUpdates::default(),
+        //     hashed_state,
+        //     prefix_sets,
+        // )
+        let mut state = self.hashed_post_state.clone();
+        state.extend(hashed_state);
+        let prefix_sets = state.construct_prefix_sets();
+        self.historical.hashed_state_root_from_nodes_with_updates(Default::default(), state, prefix_sets)
     }
 
     fn hashed_state_root_from_nodes_with_updates(

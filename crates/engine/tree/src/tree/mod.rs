@@ -1751,8 +1751,94 @@ where
 
         let root_time = Instant::now();
         let (state_root, trie_output) =
-            state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
+            state_provider.hashed_state_root_from_nodes_with_updates(
+                Default::default(),
+                hashed_state.clone(),
+                hashed_state.construct_prefix_sets()
+            )?;
         if state_root != block.state_root {
+            // 0206020a0d
+            let target = reth_trie::Nibbles::from_nibbles_unchecked(reth_primitives::hex!("0206020a0d"));
+            let target_node = trie_output.account_nodes_ref().get(&target);
+            let (recomputed_state_root, recomputed_trie_output) = state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
+
+            println!("matching count {}", hashed_state.accounts.iter().filter(|(hashed_address, _)| reth_trie::Nibbles::unpack(hashed_address).starts_with(&target)).count());
+
+            let matching_account_entry = hashed_state.accounts.iter().find(|(hashed_address, _)| {
+                reth_trie::Nibbles::unpack(hashed_address).starts_with(&target)
+            });
+            println!("match account entry {:?}", matching_account_entry);
+
+            let matching_plain_state_entry = matching_account_entry.as_ref().and_then(|(hashed_address, _)| {
+                output.state.state.iter().find(|(address, _)| reth_primitives::keccak256(address) == **hashed_address)
+            });
+            // println!("match plain state entry {:?}", matching_plain_state_entry);
+
+            let matching_storage_entry = hashed_state.storages.iter().find(|(hashed_address, _)| {
+                reth_trie::Nibbles::unpack(hashed_address).starts_with(&target)
+            });
+            println!("match storage entry {:?}", matching_storage_entry);
+
+            let mut target_hashed_post_state = HashedPostState::default();
+            if let Some((address, acc)) = matching_plain_state_entry {
+                target_hashed_post_state.accounts.insert(reth_primitives::keccak256(address), acc.original_info.clone().map(Into::into));
+                // let mut storage = reth_trie::HashedStorage::new(acc.was_destroyed());
+                // for (slot, value) in &acc.storage {
+                //     storage.storage.insert(reth_primitives::keccak256(B256::new(slot.to_be_bytes())), value.original_value());
+                // }
+                // target_hashed_post_state.storages.insert(reth_primitives::keccak256(address), storage);
+            }
+            let (parent_root, parent_trie_output) = state_provider.hashed_state_root_from_nodes_with_updates(
+                Default::default(),
+                target_hashed_post_state.clone(),
+                target_hashed_post_state.construct_prefix_sets(),
+            )?;
+            println!("-----separator-----");
+            let (recomputed_parent_root, recomputed_parent_trie_output) = state_provider.hashed_state_root_with_updates(target_hashed_post_state)?;
+            similar_asserts::assert_eq!(parent_root, recomputed_parent_root, "parent roots must match");
+            similar_asserts::assert_eq!(parent_trie_output.into_sorted(), recomputed_parent_trie_output.into_sorted(), "outputs must match");
+
+            let recomputed_node = recomputed_trie_output.account_nodes_ref().get(&target);
+            similar_asserts::assert_eq!(target_node, recomputed_node, "nodes at {target:?} must match");
+
+            let mut prefix_set = hashed_state.construct_prefix_sets();
+            if recomputed_state_root == block.state_root {
+                let mut recomputed_storage_tries_output = recomputed_trie_output.clone().into_sorted().storage_tries_ref().clone();
+                for (hashed_address, storage_trie_updates) in trie_output.clone().into_sorted().storage_tries_ref() {
+                    let mut storage_prefix_set = prefix_set.storage_prefix_sets.get(hashed_address).cloned().unwrap_or_default();
+                    let recomputed = recomputed_storage_tries_output.remove(hashed_address);
+                    let preimage = output.state.state.keys().find(|address| reth_primitives::keccak256(address) == *hashed_address).copied().unwrap_or_default();
+                    
+                    if storage_trie_updates.is_deleted() {
+                        println!("storage for {hashed_address} (preimage {preimage}) was deleted. recomputed deleted? {:?}", recomputed.as_ref().map(|r| r.is_deleted()));
+                    }
+                    // similar_asserts::assert_eq!(
+                    //     Some(storage_trie_updates.is_deleted()),
+                    //     recomputed.as_ref().map(|r| r.is_deleted()),
+                    //     "is_deleted mismatch for {hashed_address} (preimage {preimage})"
+                    // );
+
+                    // similar_asserts::assert_eq!(
+                    //     Some(storage_trie_updates.storage_nodes_ref().into_iter().collect::<Vec<_>>()),
+                    //     recomputed.as_ref().map(|r|
+                    //         r.storage_nodes_ref().into_iter().filter(|(nibbles, _)| storage_prefix_set.contains(&nibbles)).collect::<Vec<_>>()
+                    //     ),
+                    //     "storage_nodes_ref mismatch for {hashed_address} (preimage {preimage} deleted? {})", storage_trie_updates.is_deleted()
+                    // );
+                }
+
+                similar_asserts::assert_eq!(
+                    trie_output.into_sorted().account_nodes_ref().as_ref(),
+                    recomputed_trie_output
+                        .into_sorted()
+                        .account_nodes_ref()
+                        .into_iter()
+                        .cloned()
+                        .filter(|(nibbles, _)| prefix_set.account_prefix_set.contains(&nibbles))
+                        .collect::<Vec<_>>()
+                );
+            }
+
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
             )
