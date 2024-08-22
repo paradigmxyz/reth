@@ -116,7 +116,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, B256::ZERO, txs_range);
+        let mut blocks = random_block_range(&mut rng, 0..=num_blocks, B256::ZERO, txs_range, None);
 
         let (transitions, start_state) = random_changeset_range(
             &mut rng,

@@ -1,7 +1,7 @@
 use alloy_primitives::BlockNumber;
 
 /// The finished height of all `ExEx`'s.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinishedExExHeight {
     /// No `ExEx`'s are installed, so there is no finished height.
     NoExExs,

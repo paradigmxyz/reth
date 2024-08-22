@@ -944,13 +944,13 @@ impl<DB> ForkChoiceSubscriptions for BlockchainProvider<DB>
 where
     DB: Send + Sync,
 {
-    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
-        let receiver = self.chain_info.subscribe_to_safe_block();
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.chain_info.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
     }
 
-    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
-        let receiver = self.chain_info.subscribe_to_finalized_block();
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.chain_info.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
     }
 }
