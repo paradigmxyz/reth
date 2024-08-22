@@ -22,13 +22,13 @@ use crate::{
         transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
         EthTransactions, FullEthApi,
     },
-    Block, Transaction,
+    RpcBlock, RpcTransaction,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
-    EthApiServer<Transaction<Self::NetworkTypes>, Block<Self::NetworkTypes>>
+    EthApiServer<RpcTransaction<Self::NetworkTypes>, RpcBlock<Self::NetworkTypes>>
     + FullEthApi
     + UpdateRawTxForwarder
     + Clone
@@ -36,7 +36,7 @@ pub trait FullEthApiServer:
 }
 
 impl<T> FullEthApiServer for T where
-    T: EthApiServer<Transaction<T::NetworkTypes>, Block<T::NetworkTypes>>
+    T: EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>>
         + FullEthApi
         + UpdateRawTxForwarder
         + Clone
@@ -356,7 +356,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer<Transaction<T::NetworkTypes>, Block<T::NetworkTypes>> for T
+impl<T> EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>> for T
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
@@ -403,7 +403,7 @@ where
         &self,
         hash: B256,
         full: bool,
-    ) -> RpcResult<Option<Block<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
         Ok(EthBlocks::rpc_block(self, hash.into(), full).await?)
     }
@@ -413,7 +413,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> RpcResult<Option<Block<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
         Ok(EthBlocks::rpc_block(self, number.into(), full).await?)
     }
@@ -462,7 +462,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Block<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, hash.into(), index).await?)
     }
@@ -472,7 +472,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Block<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, number.into(), index).await?)
     }
@@ -487,7 +487,7 @@ where
     async fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> RpcResult<Option<Transaction<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
@@ -508,7 +508,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Transaction<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into())
             .await?)
@@ -534,7 +534,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Transaction<T::NetworkTypes>>> {
+    ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
             .await?)

@@ -4,7 +4,7 @@ use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{Block, EthApiTypes, Transaction};
+use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
     SyncStatus, TransactionRequest,
@@ -35,7 +35,7 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 #[async_trait::async_trait]
 impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<Transaction<Eth::NetworkTypes>, Block<Eth::NetworkTypes>> + EthApiTypes,
+    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>> + EthApiTypes,
     Eth::NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
     EthFilter: EthFilterApiServer<reth_rpc_types::Transaction>,
 {
@@ -84,7 +84,7 @@ where
         &self,
         hash: B256,
         full: bool,
-    ) -> Result<Option<Block<Eth::NetworkTypes>>> {
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
@@ -93,7 +93,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> Result<Option<Block<Eth::NetworkTypes>>> {
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 

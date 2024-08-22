@@ -9,7 +9,7 @@ use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::{Block, FromEthApiError};
+use crate::{FromEthApiError, RpcBlock};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -37,7 +37,8 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         full: bool,
-    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
+    {
         async move {
             let block = match self.block_with_senders(block_id).await? {
                 Some(block) => block,
@@ -181,7 +182,8 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         index: Index,
-    ) -> impl Future<Output = Result<Option<Block<Self::NetworkTypes>>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
+    {
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
