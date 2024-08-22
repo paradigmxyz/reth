@@ -428,6 +428,7 @@ alloy-transport-ws = { version = "0.2.1", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.1"
+op-alloy-network = "0.1"
 
 # misc
 aquamarine = "0.5"

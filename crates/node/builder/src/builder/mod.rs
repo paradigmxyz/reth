@@ -328,7 +328,11 @@ where
                             <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
                         >
                     >
-                        + FullEthApiServer
+                        + FullEthApiServer<
+                            NetworkTypes: alloy_network::Network<
+                                TransactionResponse = reth_rpc_types::Transaction
+                            >,
+                        >
                         + AddDevSigners
         >,
     {
@@ -474,8 +478,9 @@ where
     AO: NodeAddOns<
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
     >,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc

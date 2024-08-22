@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -11,6 +11,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
+use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 
@@ -64,7 +65,7 @@ where
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypes + 'static {
+pub trait FullNodeTypes: NodeTypes<ChainSpec = ChainSpec> + 'static {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
@@ -114,7 +115,7 @@ where
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypes,
+    Types: NodeTypes<ChainSpec = ChainSpec>,
     Provider: FullProvider<DB, Types::ChainSpec>,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
@@ -162,7 +163,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
     /// The core `eth` namespace API type to install on the RPC server (see
     /// `reth_rpc_eth_api::EthApiServer`).
-    type EthApi: Send + Clone;
+    type EthApi: EthApiTypes + Send + Clone;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
