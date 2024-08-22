@@ -2363,8 +2363,7 @@ mod tests {
         // Create a new provider
         let mut rng = generators::rng();
         let (provider, _, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)
-                .unwrap();
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
