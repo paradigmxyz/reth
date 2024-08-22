@@ -1,16 +1,18 @@
-use crate::{hardfork, ChainHardforks, ForkCondition, Hardfork};
-use alloy_chains::Chain;
-use alloy_primitives::{uint, U256};
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::String};
 use core::{
     fmt,
     fmt::{Display, Formatter},
     str::FromStr,
 };
+
+use alloy_chains::Chain;
+use alloy_genesis::ChainConfig;
+use alloy_primitives::{uint, U256};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, format, string::String};
+use crate::{hardfork, ChainHardforks, ConfigureHardforks, ForkCondition, Hardfork};
 
 hardfork!(
     /// The name of an Ethereum hardfork.
@@ -333,80 +335,89 @@ impl EthereumHardfork {
     }
 
     /// Ethereum mainnet list of hardforks.
-    pub const fn mainnet() -> [(Self, ForkCondition); 17] {
-        [
-            (Self::Frontier, ForkCondition::Block(0)),
-            (Self::Homestead, ForkCondition::Block(1150000)),
-            (Self::Dao, ForkCondition::Block(1920000)),
-            (Self::Tangerine, ForkCondition::Block(2463000)),
-            (Self::SpuriousDragon, ForkCondition::Block(2675000)),
-            (Self::Byzantium, ForkCondition::Block(4370000)),
-            (Self::Constantinople, ForkCondition::Block(7280000)),
-            (Self::Petersburg, ForkCondition::Block(7280000)),
-            (Self::Istanbul, ForkCondition::Block(9069000)),
-            (Self::MuirGlacier, ForkCondition::Block(9200000)),
-            (Self::Berlin, ForkCondition::Block(12244000)),
-            (Self::London, ForkCondition::Block(12965000)),
-            (Self::ArrowGlacier, ForkCondition::Block(13773000)),
-            (Self::GrayGlacier, ForkCondition::Block(15050000)),
-            (
-                Self::Paris,
-                ForkCondition::TTD {
-                    fork_block: None,
-                    total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
-                },
-            ),
-            (Self::Shanghai, ForkCondition::Timestamp(1681338455)),
-            (Self::Cancun, ForkCondition::Timestamp(1710338135)),
-        ]
-    }
+    pub const MAINNET: [(Self, ForkCondition); 17] = [
+        (Self::Frontier, ForkCondition::Block(0)),
+        (Self::Homestead, ForkCondition::Block(1150000)),
+        (Self::Dao, ForkCondition::Block(1920000)),
+        (Self::Tangerine, ForkCondition::Block(2463000)),
+        (Self::SpuriousDragon, ForkCondition::Block(2675000)),
+        (Self::Byzantium, ForkCondition::Block(4370000)),
+        (Self::Constantinople, ForkCondition::Block(7280000)),
+        (Self::Petersburg, ForkCondition::Block(7280000)),
+        (Self::Istanbul, ForkCondition::Block(9069000)),
+        (Self::MuirGlacier, ForkCondition::Block(9200000)),
+        (Self::Berlin, ForkCondition::Block(12244000)),
+        (Self::London, ForkCondition::Block(12965000)),
+        (Self::ArrowGlacier, ForkCondition::Block(13773000)),
+        (Self::GrayGlacier, ForkCondition::Block(15050000)),
+        (
+            Self::Paris,
+            ForkCondition::TTD {
+                fork_block: None,
+                total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
+            },
+        ),
+        (Self::Shanghai, ForkCondition::Timestamp(1681338455)),
+        (Self::Cancun, ForkCondition::Timestamp(1710338135)),
+    ];
 
     /// Ethereum sepolia list of hardforks.
-    pub const fn sepolia() -> [(Self, ForkCondition); 15] {
-        [
-            (Self::Frontier, ForkCondition::Block(0)),
-            (Self::Homestead, ForkCondition::Block(0)),
-            (Self::Dao, ForkCondition::Block(0)),
-            (Self::Tangerine, ForkCondition::Block(0)),
-            (Self::SpuriousDragon, ForkCondition::Block(0)),
-            (Self::Byzantium, ForkCondition::Block(0)),
-            (Self::Constantinople, ForkCondition::Block(0)),
-            (Self::Petersburg, ForkCondition::Block(0)),
-            (Self::Istanbul, ForkCondition::Block(0)),
-            (Self::MuirGlacier, ForkCondition::Block(0)),
-            (Self::Berlin, ForkCondition::Block(0)),
-            (Self::London, ForkCondition::Block(0)),
-            (
-                Self::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(1735371),
-                    total_difficulty: uint!(17_000_000_000_000_000_U256),
-                },
-            ),
-            (Self::Shanghai, ForkCondition::Timestamp(1677557088)),
-            (Self::Cancun, ForkCondition::Timestamp(1706655072)),
-        ]
-    }
+    pub const SEPOLIA: [(Self, ForkCondition); 15] = [
+        (Self::Frontier, ForkCondition::Block(0)),
+        (Self::Homestead, ForkCondition::Block(0)),
+        (Self::Dao, ForkCondition::Block(0)),
+        (Self::Tangerine, ForkCondition::Block(0)),
+        (Self::SpuriousDragon, ForkCondition::Block(0)),
+        (Self::Byzantium, ForkCondition::Block(0)),
+        (Self::Constantinople, ForkCondition::Block(0)),
+        (Self::Petersburg, ForkCondition::Block(0)),
+        (Self::Istanbul, ForkCondition::Block(0)),
+        (Self::MuirGlacier, ForkCondition::Block(0)),
+        (Self::Berlin, ForkCondition::Block(0)),
+        (Self::London, ForkCondition::Block(0)),
+        (
+            Self::Paris,
+            ForkCondition::TTD {
+                fork_block: Some(1735371),
+                total_difficulty: uint!(17_000_000_000_000_000_U256),
+            },
+        ),
+        (Self::Shanghai, ForkCondition::Timestamp(1677557088)),
+        (Self::Cancun, ForkCondition::Timestamp(1706655072)),
+    ];
 
     /// Ethereum holesky list of hardforks.
-    pub const fn holesky() -> [(Self, ForkCondition); 15] {
-        [
-            (Self::Frontier, ForkCondition::Block(0)),
-            (Self::Homestead, ForkCondition::Block(0)),
-            (Self::Dao, ForkCondition::Block(0)),
-            (Self::Tangerine, ForkCondition::Block(0)),
-            (Self::SpuriousDragon, ForkCondition::Block(0)),
-            (Self::Byzantium, ForkCondition::Block(0)),
-            (Self::Constantinople, ForkCondition::Block(0)),
-            (Self::Petersburg, ForkCondition::Block(0)),
-            (Self::Istanbul, ForkCondition::Block(0)),
-            (Self::MuirGlacier, ForkCondition::Block(0)),
-            (Self::Berlin, ForkCondition::Block(0)),
-            (Self::London, ForkCondition::Block(0)),
-            (Self::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
-            (Self::Shanghai, ForkCondition::Timestamp(1696000704)),
-            (Self::Cancun, ForkCondition::Timestamp(1707305664)),
-        ]
+    pub const HOLESKY: [(Self, ForkCondition); 15] = [
+        (Self::Frontier, ForkCondition::Block(0)),
+        (Self::Homestead, ForkCondition::Block(0)),
+        (Self::Dao, ForkCondition::Block(0)),
+        (Self::Tangerine, ForkCondition::Block(0)),
+        (Self::SpuriousDragon, ForkCondition::Block(0)),
+        (Self::Byzantium, ForkCondition::Block(0)),
+        (Self::Constantinople, ForkCondition::Block(0)),
+        (Self::Petersburg, ForkCondition::Block(0)),
+        (Self::Istanbul, ForkCondition::Block(0)),
+        (Self::MuirGlacier, ForkCondition::Block(0)),
+        (Self::Berlin, ForkCondition::Block(0)),
+        (Self::London, ForkCondition::Block(0)),
+        (Self::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
+        (Self::Shanghai, ForkCondition::Timestamp(1696000704)),
+        (Self::Cancun, ForkCondition::Timestamp(1707305664)),
+    ];
+
+    /// Returns hardforks for given chain.
+    pub fn hardforks(chain: Chain) -> &'static [(Self, ForkCondition)] {
+        if chain == Chain::mainnet() {
+            return &Self::MAINNET
+        }
+        if chain == Chain::sepolia() {
+            return &Self::SEPOLIA
+        }
+        if chain == Chain::holesky() {
+            return &Self::HOLESKY
+        }
+
+        panic!("l1 chain list should be exhaustive")
     }
 }
 
@@ -417,5 +428,49 @@ impl<const N: usize> From<[(EthereumHardfork, ForkCondition); N]> for ChainHardf
                 .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
                 .collect(),
         )
+    }
+}
+
+impl ConfigureHardforks for EthereumHardfork {
+    fn init_block_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self, ForkCondition)> {
+        [
+            (Self::Homestead, config.homestead_block),
+            (Self::Dao, config.dao_fork_block),
+            (Self::Tangerine, config.eip150_block),
+            (Self::SpuriousDragon, config.eip155_block),
+            (Self::Byzantium, config.byzantium_block),
+            (Self::Constantinople, config.constantinople_block),
+            (Self::Petersburg, config.petersburg_block),
+            (Self::Istanbul, config.istanbul_block),
+            (Self::MuirGlacier, config.muir_glacier_block),
+            (Self::Berlin, config.berlin_block),
+            (Self::London, config.london_block),
+            (Self::ArrowGlacier, config.arrow_glacier_block),
+            (Self::GrayGlacier, config.gray_glacier_block),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+    }
+
+    fn init_paris(config: &ChainConfig) -> Option<(Self, ForkCondition)> {
+        let ttd = config.terminal_total_difficulty?;
+        Some((
+            Self::Paris,
+            ForkCondition::TTD { total_difficulty: ttd, fork_block: config.merge_netsplit_block },
+        ))
+    }
+
+    fn init_time_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self, ForkCondition)> {
+        [
+            (Self::Shanghai, config.shanghai_time),
+            (Self::Cancun, config.cancun_time),
+            (Self::Prague, config.prague_time),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, time)| time.map(|time| (hardfork, ForkCondition::Timestamp(time))))
     }
 }

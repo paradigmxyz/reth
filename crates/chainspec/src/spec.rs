@@ -43,7 +43,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: EthereumHardfork::mainnet().into(),
+        hardforks: EthereumHardfork::MAINNET.into(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             address!("00000000219ab540356cbb839cbe05303d7705fa"),
@@ -67,7 +67,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis_hash: Some(SEPOLIA_GENESIS_HASH),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: EthereumHardfork::sepolia().into(),
+        hardforks: EthereumHardfork::SEPOLIA.into(),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -90,7 +90,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(HOLESKY_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: EthereumHardfork::holesky().into(),
+        hardforks: EthereumHardfork::HOLESKY.into(),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -773,7 +773,7 @@ impl From<Genesis> for ChainSpec {
 
         // Uses ethereum or optimism main chains to find proper order
         #[cfg(not(feature = "optimism"))]
-        let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
+        let mainnet_hardforks: ChainHardforks = EthereumHardfork::MAINNET.into();
         #[cfg(not(feature = "optimism"))]
         let mainnet_order = mainnet_hardforks.forks_iter();
         #[cfg(feature = "optimism")]

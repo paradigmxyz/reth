@@ -1,6 +1,7 @@
 mod macros;
 
 mod ethereum;
+use alloy_genesis::ChainConfig;
 pub use ethereum::EthereumHardfork;
 
 mod optimism;
@@ -14,6 +15,8 @@ use core::{
     hash::{Hash, Hasher},
 };
 use dyn_clone::DynClone;
+
+use crate::ForkCondition;
 
 /// Generic hardfork trait.
 #[auto_impl::auto_impl(&, Box)]
@@ -42,6 +45,21 @@ impl Hash for dyn Hardfork + 'static {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.name().hash(state)
     }
+}
+
+/// Configures hardforks from genesis [`ChainConfig`].
+pub trait ConfigureHardforks: Sized {
+    /// Initializes block based hardforks from [`ChainConfig`].
+    fn init_block_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self, ForkCondition)>;
+
+    /// Initializes TTD based hardfork from [`ChainConfig`].
+    fn init_paris(config: &ChainConfig) -> Option<(Self, ForkCondition)>;
+
+    /// Initializes time based hardforks from [`ChainConfig`].
+    fn init_time_hardforks(config: &ChainConfig)
+        -> impl IntoIterator<Item = (Self, ForkCondition)>;
 }
 
 #[cfg(test)]

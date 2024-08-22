@@ -7239,6 +7239,7 @@ name = "reth-ethereum-forks"
 version = "1.0.5"
 dependencies = [
  "alloy-chains",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",

@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # ethereum
+alloy-genesis.workspace = true
 alloy-chains.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
