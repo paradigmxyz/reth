@@ -1493,12 +1493,15 @@ mod tests {
 
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chain_state::{
+        test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
+        ExecutedBlock, NewCanonicalChain,
+    };
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
     use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
         BlockHashOrNumber, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment, B256,
     };
@@ -1948,6 +1951,50 @@ mod tests {
                 .map(|b| b.header.clone())
                 .collect::<Vec<_>>()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_canon_state_subscriptions() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+
+        // Generate a random block to initialise the blockchain provider.
+        let mut test_block_builder = TestBlockBuilder::default();
+        let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
+        let block_hash_1 = block_1.hash();
+
+        // Insert and commit the block.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_historical_block(block_1)?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Subscribe twice for canonical state updates.
+        let in_memory_state = provider.canonical_in_memory_state();
+        let mut rx_1 = provider.subscribe_to_canonical_state();
+        let mut rx_2 = provider.subscribe_to_canonical_state();
+
+        // Send and receive commit notifications.
+        let block_2 = test_block_builder.generate_random_block(1, block_hash_1);
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), None);
+        let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
+        in_memory_state.notify_canon_state(commit.clone());
+        let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
+        assert_eq!(notification_1, Ok(commit.clone()));
+        assert_eq!(notification_2, Ok(commit.clone()));
+
+        // Send and receive re-org notifications.
+        let block_3 = test_block_builder.generate_random_block(1, block_hash_1);
+        let block_4 = test_block_builder.generate_random_block(2, block_3.hash());
+        let new_chain = Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), None);
+        let re_org =
+            CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
+        in_memory_state.notify_canon_state(re_org.clone());
+        let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
+        assert_eq!(notification_1, Ok(re_org.clone()));
+        assert_eq!(notification_2, Ok(re_org.clone()));
 
         Ok(())
     }
