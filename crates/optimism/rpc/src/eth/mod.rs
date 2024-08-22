@@ -11,10 +11,12 @@ use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
+use op_alloy_network::Optimism;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
     StageCheckpointReader, StateProviderFactory,
@@ -22,15 +24,15 @@ use reth_provider::{
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthState, LoadBlock, LoadFee, LoadState, SpawnBlocking,
-        Trace,
+        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
+        SpawnBlocking, Trace,
     },
     EthApiTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskExecutor, TaskSpawner,
+    TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -42,16 +44,6 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
->;
-
-/// Adapter for [`EthApiBuilderCtx`].
-pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Evm,
-    <N as FullNodeComponents>::Network,
-    TaskExecutor,
-    <N as FullNodeTypes>::Provider,
 >;
 
 /// OP-Reth `Eth` API implementation.
@@ -66,6 +58,7 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
+    #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
 }
 
@@ -99,14 +92,16 @@ impl<N: FullNodeComponents> OpEthApi<N> {
 impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents,
 {
     type Error = OpEthApiError;
+    type NetworkTypes = Optimism;
 }
 
 impl<N> EthApiSpec for OpEthApi<N>
 where
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    Self: Send + Sync,
+    N: FullNodeComponents,
 {
     #[inline]
     fn provider(
@@ -127,7 +122,7 @@ where
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn reth_rpc_eth_api::helpers::EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
 }
@@ -135,7 +130,7 @@ where
 impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -156,7 +151,7 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents,
 {
     #[inline]
     fn provider(
@@ -184,7 +179,7 @@ where
 impl<N> LoadState for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
@@ -239,6 +234,7 @@ impl<N: FullNodeComponents> AddDevSigners for OpEthApi<N> {
 
 impl<N> BuilderProvider<N> for OpEthApi<N>
 where
+    Self: Send,
     N: FullNodeComponents,
 {
     type Ctx<'a> = &'a EthApiBuilderCtx<N>;
@@ -249,7 +245,7 @@ where
 }
 
 impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
 }

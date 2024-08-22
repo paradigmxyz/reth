@@ -119,7 +119,7 @@ pub struct OptimismExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for OptimismExecutorBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type EVM = OptimismEvmConfig;
     type Executor = OpExecutorProvider<Self::EVM>;
@@ -146,7 +146,7 @@ pub struct OptimismPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for OptimismPoolBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -290,7 +290,7 @@ pub struct OptimismNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OptimismNetworkBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn build_network(
@@ -347,7 +347,7 @@ pub struct OptimismConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 

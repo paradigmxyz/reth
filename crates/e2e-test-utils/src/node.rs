@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, pin::Pin};
 
+use alloy_network::Network;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
@@ -14,8 +15,7 @@ use reth::{
         types::engine::PayloadStatusEnum,
     },
 };
-use reth_chainspec::ChainSpec;
-use reth_node_builder::{NodeAddOns, NodeTypes};
+use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypes};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
@@ -46,7 +46,7 @@ where
 
 impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
-    Node: FullNodeComponents<ChainSpec = ChainSpec>,
+    Node: FullNodeComponents,
     Node::Network: PeersHandleProvider,
     AddOns: NodeAddOns<Node>,
 {
@@ -93,6 +93,8 @@ where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
         AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
+        <AddOns::EthApi as EthApiTypes>::NetworkTypes:
+            Network<TransactionResponse = alloy_rpc_types::Transaction>,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

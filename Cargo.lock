@@ -2856,7 +2856,6 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "reth",
- "reth-chainspec",
  "reth-node-ethereum",
  "reth-tracing",
  "reth-transaction-pool",
@@ -5243,6 +5242,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-alloy-network"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3cbfa664a74fe4577a78d1c4bce18fa93be56756730782283df8ff3241c7118"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+]
+
+[[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6948,6 +6961,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "jsonrpsee",
+ "jsonrpsee-types",
  "reth",
  "reth-chainspec",
  "reth-db",
@@ -6959,6 +6973,8 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
  "reth-stages-types",
  "reth-tokio-util",
  "reth-tracing",
@@ -7684,6 +7700,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
+ "reth-rpc-eth-api",
  "reth-tasks",
  "reth-transaction-pool",
 ]
@@ -7692,6 +7709,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.0.5"
 dependencies = [
+ "alloy-network",
  "aquamarine",
  "eyre",
  "fdlimit",
@@ -7914,6 +7932,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-types",
@@ -8017,12 +8036,14 @@ dependencies = [
  "derive_more 1.0.0",
  "jsonrpsee",
  "jsonrpsee-types",
+ "op-alloy-network",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",
  "reth-node-api",
+ "reth-node-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -8266,6 +8287,7 @@ version = "1.0.5"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
  "async-trait",
@@ -8321,6 +8343,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.0.5"
 dependencies = [
+ "alloy-json-rpc",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -8336,6 +8359,7 @@ version = "1.0.5"
 dependencies = [
  "futures",
  "jsonrpsee",
+ "jsonrpsee-http-client",
  "reth-primitives",
  "reth-rpc-api",
  "reth-rpc-eth-api",
@@ -8429,6 +8453,8 @@ name = "reth-rpc-eth-api"
 version = "1.0.5"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-json-rpc",
+ "alloy-network",
  "async-trait",
  "auto_impl",
  "dyn-clone",

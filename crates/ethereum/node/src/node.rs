@@ -47,7 +47,7 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<ChainSpec = ChainSpec>,
+        Node: FullNodeTypes,
         <Node as NodeTypes>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -105,7 +105,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type EVM = EthEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;
@@ -134,7 +134,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -212,7 +212,7 @@ impl<EVM> EthereumPayloadBuilder<EVM> {
 
 impl<Node, Evm, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder<Evm>
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
     Evm: ConfigureEvm,
     Pool: TransactionPool + Unpin + 'static,
     <Node as NodeTypes>::Engine: PayloadTypes<
@@ -284,7 +284,7 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 

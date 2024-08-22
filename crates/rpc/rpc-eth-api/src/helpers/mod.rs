@@ -26,7 +26,6 @@ pub mod spec;
 pub mod state;
 pub mod trace;
 pub mod transaction;
-pub mod types;
 
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
