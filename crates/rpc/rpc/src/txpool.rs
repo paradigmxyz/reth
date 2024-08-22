@@ -4,9 +4,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, TransactionSignedEcRecovered};
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_types::{
-    txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
-    Transaction,
+use reth_rpc_types::txpool::{
+    TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
@@ -33,7 +32,7 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
     // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
-    Eth: TransactionCompat<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
 {
     fn content(&self) -> TxpoolContent {
         #[inline]
@@ -42,7 +41,7 @@ where
             content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
         ) where
             Tx: PoolTransaction,
-            Eth: TransactionCompat<Transaction = Transaction>,
+            Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         {
             content
                 .entry(tx.sender())
@@ -68,7 +67,7 @@ where
 impl<Pool, Eth> TxPoolApiServer for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = Transaction> + 'static,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.

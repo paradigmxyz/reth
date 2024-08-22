@@ -68,7 +68,6 @@ where
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
             TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,

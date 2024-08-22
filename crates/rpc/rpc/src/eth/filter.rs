@@ -144,7 +144,7 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
-    Eth: TransactionCompat<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
@@ -244,7 +244,7 @@ impl<Provider, Pool, Eth> EthFilterApiServer<Eth::Transaction> for EthFilter<Pro
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = Transaction> + Clone + 'static,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction> + Clone + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {

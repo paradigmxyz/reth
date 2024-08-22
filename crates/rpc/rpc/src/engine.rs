@@ -1,4 +1,3 @@
-use alloy_network::Network;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
@@ -42,7 +41,6 @@ impl<Eth, EthFilter>
 where
     Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
         + EthApiTypes<
-            NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
             TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
         >,
     EthFilter: EthFilterApiServer<<Eth::TransactionCompat as TransactionCompat>::Transaction>,

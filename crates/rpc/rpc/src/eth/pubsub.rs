@@ -17,7 +17,7 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log, Transaction,
+    FilteredParams, Header, Log,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -77,7 +77,7 @@ where
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat<Transaction = Transaction> + Clone + 'static,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction> + Clone + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -109,7 +109,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
     // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
-    Eth: TransactionCompat<Transaction = Transaction>,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
 {
     match kind {
         SubscriptionKind::NewHeads => {

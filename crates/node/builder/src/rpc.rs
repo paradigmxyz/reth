@@ -11,7 +11,7 @@ use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
         api::EngineApiServer,
-        eth::{EthApiTypes, FullEthApiServer},
+        eth::{EthApiTypes, FullEthApiServer, RpcTransaction},
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
@@ -301,8 +301,9 @@ where
     Engine: EngineApiServer<Node::Engine>,
     EthApi: EthApiBuilderProvider<Node>
         + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<
+                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            >,
         >,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;

@@ -330,9 +330,7 @@ where
                         >
                     >
                         + FullEthApiServer<
-                            NetworkTypes: alloy_network::Network<
-                                TransactionResponse = reth_rpc_types::Transaction
-                            >, TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>
+                           TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>
                         >
                         + AddDevSigners
         >,
@@ -480,7 +478,6 @@ where
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
                     + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
             TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         > + AddDevSigners,
     >,

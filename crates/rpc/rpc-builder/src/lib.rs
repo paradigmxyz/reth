@@ -232,8 +232,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
     EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-        TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<EthApi::NetworkTypes>>,
     >,
 {
     let module_config = module_config.into();
@@ -442,8 +441,9 @@ where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<
+                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            >,
         >,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
@@ -511,8 +511,9 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+            TransactionCompat: TransactionCompat<
+                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            >,
         >,
     {
         let mut modules = TransportRpcModules::default();
@@ -811,9 +812,7 @@ where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: EthApiTypes<
-        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-    >,
+    EthApi: EthApiTypes,
 {
     /// Register Eth Namespace
     ///
@@ -993,8 +992,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
-        TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<EthApi::NetworkTypes>>,
     >,
 {
     /// Configures the auth module that includes the
