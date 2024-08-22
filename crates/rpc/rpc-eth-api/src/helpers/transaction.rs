@@ -188,7 +188,7 @@ pub trait EthTransactions: LoadTransaction {
         })
     }
 
-    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    /// Get transaction by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(

@@ -1,4 +1,3 @@
-use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
