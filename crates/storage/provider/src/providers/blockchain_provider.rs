@@ -126,12 +126,10 @@ where
         (start, end)
     }
 
-    /// Fetches ranges of data spanning in-memory state and storage.
+    /// Fetches a range of data from both in-memory state and storage.
     ///
-    /// `fetch_db_range`:  should return the whole range of items from the database.
-    ///
-    /// `map_block_state_item`: should return an Option of the value part of the nth block. If it
-    /// returns None (eg. fails predicate), it will stop fetching and return the list.
+    /// - `fetch_db_range`: Retrieves a range of items from the database.
+    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None` is returned.
     fn fetch_db_mem_range<T, F, G, P>(
         &self,
         range: impl RangeBounds<BlockNumber>,
