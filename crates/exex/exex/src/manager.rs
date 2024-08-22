@@ -341,16 +341,7 @@ impl Future for ExExManager {
 
         // update watch channel block number
         let finished_height = self.exex_handles.iter_mut().try_fold(u64::MAX, |curr, exex| {
-            let height = match exex.finished_height {
-                None => return Err(()),
-                Some(height) => height,
-            };
-
-            if height < curr {
-                Ok(height)
-            } else {
-                Ok(curr)
-            }
+            exex.finished_height.map_or(Err(()), |height| Ok(height.min(curr)))
         });
         if let Ok(finished_height) = finished_height {
             let _ = self.finished_height.send(FinishedExExHeight::Height(finished_height));
@@ -613,9 +604,86 @@ mod tests {
         let mut pinned_manager = std::pin::pin!(exex_manager);
         let _ = pinned_manager.as_mut().poll(&mut cx);
 
-        // Check that the block height was updated
-        let updated_exex_handle = &pinned_manager.exex_handles[0];
-        assert_eq!(updated_exex_handle.finished_height, Some(42));
+        // Get the receiver for the finished height
+        let mut receiver = pinned_manager.handle.finished_height();
+
+        // Wait for a new value to be sent
+        receiver.changed().await.unwrap();
+
+        // Get the latest value
+        let finished_height = *receiver.borrow();
+
+        // The finished height should be updated to the lower block height
+        assert_eq!(finished_height, FinishedExExHeight::Height(42));
+    }
+
+    #[tokio::test]
+    async fn test_updates_block_height_lower() {
+        // Create two `ExExHandle` instances
+        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string());
+        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string());
+
+        // Send events to update the block heights of the two handles, with the second being lower
+        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(10)).unwrap();
+
+        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        let mut pinned_manager = std::pin::pin!(exex_manager);
+
+        let _ = pinned_manager.as_mut().poll(&mut cx);
+
+        // Get the receiver for the finished height
+        let mut receiver = pinned_manager.handle.finished_height();
+
+        // Wait for a new value to be sent
+        receiver.changed().await.unwrap();
+
+        // Get the latest value
+        let finished_height = *receiver.borrow();
+
+        // The finished height should be updated to the lower block height
+        assert_eq!(finished_height, FinishedExExHeight::Height(10));
+    }
+
+    #[tokio::test]
+    async fn test_updates_block_height_greater() {
+        // Create two `ExExHandle` instances
+        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string());
+        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string());
+
+        // Assert that the initial block height is `None` for the first `ExExHandle`.
+        assert!(exex_handle1.finished_height.is_none());
+
+        // Send events to update the block heights of the two handles, with the second being higher.
+        event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
+        event_tx2.send(ExExEvent::FinishedHeight(100)).unwrap();
+
+        let exex_manager = ExExManager::new(vec![exex_handle1, exex_handle2], 10);
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        let mut pinned_manager = std::pin::pin!(exex_manager);
+
+        let _ = pinned_manager.as_mut().poll(&mut cx);
+
+        // Get the receiver for the finished height
+        let mut receiver = pinned_manager.handle.finished_height();
+
+        // Wait for a new value to be sent
+        receiver.changed().await.unwrap();
+
+        // Get the latest value
+        let finished_height = *receiver.borrow();
+
+        // The finished height should be updated to the lower block height
+        assert_eq!(finished_height, FinishedExExHeight::Height(42));
+
+        // // The lower block height should be retained
+        // let updated_exex_handle = &pinned_manager.exex_handles[0];
+        // assert_eq!(updated_exex_handle.finished_height, Some(42));
     }
 
     #[tokio::test]
