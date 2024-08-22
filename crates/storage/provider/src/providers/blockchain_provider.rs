@@ -1503,10 +1503,11 @@ mod tests {
     use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
+        B256,
     };
     use reth_storage_api::{
-        BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
+        BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
     };
     use reth_testing_utils::generators::{
@@ -2427,6 +2428,52 @@ mod tests {
 
         // Ensure the timestamp is updated and between the before and after timestamps
         assert!(before < last_update_ts && last_update_ts < after);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_id_reader() -> eyre::Result<()> {
+        // Create a new provider
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) =
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+
+        // Set the pending block in memory
+        let pending_block = in_memory_blocks.last().unwrap();
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(pending_block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Set the safe block in memory
+        let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
+        provider.canonical_in_memory_state.set_safe(safe_block.header.clone());
+
+        // Set the finalized block in memory
+        let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
+        provider.canonical_in_memory_state.set_finalized(finalized_block.header.clone());
+
+        // Verify the pending block number and hash
+        assert_eq!(
+            provider.pending_block_num_hash()?,
+            Some(BlockNumHash { number: pending_block.number, hash: pending_block.hash() })
+        );
+
+        // Verify the safe block number and hash
+        assert_eq!(
+            provider.safe_block_num_hash()?,
+            Some(BlockNumHash { number: safe_block.number, hash: safe_block.hash() })
+        );
+
+        // Verify the finalized block number and hash
+        assert_eq!(
+            provider.finalized_block_num_hash()?,
+            Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
+        );
 
         Ok(())
     }
