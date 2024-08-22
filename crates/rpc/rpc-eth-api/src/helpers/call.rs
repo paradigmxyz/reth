@@ -259,18 +259,18 @@ pub trait EthCall: Call + LoadPendingBlock {
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
-        let ( result, mut env) = self.inspect(&mut db, env, &mut inspector)?;
+        let (result, mut env) = self.inspect(&mut db, env, &mut inspector)?;
         let access_list = inspector.into_access_list();
         env.tx.access_list = access_list.to_vec();
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
-              return  Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-               return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Success { .. } => {}
         };
@@ -278,8 +278,8 @@ pub trait EthCall: Call + LoadPendingBlock {
         let (_, _) = self.transact(&mut db, env.clone())?;
 
         let gas_used = match result.result {
-            ExecutionResult::Success { gas_used, .. } => gas_used,
-            ExecutionResult::Revert { gas_used, .. } => gas_used,
+            ExecutionResult::Success { gas_used, .. } |
+            ExecutionResult::Revert { gas_used, .. } |
             ExecutionResult::Halt { gas_used, .. } => gas_used,
         };
 
