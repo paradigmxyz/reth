@@ -4,7 +4,7 @@ use std::error::Error;
 
 use alloy_network::{Ethereum, Network};
 use reth_rpc_eth_types::EthApiError;
-use reth_rpc_types::{Block, Rich, Transaction};
+use reth_rpc_types::{Block, Transaction};
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -32,4 +32,4 @@ impl EthApiTypes for () {
 pub type RpcTransaction<T> = <T as Network>::TransactionResponse;
 
 /// Adapter for network specific block type.
-pub type RpcBlock<T> = Rich<Block<RpcTransaction<T>>>;
+pub type RpcBlock<T> = Block<RpcTransaction<T>>;

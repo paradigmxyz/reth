@@ -29,6 +29,9 @@ mod info;
 /// The chain spec module.
 mod spec;
 
+mod api;
+pub use api::EthChainSpec;
+
 /// Chain specific constants
 pub(crate) mod constants;
 

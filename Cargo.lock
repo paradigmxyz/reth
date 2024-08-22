@@ -7692,6 +7692,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.0.5"
 dependencies = [
+ "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
@@ -8037,6 +8038,7 @@ dependencies = [
  "jsonrpsee-types",
  "op-alloy-network",
  "parking_lot 0.12.3",
+ "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",
@@ -8341,6 +8343,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.0.5"
 dependencies = [
+ "alloy-json-rpc",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -8754,6 +8757,7 @@ dependencies = [
 name = "reth-testing-utils"
 version = "1.0.5"
 dependencies = [
+ "alloy-eips",
  "alloy-genesis",
  "rand 0.8.5",
  "reth-primitives",
@@ -8960,9 +8964,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43cbb1576a147317c6990cf69d6cd5ef402df99f638616ba911006e9ec45866b"
+checksum = "ec16f9b9d3cdaaf2f4b7ceaf004eb2c89df04e7ea29622584c0a6ec676bd0a83"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",

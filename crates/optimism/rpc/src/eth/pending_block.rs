@@ -1,5 +1,6 @@
 //! Loads OP pending block for a RPC response.   
 
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
@@ -26,7 +27,10 @@ where
     #[inline]
     fn provider(
         &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
+    ) -> impl BlockReaderIdExt
+           + EvmEnvProvider
+           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + StateProviderFactory {
         self.inner.provider()
     }
 

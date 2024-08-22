@@ -1,4 +1,4 @@
-use crate::constants::MAINNET_DEPOSIT_CONTRACT;
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
@@ -813,8 +813,11 @@ impl From<Genesis> for ChainSpec {
 /// A trait for reading the current [`ChainSpec`].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Send + Sync {
+    /// The chain spec type.
+    type ChainSpec: EthChainSpec;
+
     /// Get an [`Arc`] to the [`ChainSpec`].
-    fn chain_spec(&self) -> Arc<ChainSpec>;
+    fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 }
 
 /// A helper to build custom chain specs
@@ -1691,11 +1694,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1720627201, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 1725984001 },
+                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 1726070401 },
                 ),
                 (
-                    Head { number: 0, timestamp: 1725984001, ..Default::default() },
-                    ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
+                    Head { number: 0, timestamp: 1726070401, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
                 ),
             ],
         );
@@ -2653,7 +2656,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xfa, 0x57, 0x86, 0x01]), next: 0 },
+            ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }

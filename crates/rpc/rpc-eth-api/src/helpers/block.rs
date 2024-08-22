@@ -6,7 +6,7 @@ use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index, Rich};
+use reth_rpc_types::{AnyTransactionReceipt, Header, Index};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::{FromEthApiError, RpcBlock};
@@ -26,7 +26,7 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
+        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -51,7 +51,7 @@ pub trait EthBlocks: LoadBlock {
                 .ok_or(EthApiError::UnknownBlockNumber)?;
             let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(Some(Rich { inner: block, extra_info: Default::default() }))
+            Ok(Some(block))
         }
     }
 
@@ -198,12 +198,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            let index = usize::from(index);
-            let uncle = uncles.into_iter().nth(index).map(|header| Rich {
-                inner: uncle_block_from_header(header),
-                extra_info: Default::default(),
-            });
-            Ok(uncle)
+            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
         }
     }
 }
