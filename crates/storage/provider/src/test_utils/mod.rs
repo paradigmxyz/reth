@@ -16,7 +16,7 @@ mod noop;
 
 pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
-pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
+// pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Creates test provider factory with mainnet chain spec.
 pub fn create_test_provider_factory() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {

@@ -1492,22 +1492,17 @@ mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-    use reth_primitives::{BlockNumHash, BlockNumberOrTag, SealedBlock, B256};
-    use reth_storage_api::{
-        BlockHashReader, BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider,
-    };
-    use reth_testing_utils::generators::{self, random_block_range};
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
     use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
+        B256,
     };
     use reth_storage_api::{
-        BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
+        BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
     };
     use reth_testing_utils::generators::{
@@ -2366,8 +2361,10 @@ mod tests {
     #[test]
     fn test_block_id_reader() -> eyre::Result<()> {
         // Create a new provider
-        let (provider, _, in_memory_blocks) =
-            provider_with_random_blocks(TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT).unwrap();
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) =
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)
+                .unwrap();
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
