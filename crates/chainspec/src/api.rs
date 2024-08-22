@@ -9,6 +9,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + 'static {
 
     /// Chain id.
     fn chain(&self) -> Chain;
+    
     /// Activation condition for a given hardfork.
     fn activation_condition(&self, hardfork: Self::Hardfork) -> ForkCondition;
 }
