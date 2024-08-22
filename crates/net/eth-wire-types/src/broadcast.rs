@@ -643,7 +643,6 @@ impl<V> PartiallyValidData<V> {
 /// Partially validated data from an announcement or a
 /// [`PooledTransactions`](crate::PooledTransactions) response.
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
-#[from(PartiallyValidData<Eth68TxMetadata>)]
 pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]

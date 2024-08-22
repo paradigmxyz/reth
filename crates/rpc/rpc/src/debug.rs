@@ -10,7 +10,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
@@ -586,6 +586,16 @@ where
                     block.timestamp,
                     block.number,
                     block.parent_beacon_block_root,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                // apply eip-2935 blockhashes update
+                apply_blockhashes_update(
+                    &mut db,
+                    &this.inner.provider.chain_spec(),
+                    block.timestamp,
+                    block.number,
+                    block.parent_hash,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 

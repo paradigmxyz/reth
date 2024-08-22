@@ -111,8 +111,8 @@ impl InMemoryState {
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
-    pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.borrow().as_ref().map(|state| Arc::new(BlockState::new(state.block.clone())))
+    pub(crate) fn pending_state(&self) -> Option<BlockState> {
+        self.pending.borrow().clone()
     }
 
     #[cfg(test)]
@@ -159,8 +159,8 @@ pub struct CanonicalInMemoryState {
 }
 
 impl CanonicalInMemoryState {
-    /// Create a new in memory state with the given blocks, numbers, pending state and finalized
-    /// header if it exists.
+    /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
+    /// finalized header.
     pub fn new(
         blocks: HashMap<B256, Arc<BlockState>>,
         numbers: BTreeMap<u64, B256>,
@@ -168,21 +168,20 @@ impl CanonicalInMemoryState {
         finalized: Option<SealedHeader>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
-        let head_state = in_memory_state.head_state();
-        let header =
-            head_state.map(|state| state.block().block().header.clone()).unwrap_or_default();
-
+        let header = in_memory_state
+            .head_state()
+            .map_or_else(SealedHeader::default, |state| state.block().block().header.clone());
         let chain_info_tracker = ChainInfoTracker::new(header, finalized);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
-        let inner = CanonicalInMemoryStateInner {
-            chain_info_tracker,
-            in_memory_state,
-            canon_state_notification_sender,
-        };
-
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(CanonicalInMemoryStateInner {
+                chain_info_tracker,
+                in_memory_state,
+                canon_state_notification_sender,
+            }),
+        }
     }
 
     /// Create an empty state.
@@ -348,7 +347,7 @@ impl CanonicalInMemoryState {
     }
 
     /// Returns the in memory pending state.
-    pub fn pending_state(&self) -> Option<Arc<BlockState>> {
+    pub fn pending_state(&self) -> Option<BlockState> {
         self.inner.in_memory_state.pending_state()
     }
 
@@ -466,12 +465,12 @@ impl CanonicalInMemoryState {
 
     /// Subscribe to new safe block events.
     pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
-        self.inner.chain_info_tracker.subscribe_to_safe_block()
+        self.inner.chain_info_tracker.subscribe_safe_block()
     }
 
     /// Subscribe to new finalized block events.
     pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
-        self.inner.chain_info_tracker.subscribe_to_finalized_block()
+        self.inner.chain_info_tracker.subscribe_finalized_block()
     }
 
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
@@ -568,12 +567,12 @@ pub struct BlockState {
 
 #[allow(dead_code)]
 impl BlockState {
-    /// `BlockState` constructor.
+    /// [`BlockState`] constructor.
     pub const fn new(block: ExecutedBlock) -> Self {
         Self { block, parent: None }
     }
 
-    /// `BlockState` constructor with parent.
+    /// [`BlockState`] constructor with parent.
     pub fn with_parent(block: ExecutedBlock, parent: Option<Self>) -> Self {
         Self { block, parent: parent.map(Box::new) }
     }
@@ -658,7 +657,7 @@ impl BlockState {
         chain
     }
 
-    /// Appends the parent chain of this `BlockState` to the given vector.
+    /// Appends the parent chain of this [`BlockState`] to the given vector.
     pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
         chain.extend(self.parent_state_chain());
     }
@@ -1106,6 +1105,58 @@ mod tests {
         assert_eq!(state.state_by_number(0).unwrap().block().block().hash(), block2.block().hash());
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
+    }
+
+    #[test]
+    fn test_in_memory_state_set_pending_block() {
+        let state = CanonicalInMemoryState::empty();
+        let mut test_block_builder = TestBlockBuilder::default();
+
+        // First random block
+        let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
+
+        // Second block with parent hash of the first block
+        let block2 = test_block_builder.get_executed_block_with_number(1, block1.block().hash());
+
+        // Commit the two blocks
+        let chain = NewCanonicalChain::Commit { new: vec![block1.clone(), block2.clone()] };
+        state.update_chain(chain);
+
+        // Assert that the pending state is None before setting it
+        assert!(state.pending_state().is_none());
+
+        // Set the pending block
+        state.set_pending_block(block2.clone());
+
+        // Check the pending state
+        assert_eq!(
+            state.pending_state().unwrap(),
+            BlockState::with_parent(block2.clone(), Some(BlockState::new(block1)))
+        );
+
+        // Check the pending block
+        assert_eq!(state.pending_block().unwrap(), block2.block().clone());
+
+        // Check the pending block number and hash
+        assert_eq!(
+            state.pending_block_num_hash().unwrap(),
+            BlockNumHash { number: 1, hash: block2.block().hash() }
+        );
+
+        // Check the pending header
+        assert_eq!(state.pending_header().unwrap(), block2.block().header.header().clone());
+
+        // Check the pending sealed header
+        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().header.clone());
+
+        // Check the pending block with senders
+        assert_eq!(
+            state.pending_block_with_senders().unwrap(),
+            block2.block().clone().seal_with_senders().unwrap()
+        );
+
+        // Check the pending block and receipts
+        assert_eq!(state.pending_block_and_receipts().unwrap(), (block2.block().clone(), vec![]));
     }
 
     #[test]

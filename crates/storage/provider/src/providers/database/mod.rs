@@ -713,7 +713,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, None, Some(3), None);
+        let block = random_block(&mut rng, 0, None, Some(3), None, None);
 
         let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {

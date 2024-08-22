@@ -15,8 +15,8 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    AnyTransactionReceipt, Block, BlockOverrides, Bundle, EIP1186AccountProofResponse,
+    EthCallResponse, FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
     TransactionRequest, Work,
 };
 use tracing::trace;
@@ -102,7 +102,7 @@ pub trait EthApi {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>>;
+    ) -> RpcResult<Option<Block>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockNumberAndIndex")]
@@ -110,7 +110,7 @@ pub trait EthApi {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>>;
+    ) -> RpcResult<Option<Block>>;
 
     /// Returns the EIP-2718 encoded transaction if it exists.
     ///
@@ -262,7 +262,7 @@ pub trait EthApi {
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<reth_rpc_types::Account>;
+    ) -> RpcResult<Option<reth_rpc_types::Account>>;
 
     /// Introduced in EIP-1559, returns suggestion for the priority for dynamic fee transactions.
     #[method(name = "maxPriorityFeePerGas")]
@@ -449,7 +449,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>> {
+    ) -> RpcResult<Option<Block>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, hash.into(), index).await?)
     }
@@ -459,7 +459,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<RichBlock>> {
+    ) -> RpcResult<Option<Block>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
         Ok(EthBlocks::ommer_by_block_and_index(self, number.into(), index).await?)
     }
@@ -652,7 +652,7 @@ where
         &self,
         address: Address,
         block: BlockId,
-    ) -> RpcResult<reth_rpc_types::Account> {
+    ) -> RpcResult<Option<reth_rpc_types::Account>> {
         trace!(target: "rpc::eth", "Serving eth_getAccount");
         Ok(EthState::get_account(self, address, block).await?)
     }
