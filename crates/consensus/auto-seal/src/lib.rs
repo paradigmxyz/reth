@@ -287,9 +287,7 @@ impl StorageInner {
         let mut header = Header {
             parent_hash: self.best_hash,
             ommers_hash: proofs::calculate_ommers_root(ommers),
-            state_root: Default::default(),
             transactions_root: proofs::calculate_transaction_root(transactions),
-            receipts_root: Default::default(),
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             difficulty: U256::from(2),
             number: self.best_block + 1,
