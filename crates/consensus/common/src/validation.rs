@@ -13,7 +13,7 @@ use reth_primitives::{
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
-pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> {
+pub const fn validate_header_gas(header: &Header) -> Result<(), ConsensusError> {
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
@@ -26,7 +26,7 @@ pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> 
 /// Ensure the EIP-1559 base fee is set if the London hardfork is active.
 #[inline]
 pub fn validate_header_base_fee(
-    header: &SealedHeader,
+    header: &Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number) &&
@@ -112,7 +112,7 @@ pub fn validate_block_pre_execution(
 ///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
-pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), ConsensusError> {
+pub fn validate_4844_header_standalone(header: &Header) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
     let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
@@ -166,7 +166,7 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 /// header matches the parent hash in the header.
 #[inline]
 pub fn validate_against_parent_hash_number(
-    header: &SealedHeader,
+    header: &Header,
     parent: &SealedHeader,
 ) -> Result<(), ConsensusError> {
     // Parent number is consistent.
@@ -189,8 +189,8 @@ pub fn validate_against_parent_hash_number(
 /// Validates the base fee against the parent and EIP-1559 rules.
 #[inline]
 pub fn validate_against_parent_eip1559_base_fee(
-    header: &SealedHeader,
-    parent: &SealedHeader,
+    header: &Header,
+    parent: &Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
@@ -219,9 +219,9 @@ pub fn validate_against_parent_eip1559_base_fee(
 
 /// Validates the timestamp against the parent to make sure it is in the past.
 #[inline]
-pub fn validate_against_parent_timestamp(
-    header: &SealedHeader,
-    parent: &SealedHeader,
+pub const fn validate_against_parent_timestamp(
+    header: &Header,
+    parent: &Header,
 ) -> Result<(), ConsensusError> {
     if header.is_timestamp_in_past(parent.timestamp) {
         return Err(ConsensusError::TimestampIsInPast {
@@ -237,8 +237,8 @@ pub fn validate_against_parent_timestamp(
 /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
 /// parent header fields.
 pub fn validate_against_parent_4844(
-    header: &SealedHeader,
-    parent: &SealedHeader,
+    header: &Header,
+    parent: &Header,
 ) -> Result<(), ConsensusError> {
     // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
     //

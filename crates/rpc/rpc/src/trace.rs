@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
@@ -75,7 +75,11 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
+    Provider: BlockReader
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -547,7 +551,11 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
+    Provider: BlockReader
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.

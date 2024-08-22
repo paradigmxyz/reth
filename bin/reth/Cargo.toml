@@ -83,7 +83,6 @@ tracing.workspace = true
 fdlimit.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics
@@ -151,10 +150,6 @@ ethereum = []
 [[bin]]
 name = "reth"
 path = "src/main.rs"
-
-[[bin]]
-name = "engine2"
-path = "src/engine2.rs"
 
 [[bin]]
 name = "op-reth"

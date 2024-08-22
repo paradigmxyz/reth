@@ -40,10 +40,16 @@ pub enum DownloadOutcome {
     /// Downloaded blocks.
     Blocks(Vec<SealedBlockWithSenders>),
     /// New download started.
-    NewDownloadStarted { remaining_blocks: u64, target: B256 },
+    NewDownloadStarted {
+        /// How many blocks are pending in this download.
+        remaining_blocks: u64,
+        /// The hash of the highest block of this download.
+        target: B256,
+    },
 }
 
 /// Basic [`BlockDownloader`].
+#[allow(missing_debug_implementations)]
 pub struct BasicBlockDownloader<Client>
 where
     Client: BlockClient + 'static,
@@ -393,11 +399,11 @@ mod tests {
         assert_eq!(block_downloader.inflight_full_block_requests.len(), TOTAL_BLOCKS);
 
         // poll downloader
-        for i in 0..TOTAL_BLOCKS {
+        for _ in 0..TOTAL_BLOCKS {
             let sync_future = poll_fn(|cx| block_downloader.poll(cx));
             let next_ready = sync_future.await;
 
-            assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, target } => {
+            assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, .. } => {
                 assert_eq!(remaining_blocks, 1);
             });
         }

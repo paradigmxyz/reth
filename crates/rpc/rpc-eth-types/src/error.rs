@@ -9,14 +9,15 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, BlockNumberOrTag,
+    ToRpcError,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
 /// Result alias
@@ -40,15 +41,6 @@ pub enum EthApiError {
     /// Header not found for block hash/number
     #[error("header not found")]
     HeaderNotFound(BlockId),
-    /// Thrown when querying for `finalized` or `safe` block before the merge transition is
-    /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
-    ///
-    /// op-node now checks for either `Unknown block` OR `unknown block`:
-    /// <https://github.com/ethereum-optimism/optimism/blob/3b374c292e2b05cc51b52212ba68dd88ffce2a3b/op-service/sources/l2_client.go#L105>
-    ///
-    /// TODO(#8045): Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
-    #[error("unknown block")]
-    UnknownSafeOrFinalizedBlock,
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
@@ -180,15 +172,15 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                             format!("hash {}", h.block_hash)
                         }
                     }
-                    BlockId::Number(n) => format!("number {}", n),
+                    BlockId::Number(n) => match n {
+                        BlockNumberOrTag::Number(n) => format!("number {}", n),
+                        _ => format!("{}", n),
+                    },
                 };
                 rpc_error_with_code(
                     EthRpcErrorCode::ResourceNotFound.code(),
                     format!("{}: {}", error, arg),
                 )
-            }
-            EthApiError::UnknownSafeOrFinalizedBlock => {
-                rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
@@ -207,10 +199,13 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-impl From<JsInspectorError> for EthApiError {
-    fn from(error: JsInspectorError) -> Self {
+#[cfg(feature = "js-tracer")]
+impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
+    fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
         match error {
-            err @ JsInspectorError::JsError(_) => Self::InternalJsTracerError(err.to_string()),
+            err @ revm_inspectors::tracing::js::JsInspectorError::JsError(_) => {
+                Self::InternalJsTracerError(err.to_string())
+            }
             err => Self::InvalidParams(err.to_string()),
         }
     }
@@ -236,9 +231,8 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
             ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
             ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
-            ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
-                Self::UnknownSafeOrFinalizedBlock
-            }
+            ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
+            ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             err => Self::Internal(err.into()),
         }
     }

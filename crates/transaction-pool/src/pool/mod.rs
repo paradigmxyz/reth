@@ -120,8 +120,11 @@ pub(crate) mod state;
 pub mod txpool;
 mod update;
 
-const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
-const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+/// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
+pub const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
+/// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
+pub const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+
 const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 
 /// Transaction pool internals.
@@ -233,7 +236,7 @@ where
     /// Adds a new transaction listener to the pool that gets notified about every new _pending_
     /// transaction inserted into the pool
     pub fn add_pending_listener(&self, kind: TransactionListenerKind) -> mpsc::Receiver<TxHash> {
-        let (sender, rx) = mpsc::channel(PENDING_TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(self.config.pending_tx_listener_buffer_size);
         let listener = PendingTransactionHashListener { sender, kind };
         self.pending_transaction_listener.lock().push(listener);
         rx
@@ -244,7 +247,7 @@ where
         &self,
         kind: TransactionListenerKind,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
-        let (sender, rx) = mpsc::channel(NEW_TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(self.config.new_tx_listener_buffer_size);
         let listener = TransactionListener { sender, kind };
         self.transaction_listener.lock().push(listener);
         rx
@@ -729,6 +732,14 @@ where
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+    }
+
+    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    pub(crate) fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.

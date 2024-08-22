@@ -11,16 +11,15 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
     PooledTransactionsElementEcRecovered, TransactionSigned,
 };
-use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
-    StateProviderFactory,
-};
+use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
@@ -74,7 +73,12 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + Clone
+        + Send
+        + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -95,7 +99,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + Clone
+        + Send
+        + 'static,
     P: TransactionPoolExt + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,

@@ -1,0 +1,46 @@
+[package]
+name = "reth-db-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Database models used in storage module."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+reth-primitives = { workspace = true, features = ["reth-codec"] }
+
+# codecs
+modular-bitfield.workspace = true
+serde = { workspace = true, default-features = false }
+
+# misc
+bytes.workspace = true
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-codecs.workspace = true
+
+arbitrary = { workspace = true, features = ["derive"] }
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+test-fuzz.workspace = true
+
+[features]
+test-utils = ["arbitrary"]
+arbitrary = [
+    "reth-primitives/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+]

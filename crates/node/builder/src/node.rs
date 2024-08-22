@@ -3,7 +3,6 @@ pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 use std::{marker::PhantomData, sync::Arc};
 
-use reth_chainspec::ChainSpec;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -62,6 +61,8 @@ where
     type Primitives = N::Primitives;
 
     type Engine = N::Engine;
+
+    type ChainSpec = N::ChainSpec;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
@@ -112,8 +113,8 @@ where
     Node: FullNodeComponents,
     AddOns: NodeAddOns<Node>,
 {
-    /// Returns the [`ChainSpec`] of the node.
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+    /// Returns the chain spec of the node.
+    pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
         self.provider.chain_spec()
     }
 

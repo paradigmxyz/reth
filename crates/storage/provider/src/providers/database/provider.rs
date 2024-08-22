@@ -2002,6 +2002,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(None)
     }
 
+    /// Returns the ommers for the block with matching id from the database.
+    ///
+    /// If the block is not found, this returns `None`.
+    /// If the block exists, but doesn't contain ommers, this returns `None`.
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
@@ -3663,7 +3667,7 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
-    fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
             .cursor_read::<tables::ChainState>()?
@@ -3671,10 +3675,8 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
             .take(1)
             .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
 
-        let last_finalized_block_number = finalized_blocks
-            .pop_first()
-            .unwrap_or((tables::ChainStateKey::LastFinalizedBlock, 0_u64));
-        Ok(last_finalized_block_number.1)
+        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
+        Ok(last_finalized_block_number)
     }
 }
 

@@ -5,7 +5,7 @@ use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
-use derive_more::{Deref, DerefMut, From, IntoIterator};
+use derive_more::{DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
@@ -14,11 +14,11 @@ use serde::{Deserialize, Serialize};
 use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec(no_arbitrary, zstd))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(CompactZstd))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
@@ -74,7 +74,7 @@ impl Receipt {
     Serialize,
     Deserialize,
     From,
-    Deref,
+    derive_more::Deref,
     DerefMut,
     IntoIterator,
 )]
@@ -142,8 +142,10 @@ impl From<Receipt> for ReceiptWithBloom {
 }
 
 /// [`Receipt`] with calculated bloom filter.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,

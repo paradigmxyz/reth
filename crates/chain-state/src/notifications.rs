@@ -9,8 +9,11 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::broadcast;
-use tokio_stream::{wrappers::BroadcastStream, Stream};
+use tokio::sync::{broadcast, watch};
+use tokio_stream::{
+    wrappers::{BroadcastStream, WatchStream},
+    Stream,
+};
 use tracing::debug;
 
 /// Type alias for a receiver that receives [`CanonStateNotification`]
@@ -60,42 +63,36 @@ impl Stream for CanonStateNotificationStream {
     }
 }
 
-/// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all `ExecutionOutcome` and
-/// [`reth_primitives::SealedBlockWithSenders`] of both reverted and committed blocks.
-#[derive(Clone, Debug)]
+/// A notification that is sent when a new block is imported, or an old block is reverted.
+///
+/// The notification contains at least one [`Chain`] with the imported segment. If some blocks were
+/// reverted (e.g. during a reorg), the old chain is also returned.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonStateNotification {
-    /// Chain got extended without reorg and only new chain is returned.
+    /// The canonical chain was extended.
     Commit {
-        /// The newly extended chain.
+        /// The newly added chain segment.
         new: Arc<Chain>,
     },
-    /// Chain reorgs and both old and new chain are returned.
-    /// Revert is just a subset of reorg where the new chain is empty.
+    /// A chain segment was reverted or reorged.
+    ///
+    /// - In the case of a reorg, the reverted blocks are present in `old`, and the new blocks are
+    ///   present in `new`.
+    /// - In the case of a revert, the reverted blocks are present in `old`, and `new` is an empty
+    ///   chain segment.
     Reorg {
-        /// The old chain before reorganization.
+        /// The chain segment that was reverted.
         old: Arc<Chain>,
-        /// The new chain after reorganization.
+        /// The chain segment that was added on top of the canonical chain, minus the reverted
+        /// blocks.
+        ///
+        /// In the case of a revert, not a reorg, this chain segment is empty.
         new: Arc<Chain>,
     },
-}
-
-// For one reason or another, the compiler can't derive PartialEq for CanonStateNotification.
-// so we are forced to implement it manually.
-impl PartialEq for CanonStateNotification {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Reorg { old: old1, new: new1 }, Self::Reorg { old: old2, new: new2 }) => {
-                old1 == old2 && new1 == new2
-            }
-            (Self::Commit { new: new1 }, Self::Commit { new: new2 }) => new1 == new2,
-            _ => false,
-        }
-    }
 }
 
 impl CanonStateNotification {
-    /// Get old chain if any.
+    /// Get the chain segment that was reverted, if any.
     pub fn reverted(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Commit { .. } => None,
@@ -103,16 +100,14 @@ impl CanonStateNotification {
         }
     }
 
-    /// Get the new chain if any.
-    ///
-    /// Returns the new committed [Chain] for [`Self::Reorg`] and [`Self::Commit`] variants.
+    /// Get the newly imported chain segment, if any.
     pub fn committed(&self) -> Arc<Chain> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.clone(),
         }
     }
 
-    /// Returns the new tip of the chain.
+    /// Get the new tip of the chain.
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
@@ -122,9 +117,11 @@ impl CanonStateNotification {
         }
     }
 
-    /// Return receipt with its block number and transaction hash.
+    /// Get receipts in the reverted and newly imported chain segments with their corresponding
+    /// block numbers and transaction hashes.
     ///
-    /// Last boolean is true if receipt is from reverted block.
+    /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
+    /// chain segment.
     pub fn block_receipts(&self) -> Vec<(BlockReceipts, bool)> {
         let mut receipts = Vec::new();
 
@@ -143,17 +140,25 @@ impl CanonStateNotification {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
+pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
-    /// Get notified when a new head of the chain is selected.
-    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications;
+    /// Get notified when a new safe block of the chain is selected.
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications;
 
-    /// Convenience method to get a stream of the new head of the chain.
-    fn fork_choice_stream(&self) -> ForkChoiceStream {
-        ForkChoiceStream { st: BroadcastStream::new(self.subscribe_to_fork_choice().0) }
+    /// Get notified when a new finalized block of the chain is selected.
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications;
+
+    /// Convenience method to get a stream of the new safe blocks of the chain.
+    fn safe_block_stream(&self) -> ForkChoiceStream {
+        ForkChoiceStream { st: WatchStream::new(self.subscribe_safe_block().0) }
+    }
+
+    /// Convenience method to get a stream of the new finalized blocks of the chain.
+    fn finalized_block_stream(&self) -> ForkChoiceStream {
+        ForkChoiceStream { st: WatchStream::new(self.subscribe_finalized_block().0) }
     }
 }
 
@@ -162,7 +167,7 @@ pub trait ForkChoiceSubscriptions: Send + Sync {
 #[pin_project::pin_project]
 pub struct ForkChoiceStream {
     #[pin]
-    st: BroadcastStream<SealedHeader>,
+    st: WatchStream<Option<SealedHeader>>,
 }
 
 impl Stream for ForkChoiceStream {
@@ -170,14 +175,46 @@ impl Stream for ForkChoiceStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
+            match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Some(notification)) => return Poll::Ready(Some(notification)),
+                Some(None) => continue,
+                None => return Poll::Ready(None),
+            }
+        }
+    }
+}
+
+/// A stream for block state watch channels (pending, safe or finalized watchers)
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct BlockStateNotificationStream<T> {
+    #[pin]
+    st: WatchStream<Option<T>>,
+}
+
+impl<T: Clone + Sync + Send + 'static> BlockStateNotificationStream<T> {
+    /// Creates a new `BlockStateNotificationStream`
+    pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
+        Self { st: WatchStream::new(rx) }
+    }
+}
+
+impl<T: Clone + Sync + Send + 'static> Stream for BlockStateNotificationStream<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
             return match ready!(self.as_mut().project().st.poll_next(cx)) {
-                Some(Ok(notification)) => Poll::Ready(Some(notification)),
-                Some(Err(err)) => {
-                    debug!(%err, "finalized header notification stream lagging behind");
-                    continue
+                Some(notification) => {
+                    if notification.is_some() {
+                        return Poll::Ready(notification);
+                    } else {
+                        // skip None values
+                        continue;
+                    }
                 }
                 None => Poll::Ready(None),
-            };
+            }
         }
     }
 }

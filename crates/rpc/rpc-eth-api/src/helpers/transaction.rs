@@ -19,12 +19,12 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError};
+use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
@@ -188,14 +188,14 @@ pub trait EthTransactions: LoadTransaction {
         })
     }
 
-    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    /// Get transaction by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Transaction>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
@@ -389,27 +389,26 @@ pub trait EthTransactions: LoadTransaction {
                 ) => {
                     // As per the EIP, we follow the same semantics as EIP-1559.
                     Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                    chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
-                    to: match to {
-                        Some(TxKind::Call(to)) => to,
-                        _ => Address::default(),
-                    },
-                    access_list: access_list.unwrap_or_default(),
+                        chain_id: 0,
+                        nonce: nonce.unwrap_or_default(),
+                        max_priority_fee_per_gas: U256::from(
+                            max_priority_fee_per_gas.unwrap_or_default(),
+                        ),
+                        max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                        gas_limit: U256::from(gas.unwrap_or_default()),
+                        value: value.unwrap_or_default(),
+                        input: data.into_input().unwrap_or_default(),
+                        to: match to {
+                            Some(TxKind::Call(to)) => to,
+                            _ => Address::default(),
+                        },
+                        access_list: access_list.unwrap_or_default(),
 
-                    // eip-4844 specific.
-                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                    blob_versioned_hashes,
-                    sidecar,
-                }))
+                        // eip-4844 specific.
+                        max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
+                        blob_versioned_hashes,
+                        sidecar,
+                    }))
                 }
 
                 _ => None,

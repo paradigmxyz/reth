@@ -191,7 +191,7 @@ mod tests {
 
     /// Create random block with specified number and parent hash.
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
-        let block = random_block(rng, number, Some(parent), None, None);
+        let block = random_block(rng, number, Some(parent), None, None, None);
         block.seal_with_senders().unwrap()
     }
 

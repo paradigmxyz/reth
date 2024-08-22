@@ -78,7 +78,10 @@ pub struct RollupConfig {
     pub block_time: u64,
     pub max_sequencer_drift: u64,
     pub seq_window_size: u64,
-    pub channel_timeout: u64,
+
+    #[serde(rename = "channel_timeout")]
+    pub channel_timeout_bedrock: u64,
+    pub channel_timeout_granite: u64,
     /// todo use u128 to represent *big.Int?
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub l1_chain_id: Option<u128>,
@@ -95,6 +98,8 @@ pub struct RollupConfig {
     pub ecotone_time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fjord_time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granite_time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interop_time: Option<u64>,
     pub batch_inbox_address: Address,
@@ -333,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_rollup_config() {
-        let rollup_config_json = r#"{"genesis":{"l1":{"blockHash":"0x438335a20d98863a4c0c97999eb2481921ccd28553eac6f913af7c12aec04108"},"l2":{"blockHash":"0xdbf6a80fef073de06add9b0d14026d6e5a86c85f6d102c36d3d8e9cf89c2afd3"},"l2_time":1686068903,"system_config":{"batcherAddr":"0x6887246668a3b87f54deb3b94ba47a6f63f32985","overhead":"0x00000000000000000000000000000000000000000000000000000000000000bc","scalar":"0x00000000000000000000000000000000000000000000000000000000000a6fe0","gasLimit":30000000}},"block_time":2,"max_sequencer_drift":600,"seq_window_size":3600,"channel_timeout":300,"l1_chain_id":1,"l2_chain_id":10,"regolith_time":0,"canyon_time":1704992401,"delta_time":1708560000,"ecotone_time":1710374401,"batch_inbox_address":"0xff00000000000000000000000000000000000010","deposit_contract_address":"0xbeb5fc579115071764c7423a4f12edde41f106ed","l1_system_config_address":"0x229047fed2591dbec1ef1118d64f7af3db9eb290","protocol_versions_address":"0x8062abc286f5e7d9428a0ccb9abd71e50d93b935","da_challenge_address":"0x0000000000000000000000000000000000000000","da_challenge_window":0,"da_resolve_window":0,"use_plasma":false}"#;
+        let rollup_config_json = r#"{"genesis":{"l1":{"blockHash":"0x438335a20d98863a4c0c97999eb2481921ccd28553eac6f913af7c12aec04108"},"l2":{"blockHash":"0xdbf6a80fef073de06add9b0d14026d6e5a86c85f6d102c36d3d8e9cf89c2afd3"},"l2_time":1686068903,"system_config":{"batcherAddr":"0x6887246668a3b87f54deb3b94ba47a6f63f32985","overhead":"0x00000000000000000000000000000000000000000000000000000000000000bc","scalar":"0x00000000000000000000000000000000000000000000000000000000000a6fe0","gasLimit":30000000}},"block_time":2,"max_sequencer_drift":600,"seq_window_size":3600,"channel_timeout":300,"channel_timeout_granite":50,"l1_chain_id":1,"l2_chain_id":10,"regolith_time":0,"canyon_time":1704992401,"delta_time":1708560000,"ecotone_time":1710374401,"batch_inbox_address":"0xff00000000000000000000000000000000000010","deposit_contract_address":"0xbeb5fc579115071764c7423a4f12edde41f106ed","l1_system_config_address":"0x229047fed2591dbec1ef1118d64f7af3db9eb290","protocol_versions_address":"0x8062abc286f5e7d9428a0ccb9abd71e50d93b935","da_challenge_address":"0x0000000000000000000000000000000000000000","da_challenge_window":0,"da_resolve_window":0,"use_plasma":false}"#;
         test_helper::<RollupConfig>(rollup_config_json);
     }
 
