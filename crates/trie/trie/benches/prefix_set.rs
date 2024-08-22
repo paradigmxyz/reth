@@ -7,7 +7,7 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
+use reth_trie::{prefix_set::PrefixSet, Nibbles};
 use std::collections::BTreeSet;
 
 /// Abstractions used for benching
@@ -16,7 +16,7 @@ pub trait PrefixSetAbstraction: Default {
     fn contains(&mut self, key: Nibbles) -> bool;
 }
 
-impl PrefixSetAbstraction for PrefixSetMut {
+impl PrefixSetAbstraction for PrefixSet {
     fn insert(&mut self, key: Nibbles) {
         Self::insert(self, key)
     }
@@ -66,7 +66,7 @@ fn prefix_set_bench<T: PrefixSetAbstraction>(
         for key in &preload {
             prefix_set.insert(key.clone());
         }
-        (prefix_set, input.clone(), expected.clone())
+        (prefix_set.freeze(), input.clone(), expected.clone())
     };
 
     let group_id = format!(
