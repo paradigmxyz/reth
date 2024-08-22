@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-ipc.workspace = true
+reth-chainspec.workspace = true
 reth-network-api.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true

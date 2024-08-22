@@ -11,6 +11,7 @@ use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
@@ -98,17 +99,20 @@ impl<N: FullNodeComponents> OpEthApi<N> {
 impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     type Error = OpEthApiError;
 }
 
 impl<N> EthApiSpec for OpEthApi<N>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
-    fn provider(&self) -> impl ChainSpecProvider + BlockNumReader + StageCheckpointReader {
+    fn provider(
+        &self,
+    ) -> impl ChainSpecProvider<ChainSpec = ChainSpec> + BlockNumReader + StageCheckpointReader
+    {
         self.inner.provider()
     }
 
@@ -131,7 +135,7 @@ where
 impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -152,10 +156,12 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
-    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider {
+    fn provider(
+        &self,
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec> {
         self.inner.provider()
     }
 
@@ -178,10 +184,10 @@ where
 impl<N> LoadState for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
         self.inner.provider()
     }
 

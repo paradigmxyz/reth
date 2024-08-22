@@ -7,6 +7,7 @@ use reth::{
         DebugApiServer,
     },
 };
+use reth_chainspec::ChainSpec;
 use reth_primitives::{Bytes, B256};
 
 #[allow(missing_debug_implementations)]
@@ -14,7 +15,7 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi> {
     pub inner: RpcRegistry<Node, EthApi>,
 }
 
-impl<Node: FullNodeComponents, EthApi> RpcTestContext<Node, EthApi>
+impl<Node: FullNodeComponents<ChainSpec = ChainSpec>, EthApi> RpcTestContext<Node, EthApi>
 where
     EthApi: EthApiSpec + EthTransactions + TraceExt,
 {

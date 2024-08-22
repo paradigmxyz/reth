@@ -2862,6 +2862,7 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "reth",
+ "reth-chainspec",
  "reth-node-ethereum",
  "reth-tracing",
  "reth-transaction-pool",
@@ -7690,6 +7691,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.0.5"
 dependencies = [
+ "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
@@ -8031,6 +8033,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot 0.12.3",
+ "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",
