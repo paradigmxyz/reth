@@ -604,6 +604,10 @@ mod tests {
         let mut pinned_manager = std::pin::pin!(exex_manager);
         let _ = pinned_manager.as_mut().poll(&mut cx);
 
+        // Check that the block height was updated
+        let updated_exex_handle = &pinned_manager.exex_handles[0];
+        assert_eq!(updated_exex_handle.finished_height, Some(42));
+
         // Get the receiver for the finished height
         let mut receiver = pinned_manager.handle.finished_height();
 
