@@ -295,7 +295,7 @@ where
         let mut db_headers = self.database.headers_range(range.clone())?;
 
         // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
+        range.nth(db_headers.len().saturating_sub(1));
 
         headers.append(&mut db_headers);
 
@@ -335,7 +335,7 @@ where
         let mut db_headers = self.database.sealed_headers_range(range.clone())?;
 
         // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
+        range.nth(db_headers.len().saturating_sub(1));
 
         sealed_headers.append(&mut db_headers);
 
@@ -368,7 +368,7 @@ where
         let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
 
         // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
+        range.nth(db_headers.len().saturating_sub(1));
 
         sealed_headers.append(&mut db_headers);
 
@@ -416,7 +416,7 @@ where
         let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(db_hashes.len() - 1);
+        range.nth(db_hashes.len().saturating_sub(1));
 
         hashes.append(&mut db_hashes);
 
@@ -638,7 +638,7 @@ where
         blocks.append(&mut database_blocks);
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(blocks.len() - 1);
+        range.nth(blocks.len().saturating_sub(1));
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
@@ -666,7 +666,7 @@ where
         blocks.append(&mut database_blocks);
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(blocks.len() - 1);
+        range.nth(blocks.len().saturating_sub(1));
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
@@ -696,7 +696,7 @@ where
         blocks.append(&mut database_blocks);
 
         // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(blocks.len() - 1);
+        range.nth(blocks.len().saturating_sub(1));
 
         // Fetch the remaining blocks from the in-memory state
         for num in range {
