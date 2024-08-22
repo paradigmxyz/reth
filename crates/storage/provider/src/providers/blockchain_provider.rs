@@ -1487,7 +1487,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Range, sync::Arc};
+    use std::{ops::Range, sync::Arc, time::Instant};
 
     use itertools::Itertools;
     use rand::Rng;
@@ -2353,6 +2353,31 @@ mod tests {
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
             in_memory_block.requests.clone()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_canon_state_tracker() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) =
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+
+        let before = Instant::now();
+        provider.on_forkchoice_update_received(&Default::default());
+        let last_update_ts = provider.last_received_update_timestamp().unwrap();
+        let after = Instant::now();
+
+        // Ensure the timestamp is updated and between the before and after timestamps
+        assert!(before < last_update_ts && last_update_ts < after);
+
+        let before = Instant::now();
+        provider.on_transition_configuration_exchanged();
+        let last_update_ts = provider.last_exchanged_transition_configuration_timestamp().unwrap();
+        let after = Instant::now();
+
+        // Ensure the timestamp is updated and between the before and after timestamps
+        assert!(before < last_update_ts && last_update_ts < after);
 
         Ok(())
     }
