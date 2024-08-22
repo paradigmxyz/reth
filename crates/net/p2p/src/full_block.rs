@@ -496,11 +496,10 @@ where
                 self.client.report_bad_message(peer);
             } else {
                 let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
-                // ensure the downloaded headers are valid
+                // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
-                    return
                 }
 
                 // get the bodies request so it can be polled later
@@ -757,6 +756,25 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 50).await;
         assert_eq!(received.len(), 50);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_invalid_header() {
+        let client = TestFullBlockClient::default();
+        let range_length: usize = 3;
+        let (header, _) = insert_headers_into_client(&client, 0..range_length);
+
+        let test_consensus = reth_consensus::test_utils::TestConsensus::default();
+        test_consensus.set_fail_validation(true);
+        let client = FullBlockClient::new(client, Arc::new(test_consensus));
+
+        let received = client.get_full_block_range(header.hash(), range_length as u64).await;
+
+        assert_eq!(received.len(), range_length);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
             assert_eq!(block.header.number, expected_number);
