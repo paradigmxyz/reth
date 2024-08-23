@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
@@ -672,26 +673,6 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
             .field("changed_accounts", &self.changed_accounts.len())
             .field("mined_transactions", &self.mined_transactions.len())
             .finish()
-    }
-}
-
-/// Represents a changed account
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct ChangedAccount {
-    /// The address of the account.
-    pub address: Address,
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-}
-
-// === impl ChangedAccount ===
-
-impl ChangedAccount {
-    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
     }
 }
 

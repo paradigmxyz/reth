@@ -153,6 +153,7 @@
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};

@@ -4,7 +4,7 @@ use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPool, TransactionPoolExt},
+    traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
 use futures_util::{
@@ -13,7 +13,7 @@ use futures_util::{
 };
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::ChainSpecProvider;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
@@ -272,7 +272,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
-                    changed_accounts_iter(new_state).map(ChangedAccountEntry).collect();
+                    new_state.changed_accounts().map(ChangedAccountEntry).collect();
 
                 // find all accounts that were changed in the old chain but _not_ in the new chain
                 let missing_changed_acc = old_state
@@ -405,7 +405,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
-                for acc in changed_accounts_iter(state) {
+                for acc in state.changed_accounts() {
                     // we can always clear the dirty flag for this account
                     dirty_addresses.remove(&acc.address);
                     changed_accounts.push(acc);
@@ -548,16 +548,6 @@ where
         }
     }
     Ok(res)
-}
-
-/// Extracts all changed accounts from the `BundleState`
-fn changed_accounts_iter(
-    execution_outcome: &ExecutionOutcome,
-) -> impl Iterator<Item = ChangedAccount> + '_ {
-    execution_outcome
-        .accounts_iter()
-        .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
-        .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
 }
 
 /// Loads transactions from a file, decodes them from the RLP format, and inserts them
