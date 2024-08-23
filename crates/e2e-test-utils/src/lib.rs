@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_network::Network;
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
@@ -14,7 +15,7 @@ use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, NodeComponents, RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeComponents, NodeTypes, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -50,10 +51,18 @@ pub async fn setup<N>(
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>>,
-    <<N::ComponentsBuilder as NodeComponentsBuilder<TmpNodeAdapter<N>>>::Components as NodeComponents<TmpNodeAdapter<N>>>::Network: PeersHandleProvider,
-    <N::AddOns as NodeAddOns<Adapter<N>>>::EthApi:
-        FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypes<ChainSpec = ChainSpec>,
+    N::ComponentsBuilder: NodeComponentsBuilder<
+        TmpNodeAdapter<N>,
+        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
+    >,
+    N::AddOns: NodeAddOns<
+        Adapter<N>,
+        EthApi: FullEthApiServer<
+            NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners
+                    + EthApiBuilderProvider<Adapter<N>>,
+    >,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

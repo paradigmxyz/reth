@@ -203,6 +203,7 @@ mod tests {
                 B256::ZERO,
                 1..3,
                 None,
+                None,
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(
