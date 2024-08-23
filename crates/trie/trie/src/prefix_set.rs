@@ -84,7 +84,7 @@ pub struct TriePrefixSets {
 /// ```
 #[derive(Clone, Default, Debug)]
 pub struct PrefixSetMut {
-    /// Flag indicating that all entries should be considered changed.
+    /// Flag indicating that any entry should be considered changed.
     /// If set, the keys will be discarded.
     all: bool,
     keys: Vec<Nibbles>,
@@ -155,8 +155,9 @@ impl PrefixSetMut {
 /// See also [`PrefixSetMut::freeze`].
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    index: usize,
+    /// Flag indicating that any entry should be considered changed.
     all: bool,
+    index: usize,
     keys: Arc<Vec<Nibbles>>,
 }
 
