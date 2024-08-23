@@ -7,20 +7,38 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
+use reth_trie::{
+    prefix_set::{PrefixSet, PrefixSetMut},
+    Nibbles,
+};
 use std::collections::BTreeSet;
+
+/// Abstraction for aggregating nibbles and freezing it to a type
+/// that can be later used for benching.
+pub trait PrefixSetMutAbstraction: Default {
+    type Frozen;
+    fn insert(&mut self, key: Nibbles);
+    fn freeze(self) -> Self::Frozen;
+}
 
 /// Abstractions used for benching
 pub trait PrefixSetAbstraction: Default {
-    fn insert(&mut self, key: Nibbles);
     fn contains(&mut self, key: Nibbles) -> bool;
 }
 
-impl PrefixSetAbstraction for PrefixSetMut {
+impl PrefixSetMutAbstraction for PrefixSetMut {
+    type Frozen = PrefixSet;
+
     fn insert(&mut self, key: Nibbles) {
         Self::insert(self, key)
     }
 
+    fn freeze(self) -> Self::Frozen {
+        Self::freeze(self)
+    }
+}
+
+impl PrefixSetAbstraction for PrefixSet {
     fn contains(&mut self, key: Nibbles) -> bool {
         Self::contains(self, &key)
     }
@@ -56,17 +74,20 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
     }
 }
 
-fn prefix_set_bench<T: PrefixSetAbstraction>(
+fn prefix_set_bench<T>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     (preload, input, expected): (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>),
-) {
+) where
+    T: PrefixSetMutAbstraction,
+    T::Frozen: PrefixSetAbstraction,
+{
     let setup = || {
         let mut prefix_set = T::default();
         for key in &preload {
             prefix_set.insert(key.clone());
         }
-        (prefix_set, input.clone(), expected.clone())
+        (prefix_set.freeze(), input.clone(), expected.clone())
     };
 
     let group_id = format!(
@@ -119,11 +140,19 @@ mod implementations {
         keys: BTreeSet<Nibbles>,
     }
 
-    impl PrefixSetAbstraction for BTreeAnyPrefixSet {
+    impl PrefixSetMutAbstraction for BTreeAnyPrefixSet {
+        type Frozen = Self;
+
         fn insert(&mut self, key: Nibbles) {
             self.keys.insert(key);
         }
 
+        fn freeze(self) -> Self::Frozen {
+            self
+        }
+    }
+
+    impl PrefixSetAbstraction for BTreeAnyPrefixSet {
         fn contains(&mut self, key: Nibbles) -> bool {
             self.keys.iter().any(|k| k.has_prefix(&key))
         }
@@ -135,11 +164,19 @@ mod implementations {
         last_checked: Option<Nibbles>,
     }
 
-    impl PrefixSetAbstraction for BTreeRangeLastCheckedPrefixSet {
+    impl PrefixSetMutAbstraction for BTreeRangeLastCheckedPrefixSet {
+        type Frozen = Self;
+
         fn insert(&mut self, key: Nibbles) {
             self.keys.insert(key);
         }
 
+        fn freeze(self) -> Self::Frozen {
+            self
+        }
+    }
+
+    impl PrefixSetAbstraction for BTreeRangeLastCheckedPrefixSet {
         fn contains(&mut self, prefix: Nibbles) -> bool {
             let range = match self.last_checked.as_ref() {
                 // presumably never hit
@@ -169,12 +206,20 @@ mod implementations {
         sorted: bool,
     }
 
-    impl PrefixSetAbstraction for VecBinarySearchPrefixSet {
+    impl PrefixSetMutAbstraction for VecBinarySearchPrefixSet {
+        type Frozen = Self;
+
         fn insert(&mut self, key: Nibbles) {
             self.sorted = false;
             self.keys.push(key);
         }
 
+        fn freeze(self) -> Self::Frozen {
+            self
+        }
+    }
+
+    impl PrefixSetAbstraction for VecBinarySearchPrefixSet {
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();
@@ -198,12 +243,20 @@ mod implementations {
         index: usize,
     }
 
-    impl PrefixSetAbstraction for VecCursorPrefixSet {
+    impl PrefixSetMutAbstraction for VecCursorPrefixSet {
+        type Frozen = Self;
+
         fn insert(&mut self, nibbles: Nibbles) {
             self.sorted = false;
             self.keys.push(nibbles);
         }
 
+        fn freeze(self) -> Self::Frozen {
+            self
+        }
+    }
+
+    impl PrefixSetAbstraction for VecCursorPrefixSet {
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();
@@ -239,12 +292,20 @@ mod implementations {
         sorted: bool,
     }
 
-    impl PrefixSetAbstraction for VecBinarySearchWithLastFoundPrefixSet {
+    impl PrefixSetMutAbstraction for VecBinarySearchWithLastFoundPrefixSet {
+        type Frozen = Self;
+
         fn insert(&mut self, key: Nibbles) {
             self.sorted = false;
             self.keys.push(key);
         }
 
+        fn freeze(self) -> Self::Frozen {
+            self
+        }
+    }
+
+    impl PrefixSetAbstraction for VecBinarySearchWithLastFoundPrefixSet {
         fn contains(&mut self, prefix: Nibbles) -> bool {
             if !self.sorted {
                 self.keys.sort();

@@ -501,6 +501,8 @@ mod tests {
                     0..=stage_progress - 1,
                     B256::ZERO,
                     0..1,
+                    None,
+                    None,
                 ));
                 self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
@@ -520,6 +522,8 @@ mod tests {
                 preblocks.last().map(|b| b.hash()),
                 Some(0),
                 None,
+                None,
+                None,
             );
             let mut header = header.unseal();
 
@@ -534,7 +538,7 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
+            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3, None, None));
             let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 

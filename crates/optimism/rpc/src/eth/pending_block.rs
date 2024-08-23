@@ -1,6 +1,6 @@
 //! Loads OP pending block for a RPC response.   
 
-use crate::OpEthApi;
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
@@ -17,6 +17,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
 
+use crate::OpEthApi;
+
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
@@ -25,7 +27,10 @@ where
     #[inline]
     fn provider(
         &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
+    ) -> impl BlockReaderIdExt
+           + EvmEnvProvider
+           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + StateProviderFactory {
         self.inner.provider()
     }
 

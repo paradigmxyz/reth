@@ -68,7 +68,7 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
 }
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Events, Network> EthPubSubApiServer
+impl<Provider, Pool, Events, Network> EthPubSubApiServer<reth_rpc_types::Transaction>
     for EthPubSub<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
