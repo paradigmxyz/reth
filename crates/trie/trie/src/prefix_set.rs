@@ -104,7 +104,7 @@ impl PrefixSetMut {
     }
 
     /// Create [`PrefixSetMut`] that considers all key changed.
-    pub fn all() -> Self {
+    pub const fn all() -> Self {
         Self { all: true, keys: Vec::new() }
     }
 
