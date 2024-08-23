@@ -84,6 +84,8 @@ pub struct TriePrefixSets {
 /// ```
 #[derive(Clone, Default, Debug)]
 pub struct PrefixSetMut {
+    /// Flag indicating that all entries should be considered changed.
+    /// If set, the keys will be discarded.
     all: bool,
     keys: Vec<Nibbles>,
 }
