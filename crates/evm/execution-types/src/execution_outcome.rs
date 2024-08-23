@@ -867,12 +867,18 @@ mod tests {
         let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();
 
         // Assert that the changed accounts match the expected ones
-        assert_eq!(
-            changed_accounts,
-            vec![
-                ChangedAccount { address: address1, nonce: 1, balance: U256::from(100) },
-                ChangedAccount { address: address2, nonce: 2, balance: U256::from(200) },
-            ]
-        );
+        assert_eq!(changed_accounts.len(), 2);
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address1,
+            nonce: 1,
+            balance: U256::from(100)
+        }));
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address2,
+            nonce: 2,
+            balance: U256::from(200)
+        }));
     }
 }
