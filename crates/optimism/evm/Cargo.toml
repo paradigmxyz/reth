@@ -34,6 +34,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 [features]
 optimism = [

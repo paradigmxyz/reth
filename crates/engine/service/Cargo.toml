@@ -43,6 +43,7 @@ reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

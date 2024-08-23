@@ -31,3 +31,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+reth-chainspec = { workspace = true, features = ["test-utils"] }

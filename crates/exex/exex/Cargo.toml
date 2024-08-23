@@ -40,7 +40,6 @@ metrics.workspace = true
 
 [dev-dependencies]
 reth-blockchain-tree.workspace = true
-reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-evm-ethereum.workspace = true
@@ -48,6 +47,7 @@ reth-node-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 secp256k1.workspace = true
 

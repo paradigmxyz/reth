@@ -65,6 +65,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 parking_lot.workspace = true
 tempfile.workspace = true
@@ -82,4 +83,5 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "once_cell",
+    "reth-chainspec/test-utils",
 ]

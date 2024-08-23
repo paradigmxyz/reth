@@ -44,7 +44,6 @@ aquamarine.workspace = true
 linked_hash_set.workspace = true
 
 [dev-dependencies]
-reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -56,7 +55,8 @@ reth-evm-ethereum.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 alloy-genesis.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 [features]
-test-utils = []
+test-utils = ["reth-chainspec/test-utils"]
 optimism = ["reth-primitives/optimism", "reth-provider/optimism"]

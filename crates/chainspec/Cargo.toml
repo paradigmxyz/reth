@@ -57,6 +57,3 @@ arbitrary = [
     "alloy-chains/arbitrary"
 ]
 test-utils = []
-test-utils-optimism = []
-
-

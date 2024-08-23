@@ -20,3 +20,4 @@ reth-consensus.workspace = true
 reth-storage-api.workspace = true
 rand.workspace = true
 mockall = "0.12"
+reth-chainspec = { workspace = true, features = ["test-utils"] }

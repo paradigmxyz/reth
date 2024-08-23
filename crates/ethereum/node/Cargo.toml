@@ -34,7 +34,6 @@ eyre.workspace = true
 
 [dev-dependencies]
 reth.workspace = true
-reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
@@ -47,7 +46,11 @@ alloy-genesis.workspace = true
 tokio.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
-test-utils = ["reth-node-builder/test-utils"]
+test-utils = [
+    "reth-node-builder/test-utils",
+    "reth-chainspec/test-utils",
+]

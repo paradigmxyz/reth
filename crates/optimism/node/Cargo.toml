@@ -65,6 +65,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 [features]
 optimism = [
@@ -79,4 +80,7 @@ optimism = [
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism"
 ]
-test-utils = ["reth-node-builder/test-utils"]
+test-utils = [
+    "reth-node-builder/test-utils",
+    "reth-chainspec/test-utils",
+]

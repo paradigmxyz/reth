@@ -18,3 +18,6 @@ reth-primitives.workspace = true
 reth-consensus.workspace = true
 
 tracing.workspace = true
+
+[dev-dependencies]
+reth-chainspec = { workspace = true, features = ["test-utils"] }
