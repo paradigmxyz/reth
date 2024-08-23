@@ -30,8 +30,7 @@ pub use constants::{
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
-pub enum TransactionValidationOutcome<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>
-{
+pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// The transaction is considered _currently_ valid and can be inserted into the pool.
     Valid {
         /// Balance of the sender at the current point.
