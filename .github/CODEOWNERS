@@ -21,7 +21,7 @@ crates/metrics/             @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
 crates/node/                @mattsse @Rjected @onbjerg
-crates/optimism/            @mattsse @Rjected @fgimenez
+crates/optimism/            @mattsse @Rjected @fgimenez @emhane
 crates/payload/             @mattsse @Rjected
 crates/primitives/          @Rjected
 crates/primitives-traits/   @Rjected @joshieDo
