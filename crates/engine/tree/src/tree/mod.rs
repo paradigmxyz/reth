@@ -506,15 +506,14 @@ where
                 Ok(Some(msg)) => {
                     if let Err(fatal) = self.on_engine_message(msg) {
                         error!(target: "engine", %fatal, "insert block fatal error");
-                        return
+                        // return
                     }
                 }
                 Ok(None) => {
                     debug!(target: "engine", "received no engine message for some time, while waiting for persistence task to complete");
-                    return
                 }
                 Err(_err) => {
-                    error!(target: "engine", "engine channel disconnected");
+                    error!(target: "engine", "Engine channel disconnected");
                     return
                 }
             }
@@ -907,7 +906,7 @@ where
                     self.on_backfill_sync_finished(ctrl)?;
                     Ok(())
                 }
-            },
+            }
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
@@ -1627,7 +1626,6 @@ where
     /// Returns an event with the appropriate action to take, such as:
     ///  - download more missing blocks
     ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
-    ///  - bubbles up fatal insert block error
     #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number,), target = "engine")]
     fn on_downloaded_block(
         &mut self,
@@ -1636,8 +1634,7 @@ where
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
         if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)
-            .ok()
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)?
             .is_some()
         {
             return Ok(None)
@@ -1659,7 +1656,7 @@ where
                     ))))
                 }
                 trace!(target: "engine", "appended downloaded block");
-                self.try_connect_buffered_blocks(block_num_hash)?
+                self.try_connect_buffered_blocks(block_num_hash)?;
             }
             Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
@@ -2208,14 +2205,14 @@ mod tests {
             let fcu_state = self.fcu_state(block_hash);
 
             let (tx, rx) = oneshot::channel();
-            let _ = self.tree.on_engine_message(FromEngine::Request(
+            self.tree.on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
                     state: fcu_state,
                     payload_attrs: None,
                     tx,
                 }
                 .into(),
-            ));
+            )).unwrap();
 
             let response = rx.await.unwrap().unwrap().await.unwrap();
             match fcu_status.into() {
@@ -2363,7 +2360,7 @@ mod tests {
 
         // process the message
         let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
-        let _ = test_harness.tree.on_engine_message(msg);
+        test_harness.tree.on_engine_message(msg).unwrap();
 
         // we now should receive the other batch
         let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
@@ -2447,7 +2444,7 @@ mod tests {
             .with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        let _ = test_harness.tree.on_engine_message(FromEngine::Request(
+        test_harness.tree.on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
                 state: ForkchoiceState {
                     head_block_hash: B256::random(),
@@ -2458,7 +2455,7 @@ mod tests {
                 tx,
             }
             .into(),
-        ));
+        )).unwrap();
 
         let resp = rx.await.unwrap().unwrap().await.unwrap();
         assert!(resp.payload_status.is_syncing());
@@ -2514,14 +2511,14 @@ mod tests {
             TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        let _ = test_harness.tree.on_engine_message(FromEngine::Request(
+        test_harness.tree.on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
                 payload: payload.clone().into(),
                 cancun_fields: None,
                 tx,
             }
             .into(),
-        ));
+        )).unwrap();
 
         let resp = rx.await.unwrap().unwrap();
         assert!(resp.is_syncing());
@@ -2836,7 +2833,7 @@ mod tests {
             block_number: MIN_BLOCKS_FOR_PIPELINE_RUN + 1,
         });
 
-        let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished));
+        test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         match event {
@@ -2846,12 +2843,13 @@ mod tests {
             _ => panic!("Unexpected event: {:#?}", event),
         }
 
-        let _ = test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
             .last()
             .unwrap()
-            .clone()]));
+            .clone()])).unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
+        println!("event received: {:?}", event);
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockRange(initial_hash, total_blocks)) => {
                 assert_eq!(total_blocks, (main_chain.len() - 1) as u64);
@@ -2904,9 +2902,9 @@ mod tests {
         }
 
         // send message to tell the engine the requested block was downloaded
-        let _ = test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![
             main_chain_backfill_target.clone(),
-        ]));
+        ])).unwrap();
 
         // check that backfill is triggered
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -2927,16 +2925,17 @@ mod tests {
         test_harness.setup_range_insertion_for_chain(backfilled_chain);
 
         // send message to mark backfill finished
-        let _ = test_harness.tree.on_engine_message(FromEngine::Event(
+        test_harness.tree.on_engine_message(FromEngine::Event(
             FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
                 block_number: main_chain_backfill_target.number,
             }),
-        ));
+        )).unwrap();
 
         // send fcu to the tip of main
         test_harness.fcu_to(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
+        println!("event received: {:?}", event);
         match event {
             EngineApiEvent::Download(DownloadRequest::BlockSet(target_hash)) => {
                 assert_eq!(target_hash, HashSet::from([main_chain_last_hash]));
@@ -2945,9 +2944,9 @@ mod tests {
         }
 
         // tell engine main chain tip downloaded
-        let _ = test_harness
+        test_harness
             .tree
-            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain_last.clone()]));
+            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain_last.clone()])).unwrap();
 
         // check download range request
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -2970,8 +2969,7 @@ mod tests {
         test_harness.setup_range_insertion_for_chain(remaining.clone());
 
         // tell engine block range downloaded
-        let _ =
-            test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone()));
+        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone())).unwrap();
 
         test_harness.check_fork_chain_insertion(remaining).await;
 
