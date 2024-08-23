@@ -54,7 +54,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> TransactionValidationOutcome<T> {
+impl<T: PoolTransaction> TransactionValidationOutcome<T> {
     /// Returns the hash of the transactions
     pub fn tx_hash(&self) -> TxHash {
         match self {
@@ -116,7 +116,7 @@ impl<T> ValidTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidTransaction<T> {
+impl<T: PoolTransaction> ValidTransaction<T> {
     /// Returns the transaction.
     #[inline]
     pub const fn transaction(&self) -> &T {
