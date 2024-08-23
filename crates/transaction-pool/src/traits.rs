@@ -473,7 +473,7 @@ impl TransactionListenerKind {
 
 /// A Helper type that bundles all transactions in the pool.
 #[derive(Debug, Clone)]
-pub struct AllPoolTransactions<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub struct AllPoolTransactions<T: PoolTransaction> {
     /// Transactions that are ready for inclusion in the next block.
     pub pending: Vec<Arc<ValidPoolTransaction<T>>>,
     /// Transactions that are ready for inclusion in _future_ blocks, but are currently parked,
@@ -484,21 +484,19 @@ pub struct AllPoolTransactions<T: PoolTransaction<Consensus = TransactionSignedE
 
 // === impl AllPoolTransactions ===
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllPoolTransactions<T> {
+impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+    pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
         self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
+    pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Default
-    for AllPoolTransactions<T>
-{
+impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
     fn default() -> Self {
         Self { pending: Default::default(), queued: Default::default() }
     }
@@ -551,16 +549,14 @@ impl From<PropagateKind> for PeerId {
 
 /// Represents a new transaction
 #[derive(Debug)]
-pub struct NewTransactionEvent<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub struct NewTransactionEvent<T: PoolTransaction> {
     /// The pool which the transaction was moved to.
     pub subpool: SubPool,
     /// Actual transaction
     pub transaction: Arc<ValidPoolTransaction<T>>,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Clone
-    for NewTransactionEvent<T>
-{
+impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     fn clone(&self) -> Self {
         Self { subpool: self.subpool, transaction: self.transaction.clone() }
     }
@@ -1318,18 +1314,14 @@ impl GetPooledTransactionLimit {
 /// A Stream that yields full transactions the subpool
 #[must_use = "streams do nothing unless polled"]
 #[derive(Debug)]
-pub struct NewSubpoolTransactionStream<
-    Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
-> {
+pub struct NewSubpoolTransactionStream<Tx: PoolTransaction> {
     st: Receiver<NewTransactionEvent<Tx>>,
     subpool: SubPool,
 }
 
 // === impl NewSubpoolTransactionStream ===
 
-impl<Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>>
-    NewSubpoolTransactionStream<Tx>
-{
+impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
     /// Create a new stream that yields full transactions from the subpool
     pub const fn new(st: Receiver<NewTransactionEvent<Tx>>, subpool: SubPool) -> Self {
         Self { st, subpool }
@@ -1352,9 +1344,7 @@ impl<Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>>
     }
 }
 
-impl<Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Stream
-    for NewSubpoolTransactionStream<Tx>
-{
+impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     type Item = NewTransactionEvent<Tx>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

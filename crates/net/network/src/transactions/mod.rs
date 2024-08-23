@@ -1546,10 +1546,7 @@ enum PooledTransactionsHashesBuilder {
 
 impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
-    fn push_pooled<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
-        &mut self,
-        pooled_tx: Arc<ValidPoolTransaction<T>>,
-    ) {
+    fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
             Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
             Self::Eth68(msg) => {

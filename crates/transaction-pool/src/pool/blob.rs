@@ -3,7 +3,6 @@ use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
-use reth_primitives::TransactionSignedEcRecovered;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
@@ -17,7 +16,7 @@ use std::{
 ///
 /// This expects that certain constraints are met:
 ///   - blob transactions are always gap less
-pub(crate) struct BlobTransactions<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub(crate) struct BlobTransactions<T: PoolTransaction> {
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions were submitted to the pool.
@@ -36,7 +35,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction<Consensus = TransactionSig
 
 // === impl BlobTransactions ===
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> BlobTransactions<T> {
+impl<T: PoolTransaction> BlobTransactions<T> {
     /// Adds a new transactions to the pending queue.
     ///
     /// # Panics
@@ -251,7 +250,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> BlobTransacti
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Default for BlobTransactions<T> {
+impl<T: PoolTransaction> Default for BlobTransactions<T> {
     fn default() -> Self {
         Self {
             submission_id: 0,
@@ -265,14 +264,14 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Default for B
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
-struct BlobTransaction<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+struct BlobTransaction<T: PoolTransaction> {
     /// Actual blob transaction.
     transaction: Arc<ValidPoolTransaction<T>>,
     /// The value that determines the order of this transaction.
     ord: BlobOrd,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> BlobTransaction<T> {
+impl<T: PoolTransaction> BlobTransaction<T> {
     /// Creates a new blob transaction, based on the pool transaction, submission id, and current
     /// pending fees.
     pub(crate) fn new(
@@ -301,31 +300,27 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> BlobTransacti
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Clone for BlobTransaction<T> {
+impl<T: PoolTransaction> Clone for BlobTransaction<T> {
     fn clone(&self) -> Self {
         Self { transaction: self.transaction.clone(), ord: self.ord.clone() }
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Eq for BlobTransaction<T> {}
+impl<T: PoolTransaction> Eq for BlobTransaction<T> {}
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PartialEq<Self>
-    for BlobTransaction<T>
-{
+impl<T: PoolTransaction> PartialEq<Self> for BlobTransaction<T> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PartialOrd<Self>
-    for BlobTransaction<T>
-{
+impl<T: PoolTransaction> PartialOrd<Self> for BlobTransaction<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Ord for BlobTransaction<T> {
+impl<T: PoolTransaction> Ord for BlobTransaction<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.ord.cmp(&other.ord)
     }

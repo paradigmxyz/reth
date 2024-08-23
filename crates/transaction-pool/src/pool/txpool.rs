@@ -22,7 +22,7 @@ use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
     },
-    Address, TransactionSignedEcRecovered, TxHash, B256,
+    Address, TxHash, B256,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -911,7 +911,7 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
-pub(crate) struct AllTransactions<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
@@ -940,7 +940,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction<Consensus = TransactionSign
     metrics: AllTransactionsMetrics,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllTransactions<T> {
+impl<T: PoolTransaction> AllTransactions<T> {
     /// Create a new instance
     fn new(config: &PoolConfig) -> Self {
         Self {
@@ -1693,7 +1693,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllTransactio
 }
 
 #[cfg(test)]
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllTransactions<T> {
+impl<T: PoolTransaction> AllTransactions<T> {
     /// This function retrieves the number of transactions stored in the pool for a specific sender.
     ///
     /// If there are no transactions for the given sender, it returns zero by default.
@@ -1702,7 +1702,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AllTransactio
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Default for AllTransactions<T> {
+impl<T: PoolTransaction> Default for AllTransactions<T> {
     fn default() -> Self {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
@@ -1741,7 +1741,7 @@ pub(crate) type InsertResult<T> = Result<InsertOk<T>, InsertErr<T>>;
 
 /// Err variant of `InsertResult`
 #[derive(Debug)]
-pub(crate) enum InsertErr<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
         transaction: Arc<ValidPoolTransaction<T>>,
@@ -1773,7 +1773,7 @@ pub(crate) enum InsertErr<T: PoolTransaction<Consensus = TransactionSignedEcReco
 
 /// Transaction was successfully inserted into the pool
 #[derive(Debug)]
-pub(crate) struct InsertOk<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Ref to the inserted transaction.
     transaction: Arc<ValidPoolTransaction<T>>,
     /// Where to move the transaction to.
@@ -1790,9 +1790,7 @@ pub(crate) struct InsertOk<T: PoolTransaction<Consensus = TransactionSignedEcRec
 /// The internal transaction typed used by `AllTransactions` which also additional info used for
 /// determining the current state of the transaction.
 #[derive(Debug)]
-pub(crate) struct PoolInternalTransaction<
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
-> {
+pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     /// The actual transaction object.
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
@@ -1809,7 +1807,7 @@ pub(crate) struct PoolInternalTransaction<
 
 // === impl PoolInternalTransaction ===
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PoolInternalTransaction<T> {
+impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
         self.cumulative_cost + self.transaction.cost()
     }
@@ -1817,14 +1815,14 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> PoolInternalT
 
 /// Tracks the result after updating the pool
 #[derive(Debug)]
-pub(crate) struct UpdateOutcome<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub(crate) struct UpdateOutcome<T: PoolTransaction> {
     /// transactions promoted to the pending pool
     pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     /// transaction that failed and were discarded
     pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Default for UpdateOutcome<T> {
+impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
         Self { promoted: vec![], discarded: vec![] }
     }

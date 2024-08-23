@@ -255,7 +255,7 @@ where
 ///
 /// For EIP-4844 blob transactions this will _not_ contain the blob sidecar which is stored
 /// separately in the [`BlobStore`](crate::blobstore::BlobStore).
-pub struct ValidPoolTransaction<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,
     /// The identifier for this transaction.
@@ -270,7 +270,7 @@ pub struct ValidPoolTransaction<T: PoolTransaction<Consensus = TransactionSigned
 
 // === impl ValidPoolTransaction ===
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> ValidPoolTransaction<T> {
+impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Returns the hash of the transaction.
     pub fn hash(&self) -> &TxHash {
         self.transaction.hash()
@@ -389,9 +389,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecovered
 }
 
 #[cfg(test)]
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + Clone> Clone
-    for ValidPoolTransaction<T>
-{
+impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
     fn clone(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),
@@ -403,9 +401,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + Clone> Clone
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> fmt::Debug
-    for ValidPoolTransaction<T>
-{
+impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
             .field("hash", self.transaction.hash())

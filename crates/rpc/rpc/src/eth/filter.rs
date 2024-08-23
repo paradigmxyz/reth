@@ -559,13 +559,13 @@ impl PendingTransactionsReceiver {
 
 /// A structure to manage and provide access to a stream of full transaction details.
 #[derive(Debug, Clone)]
-struct FullTransactionsReceiver<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+struct FullTransactionsReceiver<T: PoolTransaction> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
 }
 
 impl<T> FullTransactionsReceiver<T>
 where
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
+    T: PoolTransaction + 'static,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
@@ -573,7 +573,10 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges
+    where
+        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+    {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 

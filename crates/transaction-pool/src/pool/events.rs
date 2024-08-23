@@ -1,5 +1,5 @@
 use crate::{traits::PropagateKind, PoolTransaction, ValidPoolTransaction};
-use reth_primitives::{TransactionSignedEcRecovered, TxHash, B256};
+use reth_primitives::{TxHash, B256};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// An event that happened to a transaction and contains its full body where possible.
 #[derive(Debug)]
-pub enum FullTransactionEvent<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub enum FullTransactionEvent<T: PoolTransaction> {
     /// Transaction has been added to the pending pool.
     Pending(TxHash),
     /// Transaction has been added to the queued pool.
@@ -36,9 +36,7 @@ pub enum FullTransactionEvent<T: PoolTransaction<Consensus = TransactionSignedEc
     Propagated(Arc<Vec<PropagateKind>>),
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> Clone
-    for FullTransactionEvent<T>
-{
+impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Pending(hash) => Self::Pending(*hash),

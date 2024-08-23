@@ -85,7 +85,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
-    PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256,
+    PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -883,13 +883,13 @@ impl PendingTransactionHashListener {
 
 /// An active listener for new pending transactions.
 #[derive(Debug)]
-struct TransactionListener<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+struct TransactionListener<T: PoolTransaction> {
     sender: mpsc::Sender<NewTransactionEvent<T>>,
     /// Whether to include transactions that should not be propagated over the network.
     kind: TransactionListenerKind,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> TransactionListener<T> {
+impl<T: PoolTransaction> TransactionListener<T> {
     /// Attempts to send the event to the listener.
     ///
     /// Returns false if the channel is closed (receiver dropped)
@@ -930,7 +930,7 @@ struct BlobTransactionSidecarListener {
 
 /// Tracks an added transaction and all graph changes caused by adding it.
 #[derive(Debug, Clone)]
-pub struct AddedPendingTransaction<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub struct AddedPendingTransaction<T: PoolTransaction> {
     /// Inserted transaction.
     transaction: Arc<ValidPoolTransaction<T>>,
     /// Replaced transaction.
@@ -941,7 +941,7 @@ pub struct AddedPendingTransaction<T: PoolTransaction<Consensus = TransactionSig
     discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AddedPendingTransaction<T> {
+impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
     /// [`TransactionListenerKind`].
     ///
@@ -969,7 +969,7 @@ pub(crate) struct PendingTransactionIter<Iter> {
 impl<'a, Iter, T> Iterator for PendingTransactionIter<Iter>
 where
     Iter: Iterator<Item = &'a Arc<ValidPoolTransaction<T>>>,
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'a,
+    T: PoolTransaction + 'a,
 {
     type Item = B256;
 
@@ -993,7 +993,7 @@ pub(crate) struct FullPendingTransactionIter<Iter> {
 impl<'a, Iter, T> Iterator for FullPendingTransactionIter<Iter>
 where
     Iter: Iterator<Item = &'a Arc<ValidPoolTransaction<T>>>,
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'a,
+    T: PoolTransaction + 'a,
 {
     type Item = NewTransactionEvent<T>;
 
@@ -1013,7 +1013,7 @@ where
 
 /// Represents a transaction that was added into the pool and its state
 #[derive(Debug, Clone)]
-pub enum AddedTransaction<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> {
+pub enum AddedTransaction<T: PoolTransaction> {
     /// Transaction was successfully added and moved to the pending pool.
     Pending(AddedPendingTransaction<T>),
     /// Transaction was successfully added but not yet ready for processing and moved to a
@@ -1028,7 +1028,7 @@ pub enum AddedTransaction<T: PoolTransaction<Consensus = TransactionSignedEcReco
     },
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AddedTransaction<T> {
+impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
     pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
@@ -1099,9 +1099,7 @@ impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> AddedTransact
 
 /// Contains all state changes after a [`CanonicalStateUpdate`] was processed
 #[derive(Debug)]
-pub(crate) struct OnNewCanonicalStateOutcome<
-    T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
-> {
+pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
     /// Hash of the block.
     pub(crate) block_hash: B256,
     /// All mined transactions.
@@ -1112,7 +1110,7 @@ pub(crate) struct OnNewCanonicalStateOutcome<
     pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> OnNewCanonicalStateOutcome<T> {
+impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
     /// [`TransactionListenerKind`].
     ///
