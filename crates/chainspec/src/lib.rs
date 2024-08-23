@@ -12,8 +12,6 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-pub mod test_utils;
-
 /// Chain specific constants
 pub(crate) mod constants;
 
@@ -30,11 +28,14 @@ pub use reth_ethereum_forks::*;
 pub use api::EthChainSpec;
 pub use info::ChainInfo;
 pub use spec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecProvider, DepositContract,
+    ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+
+#[cfg(feature = "test-utils")]
+pub use spec::ChainSpecBuilder;
 
 #[cfg(test)]
 mod tests {

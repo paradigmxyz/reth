@@ -39,6 +39,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 
 [features]
 arbitrary = [

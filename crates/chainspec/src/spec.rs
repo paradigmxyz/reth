@@ -677,6 +677,7 @@ impl ChainSpec {
     }
 
     /// Build a chainspec using [`ChainSpecBuilder`]
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
     }
@@ -821,6 +822,7 @@ pub trait ChainSpecProvider: Send + Sync {
 }
 
 /// A helper to build custom chain specs
+#[cfg(any(test, feature = "test-utils"))]
 #[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
     chain: Option<Chain>,
@@ -828,6 +830,7 @@ pub struct ChainSpecBuilder {
     hardforks: ChainHardforks,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl ChainSpecBuilder {
     /// Construct a new builder from the mainnet chain spec.
     pub fn mainnet() -> Self {
@@ -837,9 +840,7 @@ impl ChainSpecBuilder {
             hardforks: MAINNET.hardforks.clone(),
         }
     }
-}
 
-impl ChainSpecBuilder {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
@@ -1053,6 +1054,7 @@ impl ChainSpecBuilder {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     fn from(value: &Arc<ChainSpec>) -> Self {
         Self {
