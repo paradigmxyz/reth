@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
@@ -57,7 +58,7 @@ impl OptimismNode {
         OptimismConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Engine = OptimismEngineTypes>,
+        Node: FullNodeTypes<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     {
         let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
         ComponentsBuilder::default()
@@ -78,7 +79,7 @@ impl OptimismNode {
 
 impl<N> Node<N> for OptimismNode
 where
-    N: FullNodeTypes<Engine = OptimismEngineTypes>,
+    N: FullNodeTypes<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -100,6 +101,7 @@ where
 impl NodeTypes for OptimismNode {
     type Primitives = ();
     type Engine = OptimismEngineTypes;
+    type ChainSpec = ChainSpec;
 }
 
 /// Add-ons w.r.t. optimism.
@@ -239,7 +241,7 @@ impl<EVM> OptimismPayloadBuilder<EVM> {
 
 impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder<EVM>
 where
-    Node: FullNodeTypes<Engine = OptimismEngineTypes>,
+    Node: FullNodeTypes<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm,
 {

@@ -560,7 +560,7 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3, None);
+            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3, None, None);
 
             let (changesets, _) = random_changeset_range(
                 &mut rng,

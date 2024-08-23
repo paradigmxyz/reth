@@ -569,7 +569,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where
         T: FullNodeTypes,
-        T::Provider: FullProvider<DB>,
+        T::Provider: FullProvider<DB, T::ChainSpec>,
         F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
@@ -598,7 +598,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB> + WithTree>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -717,7 +717,7 @@ where
 impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB> + WithTree>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -915,7 +915,7 @@ pub struct WithMeteredProvider<DB> {
 pub struct WithMeteredProviders<DB, T>
 where
     DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB>>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
 {
     db_provider_container: WithMeteredProvider<DB>,
     blockchain_db: T::Provider,
@@ -931,7 +931,7 @@ where
 pub struct WithComponents<DB, T, CB>
 where
     DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB>>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<DB>,

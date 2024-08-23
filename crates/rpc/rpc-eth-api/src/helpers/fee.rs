@@ -1,6 +1,7 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
 use futures::Future;
+use reth_chainspec::ChainSpec;
 use reth_primitives::U256;
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
@@ -239,7 +240,9 @@ pub trait LoadFee: LoadBlock {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider;
+    fn provider(
+        &self,
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec>;
 
     /// Returns a handle for reading data from memory.
     ///

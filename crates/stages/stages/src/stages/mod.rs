@@ -94,7 +94,8 @@ mod tests {
         let mut head = block.hash();
         let mut rng = generators::rng();
         for block_number in 2..=tip {
-            let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0), None);
+            let nblock =
+                random_block(&mut rng, block_number, Some(head), Some(0), Some(0), None, None);
             head = nblock.hash();
             provider_rw.insert_historical_block(nblock.try_seal_with_senders().unwrap()).unwrap();
         }
@@ -253,7 +254,7 @@ mod tests {
         let genesis_hash = B256::ZERO;
         let tip = (num_blocks - 1) as u64;
 
-        let blocks = random_block_range(&mut rng, 0..=tip, genesis_hash, 2..3, None);
+        let blocks = random_block_range(&mut rng, 0..=tip, genesis_hash, 2..3, None, None);
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
         let mut receipts = Vec::new();

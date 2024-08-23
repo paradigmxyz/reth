@@ -1,9 +1,10 @@
+use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcTransaction};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
@@ -14,7 +15,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, RichBlock,
+    AnyTransactionReceipt, BlockTransactions, Header, Rich,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -36,11 +37,16 @@ impl<Eth> OtterscanApi<Eth> {
     pub const fn new(eth: Eth) -> Self {
         Self { eth }
     }
+}
 
+impl<Eth> OtterscanApi<Eth>
+where
+    Eth: EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>,
+{
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
-        block: Option<RichBlock>,
+        block: Option<RpcBlock<Eth::NetworkTypes>>,
         receipts: Option<Vec<AnyTransactionReceipt>>,
     ) -> RpcResult<BlockDetails> {
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -52,14 +58,21 @@ impl<Eth> OtterscanApi<Eth> {
             .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
-        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
+        Ok(BlockDetails::new(
+            Rich { inner: block, extra_info: Default::default() },
+            Default::default(),
+            U256::from(total_fees),
+        ))
     }
 }
 
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + TraceExt + 'static,
+    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
+        + EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>
+        + TraceExt
+        + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
@@ -193,7 +206,7 @@ where
         }
 
         // make sure the block is full
-        let BlockTransactions::Full(transactions) = &mut block.inner.transactions else {
+        let BlockTransactions::Full(transactions) = &mut block.transactions else {
             return Err(internal_rpc_err("block is not full"));
         };
 
@@ -235,7 +248,7 @@ where
             .collect();
 
         // use `transaction_count` to indicate the paginate information
-        let mut block = OtsBlockTransactions { fullblock: block.inner.into(), receipts };
+        let mut block = OtsBlockTransactions { fullblock: block.into(), receipts };
         block.fullblock.transaction_count = tx_len;
         Ok(block)
     }
@@ -299,14 +312,14 @@ where
         .await?;
 
         let Some(BlockTransactions::Full(transactions)) =
-            self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
+            self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
         else {
             return Err(EthApiError::UnknownBlockNumber.into());
         };
 
         Ok(transactions
             .into_iter()
-            .find(|tx| tx.from == sender && tx.nonce == nonce)
+            .find(|tx| *tx.from == *sender && tx.nonce == nonce)
             .map(|tx| tx.hash))
     }
 
