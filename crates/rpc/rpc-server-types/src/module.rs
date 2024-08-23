@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
+use strum::{AsRefStr, EnumIter, IntoStaticStr, VariantNames, ParseError};
 
 /// Describes the modules that should be installed.
 ///
@@ -31,9 +31,9 @@ impl RpcModuleSelection {
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
-    /// Returns a selection of [`RethRpcModule`] with all [`RethRpcModule::all_variants`].
+    /// Returns a selection of [`RethRpcModule`] with all [`RethRpcModule::modules`].
     pub fn all_modules() -> HashSet<RethRpcModule> {
-        RethRpcModule::modules().into_iter().collect()
+        RethRpcModule::modules().iter().copied().collect()
     }
 
     /// Returns the [`RpcModuleSelection::STANDARD_MODULES`] as a selection.
@@ -76,15 +76,16 @@ impl RpcModuleSelection {
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
         I: IntoIterator<Item = T>,
-        T: TryInto<RethRpcModule>,
+        T: TryInto<RethRpcModule, Error = ParseError>,
     {
-        selection.into_iter().map(TryInto::try_into).collect()
+        let modules: Result<HashSet<RethRpcModule>, _> = selection.into_iter().map(TryInto::try_into).collect();
+        modules.map(Self::Selection)
     }
 
     /// Returns the number of modules in the selection
     pub fn len(&self) -> usize {
         match self {
-            Self::All => RethRpcModule::variant_count(),
+            Self::All => RethRpcModule::modules().len(),
             Self::Standard => Self::STANDARD_MODULES.len(),
             Self::Selection(s) => s.len(),
         }
@@ -101,7 +102,7 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [`RethRpcModule`]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            Self::All => Box::new(RethRpcModule::modules().into_iter()),
+            Self::All => Box::new(RethRpcModule::modules().iter().copied()),
             Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             Self::Selection(s) => Box::new(s.iter().copied()),
         }
@@ -130,7 +131,7 @@ impl RpcModuleSelection {
         match (http, ws) {
             // Shortcut for common case to avoid iterating later
             (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
-                other.len() == RethRpcModule::variant_count()
+                other.len() == RethRpcModule::modules().len()
             }
 
             // If either side is disabled, then the other must be empty
@@ -228,9 +229,9 @@ impl fmt::Display for RpcModuleSelection {
     AsRefStr,
     IntoStaticStr,
     VariantNames,
-    VariantArray,
     EnumIter,
     Deserialize,
+    Serialize,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
@@ -269,30 +270,9 @@ impl RethRpcModule {
     }
 }
 
-impl<'a> IntoIterator for &'a RpcModuleSelection {
-    type Item = RethRpcModule;
-    type IntoIter = Box<dyn Iterator<Item = RethRpcModule> + 'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter_selection()
-    }
-}
-
-impl<'de> Deserialize<'de> for RpcModuleSelection {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Self::from_str(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl Serialize for RpcModuleSelection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.collect_str(self)
+impl fmt::Display for RethRpcModule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = serde_json::to_string(self).map_err(|_| fmt::Error)?;
+        write!(f, "{s}")
     }
 }
