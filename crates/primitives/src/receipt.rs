@@ -1,8 +1,8 @@
 #[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{
-    logs_bloom, Bloom, Bytes, TxType, B256, DEPOSIT_TX_TYPE_ID, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    logs_bloom, Bloom, Bytes, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -349,7 +349,7 @@ impl Decodable for ReceiptWithBloom {
                         Self::decode_receipt(buf, TxType::Eip7702)
                     }
                     #[cfg(feature = "optimism")]
-                    DEPOSIT_TX_TYPE_ID => {
+                    crate::DEPOSIT_TX_TYPE_ID => {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Deposit)
                     }
@@ -485,7 +485,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {
-                out.put_u8(DEPOSIT_TX_TYPE_ID);
+                out.put_u8(crate::DEPOSIT_TX_TYPE_ID);
             }
         }
         out.put_slice(payload.as_ref());
