@@ -13,6 +13,8 @@ use reth_trie::{
 };
 use std::collections::BTreeSet;
 
+/// Abstraction for aggregating nibbles and freezing it to a type
+/// that can be later used for benching.
 pub trait PrefixSetMutAbstraction: Default {
     type Frozen;
     fn insert(&mut self, key: Nibbles);
