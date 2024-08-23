@@ -485,7 +485,7 @@ where
         self.pool.get_transactions_by_sender(sender)
     }
 
-    fn get_transactions_by_sender_and_nonce(
+    fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
