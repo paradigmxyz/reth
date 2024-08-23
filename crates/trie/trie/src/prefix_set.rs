@@ -84,6 +84,7 @@ pub struct TriePrefixSets {
 /// ```
 #[derive(Clone, Default, Debug)]
 pub struct PrefixSetMut {
+    all: bool,
     keys: Vec<Nibbles>,
 }
 
@@ -92,14 +93,19 @@ where
     I: IntoIterator<Item = Nibbles>,
 {
     fn from(value: I) -> Self {
-        Self { keys: value.into_iter().collect() }
+        Self { all: false, keys: value.into_iter().collect() }
     }
 }
 
 impl PrefixSetMut {
     /// Create [`PrefixSetMut`] with pre-allocated capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { keys: Vec::with_capacity(capacity) }
+        Self { all: false, keys: Vec::with_capacity(capacity) }
+    }
+
+    /// Create [`PrefixSetMut`] that considers all key changed.
+    pub fn all() -> Self {
+        Self { all: true, keys: Vec::new() }
     }
 
     /// Inserts the given `nibbles` into the set.
@@ -129,12 +135,16 @@ impl PrefixSetMut {
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
-        self.keys.sort();
-        self.keys.dedup();
-        // we need to shrink in both the sorted and non-sorted cases because deduping may have
-        // occurred either on `freeze`, or during `contains`.
-        self.keys.shrink_to_fit();
-        PrefixSet { keys: Arc::new(self.keys), index: 0 }
+        if self.all {
+            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+        } else {
+            self.keys.sort();
+            self.keys.dedup();
+            // we need to shrink in both the sorted and non-sorted cases because deduping may have
+            // occurred either on `freeze`, or during `contains`.
+            self.keys.shrink_to_fit();
+            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
+        }
     }
 }
 
@@ -143,8 +153,9 @@ impl PrefixSetMut {
 /// See also [`PrefixSetMut::freeze`].
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    keys: Arc<Vec<Nibbles>>,
     index: usize,
+    all: bool,
+    keys: Arc<Vec<Nibbles>>,
 }
 
 impl PrefixSet {
@@ -152,6 +163,10 @@ impl PrefixSet {
     /// if the given prefix is a prefix of any key in the set.
     #[inline]
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
+        if self.all {
+            return true
+        }
+
         while self.index > 0 && &self.keys[self.index] > prefix {
             self.index -= 1;
         }
