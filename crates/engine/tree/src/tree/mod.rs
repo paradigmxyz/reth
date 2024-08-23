@@ -672,7 +672,7 @@ where
                     let status = match status {
                         InsertPayloadOk2::Inserted(BlockStatus2::Valid) => {
                             latest_valid_hash = Some(block_hash);
-                            self.try_connect_buffered_blocks(num_hash);
+                            self.try_connect_buffered_blocks(num_hash)?;
                             PayloadStatusEnum::Valid
                         }
                         InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid) => {
@@ -925,7 +925,7 @@ where
                     self.on_backfill_sync_finished(ctrl)?;
                     Ok(())
                 }
-            }
+            },
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
@@ -2220,14 +2220,16 @@ mod tests {
             let fcu_state = self.fcu_state(block_hash);
 
             let (tx, rx) = oneshot::channel();
-            self.tree.on_engine_message(FromEngine::Request(
-                BeaconEngineMessage::ForkchoiceUpdated {
-                    state: fcu_state,
-                    payload_attrs: None,
-                    tx,
-                }
-                .into(),
-            )).unwrap();
+            self.tree
+                .on_engine_message(FromEngine::Request(
+                    BeaconEngineMessage::ForkchoiceUpdated {
+                        state: fcu_state,
+                        payload_attrs: None,
+                        tx,
+                    }
+                    .into(),
+                ))
+                .unwrap();
 
             let response = rx.await.unwrap().unwrap().await.unwrap();
             match fcu_status.into() {
@@ -2501,18 +2503,21 @@ mod tests {
             .with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        test_harness.tree.on_engine_message(FromEngine::Request(
-            BeaconEngineMessage::ForkchoiceUpdated {
-                state: ForkchoiceState {
-                    head_block_hash: B256::random(),
-                    safe_block_hash: B256::random(),
-                    finalized_block_hash: B256::random(),
-                },
-                payload_attrs: None,
-                tx,
-            }
-            .into(),
-        )).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: B256::random(),
+                        safe_block_hash: B256::random(),
+                        finalized_block_hash: B256::random(),
+                    },
+                    payload_attrs: None,
+                    tx,
+                }
+                .into(),
+            ))
+            .unwrap();
 
         let resp = rx.await.unwrap().unwrap().await.unwrap();
         assert!(resp.payload_status.is_syncing());
@@ -2568,14 +2573,17 @@ mod tests {
             TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
 
         let (tx, rx) = oneshot::channel();
-        test_harness.tree.on_engine_message(FromEngine::Request(
-            BeaconEngineMessage::NewPayload {
-                payload: payload.clone().into(),
-                cancun_fields: None,
-                tx,
-            }
-            .into(),
-        )).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::NewPayload {
+                    payload: payload.clone().into(),
+                    cancun_fields: None,
+                    tx,
+                }
+                .into(),
+            ))
+            .unwrap();
 
         let resp = rx.await.unwrap().unwrap();
         assert!(resp.is_syncing());
@@ -2957,10 +2965,13 @@ mod tests {
             _ => panic!("Unexpected event: {:#?}", event),
         }
 
-        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
-            .last()
-            .unwrap()
-            .clone()])).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+                .last()
+                .unwrap()
+                .clone()]))
+            .unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
         println!("event received: {:?}", event);
@@ -3016,9 +3027,12 @@ mod tests {
         }
 
         // send message to tell the engine the requested block was downloaded
-        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(vec![
-            main_chain_backfill_target.clone(),
-        ])).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::DownloadedBlocks(vec![
+                main_chain_backfill_target.clone()
+            ]))
+            .unwrap();
 
         // check that backfill is triggered
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -3039,11 +3053,12 @@ mod tests {
         test_harness.setup_range_insertion_for_valid_chain(backfilled_chain);
 
         // send message to mark backfill finished
-        test_harness.tree.on_engine_message(FromEngine::Event(
-            FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
-                block_number: main_chain_backfill_target.number,
-            }),
-        )).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Event(FromOrchestrator::BackfillSyncFinished(
+                ControlFlow::Continue { block_number: main_chain_backfill_target.number },
+            )))
+            .unwrap();
 
         // send fcu to the tip of main
         test_harness.fcu_to(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
@@ -3060,7 +3075,8 @@ mod tests {
         // tell engine main chain tip downloaded
         test_harness
             .tree
-            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain_last.clone()])).unwrap();
+            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain_last.clone()]))
+            .unwrap();
 
         // check download range request
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -3083,7 +3099,10 @@ mod tests {
         test_harness.setup_range_insertion_for_valid_chain(remaining.clone());
 
         // tell engine block range downloaded
-        test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone())).unwrap();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::DownloadedBlocks(remaining.clone()))
+            .unwrap();
 
         test_harness.check_fork_chain_insertion(remaining).await;
 
