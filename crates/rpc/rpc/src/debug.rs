@@ -628,9 +628,8 @@ where
                 // Take the bundle state
                 let bundle_state = db.take_bundle();
 
-                // Initialize a map of preimages. The length will be >= the number of accounts in
-                // the cache.
-                let mut state_preimages = HashMap::with_capacity(db.cache.accounts.len());
+                // Initialize a map of preimages.
+                let mut state_preimages = HashMap::new();
 
                 // Grab all account proofs for the data accessed during block execution.
                 //
@@ -669,7 +668,7 @@ where
                     .witness(HashedPostState::default(), hashed_state)
                     .map_err(Into::into)?;
 
-                // TODO(alexey): return `state_preimages` as well when https://github.com/alloy-rs/alloy/pull/1178 is merged
+                // TODO(alexey): return `state_preimages` as well when https://github.com/alloy-rs/alloy/pull/1178 is released
 
                 Ok(witness)
             })
