@@ -10,7 +10,7 @@ use revm::{
 use std::collections::HashMap;
 
 /// Represents a changed account
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChangedAccount {
     /// The address of the account.
     pub address: Address,
