@@ -239,7 +239,7 @@ pub enum RethRpcModule {
     Admin,
     /// `debug_` module
     Debug,
-    /// `eth_` module
+    /// `eth_` module, including `eth_callBundle`
     Eth,
     /// `net_` module
     Net,
@@ -251,87 +251,48 @@ pub enum RethRpcModule {
     Web3,
     /// `rpc_` module
     Rpc,
-    /// `reth_` module
-    Reth,
-    /// `ots_` module
-    Ots,
-    /// For single non-standard `eth_` namespace call `eth_callBundle`
-    ///
-    /// This is separate from [`RethRpcModule::Eth`] because it is a non standardized call that
-    /// should be opt-in.
-    EthCallBundle,
 }
-
-// === impl RethRpcModule ===
 
 impl RethRpcModule {
-    /// Returns the number of variants in the enum
-    pub const fn variant_count() -> usize {
-        <Self as VariantArray>::VARIANTS.len()
-    }
-
-    /// Returns all variant names of the enum
-    pub const fn all_variant_names() -> &'static [&'static str] {
-        <Self as VariantNames>::VARIANTS
-    }
-
-    /// Returns all variants of the enum
-    pub const fn all_variants() -> &'static [Self] {
-        <Self as VariantArray>::VARIANTS
-    }
-
-    /// Returns all variants of the enum
-    pub fn modules() -> impl IntoIterator<Item = Self> {
-        use strum::IntoEnumIterator;
-        Self::iter()
-    }
-
-    /// Returns the string representation of the module.
-    #[inline]
-    pub fn as_str(&self) -> &'static str {
-        self.into()
+    /// All variants in a list.
+    pub const fn modules() -> [RethRpcModule; 8] {
+        [
+            RethRpcModule::Admin,
+            RethRpcModule::Debug,
+            RethRpcModule::Eth,
+            RethRpcModule::Net,
+            RethRpcModule::Trace,
+            RethRpcModule::Txpool,
+            RethRpcModule::Web3,
+            RethRpcModule::Rpc,
+        ]
     }
 }
 
-impl FromStr for RethRpcModule {
-    type Err = ParseError;
+impl<'a> IntoIterator for &'a RpcModuleSelection {
+    type Item = RethRpcModule;
+    type IntoIter = Box<dyn Iterator<Item = RethRpcModule> + 'a>;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "admin" => Self::Admin,
-            "debug" => Self::Debug,
-            "eth" => Self::Eth,
-            "net" => Self::Net,
-            "trace" => Self::Trace,
-            "txpool" => Self::Txpool,
-            "web3" => Self::Web3,
-            "rpc" => Self::Rpc,
-            "reth" => Self::Reth,
-            "ots" => Self::Ots,
-            "eth-call-bundle" | "eth_callBundle" => Self::EthCallBundle,
-            _ => return Err(ParseError::VariantNotFound),
-        })
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_selection()
     }
 }
 
-impl TryFrom<&str> for RethRpcModule {
-    type Error = ParseError;
-    fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
-        FromStr::from_str(s)
+impl<'de> Deserialize<'de> for RpcModuleSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
-impl fmt::Display for RethRpcModule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(self.as_ref())
-    }
-}
-
-impl Serialize for RethRpcModule {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+impl Serialize for RpcModuleSelection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        s.serialize_str(self.as_ref())
+        serializer.collect_str(self)
     }
 }
