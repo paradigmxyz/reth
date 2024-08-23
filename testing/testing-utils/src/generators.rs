@@ -10,7 +10,7 @@ use rand::{
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Request,
     Requests, SealedBlock, SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind,
-    TxLegacy, B256, U256,
+    TxLegacy, Withdrawal, Withdrawals, B256, U256,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -138,6 +138,7 @@ pub fn random_block<R: Rng>(
     tx_count: Option<u8>,
     ommers_count: Option<u8>,
     requests_count: Option<u8>,
+    withdrawals_count: Option<u8>,
 ) -> SealedBlock {
     // Generate transactions
     let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
@@ -158,6 +159,18 @@ pub fn random_block<R: Rng>(
         requests_count.map(|count| (0..count).map(|_| random_request(rng)).collect::<Vec<_>>());
     let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
 
+    let withdrawals = withdrawals_count.map(|count| {
+        (0..count)
+            .map(|i| Withdrawal {
+                amount: rng.gen(),
+                index: i.into(),
+                validator_index: i.into(),
+                address: rng.gen(),
+            })
+            .collect::<Vec<_>>()
+    });
+    let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
+
     SealedBlock {
         header: Header {
             parent_hash: parent.unwrap_or_default(),
@@ -168,12 +181,13 @@ pub fn random_block<R: Rng>(
             ommers_hash,
             base_fee_per_gas: Some(rng.gen()),
             requests_root,
+            withdrawals_root,
             ..Default::default()
         }
         .seal_slow(),
         body: transactions,
         ommers,
-        withdrawals: None,
+        withdrawals: withdrawals.map(Withdrawals::new),
         requests: requests.map(Requests),
     }
 }
@@ -190,12 +204,14 @@ pub fn random_block_range<R: Rng>(
     head: B256,
     tx_count: Range<u8>,
     requests_count: Option<Range<u8>>,
+    withdrawals_count: Option<Range<u8>>,
 ) -> Vec<SealedBlock> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
         let tx_count = tx_count.clone().sample_single(rng);
         let requests_count = requests_count.clone().map(|r| r.sample_single(rng));
+        let withdrawals_count = withdrawals_count.clone().map(|r| r.sample_single(rng));
         blocks.push(random_block(
             rng,
             idx,
@@ -203,6 +219,7 @@ pub fn random_block_range<R: Rng>(
             Some(tx_count),
             None,
             requests_count,
+            withdrawals_count,
         ));
     }
     blocks

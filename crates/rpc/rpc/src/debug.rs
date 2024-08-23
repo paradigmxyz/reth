@@ -606,14 +606,12 @@ where
 
                 // Re-execute all of the transactions in the block to load all touched accounts into
                 // the cache DB.
-                for tx in block.raw_transactions() {
-                    let tx_envelope = TransactionSignedEcRecovered::decode(&mut tx.as_ref())
-                        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+                for tx in block.into_transactions_ecrecovered() {
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            evm_config.tx_env(&tx_envelope),
+                            evm_config.tx_env(&tx),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
