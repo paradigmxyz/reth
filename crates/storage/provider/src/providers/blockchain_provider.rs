@@ -1510,14 +1510,10 @@ mod tests {
         test_utils::TempDatabase,
         DatabaseEnv,
     };
-    use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{
-        BlockHashOrNumber, BlockNumberOrTag, Header, Receipt, SealedBlock, StaticFileSegment, B256,
-    use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
-        Withdrawals, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Header, Receipt, SealedBlock,
+        StaticFileSegment, Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1908,7 +1904,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split them into database and in-memory blocks
-        let mut blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None);
+        let mut blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
         let (database_blocks, in_memory_blocks) = blocks.split_at_mut(5);
 
         // Take the first in-memory block and add 7 ommers to it
