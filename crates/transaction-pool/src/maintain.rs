@@ -12,10 +12,8 @@ use futures_util::{
     FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
-use reth_chainspec::ChainSpecProvider;
-use reth_execution_types::ChangedAccount;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
