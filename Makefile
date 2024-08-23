@@ -67,7 +67,7 @@ build-reproducible: ## Build the reth binary into `target` directory with reprod
 	CARGO_INCREMENTAL=0 \
 	LC_ALL=C \
 	TZ=UTC \
-	RUSTFLAGS="-C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=." \
+	RUSTFLAGS="-C link-arg=-Wl,--build-id=none -Clink-arg=-static-libgcc -C metadata='' --remap-path-prefix $$(pwd)=." \
 	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked
 
 .PHONY: build-debug
