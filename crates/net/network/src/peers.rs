@@ -757,6 +757,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
                 let mut peer = Peer::with_kind(addr, kind);
+                peer.state = PeerConnectionState::PendingOut;
                 peer.fork_id = fork_id;
                 entry.insert(peer);
                 self.queued_actions
@@ -2429,6 +2430,7 @@ mod tests {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
         peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::PendingOut);
 
         match event!(peers) {
             PeerAction::Connect { peer_id, remote_addr } => {
