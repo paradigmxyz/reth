@@ -530,7 +530,7 @@ impl CanonicalInMemoryState {
         &self,
         tx_hash: TxHash,
     ) -> Option<(TransactionSigned, TransactionMeta)> {
-        for (block_number, block_state) in self.canonical_chain().enumerate() {
+        for block_state in self.canonical_chain() {
             if let Some((index, tx)) = block_state
                 .block()
                 .block()
@@ -543,7 +543,7 @@ impl CanonicalInMemoryState {
                     tx_hash,
                     index: index as u64,
                     block_hash: block_state.hash(),
-                    block_number: block_number as u64,
+                    block_number: block_state.block().block.number,
                     base_fee: block_state.block().block().header.base_fee_per_gas,
                     timestamp: block_state.block().block.timestamp,
                     excess_blob_gas: block_state.block().block.excess_blob_gas,
