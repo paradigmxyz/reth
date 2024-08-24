@@ -7,12 +7,9 @@ license.workspace = true
 
 
 [dependencies]
-reth-chainspec.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 reth-db.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 eyre.workspace = true
-
-[dev-dependencies]
-reth-chainspec = { workspace = true, features = ["test-utils"] }
