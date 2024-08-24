@@ -1739,7 +1739,7 @@ impl TransportRpcModules {
     /// Removes the method with the given name from the configured ipc methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
-    /// 
+    ///
     /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
     /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
     /// subscriptions.
