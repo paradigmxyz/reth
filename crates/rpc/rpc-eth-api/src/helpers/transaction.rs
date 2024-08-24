@@ -209,7 +209,7 @@ pub trait EthTransactions: LoadTransaction {
                         hash: Some(tx.hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
-                        base_fee: Some(base_fee_per_gas.unwrap_or_default() as u128),
+                        base_fee: base_fee_per_gas.map(u128::from),
                         index: Some(index as u64),
                     };
                     return Ok(Some(from_recovered_with_block_context(tx, tx_info)))

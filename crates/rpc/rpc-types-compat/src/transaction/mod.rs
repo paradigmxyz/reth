@@ -18,18 +18,18 @@ pub fn from_recovered_with_block_context(
     tx: TransactionSignedEcRecovered,
     tx_info: TransactionInfo,
 ) -> Transaction {
-    fill(tx, Some(tx_info))
+    fill(tx, tx_info)
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
 pub fn from_recovered(tx: TransactionSignedEcRecovered) -> Transaction {
-    fill(tx, None)
+    fill(tx, TransactionInfo::default())
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
-fn fill(tx: TransactionSignedEcRecovered, tx_info: Option<TransactionInfo>) -> Transaction {
+fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Transaction {
     let signer = tx.signer();
     let signed_tx = tx.into_signed();
 
@@ -37,8 +37,6 @@ fn fill(tx: TransactionSignedEcRecovered, tx_info: Option<TransactionInfo>) -> T
         TxKind::Create => None,
         TxKind::Call(to) => Some(Address(*to)),
     };
-
-    let tx_info = tx_info.unwrap_or_default();
 
     #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
