@@ -70,9 +70,10 @@ pub fn from_block_full(
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
+            let tx_hash = tx.hash();
             let signed_tx_ec_recovered = tx.with_signer(sender);
             let tx_info = TransactionInfo {
-                hash: Some(block_hash),
+                hash: Some(tx_hash),
                 block_hash: Some(block_hash),
                 block_number: Some(block_number),
                 base_fee: base_fee_per_gas.map(u128::from),
