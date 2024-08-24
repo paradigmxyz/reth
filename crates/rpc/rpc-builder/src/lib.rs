@@ -1754,7 +1754,7 @@ impl TransportRpcModules {
     /// Removes the method with the given name from all configured transports.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
-    pub fn remove_method_from_all_transports(&mut self, method_name: &'static str) -> bool {
+    pub fn remove_method_from_configured(&mut self, method_name: &'static str) -> bool {
         let http_removed = self.remove_http_method(method_name);
         let ws_removed = self.remove_ws_method(method_name);
         let ipc_removed = self.remove_ipc_method(method_name);
