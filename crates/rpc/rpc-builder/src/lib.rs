@@ -2078,7 +2078,7 @@ mod tests {
         }
 
         #[test]
-        fn test_remove_method_from_all_transports() {
+        fn test_remove_method_from_configured() {
             let mut modules = TransportRpcModules {
                 http: Some(create_test_module()),
                 ws: Some(create_test_module()),
@@ -2087,13 +2087,13 @@ mod tests {
             };
 
             // Remove a method that exists
-            assert!(modules.remove_method_from_all_transports("anything"));
+            assert!(modules.remove_method_from_configured("anything"));
 
             // Remove a method that was just removed (it does not exist anymore)
-            assert!(!modules.remove_method_from_all_transports("anything"));
+            assert!(!modules.remove_method_from_configured("anything"));
 
             // Remove a method that does not exist
-            assert!(!modules.remove_method_from_all_transports("non_existent_method"));
+            assert!(!modules.remove_method_from_configured("non_existent_method"));
 
             // Verify that the method was removed from all transports
             assert!(modules.http.as_ref().unwrap().method("anything").is_none());
