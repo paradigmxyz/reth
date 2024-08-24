@@ -116,7 +116,12 @@ impl ConfigureEvm for OptimismEvmConfig {
 
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         // Define a default EVM configuration
-        let mut evm = RethEvmBuilder::new(db, self.default_external_context()).build();
+        let mut evm = {
+            self.default_external_context();
+            RethEvmBuilder::new(db, ())
+        }
+        .build();
+
         // Apply the Optimism configuration to the EVM
         evm.handler = Handler::optimism_with_spec(evm.handler.cfg.spec_id);
         evm
@@ -128,8 +133,12 @@ impl ConfigureEvm for OptimismEvmConfig {
         I: GetInspector<DB>,
     {
         // Define a default EVM configuration with an inspector
-        let mut evm = RethEvmBuilder::new(db, self.default_external_context())
-            .build_with_inspector(inspector);
+        let mut evm = {
+            self.default_external_context();
+            RethEvmBuilder::new(db, ())
+        }
+        .build_with_inspector(inspector);
+
         // Apply the Optimism configuration to the EVM
         evm.handler = Handler::optimism_with_spec(evm.handler.cfg.spec_id);
         evm
