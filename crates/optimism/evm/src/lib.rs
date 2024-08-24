@@ -10,13 +10,13 @@
 #![cfg(feature = "optimism")]
 
 use reth_chainspec::ChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{builder::RethEvmBuilder, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use reth_revm::{Database, Evm, GetInspector};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -27,6 +27,7 @@ pub use l1::*;
 
 mod error;
 pub use error::OptimismBlockExecutionError;
+use revm::Handler;
 use revm_primitives::{Bytes, Env, OptimismFields, TxKind};
 
 /// Optimism-related EVM configuration.
@@ -114,7 +115,11 @@ impl ConfigureEvm for OptimismEvmConfig {
     type DefaultExternalContext<'a> = ();
 
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        EvmBuilder::default().with_db(db).optimism().build()
+        // Define a default EVM configuration
+        let mut evm = RethEvmBuilder::new(db, self.default_external_context()).build();
+        // Apply the Optimism configuration to the EVM
+        evm.handler = Handler::optimism_with_spec(evm.handler.cfg.spec_id);
+        evm
     }
 
     fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
@@ -122,12 +127,12 @@ impl ConfigureEvm for OptimismEvmConfig {
         DB: Database,
         I: GetInspector<DB>,
     {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .optimism()
-            .append_handler_register(inspector_handle_register)
-            .build()
+        // Define a default EVM configuration with an inspector
+        let mut evm = RethEvmBuilder::new(db, self.default_external_context())
+            .build_with_inspector(inspector);
+        // Apply the Optimism configuration to the EVM
+        evm.handler = Handler::optimism_with_spec(evm.handler.cfg.spec_id);
+        evm
     }
 
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
