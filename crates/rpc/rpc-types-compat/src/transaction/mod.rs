@@ -65,7 +65,7 @@ fn fill(
         }
         _ => {
             // OP-deposit
-            (None, None)
+            (Some(signed_tx.max_fee_per_gas()), None)
         }
     };
 
