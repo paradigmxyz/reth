@@ -9,6 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+mod filter;
+
+pub use filter::{NoOpTransactionFilter, TransactionFilter};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
@@ -39,9 +42,7 @@ use reth_primitives::{
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
-use reth_transaction_pool::{
-    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
-};
+use reth_transaction_pool::{ noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool, pool::BestTransactionFilter, BestTransactions};
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -100,7 +101,8 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
+        let tx_filter = NoOpTransactionFilter::new();
+        default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)
     }
 
     fn build_empty_payload(
@@ -127,12 +129,13 @@ where
 /// Constructs an Ethereum transaction payload using the best transactions from the pool.
 ///
 /// Given build arguments including an Ethereum client, transaction pool,
-/// and configuration, this function creates a transaction payload. Returns
-/// a result indicating success with the payload or an error in case of failure.
+/// configuration and transaction filter, this function creates a transaction payload.
+/// Returns a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
+pub fn default_ethereum_payload<EvmConfig, Pool, Client, TxFilter>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    tx_filter: TxFilter,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
@@ -140,6 +143,7 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
+    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>> + Sync,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
@@ -159,10 +163,14 @@ where
     let mut executed_txs = Vec::new();
     let mut executed_senders = Vec::new();
 
-    let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+    let best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
+
+    // Construct the [`BestTransactionFilter`] using as predicate the transaction attributes
+    // checker.
+    let mut filtered_txs = BestTransactionFilter::new(best_txs, |tx: &_| tx_filter.is_valid(tx));
 
     let mut total_fees = U256::ZERO;
 
@@ -201,13 +209,13 @@ where
     })?;
 
     let mut receipts = Vec::new();
-    while let Some(pool_tx) = best_txs.next() {
+    while let Some(pool_tx) = filtered_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid
             // which also removes all dependent transaction from the iterator before we can
             // continue
-            best_txs.mark_invalid(&pool_tx);
+            filtered_txs.mark_invalid(&pool_tx);
             continue
         }
 
@@ -229,7 +237,7 @@ where
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
-                best_txs.mark_invalid(&pool_tx);
+                filtered_txs.mark_invalid(&pool_tx);
                 continue
             }
         }
@@ -255,7 +263,7 @@ where
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(&pool_tx);
+                            filtered_txs.mark_invalid(&pool_tx);
                         }
 
                         continue
@@ -279,7 +287,7 @@ where
 
             // if we've reached the max data gas per block, we can skip blob txs entirely
             if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                best_txs.skip_blobs();
+                filtered_txs.skip_blobs();
             }
         }
 
