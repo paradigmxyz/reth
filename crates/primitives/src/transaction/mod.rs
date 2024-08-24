@@ -1582,22 +1582,6 @@ impl Decodable for TransactionSignedEcRecovered {
     }
 }
 
-/// Ensures the transaction can be sent over the
-/// network
-pub trait IntoRecoveredTransaction {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
-}
-
-impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone()
-    }
-}
-
 /// Generic wrapper with encoded Bytes, such as transaction data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithEncoded<T>(Bytes, pub T);

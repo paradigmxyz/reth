@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use reth::{
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, IntoRecoveredTransaction},
+    primitives::Address,
     rpc::{
         compat::transaction::transaction_to_call_request,
         types::trace::{parity::TraceType, tracerequest::TraceCallRequest},

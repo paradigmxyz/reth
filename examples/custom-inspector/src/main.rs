@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use reth::{
     builder::NodeHandle,
     cli::Cli,
-    primitives::{Address, BlockNumberOrTag, IntoRecoveredTransaction},
+    primitives::{Address, BlockNumberOrTag},
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},

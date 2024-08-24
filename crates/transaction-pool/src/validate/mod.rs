@@ -7,9 +7,8 @@ use crate::{
 };
 use futures_util::future::Either;
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, SealedBlock, TransactionSignedEcRecovered, TxHash, B256,
-    U256,
+    Address, BlobTransactionSidecar, PooledTransactionsElementEcRecovered, SealedBlock,
+    TransactionSignedEcRecovered, TxHash, B256, U256,
 };
 use std::{fmt, future::Future, time::Instant};
 
@@ -380,11 +379,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecoveredTransaction
-    for ValidPoolTransaction<T>
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> From<&ValidPoolTransaction<T>>
+    for TransactionSignedEcRecovered
 {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus()
+    fn from(tx: &ValidPoolTransaction<T>) -> Self {
+        tx.transaction.clone().into_consensus()
     }
 }
 
