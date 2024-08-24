@@ -5,6 +5,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 #[cfg(feature = "std")]
 use std::sync::Arc;
 
+use reth_ethereum_forks::Hardfork;
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};

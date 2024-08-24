@@ -1,3 +1,8 @@
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use alloy_chains::Chain;
 use alloy_genesis::ChainConfig;
 use derive_more::{Deref, DerefMut, Into};
