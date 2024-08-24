@@ -379,7 +379,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> From<&ValidPoolTransaction<T>>
+impl<T: PoolTransaction<Consensus = Self>> From<&ValidPoolTransaction<T>>
     for TransactionSignedEcRecovered
 {
     fn from(tx: &ValidPoolTransaction<T>) -> Self {
