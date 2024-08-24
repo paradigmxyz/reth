@@ -2,7 +2,7 @@
 
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
-use alloy_rpc_types::Transaction;
+use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
@@ -70,15 +70,17 @@ pub fn from_block_full(
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
+            let tx_hash = tx.hash();
             let signed_tx_ec_recovered = tx.with_signer(sender);
+            let tx_info = TransactionInfo {
+                hash: Some(tx_hash),
+                block_hash: Some(block_hash),
+                block_number: Some(block_number),
+                base_fee: base_fee_per_gas.map(u128::from),
+                index: Some(idx as u64),
+            };
 
-            from_recovered_with_block_context(
-                signed_tx_ec_recovered,
-                block_hash,
-                block_number,
-                base_fee_per_gas,
-                idx,
-            )
+            from_recovered_with_block_context(signed_tx_ec_recovered, tx_info)
         })
         .collect::<Vec<_>>();
 

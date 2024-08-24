@@ -1,7 +1,10 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use reth_primitives::{Address, BlockNumber, TransactionSignedEcRecovered, TxKind, TxType, B256};
+use alloy_rpc_types::{
+    request::{TransactionInput, TransactionRequest},
+    TransactionInfo,
+};
+use reth_primitives::{Address, TransactionSignedEcRecovered, TxKind, TxType};
 use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 pub use typed::*;
@@ -9,36 +12,24 @@ pub use typed::*;
 mod signature;
 mod typed;
 
-/// Create a new rpc transaction result for a mined transaction, using the given block hash,
-/// number, and tx index fields to populate the corresponding fields in the rpc result.
-///
-/// The block hash, number, and tx index fields should be from the original block where the
-/// transaction was mined.
+/// Create a new rpc transaction result for a mined transaction, using the given [`TransactionInfo`]
+/// to populate the corresponding fields in the rpc result.
 pub fn from_recovered_with_block_context(
     tx: TransactionSignedEcRecovered,
-    block_hash: B256,
-    block_number: BlockNumber,
-    base_fee: Option<u64>,
-    tx_index: usize,
+    tx_info: TransactionInfo,
 ) -> Transaction {
-    fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+    fill(tx, tx_info)
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
 pub fn from_recovered(tx: TransactionSignedEcRecovered) -> Transaction {
-    fill(tx, None, None, None, None)
+    fill(tx, TransactionInfo::default())
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
-fn fill(
-    tx: TransactionSignedEcRecovered,
-    block_hash: Option<B256>,
-    block_number: Option<BlockNumber>,
-    base_fee: Option<u64>,
-    transaction_index: Option<usize>,
-) -> Transaction {
+fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Transaction {
     let signer = tx.signer();
     let signed_tx = tx.into_signed();
 
@@ -53,11 +44,10 @@ fn fill(
         TxType::Eip1559 | TxType::Eip4844 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
-            let gas_price = base_fee
+            let gas_price = tx_info
+                .base_fee
                 .and_then(|base_fee| {
-                    signed_tx
-                        .effective_tip_per_gas(Some(base_fee))
-                        .map(|tip| tip + base_fee as u128)
+                    signed_tx.effective_tip_per_gas(Some(base_fee as u64)).map(|tip| tip + base_fee)
                 })
                 .unwrap_or_else(|| signed_tx.max_fee_per_gas());
 
@@ -95,9 +85,9 @@ fn fill(
         transaction_type: Some(signed_tx.tx_type() as u8),
 
         // These fields are set to None because they are not stored as part of the transaction
-        block_hash,
-        block_number,
-        transaction_index: transaction_index.map(|idx| idx as u64),
+        block_hash: tx_info.block_hash,
+        block_number: tx_info.block_number,
+        transaction_index: tx_info.index,
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
         blob_versioned_hashes,
