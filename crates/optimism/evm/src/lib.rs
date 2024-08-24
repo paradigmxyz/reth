@@ -338,6 +338,9 @@ mod tests {
 
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::ECOTONE, is_optimism: true });
+
+        // Latest spec ID in journaled state
+        assert_eq!(evm.context.evm.journaled_state.spec, SpecId::LATEST);
     }
 
     #[test]
@@ -482,5 +485,8 @@ mod tests {
 
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::ECOTONE, is_optimism: true });
+
+        // Latest spec ID in journaled state
+        assert_eq!(evm.context.evm.journaled_state.spec, SpecId::LATEST);
     }
 }
