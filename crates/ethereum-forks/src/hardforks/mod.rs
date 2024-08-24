@@ -148,3 +148,14 @@ impl core::fmt::Debug for ChainHardforks {
             .finish()
     }
 }
+
+impl<H: Hardfork> FromIterator<(H, ForkCondition)> for ChainHardforks {
+    fn from_iter<T: IntoIterator<Item = (H, ForkCondition)>>(iter: T) -> Self {
+        let forks: Vec<(Box<dyn Hardfork>, ForkCondition)> =
+            iter.into_iter().map(|(hf, cnd)| (Box::new(hf) as Box<dyn Hardfork>, cnd)).collect();
+
+        let map = forks.iter().map(|(fork, condition)| (fork.name(), *condition)).collect();
+
+        Self { forks, map }
+    }
+}

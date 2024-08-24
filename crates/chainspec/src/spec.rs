@@ -1,17 +1,26 @@
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
+pub use alloy_eips::eip1559::BaseFeeParams;
+
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(feature = "std")]
+use std::sync::Arc;
+
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
+#[cfg(feature = "optimism")]
+use reth_ethereum_forks::OptimismHardfork;
 use reth_ethereum_forks::{
-    ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
+    ChainHardforks, ConfigureHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks,
+    ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
 };
-use reth_network_peers::NodeRecord;
+use reth_network_peers::{
+    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
+    sepolia_nodes, NodeRecord,
+};
 use reth_primitives_traits::{
     constants::{
         DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT,
@@ -20,16 +29,8 @@ use reth_primitives_traits::{
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
-#[cfg(feature = "std")]
-use std::sync::Arc;
 
-pub use alloy_eips::eip1559::BaseFeeParams;
-#[cfg(feature = "optimism")]
-use reth_ethereum_forks::OptimismHardfork;
-use reth_network_peers::{
-    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
-    sepolia_nodes,
-};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -698,92 +699,35 @@ impl ChainSpec {
     }
 }
 
-impl From<Genesis> for ChainSpec {
+impl From<Genesis> for ChainSpec
+where
+    <Self as EthChainSpec>::Hardfork: ConfigureHardforks,
+{
     fn from(genesis: Genesis) -> Self {
-        #[cfg(feature = "optimism")]
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis.config);
-        #[cfg(feature = "optimism")]
-        let genesis_info =
-            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
+        let mut hardforks = Vec::with_capacity(
+            <Self as EthChainSpec>::Hardfork::super_chain_mainnet_hardforks().count(),
+        );
 
         // Block-based hardforks
-        let hardfork_opts = [
-            (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
-            (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
-            (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
-            (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
-            (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
-            (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
-            (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
-            (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
-            (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
-            (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
-            (EthereumHardfork::London.boxed(), genesis.config.london_block),
-            (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
-            (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
-        ];
-        let mut hardforks = hardfork_opts
-            .into_iter()
-            .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
-            .collect::<Vec<_>>();
+        hardforks.extend(<Self as EthChainSpec>::Hardfork::init_block_hardforks(&genesis.config));
 
         // Paris
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        total_difficulty: ttd,
-                        fork_block: genesis.config.merge_netsplit_block,
-                    },
-                ));
+        let paris_block_and_final_difficulty = || -> Option<(u64, U256)> {
+            let ttd = genesis.config.terminal_total_difficulty?;
+            let paris = <Self as EthChainSpec>::Hardfork::init_paris(&genesis.config)?;
+            hardforks.push(paris);
 
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
+            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+        }();
 
         // Time-based hardforks
-        let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
-            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
-        ];
-
-        let time_hardforks = time_hardfork_opts
-            .into_iter()
-            .filter_map(|(hardfork, opt)| {
-                opt.map(|time| (hardfork, ForkCondition::Timestamp(time)))
-            })
-            .collect::<Vec<_>>();
-
-        hardforks.extend(time_hardforks);
-
-        // Uses ethereum or optimism main chains to find proper order
-        #[cfg(not(feature = "optimism"))]
-        let mainnet_hardforks: ChainHardforks = EthereumHardfork::MAINNET.into();
-        #[cfg(not(feature = "optimism"))]
-        let mainnet_order = mainnet_hardforks.forks_iter();
-        #[cfg(feature = "optimism")]
-        let mainnet_hardforks = OptimismHardfork::op_mainnet();
-        #[cfg(feature = "optimism")]
-        let mainnet_order = mainnet_hardforks.forks_iter();
+        hardforks.extend(<Self as EthChainSpec>::Hardfork::init_time_hardforks(&genesis.config));
 
         let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
-        for (hardfork, _) in mainnet_order {
-            if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
+
+        // Uses super chain mainnet to find proper order, e.g. op mainnet for op stack chains
+        for (hardfork, _) in <Self as EthChainSpec>::Hardfork::super_chain_mainnet_hardforks() {
+            if let Some(pos) = hardforks.iter().position(|(e, _)| e.name() == hardfork.name()) {
                 ordered_hardforks.push(hardforks[pos].clone());
             }
         }
@@ -796,15 +740,16 @@ impl From<Genesis> for ChainSpec {
             DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
         });
 
+        let base_fee_params = <Self as EthChainSpec>::base_fee_params(&genesis.config);
+
         Self {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks: ChainHardforks::new(hardforks),
+            hardforks: hardforks.into_iter().collect(),
             paris_block_and_final_difficulty,
             deposit_contract,
-            #[cfg(feature = "optimism")]
-            base_fee_params: optimism_genesis_info.base_fee_params,
+            base_fee_params,
             ..Default::default()
         }
     }
