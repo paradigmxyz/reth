@@ -9,6 +9,24 @@ use revm::{
 };
 use std::collections::HashMap;
 
+/// Represents a changed account
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangedAccount {
+    /// The address of the account.
+    pub address: Address,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: U256,
+}
+
+impl ChangedAccount {
+    /// Creates a new [`ChangedAccount`] with the given address and 0 balance and nonce.
+    pub const fn empty(address: Address) -> Self {
+        Self { address, nonce: 0, balance: U256::ZERO }
+    }
+}
+
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
@@ -323,6 +341,17 @@ impl ExecutionOutcome {
     pub fn with_requests(mut self, requests: Vec<Requests>) -> Self {
         self.requests = requests;
         self
+    }
+
+    /// Returns an iterator over all changed accounts from the `ExecutionOutcome`.
+    ///
+    /// This method filters the accounts to return only those that have undergone changes
+    /// and maps them into `ChangedAccount` instances, which include the address, nonce, and
+    /// balance.
+    pub fn changed_accounts(&self) -> impl Iterator<Item = ChangedAccount> + '_ {
+        self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
+            |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
+        )
     }
 }
 
@@ -780,5 +809,76 @@ mod tests {
 
         // Assert that splitting at the first block number returns None for the lower outcome
         assert_eq!(exec_res.clone().split_at(123), (None, exec_res));
+    }
+
+    #[test]
+    fn test_changed_accounts() {
+        // Set up some sample accounts
+        let address1 = Address::random();
+        let address2 = Address::random();
+        let address3 = Address::random();
+
+        // Set up account info with some changes
+        let account_info1 =
+            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
+        let account_info2 =
+            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+
+        // Set up the bundle state with these accounts
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address1,
+            BundleAccount {
+                info: Some(account_info1),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+        bundle_state.state.insert(
+            address2,
+            BundleAccount {
+                info: Some(account_info2),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+
+        // Unchanged account
+        bundle_state.state.insert(
+            address3,
+            BundleAccount {
+                info: None,
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+
+        let execution_outcome = ExecutionOutcome {
+            bundle: bundle_state,
+            receipts: Receipts::default(),
+            first_block: 0,
+            requests: vec![],
+        };
+
+        // Get the changed accounts
+        let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();
+
+        // Assert that the changed accounts match the expected ones
+        assert_eq!(changed_accounts.len(), 2);
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address1,
+            nonce: 1,
+            balance: U256::from(100)
+        }));
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address2,
+            nonce: 2,
+            balance: U256::from(200)
+        }));
     }
 }
