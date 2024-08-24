@@ -1068,6 +1068,15 @@ where
                             let mut module = eth_api.clone().into_rpc();
                             module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
                             module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+                            module
+                                .merge(
+                                    EthBundle::new(
+                                        eth_api.clone(),
+                                        self.blocking_pool_guard.clone(),
+                                    )
+                                    .into_rpc(),
+                                )
+                                .expect("No conflicts");
 
                             module.into()
                         }
@@ -1096,11 +1105,6 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => {
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
-                                .into_rpc()
-                                .into()
-                        }
-                        RethRpcModule::EthCallBundle => {
-                            EthBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
@@ -1820,26 +1824,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_eth_call_bundle() {
-        let selection = "eth-call-bundle".parse::<RethRpcModule>().unwrap();
-        assert_eq!(selection, RethRpcModule::EthCallBundle);
-        let selection = "eth_callBundle".parse::<RethRpcModule>().unwrap();
-        assert_eq!(selection, RethRpcModule::EthCallBundle);
-    }
-
-    #[test]
     fn parse_eth_call_bundle_selection() {
-        let selection = "eth,admin,debug,eth-call-bundle".parse::<RpcModuleSelection>().unwrap();
+        let selection = "eth,admin,debug".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
             selection,
             RpcModuleSelection::Selection(
-                [
-                    RethRpcModule::Eth,
-                    RethRpcModule::Admin,
-                    RethRpcModule::Debug,
-                    RethRpcModule::EthCallBundle,
-                ]
-                .into()
+                [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug,].into()
             )
         );
     }
