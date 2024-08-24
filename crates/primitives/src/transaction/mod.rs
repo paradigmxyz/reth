@@ -1591,13 +1591,6 @@ pub trait IntoRecoveredTransaction {
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
 }
 
-impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone()
-    }
-}
-
 /// Generic wrapper with encoded Bytes, such as transaction data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithEncoded<T>(Bytes, pub T);
