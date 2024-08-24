@@ -331,8 +331,8 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns a transaction sent by a given user with a given nonce
-    fn get_transactions_by_sender_and_nonce(
+    /// Returns a transaction sent by a given user and a nonce
+    fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
