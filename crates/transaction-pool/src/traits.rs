@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
@@ -41,7 +42,10 @@ pub type PeerId = reth_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -331,8 +335,8 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns a transaction sent by a given user with a given nonce
-    fn get_transactions_by_sender_and_nonce(
+    /// Returns a transaction sent by a given user and a nonce
+    fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
@@ -483,13 +487,13 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into())
+    pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into())
+    pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 }
 
@@ -675,26 +679,6 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
-/// Represents a changed account
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct ChangedAccount {
-    /// The address of the account.
-    pub address: Address,
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-}
-
-// === impl ChangedAccount ===
-
-impl ChangedAccount {
-    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
-    }
-}
-
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
@@ -790,18 +774,16 @@ impl BestTransactionsAttributes {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
-    fmt::Debug
-    + Send
-    + Sync
-    + Clone
-    + TryFrom<TransactionSignedEcRecovered>
-    + Into<TransactionSignedEcRecovered>
+    fmt::Debug + Send + Sync + Clone + TryFrom<TransactionSignedEcRecovered>
 {
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Self` type to `Consensus`
+    fn into_consensus(self) -> Self::Consensus;
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Self::Pooled) -> Self;
@@ -903,7 +885,10 @@ pub trait PoolTransaction:
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
 pub trait EthPoolTransaction:
-    PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>
+    PoolTransaction<
+    Pooled = PooledTransactionsElementEcRecovered,
+    Consensus = TransactionSignedEcRecovered,
+>
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
@@ -1042,6 +1027,10 @@ impl PoolTransaction for EthPooledTransaction {
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()

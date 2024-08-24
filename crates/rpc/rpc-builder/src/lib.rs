@@ -1068,6 +1068,15 @@ where
                             let mut module = eth_api.clone().into_rpc();
                             module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
                             module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+                            module
+                                .merge(
+                                    EthBundle::new(
+                                        eth_api.clone(),
+                                        self.blocking_pool_guard.clone(),
+                                    )
+                                    .into_rpc(),
+                                )
+                                .expect("No conflicts");
 
                             module.into()
                         }
@@ -1096,11 +1105,6 @@ where
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => {
                             RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
-                                .into_rpc()
-                                .into()
-                        }
-                        RethRpcModule::EthCallBundle => {
-                            EthBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
@@ -1705,6 +1709,62 @@ impl TransportRpcModules {
         self.merge_ipc(other)?;
         Ok(())
     }
+
+    /// Removes the method with the given name from the configured http methods.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    ///
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
+    pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
+        if let Some(http_module) = &mut self.http {
+            http_module.remove_method(method_name).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Removes the method with the given name from the configured ws methods.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    ///
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
+    pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
+        if let Some(ws_module) = &mut self.ws {
+            ws_module.remove_method(method_name).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Removes the method with the given name from the configured ipc methods.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    ///
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
+    pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
+        if let Some(ipc_module) = &mut self.ipc {
+            ipc_module.remove_method(method_name).is_some()
+        } else {
+            false
+        }
+    }
+
+    /// Removes the method with the given name from all configured transports.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    pub fn remove_method_from_configured(&mut self, method_name: &'static str) -> bool {
+        let http_removed = self.remove_http_method(method_name);
+        let ws_removed = self.remove_ws_method(method_name);
+        let ipc_removed = self.remove_ipc_method(method_name);
+
+        http_removed || ws_removed || ipc_removed
+    }
 }
 
 /// A handle to the spawned servers.
@@ -1820,26 +1880,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_eth_call_bundle() {
-        let selection = "eth-call-bundle".parse::<RethRpcModule>().unwrap();
-        assert_eq!(selection, RethRpcModule::EthCallBundle);
-        let selection = "eth_callBundle".parse::<RethRpcModule>().unwrap();
-        assert_eq!(selection, RethRpcModule::EthCallBundle);
-    }
-
-    #[test]
     fn parse_eth_call_bundle_selection() {
-        let selection = "eth,admin,debug,eth-call-bundle".parse::<RpcModuleSelection>().unwrap();
+        let selection = "eth,admin,debug".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
             selection,
             RpcModuleSelection::Selection(
-                [
-                    RethRpcModule::Eth,
-                    RethRpcModule::Admin,
-                    RethRpcModule::Debug,
-                    RethRpcModule::EthCallBundle,
-                ]
-                .into()
+                [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug,].into()
             )
         );
     }
@@ -1966,5 +2012,83 @@ mod tests {
                 config: None,
             }
         )
+    }
+
+    mod remove_methods {
+        use super::*;
+
+        fn create_test_module() -> RpcModule<()> {
+            let mut module = RpcModule::new(());
+            module.register_method("anything", |_, _, _| "succeed").unwrap();
+            module
+        }
+
+        #[test]
+        fn test_remove_http_method() {
+            let mut modules =
+                TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
+            // Remove a method that exists
+            assert!(modules.remove_http_method("anything"));
+
+            // Remove a method that does not exist
+            assert!(!modules.remove_http_method("non_existent_method"));
+
+            // Verify that the method was removed
+            assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+        }
+
+        #[test]
+        fn test_remove_ws_method() {
+            let mut modules =
+                TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
+
+            // Remove a method that exists
+            assert!(modules.remove_ws_method("anything"));
+
+            // Remove a method that does not exist
+            assert!(!modules.remove_ws_method("non_existent_method"));
+
+            // Verify that the method was removed
+            assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+        }
+
+        #[test]
+        fn test_remove_ipc_method() {
+            let mut modules =
+                TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
+
+            // Remove a method that exists
+            assert!(modules.remove_ipc_method("anything"));
+
+            // Remove a method that does not exist
+            assert!(!modules.remove_ipc_method("non_existent_method"));
+
+            // Verify that the method was removed
+            assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+        }
+
+        #[test]
+        fn test_remove_method_from_configured() {
+            let mut modules = TransportRpcModules {
+                http: Some(create_test_module()),
+                ws: Some(create_test_module()),
+                ipc: Some(create_test_module()),
+                ..Default::default()
+            };
+
+            // Remove a method that exists
+            assert!(modules.remove_method_from_configured("anything"));
+
+            // Remove a method that was just removed (it does not exist anymore)
+            assert!(!modules.remove_method_from_configured("anything"));
+
+            // Remove a method that does not exist
+            assert!(!modules.remove_method_from_configured("non_existent_method"));
+
+            // Verify that the method was removed from all transports
+            assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+            assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+            assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+        }
     }
 }
