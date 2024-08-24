@@ -4,7 +4,7 @@ use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::TransactionSignedEcRecovered;
+use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
@@ -124,8 +124,7 @@ where
                     let transactions: Vec<_> = transactions
                         .into_iter()
                         .map(|tx| {
-                            let recovered: TransactionSignedEcRecovered = tx.as_ref().into();
-
+                            let recovered = tx.to_recovered_transaction();
                             recovered.into_signed()
                         })
                         .collect();

@@ -12,7 +12,7 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{TransactionSignedEcRecovered, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
@@ -582,8 +582,7 @@ where
 
         while let Ok(tx) = prepared_stream.try_recv() {
             pending_txs.push(reth_rpc_types_compat::transaction::from_recovered(
-                // tx.transaction.to_recovered_transaction(),
-                tx.transaction.as_ref().into(),
+                tx.transaction.to_recovered_transaction(),
             ))
         }
         FilterChanges::Transactions(pending_txs)

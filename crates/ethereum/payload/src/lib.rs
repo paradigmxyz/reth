@@ -31,7 +31,7 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
-    Block, EthereumHardforks, Header, Receipt, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
+    Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
 use reth_provider::StateProviderFactory;
@@ -342,7 +342,7 @@ where
         }
 
         // convert tx to a signed transaction
-        let tx: TransactionSignedEcRecovered = pool_tx.as_ref().into();
+        let tx = pool_tx.to_recovered_transaction();
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block

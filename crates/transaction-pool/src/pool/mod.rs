@@ -85,8 +85,8 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    Address, BlobTransaction, BlobTransactionSidecar, PooledTransactionsElement, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, B256,
+    Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
+    PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -323,7 +323,7 @@ where
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let tx = Into::<TransactionSignedEcRecovered>::into(transaction.as_ref()).into_signed();
+            let tx = transaction.to_recovered_transaction().into_signed();
             let pooled = if tx.is_eip4844() {
                 // for EIP-4844 transactions, we need to fetch the blob sidecar from the blob store
                 if let Some(blob) = self.get_blob_transaction(tx) {
@@ -361,7 +361,7 @@ where
         tx_hash: TxHash,
     ) -> Option<PooledTransactionsElement> {
         self.get(&tx_hash).and_then(|transaction| {
-            let tx = Into::<TransactionSignedEcRecovered>::into(transaction.as_ref()).into_signed();
+            let tx = transaction.to_recovered_transaction().into_signed();
             if tx.is_eip4844() {
                 self.get_blob_transaction(tx).map(PooledTransactionsElement::BlobTransaction)
             } else {

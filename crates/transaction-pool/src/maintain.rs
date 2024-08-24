@@ -16,8 +16,8 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, PooledTransactionsElementEcRecovered,
-    TransactionSigned, TransactionSignedEcRecovered,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -611,7 +611,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| Into::<TransactionSignedEcRecovered>::into(tx.as_ref()).into_signed())
+        .map(|tx| tx.to_recovered_transaction().into_signed())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();

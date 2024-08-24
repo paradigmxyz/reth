@@ -14,8 +14,9 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockNumber, Header, Receipt, Requests, SealedBlockWithSenders, SealedHeader,
-    TransactionSignedEcRecovered, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, BlockNumber, Header, IntoRecoveredTransaction, Receipt, Requests,
+    SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered, B256,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -290,7 +291,7 @@ pub trait LoadPendingBlock: EthApiTypes {
             }
 
             // convert tx to a signed transaction
-            let tx: TransactionSignedEcRecovered = pool_tx.as_ref().into();
+            let tx = pool_tx.to_recovered_transaction();
 
             // There's only limited amount of blob space available per block, so we need to check if
             // the EIP-4844 can still fit in the block
