@@ -1709,6 +1709,10 @@ impl TransportRpcModules {
     /// Removes the method with the given name from the configured http methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
+    ///
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
     pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
         if let Some(http_module) = &mut self.http {
             http_module.remove_method(method_name).is_some()
@@ -1720,6 +1724,10 @@ impl TransportRpcModules {
     /// Removes the method with the given name from the configured ws methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
+    ///
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
     pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
         if let Some(ws_module) = &mut self.ws {
             ws_module.remove_method(method_name).is_some()
@@ -1731,6 +1739,10 @@ impl TransportRpcModules {
     /// Removes the method with the given name from the configured ipc methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
+    /// 
+    /// Be aware that a subscription consist of two methods, `subscribe` and `unsubscribe` and
+    /// it's the caller responsibility to remove both `subscribe` and `unsubscribe` methods for
+    /// subscriptions.
     pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
         if let Some(ipc_module) = &mut self.ipc {
             ipc_module.remove_method(method_name).is_some()
