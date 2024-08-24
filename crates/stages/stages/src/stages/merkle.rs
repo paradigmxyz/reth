@@ -370,11 +370,9 @@ mod tests {
     use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{
-            random_block, random_block_range, random_changeset_range, random_contract_account_range,
-        },
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_changeset_range,
+        random_contract_account_range, BlockParams,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
@@ -518,12 +516,12 @@ mod tests {
 
             let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
-                stage_progress,
-                preblocks.last().map(|b| b.hash()),
-                Some(0),
-                None,
-                None,
-                None,
+                BlockParams {
+                    number: stage_progress,
+                    parent: preblocks.last().map(|b| b.hash()),
+                    tx_count: Some(0),
+                    ..Default::default()
+                },
             );
             let mut header = header.unseal();
 

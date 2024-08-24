@@ -289,10 +289,7 @@ mod tests {
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, random_block_range},
-    };
+    use reth_testing_utils::generators::{self, random_block, random_block_range, BlockParams};
 
     use super::*;
     use crate::test_utils::{
@@ -321,12 +318,11 @@ mod tests {
             .map(|number| {
                 random_block(
                     &mut rng,
-                    number,
-                    None,
-                    Some((number == non_empty_block_number) as u8),
-                    None,
-                    None,
-                    None,
+                    BlockParams {
+                        number,
+                        tx_count: Some((number == non_empty_block_number) as u8),
+                        ..Default::default()
+                    },
                 )
             })
             .collect::<Vec<_>>();

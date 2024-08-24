@@ -20,6 +20,23 @@ use std::{
     ops::{Range, RangeInclusive},
 };
 
+/// Used to pass arguments for random block generation function in tests
+#[derive(Debug, Default)]
+pub struct BlockParams {
+    /// The block number.
+    pub number: u64,
+    /// The parent hash of the block.
+    pub parent: Option<B256>,
+    /// The number of transactions in the block.
+    pub tx_count: Option<u8>,
+    /// The number of ommers (uncles) in the block.
+    pub ommers_count: Option<u8>,
+    /// The number of requests in the block.
+    pub requests_count: Option<u8>,
+    /// The number of withdrawals in the block.
+    pub withdrawals_count: Option<u8>,
+}
+
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
 ///
 /// If `SEED` is not set, a random seed is used.
@@ -131,15 +148,14 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(
-    rng: &mut R,
-    number: u64,
-    parent: Option<B256>,
-    tx_count: Option<u8>,
-    ommers_count: Option<u8>,
-    requests_count: Option<u8>,
-    withdrawals_count: Option<u8>,
-) -> SealedBlock {
+pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlock {
+    let number = block_params.number;
+    let parent = block_params.parent;
+    let tx_count = block_params.tx_count;
+    let ommers_count = block_params.ommers_count;
+    let requests_count = block_params.requests_count;
+    let withdrawals_count = block_params.withdrawals_count;
+
     // Generate transactions
     let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> =
@@ -214,12 +230,16 @@ pub fn random_block_range<R: Rng>(
         let withdrawals_count = withdrawals_count.clone().map(|r| r.sample_single(rng));
         blocks.push(random_block(
             rng,
-            idx,
-            Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
-            Some(tx_count),
-            None,
-            requests_count,
-            withdrawals_count,
+            BlockParams {
+                number: idx,
+                parent: Some(
+                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head),
+                ),
+                tx_count: Some(tx_count),
+                ommers_count: None,
+                requests_count,
+                withdrawals_count,
+            },
         ));
     }
     blocks

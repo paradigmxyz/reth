@@ -12,7 +12,9 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
     try_payload_v1_to_block,
 };
-use reth_testing_utils::generators::{self, random_block, random_block_range, random_header, Rng};
+use reth_testing_utils::generators::{
+    self, random_block, random_block_range, random_header, BlockParams, Rng,
+};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -53,7 +55,16 @@ fn payload_body_roundtrip() {
 fn payload_validation() {
     let mut rng = generators::rng();
     let parent = rng.gen();
-    let block = random_block(&mut rng, 100, Some(parent), Some(3), Some(0), None, None);
+    let block = random_block(
+        &mut rng,
+        BlockParams {
+            number: 100,
+            parent: Some(parent),
+            tx_count: Some(3),
+            ommers_count: Some(0),
+            ..Default::default()
+        },
+    );
 
     // Valid extra data
     let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {

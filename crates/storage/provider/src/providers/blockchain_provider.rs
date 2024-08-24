@@ -1468,7 +1468,7 @@ mod tests {
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
-        random_receipt, random_signed_tx,
+        random_receipt, random_signed_tx, BlockParams,
     };
     use revm::db::BundleState;
 
@@ -1778,7 +1778,8 @@ mod tests {
 
         // Generate a random block
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None, None);
+        let block =
+            random_block(&mut rng, BlockParams { parent: Some(B256::ZERO), ..Default::default() });
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {

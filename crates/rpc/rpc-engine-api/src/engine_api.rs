@@ -1122,7 +1122,7 @@ mod tests {
     mod exchange_transition_configuration {
         use super::*;
         use reth_primitives::U256;
-        use reth_testing_utils::generators;
+        use reth_testing_utils::generators::{self, BlockParams};
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
@@ -1154,10 +1154,14 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let consensus_terminal_block =
-                random_block(&mut rng, terminal_block_number, None, None, None, None, None);
-            let execution_terminal_block =
-                random_block(&mut rng, terminal_block_number, None, None, None, None, None);
+            let consensus_terminal_block = random_block(
+                &mut rng,
+                BlockParams { number: terminal_block_number, ..Default::default() },
+            );
+            let execution_terminal_block = random_block(
+                &mut rng,
+                BlockParams { number: terminal_block_number, ..Default::default() },
+            );
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle
@@ -1200,12 +1204,7 @@ mod tests {
             let terminal_block_number = 1000;
             let terminal_block = random_block(
                 &mut generators::rng(),
-                terminal_block_number,
-                None,
-                None,
-                None,
-                None,
-                None,
+                BlockParams { number: terminal_block_number, ..Default::default() },
             );
 
             let transition_config = TransitionConfiguration {
