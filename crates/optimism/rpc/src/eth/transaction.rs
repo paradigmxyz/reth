@@ -6,13 +6,14 @@ use alloy_rpc_types::optimism::OptimismTransactionFields;
 use op_alloy_network::{Network, Optimism};
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, B256};
+use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, RawTransactionForwarder, TransactionCompat,
 };
 use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_types::TransactionInfo;
 use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
@@ -127,16 +128,10 @@ impl<Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResp
 {
     type Transaction = <Optimism as Network>::TransactionResponse;
 
-    fn fill(
-        tx: TransactionSignedEcRecovered,
-        block_hash: Option<B256>,
-        block_number: Option<BlockNumber>,
-        base_fee: Option<u64>,
-        transaction_index: Option<usize>,
-    ) -> Self::Transaction {
+    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
 
-        let mut resp = Eth::fill(tx, block_hash, block_number, base_fee, transaction_index);
+        let mut resp = Eth::fill(tx, tx_info);
 
         resp.other = OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),

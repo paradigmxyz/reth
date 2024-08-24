@@ -1,7 +1,6 @@
 //! Helper types for `reth_rpc_eth_api::EthApiServer` implementation.
 //!
 //! Transaction wrapper that labels transaction with its origin.
-
 use reth_primitives::{TransactionSignedEcRecovered, B256};
 use reth_rpc_types::TransactionInfo;
 use reth_rpc_types_compat::{
@@ -44,13 +43,15 @@ impl TransactionSource {
         match self {
             Self::Pool(tx) => from_recovered::<T>(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
-                from_recovered_with_block_context::<T>(
-                    transaction,
-                    block_hash,
-                    block_number,
-                    base_fee,
-                    index as usize,
-                )
+                let tx_info = TransactionInfo {
+                    hash: Some(transaction.hash()),
+                    index: Some(index),
+                    block_hash: Some(block_hash),
+                    block_number: Some(block_number),
+                    base_fee: base_fee.map(u128::from),
+                };
+
+                from_recovered_with_block_context::<T>(transaction, tx_info)
             }
         }
     }

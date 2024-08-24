@@ -9,8 +9,8 @@ mod typed;
 use std::fmt;
 
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use reth_primitives::{BlockNumber, TransactionSigned, TransactionSignedEcRecovered, TxType, B256};
-use reth_rpc_types::{Transaction, WithOtherFields};
+use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
+use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.
@@ -19,18 +19,15 @@ use reth_rpc_types::{Transaction, WithOtherFields};
 /// transaction was mined.
 pub fn from_recovered_with_block_context<T: TransactionCompat>(
     tx: TransactionSignedEcRecovered,
-    block_hash: B256,
-    block_number: BlockNumber,
-    base_fee: Option<u64>,
-    tx_index: usize,
+    tx_info: TransactionInfo,
 ) -> T::Transaction {
-    T::fill(tx, Some(block_hash), Some(block_number), base_fee, Some(tx_index))
+    T::fill(tx, tx_info)
 }
 
 /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
 /// environment related fields to `None`.
 pub fn from_recovered<T: TransactionCompat>(tx: TransactionSignedEcRecovered) -> T::Transaction {
-    T::fill(tx, None, None, None, None)
+    T::fill(tx, TransactionInfo::default())
 }
 
 /// Builds RPC transaction w.r.t. network.
@@ -66,13 +63,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill(
-        tx: TransactionSignedEcRecovered,
-        block_hash: Option<B256>,
-        block_number: Option<BlockNumber>,
-        base_fee: Option<u64>,
-        transaction_index: Option<usize>,
-    ) -> Self::Transaction;
+    fn fill(tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
 }
 
 impl TransactionCompat for () {
@@ -80,13 +71,7 @@ impl TransactionCompat for () {
     // `alloy_network::AnyNetwork`
     type Transaction = WithOtherFields<Transaction>;
 
-    fn fill(
-        _tx: TransactionSignedEcRecovered,
-        _block_hash: Option<B256>,
-        _block_number: Option<BlockNumber>,
-        _base_fee: Option<u64>,
-        _transaction_index: Option<usize>,
-    ) -> Self::Transaction {
+    fn fill(_tx: TransactionSignedEcRecovered, _tx_info: TransactionInfo) -> Self::Transaction {
         WithOtherFields::default()
     }
 }

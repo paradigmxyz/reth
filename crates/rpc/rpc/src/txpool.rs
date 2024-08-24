@@ -40,13 +40,13 @@ where
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
         ) where
-            Tx: PoolTransaction,
+            Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
             Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
         {
             content
                 .entry(tx.sender())
                 .or_default()
-                .insert(tx.nonce().to_string(), from_recovered::<Eth>(tx.clone().into()));
+                .insert(tx.nonce().to_string(), from_recovered::<Eth>(tx.clone().into_consensus()));
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
@@ -90,12 +90,12 @@ where
         trace!(target: "rpc::eth", "Serving txpool_inspect");
 
         #[inline]
-        fn insert<T: PoolTransaction>(
+        fn insert<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
             tx: &T,
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let tx: TransactionSignedEcRecovered = tx.clone().into();
+            let tx = tx.clone().into_consensus();
             entry.insert(
                 tx.nonce().to_string(),
                 TxpoolInspectSummary {

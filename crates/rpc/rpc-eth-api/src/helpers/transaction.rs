@@ -19,7 +19,7 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionCompat};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -207,12 +207,16 @@ pub trait EthTransactions: LoadTransaction {
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
+                    let tx_info = TransactionInfo {
+                        hash: Some(tx.hash()),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        base_fee: base_fee_per_gas.map(u128::from),
+                        index: Some(index as u64),
+                    };
+
                     return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
-                        tx,
-                        block_hash,
-                        block_number,
-                        base_fee_per_gas,
-                        index,
+                        tx, tx_info,
                     )))
                 }
             }
@@ -609,7 +613,9 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
+                if let Some(tx) =
+                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
+                {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }

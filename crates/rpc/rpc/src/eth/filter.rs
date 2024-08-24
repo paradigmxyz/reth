@@ -13,7 +13,7 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
@@ -591,7 +591,10 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<Eth::Transaction> {
+    async fn drain(&self) -> FilterChanges<Eth::Transaction>
+    where
+        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+    {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -611,7 +614,7 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 #[async_trait]
 impl<T, Eth> FullTransactionsFilter<Eth::Transaction> for FullTransactionsReceiver<T, Eth>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
     Eth: TransactionCompat + 'static,
 {
     async fn drain(&self) -> FilterChanges<Eth::Transaction> {
