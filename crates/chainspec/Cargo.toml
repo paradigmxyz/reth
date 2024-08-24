@@ -34,6 +34,7 @@ once_cell.workspace = true
 serde = { workspace = true, optional = true }
 serde_json.workspace = true
 derive_more.workspace = true
+dyn-clone = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
@@ -51,6 +52,7 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "serde",
     "dep:op-alloy-rpc-types",
+    "dep:dyn-clone",
 ]
 std = []
 arbitrary = [

@@ -405,7 +405,7 @@ impl EthereumHardfork {
         (Self::Cancun, ForkCondition::Timestamp(1707305664)),
     ];
 
-    /// Returns hardforks for given chain.
+    /// Returns the hardforks for the given chain, if recognized.
     pub fn hardforks(chain: Chain) -> &'static [(Self, ForkCondition)] {
         if chain == Chain::mainnet() {
             return &Self::MAINNET
@@ -417,7 +417,7 @@ impl EthereumHardfork {
             return &Self::HOLESKY
         }
 
-        panic!("l1 chain list should be exhaustive")
+        &[]
     }
 }
 
@@ -432,6 +432,10 @@ impl<const N: usize> From<[(EthereumHardfork, ForkCondition); N]> for ChainHardf
 }
 
 impl ConfigureHardforks for EthereumHardfork {
+    fn super_chain_mainnet_hardforks() -> impl Iterator<Item = (Self, ForkCondition)> {
+        Self::hardforks(Chain::mainnet()).iter().copied()
+    }
+
     fn init_block_hardforks(
         config: &ChainConfig,
     ) -> impl IntoIterator<Item = (Self, ForkCondition)> {

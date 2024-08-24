@@ -6536,6 +6536,7 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "derive_more 1.0.0",
+ "dyn-clone",
  "once_cell",
  "op-alloy-rpc-types",
  "reth-ethereum-forks",
