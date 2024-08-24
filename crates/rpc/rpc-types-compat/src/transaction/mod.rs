@@ -12,7 +12,7 @@ pub use typed::*;
 mod signature;
 mod typed;
 
-/// Create a new rpc transaction result for a mined transaction, using the given transaction info
+/// Create a new rpc transaction result for a mined transaction, using the given [`TransactionInfo`]
 /// to populate the corresponding fields in the rpc result.
 pub fn from_recovered_with_block_context(
     tx: TransactionSignedEcRecovered,
