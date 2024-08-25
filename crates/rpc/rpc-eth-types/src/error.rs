@@ -236,7 +236,11 @@ where
 {
     fn from(err: EVMError<T>) -> Self {
         match err {
-            EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
+            
+            EVMError::Transaction(_) => EthApiError::InvalidTransaction(
+                RpcInvalidTransactionError::NonceTooLow { tx: 0, state: 0 }
+            ),
+
             EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
@@ -264,7 +268,12 @@ where
 pub enum RpcInvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
     #[error("nonce too low")]
-    NonceTooLow,
+    NonceTooLow {
+         /// The nonce of the transaction.
+        tx: u64,
+        /// The current state of the nonce in the local chain.
+        state: u64,
+    },
     /// returned if the nonce of a transaction is higher than the next one expected based on the
     /// local chain.
     #[error("nonce too high")]
@@ -456,7 +465,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
             InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
             InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
-            InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
+            InvalidTransaction::NonceTooLow { tx, state } => Self::NonceTooLow { tx, state},
             InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
             InvalidTransaction::MaxFeePerBlobGasNotSupported => Self::MaxFeePerBlobGasNotSupported,
             InvalidTransaction::BlobVersionedHashesNotSupported => {
@@ -494,7 +503,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
             InvalidTransactionError::InsufficientFunds { .. } => Self::InsufficientFunds,
-            InvalidTransactionError::NonceNotConsistent => Self::NonceTooLow,
+            InvalidTransactionError::NonceNotConsistent => Self::NonceTooLow { tx: 0, state: 0},
             InvalidTransactionError::OldLegacyChainId => {
                 // Note: this should be unreachable since Spurious Dragon now enabled
                 Self::OldLegacyChainId
