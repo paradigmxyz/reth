@@ -8,7 +8,7 @@ use reth_chainspec::ChainSpec;
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 use reth_fs_util as fs;
 #[cfg(feature = "optimism")]
-use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
