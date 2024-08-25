@@ -267,7 +267,7 @@ where
 #[derive(thiserror::Error, Debug)]
 pub enum RpcInvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
-    #[error("nonce too low")]
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
     NonceTooLow {
          /// The nonce of the transaction.
         tx: u64,
