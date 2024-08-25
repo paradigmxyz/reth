@@ -5,6 +5,20 @@ use reth_primitives::{Address, BlockNumber, ChainId, B256};
 use reth_rpc_types::{BlockId, BlockNumberOrTag};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::IpAddr};
+use op_alloy_rpc_types::sync::{
+    L2BlockRef,L1BlockRef,SyncStatus,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputResponse {
+    pub version: B256,
+    pub output_root: B256,
+    pub block_ref: L2BlockRef,
+    pub withdrawal_storage_root: B256,
+    pub state_root: B256,
+    pub sync_status: SyncStatus,
+}
 
 // https://github.com/ethereum-optimism/optimism/blob/c7ad0ebae5dca3bf8aa6f219367a95c15a15ae41/op-service/eth/types.go#L371
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

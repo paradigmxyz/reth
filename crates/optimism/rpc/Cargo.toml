@@ -11,6 +11,9 @@ description = "Ethereum RPC implementation for optimism."
 [lints]
 workspace = true
 
+# op
+op-alloy-rpc-types = { workspace = true, optional = true }
+
 [dependencies]
 # reth
 reth-evm-optimism.workspace = true
