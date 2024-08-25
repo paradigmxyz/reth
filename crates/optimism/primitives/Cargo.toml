@@ -8,5 +8,20 @@ homepage.workspace = true
 repository.workspace = true
 description = "OP primitive types"
 
+# reth
+reth-chainspec = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-chainspec.workspace = true
+
+[features]
+arbitrary = [
+    "reth-chainspec?/arbitrary",
+]
+
+optimism = [
+    "reth-chainspec/optimism",
+]
+
 [lints]
 workspace = true
