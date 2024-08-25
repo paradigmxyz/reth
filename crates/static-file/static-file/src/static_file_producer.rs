@@ -265,10 +265,7 @@ mod tests {
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
-    };
+    use reth_testing_utils::generators::{self, random_block_range, random_receipt, BlockParams};
     use std::{
         sync::{mpsc::channel, Arc},
         time::Duration,
@@ -279,7 +276,11 @@ mod tests {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=3,
+            BlockParams { parent: Some(B256::ZERO), tx_count: Some(2..3), ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works

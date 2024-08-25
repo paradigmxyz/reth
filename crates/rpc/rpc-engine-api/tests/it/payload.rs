@@ -2,9 +2,7 @@
 
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_primitives::{
-    proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
-};
+use reth_primitives::{proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, U256};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
@@ -34,7 +32,11 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
 #[test]
 fn payload_body_roundtrip() {
     let mut rng = generators::rng();
-    for block in random_block_range(&mut rng, 0..=99, B256::default(), 0..2, None, None) {
+    for block in random_block_range(
+        &mut rng,
+        0..=99,
+        BlockParams { tx_count: Some(0..2), ..Default::default() },
+    ) {
         let unsealed = block.clone().unseal();
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
@@ -60,7 +62,7 @@ fn payload_validation() {
         BlockParams {
             number: 100,
             parent: Some(parent),
-            tx_count: Some(3),
+            tx_count: Some(0..2),
             ommers_count: Some(0),
             ..Default::default()
         },

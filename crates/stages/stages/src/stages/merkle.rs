@@ -497,10 +497,11 @@ mod tests {
                 preblocks.append(&mut random_block_range(
                     &mut rng,
                     0..=stage_progress - 1,
-                    B256::ZERO,
-                    0..1,
-                    None,
-                    None,
+                    BlockParams {
+                        parent: Some(B256::ZERO),
+                        tx_count: Some(0..1),
+                        ..Default::default()
+                    },
                 ));
                 self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
@@ -519,7 +520,6 @@ mod tests {
                 BlockParams {
                     number: stage_progress,
                     parent: preblocks.last().map(|b| b.hash()),
-                    tx_count: Some(0),
                     ..Default::default()
                 },
             );
@@ -536,7 +536,11 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3, None, None));
+            blocks.extend(random_block_range(
+                &mut rng,
+                start..=end,
+                BlockParams { parent: Some(head_hash), tx_count: Some(0..3), ..Default::default() },
+            ));
             let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 

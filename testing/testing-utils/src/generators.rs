@@ -28,13 +28,13 @@ pub struct BlockParams {
     /// The parent hash of the block.
     pub parent: Option<B256>,
     /// The number of transactions in the block.
-    pub tx_count: Option<u8>,
+    pub tx_count: Option<Range<u8>>,
     /// The number of ommers (uncles) in the block.
     pub ommers_count: Option<u8>,
     /// The number of requests in the block.
-    pub requests_count: Option<u8>,
+    pub requests_count: Option<Range<u8>>,
     /// The number of withdrawals in the block.
-    pub withdrawals_count: Option<u8>,
+    pub withdrawals_count: Option<Range<u8>>,
 }
 
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
@@ -149,34 +149,28 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 ///
 /// The ommer headers are not assumed to be valid.
 pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlock {
-    let number = block_params.number;
-    let parent = block_params.parent;
-    let tx_count = block_params.tx_count;
-    let ommers_count = block_params.ommers_count;
-    let requests_count = block_params.requests_count;
-    let withdrawals_count = block_params.withdrawals_count;
-
     // Generate transactions
-    let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
-    let transactions: Vec<TransactionSigned> =
-        (0..tx_count).map(|_| random_signed_tx(rng)).collect();
+    let tx_count = block_params.tx_count;
+    let tx_count = tx_count.unwrap_or_else(|| (0..rng.gen::<u8>()));
+    let transactions: Vec<TransactionSigned> = tx_count.map(|_| random_signed_tx(rng)).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
-    let ommers_count = ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
+    let number = block_params.number;
+    let parent = block_params.parent;
+    let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
     let ommers =
         (0..ommers_count).map(|_| random_header(rng, number, parent).unseal()).collect::<Vec<_>>();
 
-    // Calculate roots
-    let transactions_root = proofs::calculate_transaction_root(&transactions);
-    let ommers_hash = proofs::calculate_ommers_root(&ommers);
-
-    let requests =
-        requests_count.map(|count| (0..count).map(|_| random_request(rng)).collect::<Vec<_>>());
+    // Generate requests
+    let requests = block_params
+        .requests_count
+        .map(|count| count.map(|_| random_request(rng)).collect::<Vec<_>>());
     let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
 
-    let withdrawals = withdrawals_count.map(|count| {
-        (0..count)
+    // Generate withdrawals
+    let withdrawals = block_params.withdrawals_count.map(|count| {
+        count
             .map(|i| Withdrawal {
                 amount: rng.gen(),
                 index: i.into(),
@@ -185,6 +179,10 @@ pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlo
             })
             .collect::<Vec<_>>()
     });
+
+    // Calculate roots
+    let transactions_root = proofs::calculate_transaction_root(&transactions);
+    let ommers_hash = proofs::calculate_ommers_root(&ommers);
     let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
     SealedBlock {
@@ -217,28 +215,25 @@ pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlo
 pub fn random_block_range<R: Rng>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
-    head: B256,
-    tx_count: Range<u8>,
-    requests_count: Option<Range<u8>>,
-    withdrawals_count: Option<Range<u8>>,
+    block_params: BlockParams,
 ) -> Vec<SealedBlock> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
-        let tx_count = tx_count.clone().sample_single(rng);
-        let requests_count = requests_count.clone().map(|r| r.sample_single(rng));
-        let withdrawals_count = withdrawals_count.clone().map(|r| r.sample_single(rng));
         blocks.push(random_block(
             rng,
             BlockParams {
                 number: idx,
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head),
+                    blocks
+                        .last()
+                        .map(|block: &SealedBlock| block.header.hash())
+                        .unwrap_or_else(|| block_params.parent.unwrap_or_default()),
                 ),
-                tx_count: Some(tx_count),
+                tx_count: block_params.tx_count.clone(),
                 ommers_count: None,
-                requests_count,
-                withdrawals_count,
+                requests_count: block_params.requests_count.clone(),
+                withdrawals_count: block_params.withdrawals_count.clone(),
             },
         ));
     }

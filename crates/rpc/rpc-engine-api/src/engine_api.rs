@@ -925,7 +925,7 @@ mod tests {
 
     use reth_chainspec::MAINNET;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{SealedBlock, B256};
+    use reth_primitives::SealedBlock;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
@@ -995,7 +995,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use reth_testing_utils::{generators, generators::random_block_range};
+        use reth_testing_utils::generators::{self, random_block_range, BlockParams};
 
         #[tokio::test]
         async fn invalid_params() {
@@ -1033,10 +1033,7 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=start + count - 1,
-                B256::default(),
-                0..2,
-                None,
-                None,
+                BlockParams { tx_count: Some(0..2), ..Default::default() },
             );
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
@@ -1059,10 +1056,7 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 start..=start + count - 1,
-                B256::default(),
-                0..2,
-                None,
-                None,
+                BlockParams { tx_count: Some(0..2), ..Default::default() },
             );
 
             // Insert only blocks in ranges 1-25 and 50-75

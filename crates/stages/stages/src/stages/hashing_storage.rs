@@ -223,9 +223,8 @@ mod tests {
     };
     use reth_primitives::{Address, SealedBlock, U256};
     use reth_provider::providers::StaticFileWriter;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_contract_account_range},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_contract_account_range, BlockParams,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -341,8 +340,15 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks =
-                random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3, None, None);
+            let blocks = random_block_range(
+                &mut rng,
+                stage_progress..=end,
+                BlockParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: Some(0..3),
+                    ..Default::default()
+                },
+            );
 
             self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
 

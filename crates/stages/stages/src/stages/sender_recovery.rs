@@ -320,7 +320,7 @@ mod tests {
                     &mut rng,
                     BlockParams {
                         number,
-                        tx_count: Some((number == non_empty_block_number) as u8),
+                        tx_count: Some(0..(number == non_empty_block_number) as u8),
                         ..Default::default()
                     },
                 )
@@ -364,10 +364,7 @@ mod tests {
         let seed = random_block_range(
             &mut rng,
             stage_progress + 1..=previous_stage,
-            B256::ZERO,
-            0..4,
-            None,
-            None,
+            BlockParams { parent: Some(B256::ZERO), tx_count: Some(0..4), ..Default::default() },
         ); // set tx count range high enough to hit the threshold
         runner
             .db
@@ -438,7 +435,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=100,
+            BlockParams { parent: Some(B256::ZERO), tx_count: Some(0..10), ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -551,8 +552,15 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks =
-                random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2, None, None);
+            let blocks = random_block_range(
+                &mut rng,
+                stage_progress..=end,
+                BlockParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: Some(0..2),
+                    ..Default::default()
+                },
+            );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
