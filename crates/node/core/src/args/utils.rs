@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
-use reth_chainspec::{ChainSpec, DEV};
+use reth_chainspec::ChainSpec;
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 use reth_fs_util as fs;
@@ -26,43 +26,53 @@ pub fn chain_help() -> String {
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
+#[cfg(not(feature = "optimism"))]
 pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
-        #[cfg(not(feature = "optimism"))]
         "sepolia" => SEPOLIA.clone(),
-        #[cfg(not(feature = "optimism"))]
         "holesky" => HOLESKY.clone(),
-        "dev" => DEV.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism" => OP_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
-        "base" => BASE_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        _ => {
-            // try to read json from path first
-            let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                Ok(raw) => raw,
-                Err(io_err) => {
-                    // valid json may start with "\n", but must contain "{"
-                    if s.contains('{') {
-                        s.to_string()
-                    } else {
-                        return Err(io_err.into()) // assume invalid path
-                    }
-                }
-            };
-
-            // both serialized Genesis and ChainSpec structs supported
-            let genesis: Genesis = serde_json::from_str(&raw)?;
-
-            Arc::new(genesis.into())
-        }
+        "dev" => reth_chainspec::DEV.clone(),
+        _ => Arc::new(parse_custom_chain_spec(s)?),
     })
+}
+
+/// Clap value parser for [`OpChainSpec`](reth_optimism_chainspec::OpChainSpec)s.
+///
+/// The value parser matches either a known chain, the path
+/// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
+#[cfg(feature = "optimism")]
+pub fn chain_value_parser(
+    s: &str,
+) -> eyre::Result<Arc<reth_optimism_chainspec::OpChainSpec>, eyre::Error> {
+    Ok(match s {
+        "optimism" => OP_MAINNET.clone(),
+        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
+        "base" => BASE_MAINNET.clone(),
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
+        _ => Arc::new(reth_optimism_chainspec::OpChainSpec { inner: parse_custom_chain_spec(s)? }),
+    })
+}
+
+/// Parses a custom [`ChainSpec`].
+pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> {
+    // try to read json from path first
+    let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
+        Ok(raw) => raw,
+        Err(io_err) => {
+            // valid json may start with "\n", but must contain "{"
+            if s.contains('{') {
+                s.to_string()
+            } else {
+                return Err(io_err.into()) // assume invalid path
+            }
+        }
+    };
+
+    // both serialized Genesis and ChainSpec structs supported
+    let genesis: Genesis = serde_json::from_str(&raw)?;
+
+    Ok(genesis.into())
 }
 
 #[cfg(test)]

@@ -40,7 +40,7 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
 #[derive(Debug, Clone, Default)]
 pub struct EthChainSpecParser;
 
-impl ChainSpecParser for EthChainSpecParser {
+impl ChainSpecParser<ChainSpec> for EthChainSpecParser {
     const SUPPORTED_CHAINS: &'static [&'static str] = &["mainnet", "sepolia", "holesky", "dev"];
 
     fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
@@ -59,7 +59,7 @@ impl TypedValueParser for EthChainSpecParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser>::parse(val).map_err(|err| {
+        <Self as ChainSpecParser<ChainSpec>>::parse(val).map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = Self::SUPPORTED_CHAINS.join(",");
             let msg = format!(
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn parse_known_chain_spec() {
         for &chain in EthChainSpecParser::SUPPORTED_CHAINS {
-            assert!(<EthChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
+            assert!(<EthChainSpecParser as ChainSpecParser<ChainSpec>>::parse(chain).is_ok());
         }
     }
 }
