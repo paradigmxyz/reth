@@ -41,9 +41,9 @@ use tracing::trace;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[derive(Debug)]
-pub struct BlockchainProvider2<DB> {
+pub struct BlockchainProvider2<DB, Spec = ChainSpec> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    database: ProviderFactory<DB, Spec>,
     /// Tracks the chain info wrt forkchoice updates and in memory canonical
     /// state.
     pub(super) canonical_in_memory_state: CanonicalInMemoryState,
@@ -126,6 +126,53 @@ where
         (start, end)
     }
 
+    /// Fetches a range of data from both in-memory state and storage.
+    ///
+    /// - `fetch_db_range`: Retrieves a range of items from the database.
+    /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
+    ///   is returned.
+    fn fetch_db_mem_range<T, F, G, P>(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        fetch_db_range: F,
+        map_block_state_item: G,
+        mut predicate: P,
+    ) -> ProviderResult<Vec<T>>
+    where
+        F: FnOnce(RangeInclusive<BlockNumber>, &mut P) -> ProviderResult<Vec<T>>,
+        G: Fn(BlockNumber, &mut P) -> Option<T>,
+        P: FnMut(&T) -> bool,
+    {
+        let (start, end) = self.convert_range_bounds(range, || {
+            self.canonical_in_memory_state.get_canonical_block_number()
+        });
+        let mut range = start..=end;
+        let mut items = Vec::with_capacity((end - start + 1) as usize);
+
+        // First, fetch the items from the database
+        let mut db_items = fetch_db_range(range.clone(), &mut predicate)?;
+
+        if !db_items.is_empty() {
+            items.append(&mut db_items);
+
+            // Advance the range iterator by the number of items fetched from the database
+            range.nth(items.len() - 1);
+        }
+
+        // Fetch the remaining items from the in-memory state
+        for num in range {
+            // TODO: there might be an update between loop iterations, we
+            // need to handle that situation.
+            if let Some(item) = map_block_state_item(num, &mut predicate) {
+                items.push(item);
+            } else {
+                break;
+            }
+        }
+
+        Ok(items)
+    }
+
     /// This uses a given [`BlockState`] to initialize a state provider for that block.
     fn block_state_provider(
         &self,
@@ -165,7 +212,7 @@ where
             let Some(body_index) = provider.block_body_indices(block_number)? else {
                 return Ok(None)
             };
-            let tx_index = id - body_index.last_tx_num();
+            let tx_index = body_index.last_tx_num() - id;
             Ok(Some((None, tx_index as usize)))
         } else {
             // Otherwise, iterate through in-memory blocks and find the transaction with the
@@ -285,32 +332,16 @@ where
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
-        let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
-        });
-        let mut range = start..=end;
-        let mut headers = Vec::with_capacity((end - start + 1) as usize);
-
-        // First, fetch the headers from the database
-        let mut db_headers = self.database.headers_range(range.clone())?;
-
-        // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
-
-        headers.append(&mut db_headers);
-
-        // Fetch the remaining headers from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                headers.push(block_state.block().block().header.header().clone());
-            } else {
-                break
-            }
-        }
-
-        Ok(headers)
+        self.fetch_db_mem_range(
+            range,
+            |range, _| self.database.headers_range(range),
+            |num, _| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().header.header().clone())
+            },
+            |_| true,
+        )
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
@@ -325,69 +356,34 @@ where
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
-        });
-        let mut range = start..=end;
-        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
-
-        // First, fetch the headers from the database
-        let mut db_headers = self.database.sealed_headers_range(range.clone())?;
-
-        // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
-
-        sealed_headers.append(&mut db_headers);
-
-        // Fetch the remaining headers from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                sealed_headers.push(block_state.block().block().header.clone());
-            } else {
-                break
-            }
-        }
-
-        Ok(sealed_headers)
+        self.fetch_db_mem_range(
+            range,
+            |range, _| self.database.sealed_headers_range(range),
+            |num, _| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().header.clone())
+            },
+            |_| true,
+        )
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        mut predicate: impl FnMut(&SealedHeader) -> bool,
+        predicate: impl FnMut(&SealedHeader) -> bool,
     ) -> ProviderResult<Vec<SealedHeader>> {
-        let (start, end) = self.convert_range_bounds(range, || {
-            self.canonical_in_memory_state.get_canonical_block_number()
-        });
-        let mut range = start..=end;
-        let mut sealed_headers = Vec::with_capacity((end - start + 1) as usize);
-
-        // First, fetch the headers from the database
-        let mut db_headers = self.database.sealed_headers_while(range.clone(), &mut predicate)?;
-
-        // Advance the range iterator by the number of headers fetched from the database
-        range.nth(db_headers.len() - 1);
-
-        sealed_headers.append(&mut db_headers);
-
-        // Fetch the remaining headers from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                let header = block_state.block().block().header.clone();
-                if !predicate(&header) {
-                    break
-                }
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                sealed_headers.push(header);
-            } else {
-                break
-            }
-        }
-
-        Ok(sealed_headers)
+        self.fetch_db_mem_range(
+            range,
+            |range, predicate| self.database.sealed_headers_while(range, predicate),
+            |num, predicate| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().header.clone())
+                    .filter(|header| predicate(header))
+            },
+            predicate,
+        )
     }
 }
 
@@ -408,30 +404,16 @@ where
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        let mut range = start..=end;
-
-        let mut hashes = Vec::with_capacity((end - start + 1) as usize);
-
-        // First, fetch the hashes from the database
-        let mut db_hashes = self.database.canonical_hashes_range(start, end)?;
-
-        // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(db_hashes.len() - 1);
-
-        hashes.append(&mut db_hashes);
-
-        // Fetch the remaining blocks from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                hashes.push(block_state.hash());
-            } else {
-                break
-            }
-        }
-
-        Ok(hashes)
+        self.fetch_db_mem_range(
+            start..=end,
+            |range, _| self.database.canonical_hashes_range(*range.start(), *range.end()),
+            |num, _| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.hash())
+            },
+            |_| true,
+        )
     }
 }
 
@@ -629,89 +611,53 @@ where
         self.database.sealed_block_with_senders(id, transaction_kind)
     }
 
-    fn block_range(&self, mut range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        let capacity = (range.end() - range.start() + 1) as usize;
-        let mut blocks = Vec::with_capacity(capacity);
-
-        // First, fetch the blocks from the database
-        let mut database_blocks = self.database.block_range(range.clone())?;
-        blocks.append(&mut database_blocks);
-
-        // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(blocks.len() - 1);
-
-        // Fetch the remaining blocks from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                blocks.push(block_state.block().block().clone().unseal());
-            } else {
-                break
-            }
-        }
-
-        Ok(blocks)
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+        self.fetch_db_mem_range(
+            range,
+            |range, _| self.database.block_range(range),
+            |num, _| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().clone().unseal())
+            },
+            |_| true,
+        )
     }
 
     fn block_with_senders_range(
         &self,
-        mut range: RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        let capacity = (range.end() - range.start() + 1) as usize;
-        let mut blocks = Vec::with_capacity(capacity);
-
-        // First, fetch the blocks from the database
-        let mut database_blocks = self.database.block_with_senders_range(range.clone())?;
-        blocks.append(&mut database_blocks);
-
-        // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(database_blocks.len() - 1);
-
-        // Fetch the remaining blocks from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                blocks.push(BlockWithSenders { block: block.unseal(), senders });
-            } else {
-                break
-            }
-        }
-
-        Ok(blocks)
+        self.fetch_db_mem_range(
+            range,
+            |range, _| self.database.block_with_senders_range(range),
+            |num, _| {
+                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
+                    let block = block_state.block().block().clone();
+                    let senders = block_state.block().senders().clone();
+                    BlockWithSenders { block: block.unseal(), senders }
+                })
+            },
+            |_| true,
+        )
     }
 
     fn sealed_block_with_senders_range(
         &self,
-        mut range: RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        let capacity = (range.end() - range.start() + 1) as usize;
-        let mut blocks = Vec::with_capacity(capacity);
-
-        // First, fetch the blocks from the database
-        let mut database_blocks = self.database.sealed_block_with_senders_range(range.clone())?;
-        blocks.append(&mut database_blocks);
-
-        // Advance the range iterator by the number of blocks fetched from the database
-        range.nth(database_blocks.len() - 1);
-
-        // Fetch the remaining blocks from the in-memory state
-        for num in range {
-            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(num) {
-                let block = block_state.block().block().clone();
-                let senders = block_state.block().senders().clone();
-                // TODO: there might be an update between loop iterations, we
-                // need to handle that situation.
-                blocks.push(SealedBlockWithSenders { block, senders });
-            } else {
-                break
-            }
-        }
-
-        Ok(blocks)
+        self.fetch_db_mem_range(
+            range,
+            |range, _| self.database.sealed_block_with_senders_range(range),
+            |num, _| {
+                self.canonical_in_memory_state.state_by_number(num).map(|block_state| {
+                    let block = block_state.block().block().clone();
+                    let senders = block_state.block().senders().clone();
+                    SealedBlockWithSenders { block, senders }
+                })
+            },
+            |_| true,
+        )
     }
 }
 
@@ -1173,6 +1119,8 @@ impl<DB> ChainSpecProvider for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.database.chain_spec()
     }
@@ -1487,34 +1435,38 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Range, sync::Arc};
-
-    use itertools::Itertools;
-    use rand::Rng;
-    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_chainspec::{
-        ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
-    };
-    use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
-    use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{
-        BlockHashOrNumber, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment, B256,
-    };
-    use reth_storage_api::{
-        BlockHashReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
-    };
-    use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
-        random_receipt,
-    };
-    use revm::db::BundleState;
+    use std::{ops::Range, sync::Arc, time::Instant};
 
     use crate::{
         providers::BlockchainProvider2,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
         BlockWriter, CanonChainTracker, StaticFileWriter,
     };
+    use itertools::Itertools;
+    use rand::Rng;
+    use reth_chain_state::{
+        test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
+        ExecutedBlock, NewCanonicalChain,
+    };
+    use reth_chainspec::{
+        ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
+    };
+    use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
+    use reth_execution_types::{Chain, ExecutionOutcome};
+    use reth_primitives::{
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
+        Withdrawals, B256,
+    };
+    use reth_storage_api::{
+        BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
+        ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
+        WithdrawalsProvider,
+    };
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
+        random_receipt,
+    };
+    use revm::db::BundleState;
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -1523,9 +1475,17 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> (Vec<SealedBlock>, Vec<SealedBlock>) {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
-        let blocks = random_block_range(rng, 0..=block_range, B256::ZERO, 0..1, requests_count);
+        let blocks = random_block_range(
+            rng,
+            0..=block_range,
+            B256::ZERO,
+            0..1,
+            requests_count,
+            withdrawals_count,
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
@@ -1537,14 +1497,20 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
     )> {
-        let (database_blocks, in_memory_blocks) =
-            random_blocks(rng, database_blocks, in_memory_blocks, requests_count);
+        let (database_blocks, in_memory_blocks) = random_blocks(
+            rng,
+            database_blocks,
+            in_memory_blocks,
+            requests_count,
+            withdrawals_count,
+        );
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
@@ -1616,6 +1582,7 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
+        withdrawals_count: Option<Range<u8>>,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
@@ -1628,6 +1595,7 @@ mod tests {
             database_blocks,
             in_memory_blocks,
             requests_count,
+            withdrawals_count,
         )
     }
 
@@ -1638,7 +1606,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None);
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1732,7 +1700,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None);
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1796,12 +1764,17 @@ mod tests {
     #[test]
     fn test_block_reader_pending_block() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         // Generate a random block
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None);
+        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None, None);
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
@@ -1832,8 +1805,13 @@ mod tests {
     fn test_block_reader_ommers() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
 
@@ -1864,8 +1842,13 @@ mod tests {
     #[test]
     fn test_block_hash_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1888,8 +1871,13 @@ mod tests {
     #[test]
     fn test_header_provider() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -1950,11 +1938,114 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_canon_state_subscriptions() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+
+        // Generate a random block to initialise the blockchain provider.
+        let mut test_block_builder = TestBlockBuilder::default();
+        let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
+        let block_hash_1 = block_1.hash();
+
+        // Insert and commit the block.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_historical_block(block_1)?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Subscribe twice for canonical state updates.
+        let in_memory_state = provider.canonical_in_memory_state();
+        let mut rx_1 = provider.subscribe_to_canonical_state();
+        let mut rx_2 = provider.subscribe_to_canonical_state();
+
+        // Send and receive commit notifications.
+        let block_2 = test_block_builder.generate_random_block(1, block_hash_1);
+        let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), None);
+        let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
+        in_memory_state.notify_canon_state(commit.clone());
+        let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
+        assert_eq!(notification_1, Ok(commit.clone()));
+        assert_eq!(notification_2, Ok(commit.clone()));
+
+        // Send and receive re-org notifications.
+        let block_3 = test_block_builder.generate_random_block(1, block_hash_1);
+        let block_4 = test_block_builder.generate_random_block(2, block_3.hash());
+        let new_chain = Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), None);
+        let re_org =
+            CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };
+        in_memory_state.notify_canon_state(re_org.clone());
+        let (notification_1, notification_2) = tokio::join!(rx_1.recv(), rx_2.recv());
+        assert_eq!(notification_1, Ok(re_org.clone()));
+        assert_eq!(notification_2, Ok(re_org.clone()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_withdrawals_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+        let (provider, database_blocks, in_memory_blocks, _) =
+            provider_with_chain_spec_and_random_blocks(
+                &mut rng,
+                chain_spec.clone(),
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT,
+                None,
+                Some(1..3),
+            )?;
+        let blocks = [database_blocks, in_memory_blocks].concat();
+
+        let shainghai_timestamp =
+            chain_spec.hardforks.fork(EthereumHardfork::Shanghai).as_timestamp().unwrap();
+
+        assert_eq!(
+            provider
+                .withdrawals_by_block(
+                    reth_primitives::BlockHashOrNumber::Number(15),
+                    shainghai_timestamp
+                )
+                .expect("could not call withdrawals by block"),
+            Some(Withdrawals::new(vec![])),
+            "Expected withdrawals_by_block to return empty list if block does not exist"
+        );
+
+        for block in blocks.clone() {
+            assert_eq!(
+                provider
+                    .withdrawals_by_block(
+                        reth_primitives::BlockHashOrNumber::Number(block.number),
+                        shainghai_timestamp
+                    )?
+                    .unwrap(),
+                block.withdrawals.unwrap(),
+                "Expected withdrawals_by_block to return correct withdrawals"
+            );
+        }
+
+        let canonical_block_num = provider.best_block_number().unwrap();
+        let canonical_block = blocks.get(canonical_block_num as usize).unwrap();
+
+        assert_eq!(
+            Some(provider.latest_withdrawal()?.unwrap()),
+            canonical_block.withdrawals.clone().unwrap().pop(),
+            "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_block_num_reader() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
         assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
@@ -1970,14 +2061,23 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_block_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
+        let provider_block =
+            provider.block_by_id(block_number.into()).unwrap().unwrap().withdrawals;
+        println!("provider_block {:#?}", provider_block);
+        println!("db block withdrawals {:#?}", database_block.withdrawals);
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(database_block.clone().unseal())
@@ -2001,8 +2101,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_header_by_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -2054,8 +2159,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_header_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2108,8 +2218,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2144,8 +2259,13 @@ mod tests {
     #[test]
     fn test_receipt_provider_id_ext_receipts_by_block_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2180,8 +2300,13 @@ mod tests {
     #[test]
     fn test_receipt_provider_id_ext_receipts_by_block_number_or_tag() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, receipts) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, TEST_BLOCKS_COUNT, None)?;
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
 
         let database_block = database_blocks.first().unwrap().clone();
 
@@ -2215,7 +2340,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let (database_blocks, in_memory_blocks) =
-            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None);
+            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None, None);
 
         let first_database_block = database_blocks.first().map(|block| block.number).unwrap();
         let last_database_block = database_blocks.last().map(|block| block.number).unwrap();
@@ -2337,6 +2462,7 @@ mod tests {
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
                 Some(1..2),
+                None,
             )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2352,6 +2478,87 @@ mod tests {
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
             in_memory_block.requests.clone()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_canon_state_tracker() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        let before = Instant::now();
+        provider.on_forkchoice_update_received(&Default::default());
+        let last_update_ts = provider.last_received_update_timestamp().unwrap();
+        let after = Instant::now();
+
+        // Ensure the timestamp is updated and between the before and after timestamps
+        assert!(before < last_update_ts && last_update_ts < after);
+
+        let before = Instant::now();
+        provider.on_transition_configuration_exchanged();
+        let last_update_ts = provider.last_exchanged_transition_configuration_timestamp().unwrap();
+        let after = Instant::now();
+
+        // Ensure the timestamp is updated and between the before and after timestamps
+        assert!(before < last_update_ts && last_update_ts < after);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_id_reader() -> eyre::Result<()> {
+        // Create a new provider
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Set the pending block in memory
+        let pending_block = in_memory_blocks.last().unwrap();
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(pending_block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        // Set the safe block in memory
+        let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
+        provider.canonical_in_memory_state.set_safe(safe_block.header.clone());
+
+        // Set the finalized block in memory
+        let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
+        provider.canonical_in_memory_state.set_finalized(finalized_block.header.clone());
+
+        // Verify the pending block number and hash
+        assert_eq!(
+            provider.pending_block_num_hash()?,
+            Some(BlockNumHash { number: pending_block.number, hash: pending_block.hash() })
+        );
+
+        // Verify the safe block number and hash
+        assert_eq!(
+            provider.safe_block_num_hash()?,
+            Some(BlockNumHash { number: safe_block.number, hash: safe_block.hash() })
+        );
+
+        // Verify the finalized block number and hash
+        assert_eq!(
+            provider.finalized_block_num_hash()?,
+            Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
         );
 
         Ok(())

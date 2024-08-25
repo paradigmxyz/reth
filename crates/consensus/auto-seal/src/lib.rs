@@ -45,7 +45,7 @@ mod task;
 
 pub use crate::client::AutoSealClient;
 pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 pub use task::MiningTask;
 
 /// A consensus implementation intended for local development and testing purposes.
@@ -287,25 +287,16 @@ impl StorageInner {
         let mut header = Header {
             parent_hash: self.best_hash,
             ommers_hash: proofs::calculate_ommers_root(ommers),
-            beneficiary: Default::default(),
-            state_root: Default::default(),
             transactions_root: proofs::calculate_transaction_root(transactions),
-            receipts_root: Default::default(),
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
-            logs_bloom: Default::default(),
             difficulty: U256::from(2),
             number: self.best_block + 1,
             gas_limit: chain_spec.max_gas_limit,
-            gas_used: 0,
             timestamp,
-            mix_hash: Default::default(),
-            nonce: 0,
             base_fee_per_gas,
             blob_gas_used,
-            excess_blob_gas: None,
-            extra_data: Default::default(),
-            parent_beacon_block_root: None,
             requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
+            ..Default::default()
         };
 
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -383,19 +374,10 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput {
-            state,
-            receipts,
-            requests: block_execution_requests,
-            gas_used,
-            ..
-        } = executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
-        let execution_outcome = ExecutionOutcome::new(
-            state,
-            receipts.into(),
-            block.number,
-            vec![block_execution_requests.into()],
-        );
+        let block_execution_output =
+            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+        let gas_used = block_execution_output.gas_used;
+        let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
 
         // todo(onbjerg): we should not pass requests around as this is building a block, which
         // means we need to extract the requests from the execution output and compute the requests
