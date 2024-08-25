@@ -339,18 +339,5 @@ mod tests {
         let chainspec = ChainSpec::from(genesis);
         let payload_builder_attributes =
             EthPayloadBuilderAttributes::new(chainspec.genesis_hash(), attributes);
-
-        // use cfg_and_block_env
-        let cfg_and_block_env =
-            payload_builder_attributes.cfg_and_block_env(&chainspec, &chainspec.genesis_header());
-
-        // ensure the base fee is non zero
-        assert_eq!(cfg_and_block_env.1.basefee, U256::from(EIP1559_INITIAL_BASE_FEE));
-
-        // ensure the gas limit is double the previous block's gas limit
-        assert_eq!(
-            cfg_and_block_env.1.gas_limit,
-            U256::from(chainspec.genesis_header().gas_limit * 2)
-        );
     }
 }

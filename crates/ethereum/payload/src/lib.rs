@@ -13,6 +13,7 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
+use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
@@ -31,6 +32,7 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
@@ -243,58 +245,21 @@ where
         chain_spec: &ChainSpec,
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // configure evm env based on parent block
-        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
+        let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
+        let mut block_env = BlockEnv::default();
 
-        // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+        // TODO (garwah): Change this to a reasonable default or take from somewhere.
+        let total_difficulty = U256::ZERO;
 
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id == SpecId::CANCUN {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
+        self.evm_config.fill_cfg_and_block_env(
+            &mut cfg_env,
+            &mut block_env,
+            &chain_spec,
+            &parent,
+            total_difficulty,
+        );
 
-        let mut basefee =
-            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
-
-        let mut gas_limit = U256::from(parent.gas_limit);
-
-        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
-        // elasticity multiplier to get the new gas limit.
-        if chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1) {
-            let elasticity_multiplier =
-                chain_spec.base_fee_params_at_timestamp(self.timestamp()).elasticity_multiplier;
-
-            // multiply the gas limit by the elasticity multiplier
-            gas_limit *= U256::from(elasticity_multiplier);
-
-            // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE)
-        }
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: self.suggested_fee_recipient(),
-            timestamp: U256::from(self.timestamp()),
-            difficulty: U256::ZERO,
-            prevrandao: Some(self.prev_randao()),
-            gas_limit,
-            // calculate basefee based on parent block's gas usage
-            basefee: basefee.map(U256::from).unwrap_or_default(),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
-        };
-
-        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+        (cfg_env, block_env)
     }
 }
 
