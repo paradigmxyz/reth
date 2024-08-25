@@ -1,8 +1,8 @@
-use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
+use std::{ffi::OsStr, sync::Arc};
 
-use alloy_genesis::Genesis;
 use clap::{builder::TypedValueParser, error::Result, Arg, Command};
-use reth_cli::chainspec::{parse_custom_chain_spec, ChainSpecParser};
+use reth_cli::chainspec::ChainSpecParser;
+use reth_node_core::args::utils::parse_custom_chain_spec;
 use reth_optimism_chainspec::{
     OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
 };
