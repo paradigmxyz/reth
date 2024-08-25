@@ -20,13 +20,13 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-chains.workspace = true
 alloy-primitives.workspace = true
-alloy-genesis.workspace = true
 
 # io
 serde_json.workspace = true
 
 # misc
 once_cell.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }

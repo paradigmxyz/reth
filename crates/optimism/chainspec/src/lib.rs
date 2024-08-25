@@ -25,26 +25,13 @@ pub use base_sepolia::BASE_SEPOLIA;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
-use alloy_genesis::ChainConfig;
+use derive_more::Deref;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{BuilderProvider, NodeTypes};
 
 /// OP stack chain spec type.
+#[derive(Debug, Deref)]
 pub struct OpChainSpec {
     inner: ChainSpec,
-}
-
-impl<N: NodeTypes> BuilderProvider<N> for OpChainSpec {
-    type Ctx<'a> = Genesis;
-
-    #[allow(clippy::type_complexity)]
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        let inner = ChainSpec::default();
-        inner.
-        OpChainSpec {
-            inner:
-        }
-    }
 }
 
 #[cfg(test)]
