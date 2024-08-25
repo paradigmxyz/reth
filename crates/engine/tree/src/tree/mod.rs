@@ -23,8 +23,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
@@ -1760,12 +1760,7 @@ where
         let executed = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
-            execution_output: Arc::new(ExecutionOutcome::new(
-                output.state,
-                Receipts::from(output.receipts),
-                block_number,
-                vec![Requests::from(output.requests)],
-            )),
+            execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
