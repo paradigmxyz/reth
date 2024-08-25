@@ -3,7 +3,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, DEV};
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 use reth_fs_util as fs;
@@ -32,7 +32,7 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "mainnet" => MAINNET.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
-        "dev" => reth_chainspec::DEV.clone(),
+        "dev" => DEV.clone(),
         _ => Arc::new(parse_custom_chain_spec(s)?),
     })
 }
@@ -42,15 +42,13 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
 #[cfg(feature = "optimism")]
-pub fn chain_value_parser(
-    s: &str,
-) -> eyre::Result<Arc<reth_optimism_chainspec::OpChainSpec>, eyre::Error> {
+pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        "optimism" => OP_MAINNET.clone(),
-        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
-        "base" => BASE_MAINNET.clone(),
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        _ => Arc::new(reth_optimism_chainspec::OpChainSpec { inner: parse_custom_chain_spec(s)? }),
+        "optimism" => OP_MAINNET.inner.clone(),
+        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.inner.clone(),
+        "base" => BASE_MAINNET.inner.clone(),
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.inner.clone(),
+        _ => Arc::new(parse_custom_chain_spec(s)?),
     })
 }
 
