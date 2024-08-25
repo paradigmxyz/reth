@@ -247,8 +247,6 @@ where
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         let mut cfg_env = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
-
-        // TODO (garwah): Change this to a reasonable default or take from somewhere.
         let total_difficulty = U256::ZERO;
 
         self.evm_config.fill_cfg_and_block_env(
