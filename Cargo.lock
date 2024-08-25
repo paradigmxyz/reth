@@ -6552,7 +6552,6 @@ version = "1.0.5"
 dependencies = [
  "clap",
  "eyre",
- "reth-chainspec",
  "reth-cli-runner",
 ]
 
@@ -7328,6 +7327,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-prune-types",
@@ -8046,9 +8046,6 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.5"
-dependencies = [
- "reth-optimism-chainspec",
-]
 
 [[package]]
 name = "reth-optimism-rpc"

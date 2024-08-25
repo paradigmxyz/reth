@@ -17,21 +17,24 @@ pub mod constants;
 
 mod base;
 mod base_sepolia;
+mod dev;
 mod op;
 mod op_sepolia;
 
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
-use derive_more::Deref;
+use derive_more::{Constructor, Deref, Into};
 use reth_chainspec::ChainSpec;
 
 /// OP stack chain spec type.
-#[derive(Debug, Deref)]
+#[derive(Debug, Deref, Into, Constructor)]
 pub struct OpChainSpec {
-    inner: ChainSpec,
+    /// [`ChainSpec`].
+    pub inner: ChainSpec,
 }
 
 #[cfg(test)]
