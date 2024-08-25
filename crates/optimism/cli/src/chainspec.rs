@@ -28,6 +28,7 @@ pub struct OpChainSpecParser;
 
 impl ChainSpecParser<OpChainSpec> for OpChainSpecParser {
     const SUPPORTED_CHAINS: &'static [&'static str] = &[
+        "dev",
         "optimism",
         "optimism_sepolia",
         "optimism-sepolia",
