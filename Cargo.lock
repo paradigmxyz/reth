@@ -7968,7 +7968,6 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.0.5"
 dependencies = [
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "clap",
@@ -7998,8 +7997,6 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
- "serde_json",
- "shellexpand",
  "tempfile",
  "tokio",
  "tokio-util",
