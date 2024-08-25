@@ -673,10 +673,6 @@ impl Drop for Cancelled {
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
 pub struct PayloadConfig<Attributes> {
-    /// Pre-configured block environment.
-    pub initialized_block_env: BlockEnv,
-    /// Configuration for the environment.
-    pub initialized_cfg: CfgEnvWithHandlerCfg,
     /// The parent block.
     pub parent_block: Arc<SealedBlock>,
     /// Block extra data.
@@ -705,18 +701,7 @@ where
         attributes: Attributes,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
-        // configure evm env based on parent block
-        let (initialized_cfg, initialized_block_env) =
-            attributes.cfg_and_block_env(&chain_spec, &parent_block);
-
-        Self {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        }
+        Self { parent_block, extra_data, attributes, chain_spec }
     }
 
     /// Returns the payload id.

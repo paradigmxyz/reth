@@ -87,14 +87,7 @@ where
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         let extra_data = config.extra_data();
-        let PayloadConfig {
-            initialized_block_env,
-            parent_block,
-            attributes,
-            chain_spec,
-            initialized_cfg,
-            ..
-        } = config;
+        let PayloadConfig { parent_block, attributes, chain_spec, .. } = config;
 
         debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
 
@@ -244,6 +237,65 @@ where
 
         Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
     }
+
+    fn cfg_and_block_env(
+        &self,
+        chain_spec: &ChainSpec,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let mut basefee =
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
+
+        let mut gas_limit = U256::from(parent.gas_limit);
+
+        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
+        // elasticity multiplier to get the new gas limit.
+        if chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1) {
+            let elasticity_multiplier =
+                chain_spec.base_fee_params_at_timestamp(self.timestamp()).elasticity_multiplier;
+
+            // multiply the gas limit by the elasticity multiplier
+            gas_limit *= U256::from(elasticity_multiplier);
+
+            // set the base fee to the initial base fee from the EIP-1559 spec
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+        }
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: self.suggested_fee_recipient(),
+            timestamp: U256::from(self.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(self.prev_randao()),
+            gas_limit,
+            // calculate basefee based on parent block's gas usage
+            basefee: basefee.map(U256::from).unwrap_or_default(),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+    }
 }
 
 /// Constructs an Ethereum transaction payload using the best transactions from the pool.
@@ -268,14 +320,7 @@ where
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
     let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, attributes, chain_spec, .. } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;

@@ -69,21 +69,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
-
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
