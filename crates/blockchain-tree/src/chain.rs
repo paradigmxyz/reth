@@ -15,7 +15,8 @@ use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipt, SealedBlockWithSenders, SealedHeader,
+    U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
@@ -209,14 +210,13 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state = executor.execute((&block, U256::MAX).into())?;
-        let BlockExecutionOutput { state, receipts, requests, .. } = state;
-        externals
-            .consensus
-            .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
+        let state: BlockExecutionOutput<Receipt> = executor.execute((&block, U256::MAX).into())?;
+        externals.consensus.validate_block_post_execution(
+            &block,
+            PostExecutionInput::new(&state.receipts, &state.requests),
+        )?;
 
-        let initial_execution_outcome =
-            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
+        let initial_execution_outcome = ExecutionOutcome::from((state, block.number));
 
         // check state root if the block extends the canonical chain __and__ if state root
         // validation was requested.
