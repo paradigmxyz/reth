@@ -20,6 +20,7 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-chains.workspace = true
 alloy-primitives.workspace = true
+alloy-genesis.workspace = true
 
 # io
 serde_json.workspace = true

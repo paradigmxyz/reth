@@ -8,7 +8,7 @@
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 // The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+//#![cfg(feature = "optimism")]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
@@ -24,6 +24,28 @@ pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
+
+use alloy_genesis::ChainConfig;
+use reth_chainspec::ChainSpec;
+use reth_node_api::{BuilderProvider, NodeTypes};
+
+/// OP stack chain spec type.
+pub struct OpChainSpec {
+    inner: ChainSpec,
+}
+
+impl<N: NodeTypes> BuilderProvider<N> for OpChainSpec {
+    type Ctx<'a> = Genesis;
+
+    #[allow(clippy::type_complexity)]
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        let inner = ChainSpec::default();
+        inner.
+        OpChainSpec {
+            inner:
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

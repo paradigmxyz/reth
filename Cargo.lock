@@ -8045,6 +8045,9 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.5"
+dependencies = [
+ "reth-optimism-chainspec",
+]
 
 [[package]]
 name = "reth-optimism-rpc"

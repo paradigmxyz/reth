@@ -593,10 +593,10 @@ impl ChainSpec {
     }
 }
 
-impl From<Genesis> for ChainSpec {
+impl From<ChainConfig> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         #[cfg(feature = "optimism")]
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&config);
         #[cfg(feature = "optimism")]
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
