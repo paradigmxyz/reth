@@ -48,6 +48,7 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.inner.clone(),
         "base" => BASE_MAINNET.inner.clone(),
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.inner.clone(),
+        "dev" => OP_DEV.inner.clone(),
         _ => parse_custom_chain_spec(s)?,
     }))
 }
