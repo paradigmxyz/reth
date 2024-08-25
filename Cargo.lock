@@ -6297,6 +6297,7 @@ dependencies = [
  "reth-node-optimism",
  "reth-optimism-cli",
  "reth-optimism-primitives",
+ "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -8048,10 +8049,10 @@ name = "reth-optimism-rpc"
 version = "1.0.5"
 dependencies = [
  "alloy-primitives",
- "derive_more 1.0.0",
  "jsonrpsee-types",
  "op-alloy-network",
  "parking_lot 0.12.3",
+ "reqwest",
  "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
@@ -8068,8 +8069,10 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
