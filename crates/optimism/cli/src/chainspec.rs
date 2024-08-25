@@ -7,7 +7,7 @@ use reth_optimism_chainspec::{
     OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
 };
 
-/// Clap value parser for [`ChainSpec`]s.
+/// Clap value parser for [`OpChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
