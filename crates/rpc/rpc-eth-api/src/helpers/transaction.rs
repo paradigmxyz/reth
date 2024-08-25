@@ -471,10 +471,7 @@ pub trait EthTransactions: LoadTransaction {
             let recovered =
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-            let pool_transaction = match recovered.try_into() {
-                Ok(converted) => converted,
-                Err(_) => return Err(EthApiError::TransactionConversionError.into()),
-            };
+            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered).map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = LoadTransaction::pool(self)

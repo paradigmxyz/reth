@@ -558,9 +558,15 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
 
     fn into_consensus(self) -> Self::Consensus {
         self.into()

@@ -773,14 +773,18 @@ impl BestTransactionsAttributes {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction:
-    fmt::Debug + Send + Sync + Clone + TryFrom<TransactionSignedEcRecovered>
-{
+pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
+    /// Associated error type for the `try_from_consensus` method.
+    type TryFromConsensusError;
+
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Consensus` type to `Self`
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
 
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Self::Consensus;
@@ -1024,9 +1028,15 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
 
     fn into_consensus(self) -> Self::Consensus {
         self.into()
