@@ -23,12 +23,12 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, ExecutionOutcome, ProviderError, StateProviderBox,
-    StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -1735,7 +1735,7 @@ where
         let block = block.unseal();
 
         let exec_time = Instant::now();
-        let output: BlockExecutionOutput<Receipt> = executor.execute((&block, U256::MAX).into())?;
+        let output = executor.execute((&block, U256::MAX).into())?;
         debug!(target: "engine", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
         self.consensus.validate_block_post_execution(

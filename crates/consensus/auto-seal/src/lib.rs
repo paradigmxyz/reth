@@ -45,8 +45,7 @@ mod task;
 
 pub use crate::client::AutoSealClient;
 pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_primitives::Receipt;
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 pub use task::MiningTask;
 
 /// A consensus implementation intended for local development and testing purposes.
@@ -375,7 +374,7 @@ impl StorageInner {
         );
 
         // execute the block
-        let block_execution_output: BlockExecutionOutput<Receipt> =
+        let block_execution_output =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let gas_used = block_execution_output.gas_used;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));

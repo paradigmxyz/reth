@@ -11,12 +11,11 @@ use reth_blockchain_tree_api::{
 };
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_db_api::database::Database;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipt, SealedBlockWithSenders, SealedHeader,
-    U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
@@ -210,7 +209,7 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state: BlockExecutionOutput<Receipt> = executor.execute((&block, U256::MAX).into())?;
+        let state = executor.execute((&block, U256::MAX).into())?;
         externals.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&state.receipts, &state.requests),
