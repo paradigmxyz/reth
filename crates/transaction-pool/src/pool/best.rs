@@ -57,9 +57,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
                     .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128)
             {
                 return Some(best);
-            } else {
-                crate::traits::BestTransactions::mark_invalid(self, &best);
             }
+            crate::traits::BestTransactions::mark_invalid(self, &best);
         }
     }
 }
@@ -227,9 +226,8 @@ where
             let best = self.best.next()?;
             if (self.predicate)(&best) {
                 return Some(best)
-            } else {
-                self.best.mark_invalid(&best);
             }
+            self.best.mark_invalid(&best);
         }
     }
 }

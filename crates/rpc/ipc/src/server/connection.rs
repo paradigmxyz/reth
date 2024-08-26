@@ -118,9 +118,8 @@ where
             }
 
             'inner: loop {
-                let mut drained = false;
                 // drain all calls that are ready and put them in the output item queue
-                if !this.pending_calls.is_empty() {
+                let drained = if !this.pending_calls.is_empty() {
                     if let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
                         let item = match res {
                             Ok(Some(resp)) => resp,
@@ -128,11 +127,12 @@ where
                             Err(err) => err.into().to_string(),
                         };
                         this.items.push_back(item);
-                        continue 'outer
-                    } else {
-                        drained = true;
+                        continue 'outer;
                     }
-                }
+                    true
+                } else {
+                    false
+                };
 
                 // read from the stream
                 match this.conn.as_mut().poll_next(cx) {

@@ -256,31 +256,12 @@ mod tests {
             if let Ok(result @ ExecOutput { checkpoint, done }) =
                 runner.execute(input).await.unwrap()
             {
-                if done {
-                    assert_eq!(checkpoint.block_number, previous_stage);
+                if !done {
+                    let previous_checkpoint = input
+                        .checkpoint
+                        .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint())
+                        .unwrap_or_default();
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
-                        progress: EntitiesCheckpoint {
-                            processed,
-                            total,
-                        },
-                        ..
-                    }) if processed == total &&
-                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
-
-                    // Validate the stage execution
-                    assert!(
-                        runner.validate_execution(input, Some(result)).is_ok(),
-                        "execution validation"
-                    );
-
-                    break
-                }
-
-                let previous_checkpoint = input
-                    .checkpoint
-                    .and_then(|checkpoint| checkpoint.storage_hashing_stage_checkpoint())
-                    .unwrap_or_default();
-                assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
                             total,
@@ -289,10 +270,27 @@ mod tests {
                     }) if processed == previous_checkpoint.progress.processed + 1 &&
                         total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
-                // Continue from checkpoint
-                input.checkpoint = Some(checkpoint);
+                    // Continue from checkpoint
+                    input.checkpoint = Some(checkpoint);
+                    continue
+                }
+                assert_eq!(checkpoint.block_number, previous_stage);
+                assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
+                        progress: EntitiesCheckpoint {
+                            processed,
+                            total,
+                        },
+                        ..
+                    }) if processed == total &&
+                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
-                continue
+                // Validate the stage execution
+                assert!(
+                    runner.validate_execution(input, Some(result)).is_ok(),
+                    "execution validation"
+                );
+
+                break
             }
             panic!("Failed execution");
         }
