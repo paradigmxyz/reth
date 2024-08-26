@@ -42,7 +42,11 @@ use reth_primitives::{
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
-use reth_transaction_pool::{ noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool, pool::BestTransactionFilter, BestTransactions};
+use reth_transaction_pool::{
+    noop::NoopTransactionPool,
+    pool::BestTransactionFilter, BestTransactions, BestTransactionsAttributes, TransactionPool,
+    ValidPoolTransaction,
+};
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,

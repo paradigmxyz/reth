@@ -42,8 +42,6 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
     }
 }
 
-impl<T: TransactionOrdering> crate::traits::BestTransactionsFilter for BestTransactionsWithFees<T> {}
-
 impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
@@ -162,8 +160,6 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
         self.skip_blobs = skip_blobs;
     }
 }
-
-impl<T: TransactionOrdering> crate::traits::BestTransactionsFilter for BestTransactions<T> {}
 
 impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
