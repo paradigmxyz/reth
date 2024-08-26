@@ -181,7 +181,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
                 err.to_string(),
             ),
-            err @ EthApiError::InternalBlockingTaskError | err @ EthApiError::InternalEthError => {
+            err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
