@@ -133,7 +133,7 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             1..=10,
-            BlockParams { parent: Some(B256::ZERO), tx_count: Some(2..3), ..Default::default() },
+            BlockParams { parent: Some(B256::ZERO), tx_count: Some(0..2), ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
