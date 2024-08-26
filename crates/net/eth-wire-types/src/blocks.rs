@@ -3,7 +3,7 @@
 
 use crate::HeadersDirection;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -15,9 +15,10 @@ use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -38,6 +39,7 @@ pub struct GetBlockHeaders {
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders<H = Header>(
     /// The requested headers.
     pub Vec<H>,
@@ -70,9 +72,10 @@ impl<H> From<Vec<H>> for BlockHeaders<H> {
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<B256>,
@@ -88,6 +91,8 @@ impl From<Vec<B256>> for GetBlockBodies {
 /// any were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 16)]
 pub struct BlockBodies<B = BlockBody>(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<B>,

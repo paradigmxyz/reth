@@ -516,12 +516,12 @@ mod tests {
 
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
                 self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
-                let tip = if !headers.is_empty() {
-                    headers.last().unwrap().seal()
-                } else {
+                let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None).into();
                     self.db.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
+                } else {
+                    headers.last().unwrap().seal()
                 };
                 self.send_tip(tip);
                 Ok(())

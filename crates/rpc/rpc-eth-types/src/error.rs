@@ -16,7 +16,7 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
 /// Result alias
@@ -181,7 +181,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
                 err.to_string(),
             ),
-            err @ EthApiError::InternalBlockingTaskError | err @ EthApiError::InternalEthError => {
+            err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
@@ -191,10 +191,13 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-impl From<JsInspectorError> for EthApiError {
-    fn from(error: JsInspectorError) -> Self {
+#[cfg(feature = "js-tracer")]
+impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
+    fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
         match error {
-            err @ JsInspectorError::JsError(_) => Self::InternalJsTracerError(err.to_string()),
+            err @ revm_inspectors::tracing::js::JsInspectorError::JsError(_) => {
+                Self::InternalJsTracerError(err.to_string())
+            }
             err => Self::InvalidParams(err.to_string()),
         }
     }

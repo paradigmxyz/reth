@@ -225,8 +225,7 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts =
-        alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
+    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");
@@ -337,7 +336,12 @@ pub fn init_from_state_dump<DB: Database>(
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
-    if computed_state_root != expected_state_root {
+    if computed_state_root == expected_state_root {
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
+    } else {
         error!(target: "reth::cli",
             ?computed_state_root,
             ?expected_state_root,
@@ -345,11 +349,6 @@ pub fn init_from_state_dump<DB: Database>(
         );
 
         Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
-    } else {
-        info!(target: "reth::cli",
-            ?computed_state_root,
-            "Computed state root matches state root in state dump"
-        );
     }
 
     // insert sync stages for stages that require state

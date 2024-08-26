@@ -475,10 +475,10 @@ async fn main() -> eyre::Result<()> {
 ## Running
 
 In one terminal window, we will run our ExEx and gRPC server. It will start syncing Reth on the Holesky chain
-and use Etherscan in place of a real Consensus Client.
+and use Etherscan in place of a real Consensus Client. Make sure to have `ETHERSCAN_API_KEY` on your env.
 
 ```console
-cargo run --bin exex --release -- node --chain holesky --debug.etherscan
+export ETHERSCAN_API_KEY={YOUR_API_KEY} && cargo run --bin exex --release -- node --chain holesky --debug.etherscan
 ```
 
 And in the other, we will run our consumer:

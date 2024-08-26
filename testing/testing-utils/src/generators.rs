@@ -1,13 +1,17 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
+use alloy_eips::{
+    eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
+};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
     alloy_primitives::{Sealable, Sealed},
-    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
+    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Request,
+    Requests, SealedBlock, StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy,
+    Withdrawal, Withdrawals, B256, U256,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -134,6 +138,8 @@ pub fn random_block<R: Rng>(
     parent: Option<B256>,
     tx_count: Option<u8>,
     ommers_count: Option<u8>,
+    requests_count: Option<u8>,
+    withdrawals_count: Option<u8>,
 ) -> SealedBlock {
     // Generate transactions
     let tx_count = tx_count.unwrap_or_else(|| rng.gen::<u8>());
@@ -150,6 +156,22 @@ pub fn random_block<R: Rng>(
     let transactions_root = proofs::calculate_transaction_root(&transactions);
     let ommers_hash = proofs::calculate_ommers_root(&ommers);
 
+    let requests =
+        requests_count.map(|count| (0..count).map(|_| random_request(rng)).collect::<Vec<_>>());
+    let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
+
+    let withdrawals = withdrawals_count.map(|count| {
+        (0..count)
+            .map(|i| Withdrawal {
+                amount: rng.gen(),
+                index: i.into(),
+                validator_index: i.into(),
+                address: rng.gen(),
+            })
+            .collect::<Vec<_>>()
+    });
+    let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
+
     SealedBlock {
         header: Header {
             parent_hash: parent.unwrap_or_default(),
@@ -159,13 +181,15 @@ pub fn random_block<R: Rng>(
             transactions_root,
             ommers_hash,
             base_fee_per_gas: Some(rng.gen()),
+            requests_root,
+            withdrawals_root,
             ..Default::default()
         }
         .seal_slow(),
         body: transactions,
         ommers,
-        withdrawals: None,
-        requests: None,
+        withdrawals: withdrawals.map(Withdrawals::new),
+        requests: requests.map(Requests),
     }
 }
 
@@ -180,17 +204,23 @@ pub fn random_block_range<R: Rng>(
     block_numbers: RangeInclusive<BlockNumber>,
     head: B256,
     tx_count: Range<u8>,
+    requests_count: Option<Range<u8>>,
+    withdrawals_count: Option<Range<u8>>,
 ) -> Vec<SealedBlock> {
     let mut blocks =
         Vec::with_capacity(block_numbers.end().saturating_sub(*block_numbers.start()) as usize);
     for idx in block_numbers {
         let tx_count = tx_count.clone().sample_single(rng);
+        let requests_count = requests_count.clone().map(|r| r.sample_single(rng));
+        let withdrawals_count = withdrawals_count.clone().map(|r| r.sample_single(rng));
         blocks.push(random_block(
             rng,
             idx,
             Some(blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(head)),
             Some(tx_count),
             None,
+            requests_count,
+            withdrawals_count,
         ));
     }
     blocks
@@ -246,14 +276,14 @@ where
         let mut old_entries: Vec<_> = new_entries
             .into_iter()
             .filter_map(|entry| {
-                let old = if !entry.value.is_zero() {
-                    storage.insert(entry.key, entry.value)
-                } else {
+                let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
                         return None
                     }
                     old
+                } else {
+                    storage.insert(entry.key, entry.value)
                 };
                 Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
@@ -287,7 +317,7 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
+    let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);
@@ -382,6 +412,31 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
         std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
         std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     )
+}
+
+/// Generate random request
+pub fn random_request<R: Rng>(rng: &mut R) -> Request {
+    let request_type = rng.gen_range(0..3);
+    match request_type {
+        0 => Request::DepositRequest(DepositRequest {
+            pubkey: rng.gen(),
+            withdrawal_credentials: rng.gen(),
+            amount: rng.gen(),
+            signature: rng.gen(),
+            index: rng.gen(),
+        }),
+        1 => Request::WithdrawalRequest(WithdrawalRequest {
+            source_address: rng.gen(),
+            validator_pubkey: rng.gen(),
+            amount: rng.gen(),
+        }),
+        2 => Request::ConsolidationRequest(ConsolidationRequest {
+            source_address: rng.gen(),
+            source_pubkey: rng.gen(),
+            target_pubkey: rng.gen(),
+        }),
+        _ => panic!("invalid request type"),
+    }
 }
 
 #[cfg(test)]

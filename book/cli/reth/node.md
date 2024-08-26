@@ -169,6 +169,28 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --max-tx-reqs <COUNT>
+          Max concurrent `GetPooledTransactions` requests.
+
+          [default: 130]
+
+      --max-tx-reqs-peer <COUNT>
+          Max concurrent `GetPooledTransactions` requests per peer.
+
+          [default: 1]
+
+      --max-seen-tx-history <COUNT>
+          Max number of seen transactions to remember per peer.
+
+          Default is 320 transaction hashes.
+
+          [default: 320]
+
+      --max-pending-imports <COUNT>
+          Max number of transactions to import concurrently.
+
+          [default: 4096]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
@@ -208,7 +230,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -232,7 +254,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -429,6 +451,21 @@ TxPool:
 
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
+
+      --txpool.additional-validation-tasks <ADDITIONAL_VALIDATION_TASKS>
+          Number of additional transaction validation tasks to spawn
+
+          [default: 1]
+
+      --txpool.max-pending-txns <PENDING_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of pending transactions from the network to buffer
+
+          [default: 2048]
+
+      --txpool.max-new-txns <NEW_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of new transactions to buffer
+
+          [default: 1024]
 
 Builder:
       --builder.extradata <EXTRADATA>

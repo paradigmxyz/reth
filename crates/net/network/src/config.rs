@@ -148,7 +148,6 @@ where
             .split_with_handle();
 
         tokio::task::spawn(network);
-        // TODO: tokio::task::spawn(txpool);
         tokio::task::spawn(eth);
         Ok(handle)
     }

@@ -279,7 +279,7 @@ mod tests {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
+        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3, None, None);
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works

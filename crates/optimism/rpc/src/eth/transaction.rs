@@ -1,4 +1,4 @@
-//! Loads and formats OP transaction RPC response.  
+//! Loads and formats OP transaction RPC response.
 
 use std::sync::Arc;
 
@@ -93,7 +93,9 @@ where
     ) -> Result<OptimismTxMeta, <Self as EthApiTypes>::Error> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-        let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
+        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
+            (None, None)
+        } else {
             let envelope_buf = tx.envelope_encoded();
 
             let inner_l1_fee = l1_block_info
@@ -106,8 +108,6 @@ where
                 Some(inner_l1_fee.saturating_to::<u128>()),
                 Some(inner_l1_data_gas.saturating_to::<u128>()),
             )
-        } else {
-            (None, None)
         };
 
         Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))

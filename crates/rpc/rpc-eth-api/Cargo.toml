@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # reth
 revm.workspace = true
-revm-inspectors = { workspace = true, features = ["js-tracer"] }
+revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
@@ -33,6 +33,8 @@ reth-network-api.workspace = true
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
+alloy-network.workspace = true
+alloy-json-rpc.workspace = true
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
@@ -50,6 +52,7 @@ dyn-clone.workspace = true
 tracing.workspace = true
 
 [features]
+js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
 optimism = [
     "reth-primitives/optimism",

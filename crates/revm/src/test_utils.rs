@@ -6,7 +6,10 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -50,7 +53,7 @@ impl AccountReader for StateProviderTest {
 
 impl BlockHashReader for StateProviderTest {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        Ok(self.block_hash.get(&number).cloned())
+        Ok(self.block_hash.get(&number).copied())
     }
 
     fn canonical_hashes_range(
@@ -72,9 +75,27 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
+    fn hashed_state_root_from_nodes(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        unimplemented!("state root computation is not supported")
+    }
+
     fn hashed_state_root_with_updates(
         &self,
         _hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!("state root computation is not supported")
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
@@ -113,7 +134,7 @@ impl StateProvider for StateProviderTest {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
-        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).cloned()))
+        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {

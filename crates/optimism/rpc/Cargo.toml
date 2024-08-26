@@ -26,9 +26,12 @@ reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
 reth-network-api.workspace = true
+reth-node-builder.workspace = true
+reth-chainspec.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+op-alloy-network.workspace = true
 revm.workspace = true
 
 # async
@@ -36,28 +39,17 @@ parking_lot.workspace = true
 tokio.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
 jsonrpsee-types.workspace = true
 
 # misc
 thiserror.workspace = true
-serde = { workspace = true, features = ["derive"] }
 derive_more.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
-
 [features]
-client = [
-    "jsonrpsee/client",
-    "jsonrpsee/async-client",
-    "reth-rpc-eth-api/client"
-]
-
 optimism = [
     "reth-evm-optimism/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",
-    "revm/optimism"
+    "revm/optimism",
 ]

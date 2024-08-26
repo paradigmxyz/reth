@@ -12,7 +12,7 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
@@ -219,7 +219,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
+impl<Provider, Pool> EthFilterApiServer<reth_rpc_types::Transaction> for EthFilter<Provider, Pool>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
@@ -573,7 +573,10 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges
+    where
+        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+    {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -595,7 +598,7 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         Self::drain(self).await

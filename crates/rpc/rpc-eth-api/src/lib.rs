@@ -17,17 +17,17 @@ pub mod core;
 pub mod filter;
 pub mod helpers;
 pub mod pubsub;
+pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
 pub use helpers::{
     error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError},
-    types::EthApiTypes,
+    transaction::RawTransactionForwarder,
 };
 pub use pubsub::EthPubSubApiServer;
-
-pub use helpers::transaction::RawTransactionForwarder;
+pub use types::{EthApiTypes, RpcBlock, RpcTransaction};
 
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};

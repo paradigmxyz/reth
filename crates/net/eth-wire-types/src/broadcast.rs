@@ -6,7 +6,7 @@ use alloy_rlp::{
 };
 
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{
     Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
 };
@@ -23,9 +23,10 @@ use proptest::{collection::vec, prelude::*};
 use proptest_arbitrary_interop::arb;
 
 /// This informs peers of new blocks that have appeared on the network.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct NewBlockHashes(
     /// New block hashes and the block number for each blockhash.
     /// Clients should request blocks using a [`GetBlockBodies`](crate::GetBlockBodies) message.
@@ -47,9 +48,10 @@ impl NewBlockHashes {
 }
 
 /// A block hash _and_ a block number.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct BlockHashNumber {
     /// The block hash
     pub hash: B256,
@@ -73,6 +75,8 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 25)]
 pub struct NewBlock<B = Block> {
     /// A new block.
     pub block: B,
@@ -82,9 +86,10 @@ pub struct NewBlock<B = Block> {
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
-#[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 10)]
 pub struct Transactions(
     /// New transactions for the peer to include in its mempool.
     pub Vec<TransactionSigned>,
@@ -113,8 +118,9 @@ impl From<Transactions> for Vec<TransactionSigned> {
 ///
 /// The list of transactions is constructed on per-peers basis, but the underlying transaction
 /// objects are shared.
-#[derive_arbitrary(rlp, 20)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 20)]
 pub struct SharedTransactions(
     /// New transactions for the peer to include in its mempool.
     pub Vec<Arc<TransactionSigned>>,
@@ -287,9 +293,10 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
@@ -636,7 +643,6 @@ impl<V> PartiallyValidData<V> {
 /// Partially validated data from an announcement or a
 /// [`PooledTransactions`](crate::PooledTransactions) response.
 #[derive(Debug, Deref, DerefMut, IntoIterator, From)]
-#[from(PartiallyValidData<Eth68TxMetadata>)]
 pub struct ValidAnnouncementData {
     #[deref]
     #[deref_mut]

@@ -305,6 +305,22 @@ impl<T: NetworkTypes> Peers for NetworkHandle<T> {
         self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
     }
 
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to connect to the given
+    /// peer.
+    fn connect_peer_kind(
+        &self,
+        peer_id: PeerId,
+        kind: PeerKind,
+        tcp_addr: SocketAddr,
+        udp_addr: Option<SocketAddr>,
+    ) {
+        self.send_message(NetworkHandleMessage::ConnectPeer(
+            peer_id,
+            kind,
+            PeerAddr::new(tcp_addr, udp_addr),
+        ))
+    }
+
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
@@ -487,4 +503,6 @@ pub(crate) enum NetworkHandleMessage<T: NetworkTypes> {
     DiscoveryListener(UnboundedSender<DiscoveryEvent>),
     /// Adds an additional `RlpxSubProtocol`.
     AddRlpxSubProtocol(RlpxSubProtocol),
+    /// Connect to the given peer.
+    ConnectPeer(PeerId, PeerKind, PeerAddr),
 }

@@ -72,7 +72,8 @@ impl AccountHashingStage {
 
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
+        let blocks =
+            random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs, None, None);
 
         for block in blocks {
             provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();

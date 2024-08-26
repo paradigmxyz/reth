@@ -273,9 +273,9 @@ mod tests {
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
                     continue
-                } else {
-                    assert_eq!(checkpoint.block_number, previous_stage);
-                    assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
+                }
+                assert_eq!(checkpoint.block_number, previous_stage);
+                assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
                             total,
@@ -284,14 +284,13 @@ mod tests {
                     }) if processed == total &&
                         total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
-                    // Validate the stage execution
-                    assert!(
-                        runner.validate_execution(input, Some(result)).is_ok(),
-                        "execution validation"
-                    );
+                // Validate the stage execution
+                assert!(
+                    runner.validate_execution(input, Some(result)).is_ok(),
+                    "execution validation"
+                );
 
-                    break
-                }
+                break
             }
             panic!("Failed execution");
         }
@@ -342,7 +341,8 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3);
+            let blocks =
+                random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3, None, None);
 
             self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
 

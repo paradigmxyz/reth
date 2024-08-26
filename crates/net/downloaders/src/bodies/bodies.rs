@@ -662,7 +662,7 @@ mod tests {
         // Generate some random blocks
         let db = create_test_rw_db();
         let mut rng = generators::rng();
-        let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
+        let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2, None, None);
 
         let headers =
             blocks.iter().map(|block| block.header.clone().into()).collect::<Vec<Sealed<Header>>>();

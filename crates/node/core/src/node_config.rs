@@ -8,10 +8,13 @@ use crate::{
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
 };
+use eyre::eyre;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{fs, path::Path};
 
 use reth_eth_wire_types::types::BlockHeader;
 use reth_primitives::{
@@ -366,6 +369,33 @@ impl NodeConfig {
     /// Resolve the final datadir path.
     pub fn datadir(&self) -> ChainPath<DataDirPath> {
         self.datadir.clone().resolve_datadir(self.chain.chain)
+    }
+
+    /// Load an application configuration from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn load_path<T: Serialize + DeserializeOwned + Default>(
+        path: impl AsRef<Path>,
+    ) -> eyre::Result<T> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = T::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
     }
 }
 

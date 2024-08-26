@@ -45,11 +45,9 @@ pub mod sync;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub mod reputation;
-
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
-pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
+
 use reth_eth_wire_types::{NetworkTypes, PrimitiveNetworkTypes};
 
 /// Helper trait that unifies network behaviour needed for fetching blocks.

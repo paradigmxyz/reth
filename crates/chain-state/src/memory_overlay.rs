@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_primitives::{
@@ -9,18 +7,22 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
     StateRootProvider,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
+use std::{collections::HashMap, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
 #[allow(missing_debug_implementations)]
 pub struct MemoryOverlayStateProvider {
-    /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock>,
-    /// The collection of hashed state from in-memory blocks.
-    pub(crate) hashed_post_state: HashedPostState,
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider>,
+    /// The collection of executed parent blocks. Expected order is newest to oldest.
+    pub(crate) in_memory: Vec<ExecutedBlock>,
+    /// Lazy-loaded in-memory trie data.
+    pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
 
 impl MemoryOverlayStateProvider {
@@ -31,17 +33,28 @@ impl MemoryOverlayStateProvider {
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
-    pub fn new(in_memory: Vec<ExecutedBlock>, historical: Box<dyn StateProvider>) -> Self {
-        let mut hashed_post_state = HashedPostState::default();
-        for block in in_memory.iter().rev() {
-            hashed_post_state.extend(block.hashed_state.as_ref().clone());
-        }
-        Self { in_memory, hashed_post_state, historical }
+    pub fn new(historical: Box<dyn StateProvider>, in_memory: Vec<ExecutedBlock>) -> Self {
+        Self { historical, in_memory, trie_state: OnceLock::new() }
     }
 
     /// Turn this state provider into a [`StateProviderBox`]
     pub fn boxed(self) -> StateProviderBox {
         Box::new(self)
+    }
+
+    /// Return lazy-loaded trie state aggregated from in-memory blocks.
+    fn trie_state(&self) -> MemoryOverlayTrieState {
+        self.trie_state
+            .get_or_init(|| {
+                let mut hashed_state = HashedPostState::default();
+                let mut trie_nodes = TrieUpdates::default();
+                for block in self.in_memory.iter().rev() {
+                    hashed_state.extend_ref(block.hashed_state.as_ref());
+                    trie_nodes.extend_ref(block.trie.as_ref());
+                }
+                MemoryOverlayTrieState { trie_nodes, hashed_state }
+            })
+            .clone()
     }
 }
 
@@ -91,21 +104,49 @@ impl AccountReader for MemoryOverlayStateProvider {
 }
 
 impl StateRootProvider for MemoryOverlayStateProvider {
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state);
-        self.historical.hashed_state_root(state)
+        let prefix_sets = hashed_state.construct_prefix_sets();
+        self.hashed_state_root_from_nodes(TrieUpdates::default(), hashed_state, prefix_sets)
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn hashed_state_root_from_nodes(
+        &self,
+        nodes: TrieUpdates,
+        state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        let MemoryOverlayTrieState { mut trie_nodes, mut hashed_state } = self.trie_state();
+        trie_nodes.extend(nodes);
+        hashed_state.extend(state);
+        self.historical.hashed_state_root_from_nodes(trie_nodes, hashed_state, prefix_sets)
+    }
+
     fn hashed_state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state);
-        self.historical.hashed_state_root_with_updates(state)
+        let prefix_sets = hashed_state.construct_prefix_sets();
+        self.hashed_state_root_from_nodes_with_updates(
+            TrieUpdates::default(),
+            hashed_state,
+            prefix_sets,
+        )
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        nodes: TrieUpdates,
+        state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let MemoryOverlayTrieState { mut trie_nodes, mut hashed_state } = self.trie_state();
+        trie_nodes.extend(nodes);
+        hashed_state.extend(state);
+        self.historical.hashed_state_root_from_nodes_with_updates(
+            trie_nodes,
+            hashed_state,
+            prefix_sets,
+        )
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
@@ -119,16 +160,15 @@ impl StateRootProvider for MemoryOverlayStateProvider {
 }
 
 impl StateProofProvider for MemoryOverlayStateProvider {
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_proof(
         &self,
-        hashed_state: HashedPostState,
+        state: HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let mut state = self.hashed_post_state.clone();
-        state.extend(hashed_state);
-        self.historical.hashed_proof(state, address, slots)
+        let MemoryOverlayTrieState { mut hashed_state, .. } = self.trie_state();
+        hashed_state.extend(state);
+        self.historical.hashed_proof(hashed_state, address, slots)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
@@ -137,9 +177,9 @@ impl StateProofProvider for MemoryOverlayStateProvider {
         overlay: HashedPostState,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
-        let mut state = self.hashed_post_state.clone();
-        state.extend(overlay);
-        self.historical.witness(state, target)
+        let MemoryOverlayTrieState { mut hashed_state, .. } = self.trie_state();
+        hashed_state.extend(overlay);
+        self.historical.witness(hashed_state, target)
     }
 }
 
@@ -167,4 +207,13 @@ impl StateProvider for MemoryOverlayStateProvider {
 
         self.historical.bytecode_by_hash(code_hash)
     }
+}
+
+/// The collection of data necessary for trie-related operations for [`MemoryOverlayStateProvider`].
+#[derive(Clone, Debug)]
+pub(crate) struct MemoryOverlayTrieState {
+    /// The collection of aggregated in-memory trie updates.
+    pub(crate) trie_nodes: TrieUpdates,
+    /// The collection of hashed state from in-memory blocks.
+    pub(crate) hashed_state: HashedPostState,
 }

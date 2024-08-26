@@ -6,7 +6,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,3 +50,7 @@ jobs:
       - name: Run stage unwind for 100 blocks
         run: |
           op-reth stage --chain base unwind num-blocks 100
+      - name: Run stage unwind to block hash
+        run: |
+          op-reth stage --chain base unwind to-block 0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de
+

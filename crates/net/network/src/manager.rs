@@ -591,6 +591,9 @@ impl<T: NetworkTypes> NetworkManager<T> {
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
+            NetworkHandleMessage::ConnectPeer(peer_id, kind, addr) => {
+                self.swarm.state_mut().add_and_connect(peer_id, kind, addr);
+            }
             NetworkHandleMessage::SetNetworkState(net_state) => {
                 // Sets network connection state between Active and Hibernate.
                 // If hibernate stops the node to fill new outbound

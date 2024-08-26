@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
@@ -41,7 +42,10 @@ pub type PeerId = reth_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -331,8 +335,8 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns a transaction sent by a given user with a given nonce
-    fn get_transactions_by_sender_and_nonce(
+    /// Returns a transaction sent by a given user and a nonce
+    fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
@@ -340,6 +344,12 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all transactions that where submitted with the given [TransactionOrigin]
     fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -357,6 +367,25 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns all transactions that where submitted as [TransactionOrigin::External]
     fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::External)
     }
 
     /// Returns a set of all senders of transactions in the pool
@@ -458,13 +487,13 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into())
+    pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into())
+    pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 }
 
@@ -498,6 +527,16 @@ impl PropagateKind {
         match self {
             Self::Full(peer) | Self::Hash(peer) => peer,
         }
+    }
+
+    /// Returns true if the transaction was sent as a full transaction
+    pub const fn is_full(&self) -> bool {
+        matches!(self, Self::Full(_))
+    }
+
+    /// Returns true if the transaction was sent as a hash
+    pub const fn is_hash(&self) -> bool {
+        matches!(self, Self::Hash(_))
     }
 }
 
@@ -640,26 +679,6 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
-/// Represents a changed account
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct ChangedAccount {
-    /// The address of the account.
-    pub address: Address,
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-}
-
-// === impl ChangedAccount ===
-
-impl ChangedAccount {
-    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
-    }
-}
-
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
@@ -697,7 +716,31 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+}
 
+impl<T> BestTransactions for Box<T>
+where
+    T: BestTransactions + ?Sized,
+{
+    fn mark_invalid(&mut self, transaction: &Self::Item) {
+        (**self).mark_invalid(transaction);
+    }
+
+    fn no_updates(&mut self) {
+        (**self).no_updates();
+    }
+
+    fn skip_blobs(&mut self) {
+        (**self).skip_blobs();
+    }
+
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        (**self).set_skip_blobs(skip_blobs);
+    }
+}
+
+/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
+pub trait BestTransactionsFilter: BestTransactions {
     /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
     ///
     /// Given an element the closure must return true or false. The returned iterator will yield
@@ -713,6 +756,8 @@ pub trait BestTransactions: Iterator + Send {
     }
 }
 
+impl<T> BestTransactionsFilter for T where T: BestTransactions {}
+
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -724,7 +769,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
-/// A Helper type that bundles best transactions attributes together.
+/// A Helper type that bundles the best transactions attributes together.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BestTransactionsAttributes {
     /// The base fee attribute for best transactions.
@@ -754,19 +799,21 @@ impl BestTransactionsAttributes {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction:
-    fmt::Debug
-    + Send
-    + Sync
-    + Clone
-    + TryFrom<TransactionSignedEcRecovered>
-    + Into<TransactionSignedEcRecovered>
-{
+pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
+    /// Associated error type for the `try_from_consensus` method.
+    type TryFromConsensusError;
+
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Consensus` type to `Self`
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
+
+    /// Define a method to convert from the `Self` type to `Consensus`
+    fn into_consensus(self) -> Self::Consensus;
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Self::Pooled) -> Self;
@@ -868,7 +915,10 @@ pub trait PoolTransaction:
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
 pub trait EthPoolTransaction:
-    PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>
+    PoolTransaction<
+    Pooled = PooledTransactionsElementEcRecovered,
+    Consensus = TransactionSignedEcRecovered,
+>
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
@@ -1004,9 +1054,19 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()

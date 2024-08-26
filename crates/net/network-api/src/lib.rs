@@ -187,6 +187,21 @@ pub trait Peers: PeersInfo {
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
 
+    /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
+    /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
+    fn connect_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.connect_peer_kind(peer, PeerKind::Static, tcp_addr, None)
+    }
+
+    /// Connects a peer to the known peer set, with the given kind.
+    fn connect_peer_kind(
+        &self,
+        peer: PeerId,
+        kind: PeerKind,
+        tcp_addr: SocketAddr,
+        udp_addr: Option<SocketAddr>,
+    );
+
     /// Send a reputation change for the given peer.
     fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
 

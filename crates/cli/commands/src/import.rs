@@ -114,12 +114,7 @@ impl ImportCommand {
 
             let latest_block_number =
                 provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-            tokio::spawn(reth_node_events::node::handle_events(
-                None,
-                latest_block_number,
-                events,
-                provider_factory.db_ref().clone(),
-            ));
+            tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
 
             // Run pipeline
             info!(target: "reth::cli", "Starting sync pipeline");

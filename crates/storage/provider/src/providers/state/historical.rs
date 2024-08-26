@@ -16,12 +16,12 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    HashedStorage, StateRoot, StorageRoot,
+    prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
+    AccountProof, HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
-    DatabaseTrieWitness,
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
+    DatabaseStorageRoot, DatabaseTrieWitness,
 };
 use std::{collections::HashMap, fmt::Debug};
 
@@ -111,14 +111,8 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
         )
     }
 
-    /// Retrieve revert hashed state for this history provider.
-    fn revert_state(&self) -> ProviderResult<HashedPostState> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
-        {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
+    /// Checks and returns `true` if distance to historical block exceeds the provided limit.
+    fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
         let tip = self
             .tx
             .cursor_read::<tables::CanonicalHeaders>()?
@@ -129,15 +123,43 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             })
             .ok_or(ProviderError::BestBlockNotFound)?;
 
-        if tip.saturating_sub(self.block_number) > EPOCH_SLOTS {
+        Ok(tip.saturating_sub(self.block_number) > limit)
+    }
+
+    /// Retrieve revert hashed state for this history provider.
+    fn revert_state(&self) -> ProviderResult<HashedPostState> {
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
+            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        if self.check_distance_against_limit(EPOCH_SLOTS)? {
             tracing::warn!(
                 target: "provider::historical_sp",
                 target = self.block_number,
-                "Attempt to calculate state root for an old block might result in OOM, treat carefully"
+                "Attempt to calculate state root for an old block might result in OOM"
             );
         }
 
         Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
+    }
+
+    /// Retrieve revert hashed storage for this history provider and target address.
+    fn revert_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
+        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+        }
+
+        if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
+            tracing::warn!(
+                target: "provider::historical_sp",
+                target = self.block_number,
+                "Attempt to calculate storage root for an old block might result in OOM"
+            );
+        }
+
+        Ok(HashedStorage::from_reverts(self.tx, address, self.block_number)?)
     }
 
     fn history_info<T, K>(
@@ -266,7 +288,21 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root(self.tx, revert_state, Default::default())
+        StateRoot::overlay_root(self.tx, revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn hashed_state_root_from_nodes(
+        &self,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        let mut revert_state = self.revert_state()?;
+        let mut revert_prefix_sets = revert_state.construct_prefix_sets();
+        revert_state.extend(hashed_state);
+        revert_prefix_sets.extend(prefix_sets);
+        StateRoot::overlay_root_from_nodes(self.tx, nodes, revert_state, revert_prefix_sets)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -276,8 +312,27 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root_with_updates(self.tx, revert_state, Default::default())
+        StateRoot::overlay_root_with_updates(self.tx, revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        nodes: TrieUpdates,
+        hashed_state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let mut revert_state = self.revert_state()?;
+        let mut revert_prefix_sets = revert_state.construct_prefix_sets();
+        revert_state.extend(hashed_state);
+        revert_prefix_sets.extend(prefix_sets);
+        StateRoot::overlay_root_from_nodes_with_updates(
+            self.tx,
+            nodes,
+            revert_state,
+            revert_prefix_sets,
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn hashed_storage_root(
@@ -285,7 +340,9 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        StorageRoot::overlay_root(self.tx, address, hashed_storage)
+        let mut revert_storage = self.revert_storage(address)?;
+        revert_storage.extend(&hashed_storage);
+        StorageRoot::overlay_root(self.tx, address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
