@@ -1784,6 +1784,7 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
+        // Now the block should be found in memory
         assert_eq!(
             provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             Some(first_in_mem_block.clone().into())
@@ -2011,8 +2012,10 @@ mod tests {
         }
         provider_rw.commit()?;
 
+        // Create a new provider
         let provider = BlockchainProvider2::new(factory)?;
 
+        // Insert the first block into the in-memory state
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
@@ -2029,16 +2032,20 @@ mod tests {
         let first_db_block = database_blocks.first().unwrap().clone();
         let first_in_mem_block = in_memory_blocks.first().unwrap().clone();
 
+        // First database block body indices should be found
         assert_eq!(
             provider.block_body_indices(first_db_block.number)?.unwrap(),
             StoredBlockBodyIndices { first_tx_num: 0, tx_count: 4 }
         );
 
+        // First in-memory block body indices should be found with the first tx after the database
+        // blocks
         assert_eq!(
             provider.block_body_indices(first_in_mem_block.number)?.unwrap(),
             StoredBlockBodyIndices { first_tx_num: 20, tx_count: 4 }
         );
 
+        // A random block number should return None as the block is not found
         let mut rng = rand::thread_rng();
         let random_block_number: u64 = rng.gen();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
