@@ -173,6 +173,7 @@ where
 type HeapItem = (Reverse<(Vec<u8>, Vec<u8>)>, usize);
 
 /// `EtlIter` is an iterator for traversing through sorted key-value pairs in a collection of ETL
+///
 /// files. These files are created using the [`Collector`] and contain data where keys are encoded
 /// and values are compressed.
 ///

@@ -228,6 +228,7 @@ non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
 
 # Speed up tests.
 [profile.dev.package]
