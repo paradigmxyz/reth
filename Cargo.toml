@@ -226,6 +226,7 @@ future_not_send = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
+too_long_first_doc_paragraph = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
 
