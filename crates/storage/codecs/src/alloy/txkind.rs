@@ -4,10 +4,10 @@ use crate::Compact;
 use alloy_primitives::{Address, TxKind};
 
 /// Identifier for [`TxKind::Create`]
-pub const TX_KIND_TYPE_CREATE: usize = 0;
+const TX_KIND_TYPE_CREATE: usize = 0;
 
 /// Identifier for [`TxKind::Call`]
-pub const TX_KIND_TYPE_CALL: usize = 1;
+const TX_KIND_TYPE_CALL: usize = 1;
 
 impl Compact for TxKind {
     fn to_compact<B>(&self, buf: &mut B) -> usize

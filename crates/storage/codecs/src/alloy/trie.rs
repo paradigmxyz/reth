@@ -9,10 +9,10 @@ use bytes::{Buf, BufMut};
 use alloc::vec::Vec;
 
 /// Identifier for [`HashBuilderValue::Hash`]
-pub const HASH_BUILDER_TYPE_HASH: u8 = 0;
+const HASH_BUILDER_TYPE_HASH: u8 = 0;
 
 /// Identifier for [`HashBuilderValue::Bytes`]
-pub const HASH_BUILDER_TYPE_BYTES: u8 = 1;
+const HASH_BUILDER_TYPE_BYTES: u8 = 1;
 
 impl Compact for HashBuilderValue {
     fn to_compact<B>(&self, buf: &mut B) -> usize
