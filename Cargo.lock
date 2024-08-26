@@ -115,9 +115,9 @@ checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
 
 [[package]]
 name = "alloy-chains"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b515e82c8468ddb6ff8db21c78a5997442f113fd8471fd5b2261b2602dd0c67"
+checksum = "e4a777d352cd752b81c695828b1bb6e04b3e87ca4d94a6fe343244eb54effb2d"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -5712,9 +5712,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.21"
+version = "0.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a909e6e8053fa1a5ad670f5816c7d93029ee1fa8898718490544a6b0d5d38b3e"
+checksum = "479cf940fbbb3426c32c5d5176f62ad57549a0bb84773423ba8be9d089f5faba"
 dependencies = [
  "proc-macro2",
  "syn 2.0.76",
@@ -8042,6 +8042,11 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.5"
+dependencies = [
+ "reth-chainspec",
+ "reth-primitives",
+ "reth-trie-common",
+]
 
 [[package]]
 name = "reth-optimism-rpc"

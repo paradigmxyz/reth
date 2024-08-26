@@ -1,12 +1,13 @@
-use crate::{
-     Receipt, ReceiptWithBloom,B256,
+use reth_primitives::{
+    ReceiptWithBloom,B256,
 };
-use reth_trie_common::root::{ordered_trie_root_with_encoder};
+use reth_trie_common::root:: ordered_trie_root_with_encoder;
+use reth_chainspec:: {ChainSpec, OptimismHardfork};
 
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
-    chain_spec: &reth_chainspec::ChainSpec,
+    chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -14,9 +15,9 @@ pub fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Regolith, timestamp) &&
+    if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) &&
         !chain_spec
-            .is_fork_active_at_timestamp(reth_chainspec::OptimismHardfork::Canyon, timestamp)
+            .is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -40,7 +41,7 @@ mod tests {
     use super::*;
     use crate::{bloom, hex_literal::hex, Log, TxType};
     use alloy_primitives::{b256, Address, LogData};
-    use reth_chainspec::{SEPOLIA};
+    use reth_chainspec::SEPOLIA;
 
     /// Tests that the receipt root is computed correctly for the regolith block.
     /// This was implemented due to a minor bug in op-geth and op-erigon where in

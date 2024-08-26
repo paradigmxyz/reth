@@ -121,7 +121,6 @@ mod tests {
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn check_receipt_root_optimism() {
         let logs = vec![Log {
