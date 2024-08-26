@@ -46,10 +46,11 @@ pub use event::*;
 mod manager;
 pub use manager::*;
 
-use reth_chainspec::Head;
 // Re-export exex types
 #[doc(inline)]
 pub use reth_exex_types::*;
+
+use reth_chainspec::Head;
 use reth_primitives::{BlockHash, BlockNumber};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
