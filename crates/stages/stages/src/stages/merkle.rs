@@ -517,11 +517,8 @@ mod tests {
 
             let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
-                BlockParams {
-                    number: stage_progress,
-                    parent: preblocks.last().map(|b| b.hash()),
-                    ..Default::default()
-                },
+                stage_progress,
+                BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             );
             let mut header = header.unseal();
 

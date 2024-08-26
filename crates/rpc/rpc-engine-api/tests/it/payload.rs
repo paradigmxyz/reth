@@ -59,8 +59,8 @@ fn payload_validation() {
     let parent = rng.gen();
     let block = random_block(
         &mut rng,
+        100,
         BlockParams {
-            number: 100,
             parent: Some(parent),
             tx_count: Some(0..2),
             ommers_count: Some(0),

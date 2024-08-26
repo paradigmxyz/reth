@@ -98,11 +98,8 @@ mod tests {
         for block_number in 2..=tip {
             let nblock = random_block(
                 &mut rng,
-                generators::BlockParams {
-                    number: block_number,
-                    parent: Some(head),
-                    ..Default::default()
-                },
+                block_number,
+                generators::BlockParams { parent: Some(head), ..Default::default() },
             );
             head = nblock.hash();
             provider_rw.insert_historical_block(nblock.try_seal_with_senders().unwrap()).unwrap();

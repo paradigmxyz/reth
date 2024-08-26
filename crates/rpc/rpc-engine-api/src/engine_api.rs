@@ -1148,14 +1148,10 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let consensus_terminal_block = random_block(
-                &mut rng,
-                BlockParams { number: terminal_block_number, ..Default::default() },
-            );
-            let execution_terminal_block = random_block(
-                &mut rng,
-                BlockParams { number: terminal_block_number, ..Default::default() },
-            );
+            let consensus_terminal_block =
+                random_block(&mut rng, terminal_block_number, BlockParams::default());
+            let execution_terminal_block =
+                random_block(&mut rng, terminal_block_number, BlockParams::default());
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle
@@ -1196,10 +1192,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let terminal_block = random_block(
-                &mut generators::rng(),
-                BlockParams { number: terminal_block_number, ..Default::default() },
-            );
+            let terminal_block =
+                random_block(&mut generators::rng(), terminal_block_number, BlockParams::default());
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle

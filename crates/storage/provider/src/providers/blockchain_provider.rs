@@ -1785,8 +1785,11 @@ mod tests {
 
         // Generate a random block
         let mut rng = generators::rng();
-        let block =
-            random_block(&mut rng, BlockParams { parent: Some(B256::ZERO), ..Default::default() });
+        let block = random_block(
+            &mut rng,
+            0,
+            BlockParams { parent: Some(B256::ZERO), ..Default::default() },
+        );
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {

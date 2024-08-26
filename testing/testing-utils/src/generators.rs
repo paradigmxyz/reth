@@ -23,8 +23,6 @@ use std::{
 /// Used to pass arguments for random block generation function in tests
 #[derive(Debug, Default)]
 pub struct BlockParams {
-    /// The block number.
-    pub number: u64,
     /// The parent hash of the block.
     pub parent: Option<B256>,
     /// The number of transactions in the block.
@@ -148,7 +146,7 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 /// transactions in the block.
 ///
 /// The ommer headers are not assumed to be valid.
-pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlock {
+pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams) -> SealedBlock {
     // Generate transactions
     let tx_count = block_params.tx_count;
     let tx_count = tx_count.unwrap_or_else(|| (0..rng.gen::<u8>()));
@@ -156,7 +154,6 @@ pub fn random_block<R: Rng>(rng: &mut R, block_params: BlockParams) -> SealedBlo
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
-    let number = block_params.number;
     let parent = block_params.parent;
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
     let ommers =
@@ -222,8 +219,8 @@ pub fn random_block_range<R: Rng>(
     for idx in block_numbers {
         blocks.push(random_block(
             rng,
+            idx,
             BlockParams {
-                number: idx,
                 parent: Some(
                     blocks
                         .last()

@@ -2231,12 +2231,15 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let block1 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2299,11 +2302,15 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let block1 = random_block(
                 &mut rng,
-                BlockParams { number: 1, parent: Some(genesis.hash()), ..Default::default() },
+                1,
+                BlockParams { parent: Some(genesis.hash()), ..Default::default() },
             );
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
@@ -2320,8 +2327,8 @@ mod tests {
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
             let next_head = random_block(
                 &mut rng,
+                2,
                 BlockParams {
-                    number: 2,
                     parent: Some(block1.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2378,12 +2385,15 @@ mod tests {
                 .disable_blockchain_tree_sync()
                 .build();
 
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let block1 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2434,12 +2444,15 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let mut block1 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2450,8 +2463,8 @@ mod tests {
             // a second pre-merge block
             let mut block2 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2462,8 +2475,8 @@ mod tests {
             // a transition block
             let mut block3 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2516,12 +2529,15 @@ mod tests {
                 ]))
                 .build();
 
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let block1 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(genesis.hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2592,6 +2608,7 @@ mod tests {
                 .send_new_payload(
                     block_to_payload_v1(random_block(
                         &mut rng,
+                        0,
                         BlockParams { ommers_count: Some(0), ..Default::default() },
                     )),
                     None,
@@ -2606,7 +2623,8 @@ mod tests {
                 .send_new_payload(
                     block_to_payload_v1(random_block(
                         &mut rng,
-                        BlockParams { number: 1, ommers_count: Some(0), ..Default::default() },
+                        1,
+                        BlockParams { ommers_count: Some(0), ..Default::default() },
                     )),
                     None,
                 )
@@ -2636,14 +2654,16 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(&mut rng, BlockParams { number: 0, ..Default::default() });
+            let genesis = random_block(&mut rng, 0, BlockParams::default());
             let block1 = random_block(
                 &mut rng,
-                BlockParams { number: 1, parent: Some(genesis.hash()), ..Default::default() },
+                1,
+                BlockParams { parent: Some(genesis.hash()), ..Default::default() },
             );
             let block2 = random_block(
                 &mut rng,
-                BlockParams { number: 2, parent: Some(block1.hash()), ..Default::default() },
+                2,
+                BlockParams { parent: Some(block1.hash()), ..Default::default() },
             );
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
@@ -2714,8 +2734,8 @@ mod tests {
                 SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
             let block1 = random_block(
                 &mut rng,
+                1,
                 BlockParams {
-                    number: 1,
                     parent: Some(chain_spec.genesis_hash()),
                     ommers_count: Some(0),
                     ..Default::default()
@@ -2769,8 +2789,11 @@ mod tests {
                     done: true,
                 })]))
                 .build();
-            let genesis =
-                random_block(&mut rng, BlockParams { ommers_count: Some(0), ..Default::default() });
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
@@ -2801,12 +2824,8 @@ mod tests {
             let parent = rng.gen();
             let block = random_block(
                 &mut rng,
-                BlockParams {
-                    number: 2,
-                    parent: Some(parent),
-                    ommers_count: Some(0),
-                    ..Default::default()
-                },
+                2,
+                BlockParams { parent: Some(parent), ommers_count: Some(0), ..Default::default() },
             );
             let res = env.send_new_payload(block_to_payload_v1(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);

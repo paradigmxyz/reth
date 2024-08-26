@@ -269,8 +269,8 @@ mod tests {
             .map(|number| {
                 random_block(
                     &mut rng,
+                    number,
                     BlockParams {
-                        number,
                         tx_count: Some(0..(number == non_empty_block_number) as u8),
                         ..Default::default()
                     },
