@@ -197,11 +197,15 @@ impl HashedStorage {
 
     /// Construct [`PrefixSetMut`] from hashed storage.
     pub fn construct_prefix_set(&self) -> PrefixSetMut {
-        let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
-        for hashed_slot in self.storage.keys() {
-            prefix_set.insert(Nibbles::unpack(hashed_slot));
+        if self.wiped {
+            PrefixSetMut::all()
+        } else {
+            let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+            for hashed_slot in self.storage.keys() {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
+            }
+            prefix_set
         }
-        prefix_set
     }
 
     /// Extend hashed storage with contents of other.
