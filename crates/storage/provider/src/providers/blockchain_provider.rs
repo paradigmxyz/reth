@@ -1440,7 +1440,7 @@ mod tests {
     use crate::{
         providers::BlockchainProvider2,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        BlockWriter, CanonChainTracker, StaticFileWriter,
+        BlockWriter, CanonChainTracker, StateProviderFactory, StaticFileWriter,
     };
     use itertools::Itertools;
     use rand::Rng;
@@ -1458,8 +1458,8 @@ mod tests {
     };
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Header, Receipt, SealedBlock,
-        StaticFileSegment, Withdrawals, B256,
+        Account, Address, BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Header, Receipt,
+        SealedBlock, StaticFileSegment, Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1604,6 +1604,134 @@ mod tests {
     }
 
     #[test]
+    fn test_state_provider_factory() -> Result<(), ()> {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, Some(0..5), Some(0..5));
+        let database_blocks = blocks[0..5].to_vec();
+        let in_memory_blocks = blocks[5..].to_vec();
+        let mut blocks_iter = blocks.into_iter();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut modified_accounts = Vec::new();
+        for block in (0..5).map_while(|_| blocks_iter.next()) {
+            let sealed_block = block.clone().seal_with_senders().expect(
+                "failed to seal block
+    with senders",
+            );
+            provider_rw.insert_historical_block(sealed_block.clone()).unwrap();
+
+            let address = Address::random();
+            let account = Account::default();
+            let _ = provider_rw.insert_block(block.clone().seal_with_senders().unwrap());
+            modified_accounts.push((block.number, address, account));
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = BlockchainProvider2::new(factory).unwrap();
+
+        let chain = NewCanonicalChain::Commit {
+            new: blocks_iter
+                .map(|block| {
+                    let senders = block.senders().expect("failed to recover senders");
+                    ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(senders),
+                        Default::default(),
+                        Default::default(),
+                        Default::default(),
+                    )
+                })
+                .collect(),
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+        provider
+            .canonical_in_memory_state
+            .set_canonical_head(in_memory_blocks.last().unwrap().clone().header);
+
+        let latest_state = provider.latest().unwrap();
+        let memory_block = in_memory_blocks.first().unwrap();
+
+        assert_eq!(
+            latest_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        //Test latest state from
+        for (_, address, account) in &modified_accounts {
+            let state_account = latest_state.basic_account(*address).unwrap();
+            assert_eq!(
+                state_account.as_ref(),
+                Some(account),
+                "Account state mismatch for address {:?} in latest state",
+                address
+            );
+        }
+
+        // Test historical state from db
+        for (block_number, address, expected_account) in &modified_accounts {
+            let historical_state = provider.history_by_block_number(*block_number).unwrap();
+            let state_account = historical_state.basic_account(*address).unwrap();
+            assert_eq!(
+                state_account.as_ref(),
+                Some(expected_account),
+                "Account state mismatch for address {:?} at block {}",
+                address,
+                block_number
+            );
+        }
+
+        // Test historical state by block number
+        let db_block = database_blocks.last().unwrap();
+        let historical_state = provider.history_by_block_number(db_block.number);
+        assert!(historical_state.is_ok());
+        let memory_block = in_memory_blocks.first().unwrap();
+        let historical_state = historical_state.unwrap();
+        assert_eq!(
+            historical_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        // Test historical state by block hash
+        let memory_block = in_memory_blocks.first().unwrap();
+        let memory_state = provider.history_by_block_hash(memory_block.hash());
+        assert!(memory_state.is_ok());
+        let memory_state = memory_state.unwrap();
+        assert_eq!(
+            memory_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        // Test latest state
+        let memory_block = in_memory_blocks.first().unwrap();
+        let latest_state = provider.state_by_block_number_or_tag(BlockNumberOrTag::Latest).unwrap();
+        assert_eq!(
+            latest_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        // Test earliest state
+        let memory_block = in_memory_blocks.first().unwrap();
+        let earliest_state =
+            provider.state_by_block_number_or_tag(BlockNumberOrTag::Earliest).unwrap();
+        assert_eq!(
+            earliest_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        // Test pending state
+        let memory_block = in_memory_blocks.first().unwrap();
+        let pending_state = provider.pending().unwrap();
+        assert_eq!(
+            pending_state.block_hash(memory_block.number).unwrap().unwrap(),
+            memory_block.hash()
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
@@ -1656,11 +1784,11 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
 
-        // Now the block should be found in memory
         assert_eq!(
             provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
             Some(first_in_mem_block.clone().into())
         );
+
         assert_eq!(
             provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
             Some(first_in_mem_block.clone().into())
@@ -1883,10 +2011,8 @@ mod tests {
         }
         provider_rw.commit()?;
 
-        // Create a new provider
         let provider = BlockchainProvider2::new(factory)?;
 
-        // Insert the first block into the in-memory state
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
@@ -1903,20 +2029,16 @@ mod tests {
         let first_db_block = database_blocks.first().unwrap().clone();
         let first_in_mem_block = in_memory_blocks.first().unwrap().clone();
 
-        // First database block body indices should be found
         assert_eq!(
             provider.block_body_indices(first_db_block.number)?.unwrap(),
             StoredBlockBodyIndices { first_tx_num: 0, tx_count: 4 }
         );
 
-        // First in-memory block body indices should be found with the first tx after the database
-        // blocks
         assert_eq!(
             provider.block_body_indices(first_in_mem_block.number)?.unwrap(),
             StoredBlockBodyIndices { first_tx_num: 20, tx_count: 4 }
         );
 
-        // A random block number should return None as the block is not found
         let mut rng = rand::thread_rng();
         let random_block_number: u64 = rng.gen();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
