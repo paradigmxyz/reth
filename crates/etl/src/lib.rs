@@ -299,7 +299,7 @@ mod tests {
             let expected = entries[id];
             assert_eq!(
                 entry.unwrap(),
-                (expected.0.encode().to_vec(), expected.1.compress().to_vec())
+                (expected.0.encode().to_vec(), expected.1.compress().clone())
             );
         }
 

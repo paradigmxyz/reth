@@ -1577,7 +1577,7 @@ mod tests {
         provider.set_safe(safe_block.header.clone());
         provider.set_finalized(finalized_block.header.clone());
 
-        Ok((provider, database_blocks.to_vec(), in_memory_blocks.to_vec(), receipts))
+        Ok((provider, database_blocks.clone(), in_memory_blocks.clone(), receipts))
     }
 
     #[allow(clippy::type_complexity)]
