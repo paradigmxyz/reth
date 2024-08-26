@@ -335,7 +335,7 @@ impl Transaction {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip7702(_) => None,
             Self::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                Some(blob_versioned_hashes.to_vec())
+                Some(blob_versioned_hashes.clone())
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => None,
