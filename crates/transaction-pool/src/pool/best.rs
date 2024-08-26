@@ -594,4 +594,34 @@ mod tests {
         assert_eq!(best.independent.len(), 2);
         assert!(!best.independent.contains(&pending_tx2));
     }
+
+    #[test]
+    fn test_best_transactions_filter_trait_object() {
+        // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a trait object of BestTransactions iterator from the pool
+        let best: Box<dyn crate::traits::BestTransactions<Item = _>> = Box::new(pool.best());
+
+        // Create a filter that only returns transactions with even nonces
+        let filter =
+            BestTransactionFilter::new(best, |tx: &Arc<ValidPoolTransaction<MockTransaction>>| {
+                tx.nonce() % 2 == 0
+            });
+
+        // Verify that the filter only returns transactions with even nonces
+        for tx in filter {
+            assert_eq!(tx.nonce() % 2, 0);
+        }
+    }
 }
