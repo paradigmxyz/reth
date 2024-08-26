@@ -1,8 +1,10 @@
+use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
+
 use alloy_genesis::Genesis;
 use clap::{builder::TypedValueParser, error::Result, Arg, Command};
-use reth_chainspec::{ChainSpec, BASE_MAINNET, BASE_SEPOLIA, DEV, OP_MAINNET, OP_SEPOLIA};
+use reth_chainspec::{ChainSpec, DEV};
 use reth_cli::chainspec::ChainSpecParser;
-use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
+use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 /// Clap value parser for [`ChainSpec`]s.
 ///
