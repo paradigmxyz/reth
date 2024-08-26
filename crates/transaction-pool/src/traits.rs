@@ -756,6 +756,8 @@ pub trait BestTransactionsFilter: BestTransactions {
     }
 }
 
+impl<T> BestTransactionsFilter for T where T: BestTransactions {}
+
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -766,8 +768,6 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
-
-impl<T> BestTransactionsFilter for std::iter::Empty<T> {}
 
 /// A Helper type that bundles the best transactions attributes together.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
