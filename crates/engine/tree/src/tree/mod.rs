@@ -28,7 +28,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
+    StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -107,6 +107,11 @@ impl TreeState {
     /// Returns the number of executed blocks stored.
     fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
+    }
+
+    /// Returns the [`ExecutedBlock`] by hash.
+    fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock> {
+        self.blocks_by_hash.get(&hash)
     }
 
     /// Returns the block by hash.
@@ -547,7 +552,7 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTr
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
@@ -1337,6 +1342,43 @@ where
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
     }
 
+    /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
+    ///
+    /// NOTE: This cannot fetch [`ExecutedBlock`]s for _finalized_ blocks, instead it can only
+    /// fetch [`ExecutedBlock`]s for _canonical_ blocks, or blocks from sidechains that the node
+    /// has in memory.
+    ///
+    /// For finalized blocks, this will return `None`.
+    #[allow(unused)]
+    fn executed_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock>> {
+        // check memory first
+        let block = self.state.tree_state.executed_block_by_hash(hash).cloned();
+
+        if block.is_some() {
+            Ok(block)
+        } else if let Some((_, updates)) = self.state.tree_state.persisted_trie_updates.get(&hash) {
+            let SealedBlockWithSenders { block, senders } = self
+                .provider
+                .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
+            let execution_output = self
+                .provider
+                .get_state(block.number)?
+                .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
+            let hashed_state = execution_output.hash_state_slow();
+
+            Ok(Some(ExecutedBlock {
+                block: Arc::new(block),
+                senders: Arc::new(senders),
+                trie: updates.clone(),
+                execution_output: Arc::new(execution_output),
+                hashed_state: Arc::new(hashed_state),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Return sealed block from database or in-memory state by hash.
     fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
         // check memory first
@@ -1705,7 +1747,7 @@ where
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
-        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
 
         // update the tracked canonical head

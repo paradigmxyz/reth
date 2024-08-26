@@ -1,14 +1,16 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    RequestsProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
+    HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
@@ -785,5 +787,20 @@ impl ChangeSetReader for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+}
+
+impl BlockExecutionReader for MockEthProvider {
+    fn get_block_and_execution_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Chain> {
+        Ok(Chain::default())
+    }
+}
+
+impl StateReader for MockEthProvider {
+    fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        Ok(None)
     }
 }
