@@ -5,7 +5,7 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcTransaction};
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
     trace::{
@@ -22,7 +22,6 @@ use revm_inspectors::{
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
-use std::future::Future;
 
 const API_LEVEL: u64 = 8;
 
@@ -378,65 +377,5 @@ where
         // return the first found transaction, this behavior is consistent with etherscan's
         let found = traces.and_then(|traces| traces.first().cloned());
         Ok(found)
-    }
-}
-
-/// Performs a binary search within a given block range to find the desired block number.
-///
-/// The binary search is performed by calling the provided asynchronous `check` closure on the
-/// blocks of the range. The closure should return a future representing the result of performing
-/// the desired logic at a given block. The future resolves to an `bool` where:
-/// - `true` indicates that the condition has been matched, but we can try to find a lower block to
-///   make the condition more matchable.
-/// - `false` indicates that the condition not matched, so the target is not present in the current
-///   block and should continue searching in a higher range.
-///
-/// Args:
-/// - `low`: The lower bound of the block range (inclusive).
-/// - `high`: The upper bound of the block range (inclusive).
-/// - `check`: A closure that performs the desired logic at a given block.
-async fn binary_search<F, Fut>(low: u64, high: u64, check: F) -> RpcResult<u64>
-where
-    F: Fn(u64) -> Fut,
-    Fut: Future<Output = RpcResult<bool>>,
-{
-    let mut low = low;
-    let mut high = high;
-    let mut num = high;
-
-    while low <= high {
-        let mid = (low + high) / 2;
-        if check(mid).await? {
-            high = mid - 1;
-            num = mid;
-        } else {
-            low = mid + 1
-        }
-    }
-
-    Ok(num)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_binary_search() {
-        // in the middle
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
-        assert_eq!(num, Ok(5));
-
-        // in the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 7) })).await;
-        assert_eq!(num, Ok(7));
-
-        // in the lower
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 1) })).await;
-        assert_eq!(num, Ok(1));
-
-        // high than the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
-        assert_eq!(num, Ok(10));
     }
 }

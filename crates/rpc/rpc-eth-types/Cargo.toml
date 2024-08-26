@@ -35,6 +35,7 @@ revm-inspectors.workspace = true
 revm-primitives = { workspace = true, features = ["dev"] }
 
 # rpc
+jsonrpsee.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 
