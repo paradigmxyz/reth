@@ -4,8 +4,7 @@ use std::sync::{atomic::AtomicUsize, Arc};
 
 use jsonrpsee_types::error::{ErrorObject, INTERNAL_ERROR_CODE};
 use reqwest::Client;
-use reth_rpc_eth_api::RawTransactionForwarder;
-use reth_rpc_eth_types::error::{EthApiError, EthResult};
+use reth_rpc_eth_types::error::EthApiError;
 use reth_rpc_types::ToRpcError;
 
 /// Error type when interacting with the Sequencer
@@ -100,14 +99,6 @@ impl SequencerClient {
             })
             .map_err(SequencerRpcError::HttpError)?;
 
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl RawTransactionForwarder for SequencerClient {
-    async fn forward_raw_transaction(&self, tx: &[u8]) -> EthResult<()> {
-        Self::forward_raw_transaction(self, tx).await?;
         Ok(())
     }
 }
