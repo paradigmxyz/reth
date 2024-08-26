@@ -8281,7 +8281,6 @@ dependencies = [
 name = "reth-revm"
 version = "1.0.5"
 dependencies = [
- "alloy-eips",
  "reth-chainspec",
  "reth-consensus-common",
  "reth-ethereum-forks",
