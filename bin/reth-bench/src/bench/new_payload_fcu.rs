@@ -48,11 +48,11 @@ impl Command {
                 let block = match block.header.hash {
                     Some(block_hash) => {
                         // we can reuse the hash in the response
-                        Block::try_from(block).unwrap().seal(block_hash)
+                        Block::try_from(block.inner).unwrap().seal(block_hash)
                     }
                     None => {
                         // we don't have the hash, so let's just hash it
-                        Block::try_from(block).unwrap().seal_slow()
+                        Block::try_from(block.inner).unwrap().seal_slow()
                     }
                 };
 

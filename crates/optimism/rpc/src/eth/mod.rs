@@ -11,7 +11,7 @@ use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
-use op_alloy_network::Optimism;
+use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -95,7 +95,7 @@ where
     N: FullNodeComponents,
 {
     type Error = OpEthApiError;
-    type NetworkTypes = Optimism;
+    type NetworkTypes = AnyNetwork;
 }
 
 impl<N> EthApiSpec for OpEthApi<N>

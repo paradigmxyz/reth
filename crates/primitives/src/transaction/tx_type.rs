@@ -227,7 +227,7 @@ impl From<alloy_consensus::TxType> for TxType {
             alloy_consensus::TxType::Eip2930 => Self::Eip2930,
             alloy_consensus::TxType::Eip1559 => Self::Eip1559,
             alloy_consensus::TxType::Eip4844 => Self::Eip4844,
-            //alloy_consensus::TxType::Eip7702 => Self::Eip7702,
+            alloy_consensus::TxType::Eip7702 => Self::Eip7702,
         }
     }
 }

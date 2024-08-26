@@ -7,37 +7,26 @@ use crate::{
 };
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
+use alloy_serde::WithOtherFields;
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::ToString, vec::Vec};
 
-impl TryFrom<alloy_rpc_types::Block> for Block {
+impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>> for Block {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(block: alloy_rpc_types::Block) -> Result<Self, Self::Error> {
+    fn try_from(
+        block: alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>,
+    ) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let body = {
             let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
                 .transactions
             {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => transactions
-                    .into_iter()
-                    .map(|tx| {
-                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-                        Ok(TransactionSigned::from_transaction_and_signature(
-                            tx.try_into()?,
-                            crate::Signature {
-                                r: signature.r,
-                                s: signature.s,
-                                odd_y_parity: signature
-                                    .y_parity
-                                    .unwrap_or_else(|| alloy_rpc_types::Parity(!signature.v.bit(0)))
-                                    .0,
-                            },
-                        ))
-                    })
-                    .collect(),
+                alloy_rpc_types::BlockTransactions::Full(transactions) => {
+                    transactions.into_iter().map(|tx| tx.try_into()).collect()
+                }
                 alloy_rpc_types::BlockTransactions::Hashes(_) |
                 alloy_rpc_types::BlockTransactions::Uncle => {
                     // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
@@ -64,12 +53,17 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
     }
 }
 
-impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
+impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
         use alloy_eips::eip2718::Eip2718Error;
         use alloy_rpc_types::ConversionError;
+
+        #[cfg(feature = "optimism")]
+        let WithOtherFields { inner: tx, other } = tx;
+        #[cfg(not(feature = "optimism"))]
+        let WithOtherFields { inner: tx, other: _ } = tx;
 
         match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
             ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
@@ -211,8 +205,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
-                let fields = tx
-                    .other
+                let fields = other
                     .deserialize_into::<alloy_rpc_types::optimism::OptimismTransactionFields>()
                     .map_err(|e| ConversionError::Custom(e.to_string()))?;
                 Ok(Self::Deposit(crate::transaction::TxDeposit {
@@ -235,10 +228,10 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
     }
 }
 
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
+impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
@@ -268,10 +261,10 @@ impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
     }
 }
 
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
+impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedEcRecovered {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
         use alloy_rpc_types::ConversionError;
 
         let transaction: TransactionSigned = tx.try_into()?;
@@ -296,10 +289,10 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
     }
 }
 
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedNoHash {
+impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for TransactionSignedNoHash {
     type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: WithOtherFields<alloy_rpc_types::Transaction>) -> Result<Self, Self::Error> {
         Ok(Self {
             signature: tx.signature.ok_or(Self::Error::MissingSignature)?.try_into()?,
             transaction: tx.try_into()?,
@@ -337,7 +330,7 @@ mod tests {
             "v": "0x0",
             "value": "0x0"
         }"#;
-        let alloy_tx: AlloyTransaction =
+        let alloy_tx: WithOtherFields<AlloyTransaction> =
             serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
@@ -387,7 +380,7 @@ mod tests {
             "v": "0x0",
             "value": "0x239c2e16a5ca590000"
         }"#;
-        let alloy_tx: AlloyTransaction =
+        let alloy_tx: WithOtherFields<AlloyTransaction> =
             serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");

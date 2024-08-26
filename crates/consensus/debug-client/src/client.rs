@@ -198,7 +198,7 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 receipts_root: block.header.receipts_root,
                 logs_bloom: block.header.logs_bloom,
                 prev_randao: block.header.mix_hash.unwrap(),
-                block_number: block.header.number.unwrap(),
+                block_number: block.header.number,
                 gas_limit: block.header.gas_limit.try_into().unwrap(),
                 gas_used: block.header.gas_used.try_into().unwrap(),
                 timestamp: block.header.timestamp,
