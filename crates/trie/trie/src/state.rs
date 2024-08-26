@@ -6,7 +6,10 @@ use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::{keccak256, Account, Address, B256, U256};
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
-use std::collections::{hash_map, HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{hash_map, HashMap, HashSet},
+};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -99,17 +102,42 @@ impl HashedPostState {
     /// Extend this hashed post state with contents of another.
     /// Entries in the second hashed post state take precedence.
     pub fn extend(&mut self, other: Self) {
-        for (hashed_address, account) in other.accounts {
-            self.accounts.insert(hashed_address, account);
-        }
+        self.extend_inner(Cow::Owned(other));
+    }
 
-        for (hashed_address, storage) in other.storages {
+    /// Extend this hashed post state with contents of another.
+    /// Entries in the second hashed post state take precedence.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_inner(Cow::Borrowed(other));
+    }
+
+    fn extend_inner(&mut self, other: Cow<'_, Self>) {
+        self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+
+        self.storages.reserve(other.storages.len());
+        match other {
+            Cow::Borrowed(other) => {
+                self.extend_storages(other.storages.iter().map(|(k, v)| (*k, Cow::Borrowed(v))))
+            }
+            Cow::Owned(other) => {
+                self.extend_storages(other.storages.into_iter().map(|(k, v)| (k, Cow::Owned(v))))
+            }
+        }
+    }
+
+    fn extend_storages<'a>(
+        &mut self,
+        storages: impl IntoIterator<Item = (B256, Cow<'a, HashedStorage>)>,
+    ) {
+        for (hashed_address, storage) in storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
-                    entry.insert(storage);
+                    entry.insert(storage.into_owned());
                 }
                 hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().extend(storage);
+                    entry.get_mut().extend(&storage);
                 }
             }
         }
@@ -210,14 +238,12 @@ impl HashedStorage {
 
     /// Extend hashed storage with contents of other.
     /// The entries in second hashed storage take precedence.
-    pub fn extend(&mut self, other: Self) {
+    pub fn extend(&mut self, other: &Self) {
         if other.wiped {
             self.wiped = true;
             self.storage.clear();
         }
-        for (hashed_slot, value) in other.storage {
-            self.storage.insert(hashed_slot, value);
-        }
+        self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
     /// Converts hashed storage into [`HashedStorageSorted`].
