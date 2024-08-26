@@ -1,17 +1,14 @@
 //! Clap parser utilities
 
-use alloy_genesis::Genesis;
-use reth_chainspec::ChainSpec;
-use reth_fs_util as fs;
 use std::{path::PathBuf, sync::Arc};
 
-use reth_chainspec::DEV;
-
-#[cfg(feature = "optimism")]
-use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
-
+use alloy_genesis::Genesis;
+use reth_chainspec::{ChainSpec, DEV};
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
+use reth_fs_util as fs;
+#[cfg(feature = "optimism")]
+use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
