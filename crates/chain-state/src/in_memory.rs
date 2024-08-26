@@ -493,7 +493,7 @@ impl CanonicalInMemoryState {
             Vec::new()
         };
 
-        MemoryOverlayStateProvider::new(in_memory, historical)
+        MemoryOverlayStateProvider::new(historical, in_memory)
     }
 
     /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.
