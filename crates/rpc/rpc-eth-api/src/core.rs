@@ -3,7 +3,7 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
 use reth_primitives::{
     transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
@@ -580,19 +580,23 @@ where
 
         // perform a binary search over the block range to find the block in which the sender's
         // nonce reached the requested nonce.
-        let num = binary_search(1, self.block_number()?.saturating_to(), |mid| {
-            async move {
-                let mid_nonce = EthState::transaction_count(self, sender, Some(mid.into()))
-                    .await?
-                    .saturating_to::<u64>();
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.block_number()?.saturating_to(),
+            |mid| {
+                async move {
+                    let mid_nonce = EthState::transaction_count(self, sender, Some(mid.into()))
+                        .await?
+                        .saturating_to::<u64>();
 
-                // The `transaction_count` returns the `nonce` after the transaction was
-                // executed, which is the state of the account after the block, and we need to find
-                // the transaction whose nonce is the pre-state, so need to compare with `nonce`(no
-                // equal).
-                Ok(mid_nonce > nonce)
-            }
-        })
+                    // The `transaction_count` returns the `nonce` after the transaction was
+                    // executed, which is the state of the account after the block, and we need to
+                    // find the transaction whose nonce is the pre-state, so
+                    // need to compare with `nonce`(no equal).
+                    Ok(mid_nonce > nonce)
+                }
+            },
+        )
         .await?;
 
         let Some(BlockTransactions::Full(transactions)) =

@@ -1,6 +1,5 @@
 //! Commonly used code snippets
 
-use jsonrpsee_core::RpcResult;
 use reth_primitives::{Bytes, PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use std::future::Future;
 
@@ -34,10 +33,10 @@ pub fn recover_raw_transaction(data: Bytes) -> EthResult<PooledTransactionsEleme
 /// - `low`: The lower bound of the block range (inclusive).
 /// - `high`: The upper bound of the block range (inclusive).
 /// - `check`: A closure that performs the desired logic at a given block.
-pub async fn binary_search<F, Fut>(low: u64, high: u64, check: F) -> RpcResult<u64>
+pub async fn binary_search<F, Fut, E>(low: u64, high: u64, check: F) -> Result<u64, E>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = RpcResult<bool>>,
+    Fut: Future<Output = Result<bool, E>>,
 {
     let mut low = low;
     let mut high = high;

@@ -1,7 +1,7 @@
 use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcTransaction};
@@ -294,20 +294,24 @@ where
 
         // perform a binary search over the block range to find the block in which the sender's
         // nonce reached the requested nonce.
-        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
-            async move {
-                let mid_nonce =
-                    EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
-                        .await?
-                        .saturating_to::<u64>();
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.eth.block_number()?.saturating_to(),
+            |mid| {
+                async move {
+                    let mid_nonce =
+                        EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
+                            .await?
+                            .saturating_to::<u64>();
 
-                // The `transaction_count` returns the `nonce` after the transaction was
-                // executed, which is the state of the account after the block, and we need to find
-                // the transaction whose nonce is the pre-state, so need to compare with `nonce`(no
-                // equal).
-                Ok(mid_nonce > nonce)
-            }
-        })
+                    // The `transaction_count` returns the `nonce` after the transaction was
+                    // executed, which is the state of the account after the block, and we need to
+                    // find the transaction whose nonce is the pre-state, so
+                    // need to compare with `nonce`(no equal).
+                    Ok(mid_nonce > nonce)
+                }
+            },
+        )
         .await?;
 
         let Some(BlockTransactions::Full(transactions)) =
@@ -328,11 +332,15 @@ where
             return Ok(None);
         }
 
-        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
-            Box::pin(
-                async move { Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty()) },
-            )
-        })
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.eth.block_number()?.saturating_to(),
+            |mid| {
+                Box::pin(async move {
+                    Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty())
+                })
+            },
+        )
         .await?;
 
         let traces = self
