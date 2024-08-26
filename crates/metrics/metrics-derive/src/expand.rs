@@ -277,7 +277,7 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
     }
 
     let scope = match (scope, dynamic) {
-        (Some(scope), None) | (Some(scope), Some(false)) => MetricsScope::Static(scope),
+        (Some(scope), None | Some(false)) => MetricsScope::Static(scope),
         (None, Some(true)) => MetricsScope::Dynamic,
         (Some(_), Some(_)) => {
             return Err(Error::new_spanned(node, "`scope = ..` conflicts with `dynamic = true`."))

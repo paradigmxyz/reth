@@ -6,8 +6,7 @@ use tracing::error;
 /// Implements JWT validation logics and integrates
 /// to an Http [`AuthLayer`][crate::AuthLayer]
 /// by implementing the [`AuthValidator`] trait.
-#[derive(Clone)]
-#[allow(missing_debug_implementations)]
+#[derive(Debug, Clone)]
 pub struct JwtAuthValidator {
     secret: JwtSecret,
 }

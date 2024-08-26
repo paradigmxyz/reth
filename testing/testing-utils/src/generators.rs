@@ -275,14 +275,14 @@ where
         let mut old_entries: Vec<_> = new_entries
             .into_iter()
             .filter_map(|entry| {
-                let old = if !entry.value.is_zero() {
-                    storage.insert(entry.key, entry.value)
-                } else {
+                let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
                         return None
                     }
                     old
+                } else {
+                    storage.insert(entry.key, entry.value)
                 };
                 Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
@@ -316,7 +316,7 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
+    let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);

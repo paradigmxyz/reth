@@ -255,11 +255,6 @@ pub enum RethRpcModule {
     Reth,
     /// `ots_` module
     Ots,
-    /// For single non-standard `eth_` namespace call `eth_callBundle`
-    ///
-    /// This is separate from [`RethRpcModule::Eth`] because it is a non standardized call that
-    /// should be opt-in.
-    EthCallBundle,
 }
 
 // === impl RethRpcModule ===
@@ -308,7 +303,6 @@ impl FromStr for RethRpcModule {
             "rpc" => Self::Rpc,
             "reth" => Self::Reth,
             "ots" => Self::Ots,
-            "eth-call-bundle" | "eth_callBundle" => Self::EthCallBundle,
             _ => return Err(ParseError::VariantNotFound),
         })
     }

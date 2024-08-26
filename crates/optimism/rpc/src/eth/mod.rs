@@ -6,11 +6,12 @@ pub mod transaction;
 mod block;
 mod call;
 mod pending_block;
+pub mod rpc;
 
 use std::{fmt, sync::Arc};
 
+use crate::eth::rpc::SequencerClient;
 use alloy_primitives::U256;
-use derive_more::Deref;
 use op_alloy_network::Optimism;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
@@ -56,10 +57,9 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone, Deref)]
 pub struct OpEthApi<N: FullNodeComponents> {
-    #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
+    sequencer_client: parking_lot::RwLock<Option<SequencerClient>>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
@@ -81,11 +81,23 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
             ctx.executor.clone(),
-            None,
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), sequencer_client: parking_lot::RwLock::new(None) }
+    }
+}
+
+impl<N> Clone for OpEthApi<N>
+where
+    N: FullNodeComponents,
+    Self: Send + Sync,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            sequencer_client: parking_lot::RwLock::new(self.sequencer_client.read().clone()),
+        }
     }
 }
 

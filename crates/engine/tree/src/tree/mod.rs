@@ -23,8 +23,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
@@ -658,13 +658,7 @@ where
             return Ok(TreeOutcome::new(status));
         }
 
-        let status = if !self.backfill_sync_state.is_idle() {
-            if let Err(error) = self.buffer_block_without_senders(block) {
-                self.on_insert_block_error(error)?
-            } else {
-                PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-            }
-        } else {
+        let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
             match self.insert_block_without_senders(block) {
@@ -679,8 +673,8 @@ where
                             latest_valid_hash = Some(block_hash);
                             PayloadStatusEnum::Valid
                         }
-                        InsertPayloadOk2::Inserted(BlockStatus2::Disconnected { .. }) |
-                        InsertPayloadOk2::AlreadySeen(BlockStatus2::Disconnected { .. }) => {
+                        InsertPayloadOk2::Inserted(BlockStatus2::Disconnected { .. })
+                        | InsertPayloadOk2::AlreadySeen(BlockStatus2::Disconnected { .. }) => {
                             // not known to be invalid, but we don't know anything else
                             PayloadStatusEnum::Syncing
                         }
@@ -690,6 +684,10 @@ where
                 }
                 Err(error) => self.on_insert_block_error(error)?,
             }
+        } else if let Err(error) = self.buffer_block_without_senders(block) {
+            self.on_insert_block_error(error)?
+        } else {
+            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
         let mut outcome = TreeOutcome::new(status);
@@ -868,12 +866,12 @@ where
     fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
         if self.should_persist() && !self.persistence_state.in_progress() {
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
-            if !blocks_to_persist.is_empty() {
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine", "Returned empty set of blocks to persist");
+            } else {
                 let (tx, rx) = oneshot::channel();
                 let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
-            } else {
-                debug!(target: "engine", "Returned empty set of blocks to persist");
             }
         }
 
@@ -1152,8 +1150,8 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block_number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
-            self.config.persistence_threshold()
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block)
+            > self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
@@ -1253,7 +1251,7 @@ where
             trace!(target: "engine", %hash, "found canonical state for block in memory");
             // the block leads back to the canonical chain
             let historical = self.provider.state_by_block_hash(historical)?;
-            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(blocks, historical))));
+            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(historical, blocks))));
         }
 
         // the hash could belong to an unknown block or a persisted block
@@ -1424,8 +1422,8 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine", child =?child_num_hash, ?res, "connected buffered block");
-                    if self.is_sync_target_head(child_num_hash.hash) &&
-                        matches!(res, InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+                    if self.is_sync_target_head(child_num_hash.hash)
+                        && matches!(res, InsertPayloadOk2::Inserted(BlockStatus2::Valid))
                     {
                         self.make_canonical(child_num_hash.hash);
                     }
@@ -1791,12 +1789,7 @@ where
         let executed = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
-            execution_output: Arc::new(ExecutionOutcome::new(
-                output.state,
-                Receipts::from(output.receipts),
-                block_number,
-                vec![Requests::from(output.requests)],
-            )),
+            execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };

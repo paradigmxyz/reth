@@ -729,6 +729,48 @@ impl PeersManager {
         }
     }
 
+    /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
+    /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
+    #[allow(dead_code)]
+    pub(crate) fn add_and_connect(
+        &mut self,
+        peer_id: PeerId,
+        addr: PeerAddr,
+        fork_id: Option<ForkId>,
+    ) {
+        self.add_and_connect_kind(peer_id, PeerKind::Basic, addr, fork_id)
+    }
+
+    ///  Connects a peer and its address with the given kind.
+    pub(crate) fn add_and_connect_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: PeerKind,
+        addr: PeerAddr,
+        fork_id: Option<ForkId>,
+    ) {
+        if self.ban_list.is_banned(&peer_id, &addr.tcp().ip()) {
+            return
+        }
+
+        match self.peers.entry(peer_id) {
+            Entry::Vacant(entry) => {
+                trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
+                let mut peer = Peer::with_kind(addr, kind);
+                peer.state = PeerConnectionState::PendingOut;
+                peer.fork_id = fork_id;
+                entry.insert(peer);
+                self.queued_actions
+                    .push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
+            }
+            _ => return,
+        }
+
+        if kind.is_trusted() {
+            self.trusted_peer_ids.insert(peer_id);
+        }
+    }
+
     /// Removes the tracked node from the trusted set.
     pub(crate) fn remove_peer_from_trusted_set(&mut self, peer_id: PeerId) {
         let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
@@ -2380,5 +2422,33 @@ mod tests {
 
         // no more pending outbound connections
         assert_eq!(peer_manager.connection_info.num_pending_out, 0);
+    }
+
+    #[tokio::test]
+    async fn test_connect() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::PendingOut);
+
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, socket_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let (record, _) = peers.peer_by_id(peer).unwrap();
+        assert_eq!(record.tcp_addr(), socket_addr);
+        assert_eq!(record.udp_addr(), socket_addr);
+
+        // connect again
+        peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
+
+        let (record, _) = peers.peer_by_id(peer).unwrap();
+        assert_eq!(record.tcp_addr(), socket_addr);
+        assert_eq!(record.udp_addr(), socket_addr);
     }
 }
