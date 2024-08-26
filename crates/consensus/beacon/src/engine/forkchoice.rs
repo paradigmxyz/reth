@@ -41,7 +41,7 @@ impl ForkchoiceStateTracker {
     /// Returns the [`ForkchoiceStatus`] of the latest received FCU.
     ///
     /// Caution: this can be invalid.
-    pub(crate) fn latest_status(&self) -> Option<ForkchoiceStatus> {
+    pub fn latest_status(&self) -> Option<ForkchoiceStatus> {
         self.latest.as_ref().map(|s| s.status)
     }
 
