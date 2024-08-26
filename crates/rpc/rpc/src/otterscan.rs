@@ -376,7 +376,7 @@ where
 
         // A contract maybe created and then destroyed in multiple transactions, here we
         // return the first found transaction, this behavior is consistent with etherscan's
-        let found = traces.and_then(|traces| traces.first().cloned());
+        let found = traces.and_then(|traces| traces.first().copied());
         Ok(found)
     }
 }
