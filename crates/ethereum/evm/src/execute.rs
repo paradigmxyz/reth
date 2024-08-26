@@ -13,8 +13,8 @@ use reth_evm::{
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
-        apply_beacon_root_contract_call, apply_consolidation_requests_contract_call,
-        apply_withdrawal_requests_contract_call,
+        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
+        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
     },
     ConfigureEvm,
 };
@@ -24,10 +24,8 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::BlockBatchRecord,
-    db::states::bundle_state::BundleRetention,
-    state_change::{apply_blockhashes_update, post_block_balance_increments},
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -156,12 +154,13 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        apply_blockhashes_update(
-            evm.db_mut(),
+        apply_blockhashes_contract_call(
+            &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_hash,
+            &mut evm,
         )?;
 
         // execute transactions

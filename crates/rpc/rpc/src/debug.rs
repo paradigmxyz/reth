@@ -2,7 +2,10 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
+use reth_evm::{
+    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    ConfigureEvmEnv,
+};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
@@ -10,7 +13,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
@@ -595,9 +598,12 @@ where
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 // apply eip-2935 blockhashes update
-                apply_blockhashes_update(
+                pre_block_blockhashes_contract_call(
                     &mut db,
+                    &evm_config,
                     &this.inner.provider.chain_spec(),
+                    &cfg,
+                    &block_env,
                     block.timestamp,
                     block.number,
                     block.parent_hash,
