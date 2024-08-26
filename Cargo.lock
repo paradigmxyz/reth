@@ -8126,6 +8126,7 @@ dependencies = [
 name = "reth-primitives"
 version = "1.0.5"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",

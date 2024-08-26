@@ -316,7 +316,7 @@ pub fn random_account_change<R: Rng>(
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
-    let mut addresses = valid_addresses.choose_multiple(rng, 2).cloned();
+    let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);

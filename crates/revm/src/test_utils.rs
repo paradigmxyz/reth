@@ -53,7 +53,7 @@ impl AccountReader for StateProviderTest {
 
 impl BlockHashReader for StateProviderTest {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        Ok(self.block_hash.get(&number).cloned())
+        Ok(self.block_hash.get(&number).copied())
     }
 
     fn canonical_hashes_range(
@@ -134,7 +134,7 @@ impl StateProvider for StateProviderTest {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
-        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).cloned()))
+        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
