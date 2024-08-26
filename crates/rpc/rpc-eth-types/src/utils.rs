@@ -62,19 +62,23 @@ mod tests {
     #[tokio::test]
     async fn test_binary_search() {
         // in the middle
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
+        let num: Result<_, ()> =
+            binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
         assert_eq!(num, Ok(5));
 
         // in the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 7) })).await;
+        let num: Result<_, ()> =
+            binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 7) })).await;
         assert_eq!(num, Ok(7));
 
         // in the lower
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 1) })).await;
+        let num: Result<_, ()> =
+            binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 1) })).await;
         assert_eq!(num, Ok(1));
 
-        // high than the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
+        // higher than the upper
+        let num: Result<_, ()> =
+            binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
         assert_eq!(num, Ok(10));
     }
 }
