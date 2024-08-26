@@ -1,5 +1,4 @@
 use super::ExecutedBlock;
-use parking_lot::Mutex;
 use reth_errors::ProviderResult;
 use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
@@ -12,7 +11,7 @@ use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
     HashedStorage,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -23,7 +22,7 @@ pub struct MemoryOverlayStateProvider {
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlock>,
     /// Lazy-loaded in-memory trie data.
-    pub(crate) trie_state: Mutex<Option<MemoryOverlayTrieState>>,
+    pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
 
 impl MemoryOverlayStateProvider {
@@ -35,7 +34,7 @@ impl MemoryOverlayStateProvider {
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
     pub fn new(historical: Box<dyn StateProvider>, in_memory: Vec<ExecutedBlock>) -> Self {
-        Self { historical, in_memory, trie_state: Mutex::default() }
+        Self { historical, in_memory, trie_state: OnceLock::new() }
     }
 
     /// Turn this state provider into a [`StateProviderBox`]
@@ -46,8 +45,7 @@ impl MemoryOverlayStateProvider {
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
     fn trie_state(&self) -> MemoryOverlayTrieState {
         self.trie_state
-            .lock()
-            .get_or_insert_with(|| {
+            .get_or_init(|| {
                 let mut hashed_state = HashedPostState::default();
                 let mut trie_nodes = TrieUpdates::default();
                 for block in self.in_memory.iter().rev() {
