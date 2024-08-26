@@ -31,15 +31,12 @@ use revm_primitives::{
 ///
 /// This uses [`apply_blockhashes_contract_call`] to ultimately apply the blockhash contract state
 /// change.
-#[allow(clippy::too_many_arguments)]
 pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
     chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
-    block_number: u64,
-    block_timestamp: u64,
     parent_block_hash: B256,
 ) -> Result<(), BlockExecutionError>
 where
@@ -60,8 +57,8 @@ where
     apply_blockhashes_contract_call(
         evm_config,
         chain_spec,
-        block_timestamp,
-        block_number,
+        initialized_block_env.timestamp.to(),
+        initialized_block_env.number.to(),
         parent_block_hash,
         &mut evm_pre_block,
     )
@@ -135,15 +132,12 @@ where
 ///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
-#[allow(clippy::too_many_arguments)]
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
     chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
-    block_number: u64,
-    block_timestamp: u64,
     parent_beacon_block_root: Option<B256>,
 ) -> Result<(), BlockExecutionError>
 where
@@ -165,8 +159,8 @@ where
     apply_beacon_root_contract_call(
         evm_config,
         chain_spec,
-        block_timestamp,
-        block_number,
+        initialized_block_env.timestamp.to(),
+        initialized_block_env.number.to(),
         parent_beacon_block_root,
         &mut evm_pre_block,
     )

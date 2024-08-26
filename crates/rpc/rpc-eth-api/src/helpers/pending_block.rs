@@ -253,8 +253,6 @@ pub trait LoadPendingBlock: EthApiTypes {
                 chain_spec.as_ref(),
                 &cfg,
                 &block_env,
-                block_number,
-                block_env.timestamp.to::<u64>(),
                 origin.header().parent_beacon_block_root,
             )
             .map_err(|err| EthApiError::Internal(err.into()))?;
@@ -268,8 +266,6 @@ pub trait LoadPendingBlock: EthApiTypes {
             chain_spec.as_ref(),
             &cfg,
             &block_env,
-            block_number,
-            block_env.timestamp.to::<u64>(),
             origin.header().hash(),
         )
         .map_err(|err| EthApiError::Internal(err.into()))?;

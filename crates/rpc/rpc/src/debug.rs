@@ -591,8 +591,6 @@ where
                     &this.inner.provider.chain_spec(),
                     &cfg,
                     &block_env,
-                    block.timestamp,
-                    block.number,
                     block.parent_beacon_block_root,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
@@ -604,8 +602,6 @@ where
                     &this.inner.provider.chain_spec(),
                     &cfg,
                     &block_env,
-                    block.timestamp,
-                    block.number,
                     block.parent_hash,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;

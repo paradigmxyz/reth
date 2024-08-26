@@ -113,7 +113,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -124,8 +123,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.timestamp,
             attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -144,8 +141,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.timestamp,
             parent_block.hash(),
         )
         .map_err(|err| {
@@ -307,8 +302,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -327,8 +320,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         parent_block.hash(),
     )
     .map_err(|err| {
