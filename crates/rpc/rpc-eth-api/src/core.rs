@@ -7,7 +7,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -17,7 +17,6 @@ use reth_rpc_types::{
     EthCallResponse, FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::future::Future;
 use tracing::trace;
 
 use crate::{
@@ -44,28 +43,6 @@ impl<T> FullEthApiServer for T where
         + UpdateRawTxForwarder
         + Clone
 {
-}
-
-async fn binary_search<F, Fut>(low: u64, high: u64, check: F) -> RpcResult<u64>
-where
-    F: Fn(u64) -> Fut,
-    Fut: Future<Output = RpcResult<bool>>,
-{
-    let mut low = low;
-    let mut high = high;
-    let mut num = high;
-
-    while low <= high {
-        let mid = (low + high) / 2;
-        if check(mid).await? {
-            high = mid - 1;
-            num = mid;
-        } else {
-            low = mid + 1
-        }
-    }
-
-    Ok(num)
 }
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
