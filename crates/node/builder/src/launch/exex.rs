@@ -3,10 +3,10 @@
 use std::{fmt, fmt::Debug};
 
 use futures::future;
-use reth_exex::{ExExContext, ExExHandle, ExExHead, ExExManager, ExExManagerHandle};
+use reth_exex::{ExExContext, ExExEvent, ExExHandle, ExExHead, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{CanonStateSubscriptions, HeaderProvider};
 use reth_tracing::tracing::{debug, info};
 use tracing::Instrument;
 
@@ -60,8 +60,10 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 events,
                 notifications,
             };
+            let events = context.events.clone();
 
             let executor = components.task_executor().clone();
+            let provider = components.provider().clone();
             exexes.push(async move {
                 debug!(target: "reth::cli", id, "spawning exex");
                 let span = reth_tracing::tracing::info_span!("exex", id);
@@ -73,15 +75,53 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 // check the exex head against the chain head
                 if let Some(exex_head) = exex_head.filter(|exex_head| *exex_head != head.into()) {
                     span.in_scope(|| {
+                        let mut revert_to_first_matching = false;
+                        let mut backfill = false;
                         if exex_head.number > head.number {
+                            // ExEx is ahead of the chain head. Send a `FinishedHeight` event to notify Reth
+                            // that the ExEx has processed the blocks, and don't backfill anything.
+
+                            events.send(ExExEvent::FinishedHeight(exex_head.number)).expect("failed to send FinishedHeight event");
                             info!(target: "reth::cli", ?exex_head, "ExEx is ahead of the chain head");
                         } else if exex_head.number < head.number {
-                            info!(target: "reth::cli", ?exex_head, "ExEx is behind of the chain head");
+                            // ExEx is behind of the chain head. Check if the ExEx head has the same block hash
+                            // as the chain head. It can be different in case of a reorg.
+
+                            backfill = true;
+
+                            let exex_head_header = provider.sealed_header(exex_head.number).expect("failed to get sealed header").expect("sealed header not found");
+                            if exex_head_header.hash() == exex_head.hash {
+                                // If the ExEx head has the same block hash as in the database,
+                                // we can backfill the missing blocks.
+
+                                info!(target: "reth::cli", ?exex_head, "ExEx is behind of the chain head");
+                            } else {
+                                // If the ExEx head has a different block hash than the chain head, we first need
+                                // to revert the ExEx head to the first database block that matches by hash,
+                                // and then backfill the missing blocks.
+
+                                revert_to_first_matching = true;
+
+                                info!(target: "reth::cli", ?exex_head, "ExEx is behind of the chain head with a non-canonical hash");
+                            }
                         } else if exex_head.hash != head.hash {
-                            info!(target: "reth::cli", ?exex_head, "ExEx is at the chain head, but with a different hash");
+                            // ExEx is at the chain head, but with a different hash.
+                            // We first need to revert the ExEx head to the first database block that matches by hash,
+                            // and then backfill the missing blocks.
+
+                            revert_to_first_matching = true;
+                            backfill = true;
+
+                            info!(target: "reth::cli", ?exex_head, "ExEx is at the chain head, but with a non-canonical hash");
                         }
 
-                        // TODO(alexey): feed blocks to the exex
+                        if revert_to_first_matching {
+                            // TODO(alexey): revert to first matching block
+                        }
+
+                        if backfill {
+                            // TODO(alexey): backfill
+                        }
                     });
                 }
 
