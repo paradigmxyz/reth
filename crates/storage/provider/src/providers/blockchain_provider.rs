@@ -1451,11 +1451,15 @@ mod tests {
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
-    use reth_db::{models::AccountBeforeTx, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db::{
+        models::{AccountBeforeTx, StoredBlockBodyIndices},
+        test_utils::TempDatabase,
+        DatabaseEnv,
+    };
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Receipt, SealedBlock, StaticFileSegment,
-        Withdrawals, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Header, Receipt, SealedBlock,
+        StaticFileSegment, Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1464,7 +1468,7 @@ mod tests {
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
-        random_receipt,
+        random_receipt, random_signed_tx,
     };
     use revm::db::BundleState;
 
@@ -1573,7 +1577,7 @@ mod tests {
         provider.set_safe(safe_block.header.clone());
         provider.set_finalized(finalized_block.header.clone());
 
-        Ok((provider, database_blocks.to_vec(), in_memory_blocks.to_vec(), receipts))
+        Ok((provider, database_blocks.clone(), in_memory_blocks.clone(), receipts))
     }
 
     #[allow(clippy::type_complexity)]
@@ -1835,6 +1839,87 @@ mod tests {
 
         // A random hash should return None as the block number is not found
         assert_eq!(provider.ommers(B256::random().into())?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_body_indices() -> eyre::Result<()> {
+        // Initialize random number generator and provider factory
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+
+        // Generate 10 random blocks and split them into database and in-memory blocks
+        let mut blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
+        let (database_blocks, in_memory_blocks) = blocks.split_at_mut(5);
+
+        // Take the first in-memory block and add 7 ommers to it
+        let first_in_mem_block = SealedBlock {
+            ommers: vec![Header::default(); 7],
+            body: vec![
+                random_signed_tx(&mut rng),
+                random_signed_tx(&mut rng),
+                random_signed_tx(&mut rng),
+                random_signed_tx(&mut rng),
+            ],
+            ..in_memory_blocks.first().unwrap().clone()
+        };
+
+        // Insert the first 5 blocks into the database
+        let provider_rw = factory.provider_rw()?;
+        for block in database_blocks.iter_mut() {
+            *block = SealedBlock {
+                body: vec![
+                    random_signed_tx(&mut rng),
+                    random_signed_tx(&mut rng),
+                    random_signed_tx(&mut rng),
+                    random_signed_tx(&mut rng),
+                ],
+                ..block.clone()
+            };
+            provider_rw.insert_historical_block(
+                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        // Create a new provider
+        let provider = BlockchainProvider2::new(factory)?;
+
+        // Insert the first block into the in-memory state
+        let in_memory_block_senders =
+            first_in_mem_block.senders().expect("failed to recover senders");
+        let chain = NewCanonicalChain::Commit {
+            new: vec![ExecutedBlock::new(
+                Arc::new(first_in_mem_block),
+                Arc::new(in_memory_block_senders),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )],
+        };
+        provider.canonical_in_memory_state.update_chain(chain);
+
+        let first_db_block = database_blocks.first().unwrap().clone();
+        let first_in_mem_block = in_memory_blocks.first().unwrap().clone();
+
+        // First database block body indices should be found
+        assert_eq!(
+            provider.block_body_indices(first_db_block.number)?.unwrap(),
+            StoredBlockBodyIndices { first_tx_num: 0, tx_count: 4 }
+        );
+
+        // First in-memory block body indices should be found with the first tx after the database
+        // blocks
+        assert_eq!(
+            provider.block_body_indices(first_in_mem_block.number)?.unwrap(),
+            StoredBlockBodyIndices { first_tx_num: 20, tx_count: 4 }
+        );
+
+        // A random block number should return None as the block is not found
+        let mut rng = rand::thread_rng();
+        let random_block_number: u64 = rng.gen();
+        assert_eq!(provider.block_body_indices(random_block_number)?, None);
 
         Ok(())
     }

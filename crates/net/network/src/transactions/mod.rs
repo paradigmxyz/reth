@@ -1024,13 +1024,7 @@ where
                         entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
-                        if !self.bad_imports.contains(tx.hash()) {
-                            // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
-                            new_txs.push(pool_transaction);
-
-                            entry.insert(HashSet::from([peer_id]));
-                        } else {
+                        if self.bad_imports.contains(tx.hash()) {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
@@ -1038,6 +1032,12 @@ where
                                 "received a known bad transaction from peer"
                             );
                             has_bad_transactions = true;
+                        } else {
+                            // this is a new transaction that should be imported into the pool
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            new_txs.push(pool_transaction);
+
+                            entry.insert(HashSet::from([peer_id]));
                         }
                     }
                 }

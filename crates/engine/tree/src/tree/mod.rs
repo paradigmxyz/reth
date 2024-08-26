@@ -652,13 +652,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let status = if !self.backfill_sync_state.is_idle() {
-            if let Err(error) = self.buffer_block_without_senders(block) {
-                self.on_insert_block_error(error)?
-            } else {
-                PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-            }
-        } else {
+        let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
             match self.insert_block_without_senders(block) {
@@ -684,6 +678,10 @@ where
                 }
                 Err(error) => self.on_insert_block_error(error)?,
             }
+        } else if let Err(error) = self.buffer_block_without_senders(block) {
+            self.on_insert_block_error(error)?
+        } else {
+            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
         let mut outcome = TreeOutcome::new(status);
@@ -862,12 +860,12 @@ where
     fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
         if self.should_persist() && !self.persistence_state.in_progress() {
             let blocks_to_persist = self.get_canonical_blocks_to_persist();
-            if !blocks_to_persist.is_empty() {
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine", "Returned empty set of blocks to persist");
+            } else {
                 let (tx, rx) = oneshot::channel();
                 let _ = self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.start(rx);
-            } else {
-                debug!(target: "engine", "Returned empty set of blocks to persist");
             }
         }
 
@@ -1234,7 +1232,7 @@ where
             trace!(target: "engine", %hash, "found canonical state for block in memory");
             // the block leads back to the canonical chain
             let historical = self.provider.state_by_block_hash(historical)?;
-            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(blocks, historical))))
+            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(historical, blocks))))
         }
 
         // the hash could belong to an unknown block or a persisted block

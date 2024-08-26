@@ -341,7 +341,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         let mut revert_storage = self.revert_storage(address)?;
-        revert_storage.extend(hashed_storage);
+        revert_storage.extend(&hashed_storage);
         StorageRoot::overlay_root(self.tx, address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }

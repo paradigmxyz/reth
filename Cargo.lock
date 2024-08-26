@@ -8049,7 +8049,6 @@ version = "1.0.5"
 dependencies = [
  "alloy-primitives",
  "derive_more 1.0.0",
- "jsonrpsee",
  "jsonrpsee-types",
  "op-alloy-network",
  "parking_lot 0.12.3",
@@ -8069,8 +8068,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
- "serde",
- "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -8126,6 +8123,7 @@ dependencies = [
 name = "reth-primitives"
 version = "1.0.5"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -8283,7 +8281,6 @@ dependencies = [
 name = "reth-revm"
 version = "1.0.5"
 dependencies = [
- "alloy-eips",
  "reth-chainspec",
  "reth-consensus-common",
  "reth-ethereum-forks",
