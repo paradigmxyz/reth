@@ -1,6 +1,6 @@
 //! Commonly used code snippets
 
-use jsonrpsee::core::RpcResult;
+use jsonrpsee_core::RpcResult;
 use reth_primitives::{Bytes, PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use std::future::Future;
 

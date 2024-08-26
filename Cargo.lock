@@ -8505,7 +8505,6 @@ dependencies = [
  "alloy-sol-types",
  "derive_more 1.0.0",
  "futures",
- "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
