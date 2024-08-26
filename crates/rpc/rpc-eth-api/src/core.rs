@@ -557,7 +557,7 @@ where
         nonce: U64,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
-        let nonce = nonce.saturating_to::<u64>();
+        let nonce = nonce.to::<u64>();
 
         // Check the pool first
         if let Some(tx) = LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce) {
