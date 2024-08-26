@@ -304,13 +304,13 @@ where
     ) -> Result<(), UnifiedStorageWriterError> {
         match &self.static_file {
             Some(writer) => {
-                if writer.user_header().segment() != segment {
+                if writer.user_header().segment() == segment {
+                    Ok(())
+                } else {
                     Err(UnifiedStorageWriterError::IncorrectStaticFileWriter(
                         writer.user_header().segment(),
                         segment,
                     ))
-                } else {
-                    Ok(())
                 }
             }
             None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),

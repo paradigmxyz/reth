@@ -119,7 +119,9 @@ where
 
             'inner: loop {
                 // drain all calls that are ready and put them in the output item queue
-                let drained = if !this.pending_calls.is_empty() {
+                let drained = if this.pending_calls.is_empty() {
+                    false
+                } else {
                     if let Poll::Ready(Some(res)) = this.pending_calls.as_mut().poll_next(cx) {
                         let item = match res {
                             Ok(Some(resp)) => resp,
@@ -130,8 +132,6 @@ where
                         continue 'outer;
                     }
                     true
-                } else {
-                    false
                 };
 
                 // read from the stream

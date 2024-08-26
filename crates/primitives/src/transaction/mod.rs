@@ -1459,7 +1459,14 @@ impl Decodable for TransactionSigned {
         let remaining_len = buf.len();
 
         // if the transaction is encoded as a string then it is a typed transaction
-        if !header.list {
+        if header.list {
+            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
+
+            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
+            // buffer
+            *buf = original_encoding;
+            Ok(tx)
+        } else {
             let tx = Self::decode_enveloped_typed_transaction(buf)?;
 
             let bytes_consumed = remaining_len - buf.len();
@@ -1470,13 +1477,6 @@ impl Decodable for TransactionSigned {
                 return Err(RlpError::UnexpectedLength)
             }
 
-            Ok(tx)
-        } else {
-            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
-
-            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
-            // buffer
-            *buf = original_encoding;
             Ok(tx)
         }
     }
@@ -1493,7 +1493,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
             tx_eip_4844.placeholder =
-                if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]
