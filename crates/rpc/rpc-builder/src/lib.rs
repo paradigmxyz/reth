@@ -136,7 +136,6 @@
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -165,10 +164,8 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{
-        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt, UpdateRawTxForwarder,
-    },
-    EthApiServer, FullEthApiServer, RawTransactionForwarder,
+    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
+    EthApiServer, FullEthApiServer,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
@@ -738,20 +735,6 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi>
             module.merge(methods).expect("No conflicts");
         }
         module
-    }
-}
-
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
-where
-    EthApi: UpdateRawTxForwarder,
-{
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
-        self.eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
     }
 }
 

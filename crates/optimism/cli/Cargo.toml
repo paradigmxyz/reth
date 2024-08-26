@@ -27,6 +27,7 @@ reth-primitives.workspace = true
 
 ## optimisim
 reth-optimism-primitives.workspace = true
+reth-optimism-chainspec = { workspace = true, features = ["optimism"] }
 
 reth-chainspec.workspace = true
 reth-stages-types.workspace = true
