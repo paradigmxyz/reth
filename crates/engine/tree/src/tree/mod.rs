@@ -23,12 +23,12 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, BlockWithSenders, GotExpected, Header, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
     BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -104,6 +104,11 @@ impl TreeState {
     /// Returns the number of executed blocks stored.
     fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
+    }
+
+    /// Returns the [`ExecutedBlock`] by hash.
+    fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock> {
+        self.blocks_by_hash.get(&hash)
     }
 
     /// Returns the block by hash.
@@ -1309,6 +1314,44 @@ where
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
     }
 
+    /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
+    ///
+    /// NOTE: This cannot fetch [`ExecutedBlock`]s for _finalized_ blocks, instead it can only
+    /// fetch [`ExecutedBlock`]s for _canonical_ blocks, or blocks from sidechains that the node
+    /// has in memory.
+    ///
+    /// For finalized blocks, this will return `None`.
+    fn executed_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock>> {
+        // check memory first
+        let block = self
+            .state
+            .tree_state
+            .executed_block_by_hash(hash)
+            // TODO: clone for compatibility. should we return an Arc here?
+            .cloned();
+
+        if block.is_some() {
+            Ok(block)
+        } else if let Some((_, updates)) = self.state.tree_state.persisted_trie_updates.get(&hash) {
+            let block_with_senders = self
+                .provider
+                .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
+                .expect("todo: some sort of error, or return None");
+            let SealedBlockWithSenders { block, senders } = block_with_senders;
+            // todo: construct executionoutcome
+            // todo: construct hashed state
+            Ok(Some(ExecutedBlock {
+                block: Arc::new(block),
+                senders: Arc::new(senders),
+                trie: updates.clone(),
+                execution_output: todo!(),
+                hashed_state: todo!(),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Return sealed block from database or in-memory state by hash.
     fn sealed_header_by_hash(&self, hash: B256) -> ProviderResult<Option<SealedHeader>> {
         // check memory first
@@ -1677,7 +1720,7 @@ where
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
-        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count() ,"applying new chain update");
+        trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
 
         // update the tracked canonical head
