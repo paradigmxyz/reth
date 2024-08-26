@@ -15,7 +15,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, Rich, Transaction, WithOtherFields,
+    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -60,11 +60,7 @@ where
             .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
-        Ok(BlockDetails::new(
-            Rich { inner: block, extra_info: Default::default() },
-            Default::default(),
-            U256::from(total_fees),
-        ))
+        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
     }
 }
 
