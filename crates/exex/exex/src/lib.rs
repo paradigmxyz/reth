@@ -46,6 +46,20 @@ pub use event::*;
 mod manager;
 pub use manager::*;
 
+use reth_chainspec::Head;
 // Re-export exex types
 #[doc(inline)]
 pub use reth_exex_types::*;
+use reth_primitives::{BlockHash, BlockNumber};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExExHead {
+    pub number: BlockNumber,
+    pub hash: BlockHash,
+}
+
+impl From<Head> for ExExHead {
+    fn from(head: Head) -> Self {
+        Self { number: head.number, hash: head.hash }
+    }
+}

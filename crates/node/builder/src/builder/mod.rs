@@ -28,7 +28,7 @@ use reth_node_core::{
     primitives::Head,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
-use reth_primitives::revm_primitives::EnvKzgSettings;
+use reth_primitives::{revm_primitives::EnvKzgSettings, BlockHash};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -437,7 +437,7 @@ where
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
+        R: Future<Output = eyre::Result<(Option<BlockHash>, E)>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
         Self {

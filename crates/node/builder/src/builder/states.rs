@@ -7,13 +7,14 @@
 
 use std::{fmt, future::Future, marker::PhantomData};
 
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExHead};
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::BlockHash;
 use reth_tasks::TaskExecutor;
 
 use crate::{
@@ -247,7 +248,7 @@ where
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
-        R: Future<Output = eyre::Result<E>> + Send,
+        R: Future<Output = eyre::Result<(Option<ExExHead>, E)>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
         self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));

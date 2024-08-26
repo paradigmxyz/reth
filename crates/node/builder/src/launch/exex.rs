@@ -3,7 +3,7 @@
 use std::{fmt, fmt::Debug};
 
 use futures::future;
-use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
+use reth_exex::{ExExContext, ExExHandle, ExExHead, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
@@ -67,7 +67,23 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 let span = reth_tracing::tracing::info_span!("exex", id);
 
                 // init the exex
-                let exex = exex.launch(context).instrument(span.clone()).await.unwrap();
+                let (exex_head, exex) =
+                    exex.launch(context).instrument(span.clone()).await.unwrap();
+
+                // check the exex head against the chain head
+                if let Some(exex_head) = exex_head.filter(|exex_head| *exex_head != head.into()) {
+                    span.in_scope(|| {
+                        if exex_head.number > head.number {
+                            info!(target: "reth::cli", ?exex_head, "ExEx is ahead of the chain head");
+                        } else if exex_head.number < head.number {
+                            info!(target: "reth::cli", ?exex_head, "ExEx is behind of the chain head");
+                        } else if exex_head.hash != head.hash {
+                            info!(target: "reth::cli", ?exex_head, "ExEx is at the chain head, but with a different hash");
+                        }
+
+                        // TODO(alexey): feed blocks to the exex
+                    });
+                }
 
                 // spawn it as a crit task
                 executor.spawn_critical(

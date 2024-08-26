@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use futures::{future::BoxFuture, FutureExt};
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExHead};
 use reth_node_api::FullNodeComponents;
 
 /// A trait for launching an `ExEx`.
@@ -15,7 +15,9 @@ pub trait LaunchExEx<Node: FullNodeComponents>: Send {
     fn launch(
         self,
         ctx: ExExContext<Node>,
-    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send;
+    ) -> impl Future<
+        Output = eyre::Result<(Option<ExExHead>, impl Future<Output = eyre::Result<()>> + Send)>,
+    > + Send;
 }
 
 /// A boxed exex future.
@@ -24,8 +26,10 @@ pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 /// A version of [`LaunchExEx`] that returns a boxed future. Makes the trait object-safe.
 pub trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
     /// Launches the `ExEx` and returns a boxed future.
-    fn launch(self: Box<Self>, ctx: ExExContext<Node>)
-        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+    fn launch(
+        self: Box<Self>,
+        ctx: ExExContext<Node>,
+    ) -> BoxFuture<'static, eyre::Result<(Option<ExExHead>, BoxExEx)>>;
 }
 
 /// Implements [`BoxedLaunchExEx`] for any [`LaunchExEx`] that is [Send] and `'static`.
@@ -39,10 +43,10 @@ where
     fn launch(
         self: Box<Self>,
         ctx: ExExContext<Node>,
-    ) -> BoxFuture<'static, eyre::Result<BoxExEx>> {
+    ) -> BoxFuture<'static, eyre::Result<(Option<ExExHead>, BoxExEx)>> {
         async move {
-            let exex = LaunchExEx::launch(*self, ctx).await?;
-            Ok(Box::pin(exex) as BoxExEx)
+            let (tip, exex) = LaunchExEx::launch(*self, ctx).await?;
+            Ok((tip, Box::pin(exex) as BoxExEx))
         }
         .boxed()
     }
@@ -54,14 +58,15 @@ impl<Node, F, Fut, E> LaunchExEx<Node> for F
 where
     Node: FullNodeComponents,
     F: FnOnce(ExExContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<E>> + Send,
+    Fut: Future<Output = eyre::Result<(Option<ExExHead>, E)>> + Send,
     E: Future<Output = eyre::Result<()>> + Send,
 {
     fn launch(
         self,
         ctx: ExExContext<Node>,
-    ) -> impl Future<Output = eyre::Result<impl Future<Output = eyre::Result<()>> + Send>> + Send
-    {
+    ) -> impl Future<
+        Output = eyre::Result<(Option<ExExHead>, impl Future<Output = eyre::Result<()>> + Send)>,
+    > + Send {
         self(ctx)
     }
 }
