@@ -275,14 +275,14 @@ where
         let mut old_entries: Vec<_> = new_entries
             .into_iter()
             .filter_map(|entry| {
-                let old = if !entry.value.is_zero() {
-                    storage.insert(entry.key, entry.value)
-                } else {
+                let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
                         return None
                     }
                     old
+                } else {
+                    storage.insert(entry.key, entry.value)
                 };
                 Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
