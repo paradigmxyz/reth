@@ -213,6 +213,7 @@ unused_rounding = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
 zero_sized_map_values = "warn"
+option_as_ref_cloned = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
