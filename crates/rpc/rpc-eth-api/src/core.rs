@@ -21,8 +21,7 @@ use tracing::trace;
 
 use crate::{
     helpers::{
-        transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
-        EthTransactions, FullEthApi, LoadState,
+        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi, LoadState,
     },
     RpcBlock, RpcTransaction,
 };
@@ -30,17 +29,13 @@ use crate::{
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
-    EthApiServer<RpcTransaction<Self::NetworkTypes>, RpcBlock<Self::NetworkTypes>>
-    + FullEthApi
-    + UpdateRawTxForwarder
-    + Clone
+    EthApiServer<RpcTransaction<Self::NetworkTypes>, RpcBlock<Self::NetworkTypes>> + FullEthApi + Clone
 {
 }
 
 impl<T> FullEthApiServer for T where
     T: EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>>
         + FullEthApi
-        + UpdateRawTxForwarder
         + Clone
 {
 }

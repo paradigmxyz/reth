@@ -37,13 +37,15 @@ revm.workspace = true
 # async
 parking_lot.workspace = true
 tokio.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 
 # rpc
 jsonrpsee-types.workspace = true
+serde_json.workspace = true
 
 # misc
 thiserror.workspace = true
-derive_more.workspace = true
+tracing.workspace = true
 
 [features]
 optimism = [
