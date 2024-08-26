@@ -275,15 +275,24 @@ pub trait EthCall: Call + LoadPendingBlock {
             ExecutionResult::Success { .. } => {}
         };
 
-        let (_, _) = self.transact(&mut db, env.clone())?;
-
-        let gas_used = match result.result {
-            ExecutionResult::Success { gas_used, .. } |
-            ExecutionResult::Revert { gas_used, .. } |
-            ExecutionResult::Halt { gas_used, .. } => gas_used,
+        // transact again to get the exact gas used
+        let (result, env) = self.transact(&mut db, env)?;
+        let res = match result.result {
+            ExecutionResult::Halt { reason, gas_used } => {
+                let error =
+                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Revert { output, gas_used } => {
+                let error = Some(RevertError::new(output).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Success { gas_used, .. } => {
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
+            }
         };
 
-        Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error: None })
+        Ok(res)
     }
 }
 
