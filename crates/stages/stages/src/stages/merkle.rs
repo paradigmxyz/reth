@@ -638,7 +638,7 @@ mod tests {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();
-                            if storage_entry.map(|v| v.key == hashed_slot).unwrap_or_default() {
+                            if storage_entry.is_some_and(|v| v.key == hashed_slot) {
                                 storage_cursor.delete_current().unwrap();
                             }
 
