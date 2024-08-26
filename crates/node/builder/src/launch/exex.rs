@@ -81,6 +81,11 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                             // ExEx is ahead of the chain head. Send a `FinishedHeight` event to notify Reth
                             // that the ExEx has processed the blocks, and don't backfill anything.
 
+                            // TODO(alexey): `ExExManager` should handle a scenario when
+                            //  `ExExEvent::FinishedHeight(hash, number)` is different from the notification sent.
+                            // This can happen in a case when the chain was reorged while the node was offline,
+                            // and now ExEx is ahead of the chain head but on the incorrect fork
+
                             events.send(ExExEvent::FinishedHeight(exex_head.number)).expect("failed to send FinishedHeight event");
                             info!(target: "reth::cli", ?exex_head, "ExEx is ahead of the chain head");
                         } else if exex_head.number < head.number {
