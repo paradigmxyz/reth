@@ -13,7 +13,7 @@ pub trait TransactionFilter {
 pub struct NoOpTransactionFilter<T>(std::marker::PhantomData<T>);
 
 impl<T> NoOpTransactionFilter<T> {
-    /// Creates a new [`NoOpTransactionAttributesChecker`].
+    /// Creates a new [`NoOpTransactionFilter`].
     #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self(std::marker::PhantomData)

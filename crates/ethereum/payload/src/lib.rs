@@ -172,8 +172,7 @@ where
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
     ));
 
-    // Construct the [`BestTransactionFilter`] using as predicate the transaction attributes
-    // checker.
+    // Construct the [`BestTransactionFilter`] using as predicate the transactions filter.
     let mut filtered_txs = BestTransactionFilter::new(best_txs, |tx: &_| tx_filter.is_valid(tx));
 
     let mut total_fees = U256::ZERO;
