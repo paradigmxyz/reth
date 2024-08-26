@@ -275,9 +275,8 @@ impl TransactionFetcher {
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
-            } else {
-                acc_size_response = size;
             }
+            acc_size_response = size;
         }
 
         let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
@@ -692,14 +691,9 @@ impl TransactionFetcher {
                     Some(new_announced_hashes)
                 }
             }
-        } else {
-            // stores a new request future for the request
-            self.inflight_requests.push(GetPooledTxRequestFut::new(
-                peer_id,
-                new_announced_hashes,
-                rx,
-            ))
         }
+        // stores a new request future for the request
+        self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
 
         None
     }
