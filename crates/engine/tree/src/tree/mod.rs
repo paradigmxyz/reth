@@ -41,7 +41,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -177,31 +177,169 @@ impl TreeState {
     }
 
     /// Remove all blocks up to __and including__ the given block number.
-    pub(crate) fn remove_before(&mut self, upper_bound: BlockNumber) {
-        let mut numbers_to_remove = Vec::new();
-        for (&number, _) in
-            self.blocks_by_number.range((Bound::Unbounded, Bound::Included(upper_bound)))
-        {
-            numbers_to_remove.push(number);
+    ///
+    /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
+    /// those which have a fork point at or below the finalized hash.
+    ///
+    /// Canonical blocks below the upper bound will still be removed.
+    ///
+    /// NOTE: This assumes that the `finalized_num` is below or equal to the `upper_bound`
+    pub(crate) fn remove_before(
+        &mut self,
+        upper_bound: BlockNumber,
+        finalized_num: Option<BlockNumber>,
+    ) {
+        debug_assert!(Some(upper_bound) >= finalized_num);
+        // We want to do two things:
+        // * remove canonical blocks that are persisted
+        // * remove forks whose root are below the finalized block
+        // We can do this in 2 steps:
+        // * remove all canonical blocks below the upper bound
+        // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
+        // finalized block
+
+        // TODO: move trie updates here
+        // First, let's walk back the canonical chain and remove canonical blocks lower than the
+        // upper bound
+        let mut current_block = self.current_canonical_head.hash;
+        while let Entry::Occupied(block_entry) = self.blocks_by_hash.entry(current_block) {
+            if block_entry.get().block.number <= upper_bound {
+                let block = block_entry.remove();
+                let block_hash = block.block.hash();
+                let block_number = block.block.number;
+
+                if let Some(parent_children) =
+                    self.parent_to_child.get_mut(&block.block.parent_hash)
+                {
+                    parent_children.remove(&block_hash);
+                    if parent_children.is_empty() {
+                        self.parent_to_child.remove(&block.block.parent_hash);
+                    }
+                }
+
+                self.parent_to_child.remove(&block_hash);
+
+                // now remove from blocks_by_number
+                let curr_by_number = self.blocks_by_number.get_mut(&block_number);
+                if let Some(by_number_vec) = curr_by_number {
+                    // we have to find the index of the block since it exists in a vec
+                    if let Some(index) =
+                        by_number_vec.iter().position(|block| block.block.hash() == block_hash)
+                    {
+                        by_number_vec.swap_remove(index);
+                    }
+
+                    // if there are no blocks left then remove the entry for this block
+                    if by_number_vec.is_empty() {
+                        self.blocks_by_number.remove(&block_number);
+                    }
+                }
+
+                current_block = block.block.parent_hash;
+            } else {
+                current_block = block_entry.get().block.parent_hash;
+            }
         }
 
-        for number in numbers_to_remove {
-            if let Some(blocks) = self.blocks_by_number.remove(&number) {
-                for block in blocks {
-                    let block_hash = block.block.hash();
-                    self.blocks_by_hash.remove(&block_hash);
+        // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
+        // block) and only have sidechains below the finalized block.
+        if let Some(num) = finalized_num {
+            // We remove disconnected sidechains in three steps:
+            // * first, remove everything with a block number __below__ the finalized block.
+            // * next, we populate a vec with parents __at__ the finalized block.
+            // * finally, we iterate through the vec, removing children until the vec is empty
+            // (BFS).
+            let mut numbers_to_remove = Vec::new();
 
-                    if let Some(parent_children) =
-                        self.parent_to_child.get_mut(&block.block.parent_hash)
-                    {
-                        parent_children.remove(&block_hash);
-                        if parent_children.is_empty() {
-                            self.parent_to_child.remove(&block.block.parent_hash);
+            // We _exclude_ the finalized block because we will be dealing with the blocks __at__
+            // the finalized block later.
+            for (&number, _) in
+                self.blocks_by_number.range((Bound::Unbounded, Bound::Excluded(num)))
+            {
+                numbers_to_remove.push(number);
+            }
+
+            // TODO: remove trie updates whose root are below the finalized block
+            // Now that we have the numbers, let's remove **all** blocks before the finalized block
+            for number in numbers_to_remove {
+                if let Some(blocks) = self.blocks_by_number.remove(&number) {
+                    for block in blocks {
+                        let block_hash = block.block.hash();
+                        self.blocks_by_hash.remove(&block_hash);
+
+                        if let Some(parent_children) =
+                            self.parent_to_child.get_mut(&block.block.parent_hash)
+                        {
+                            parent_children.remove(&block_hash);
+                            if parent_children.is_empty() {
+                                self.parent_to_child.remove(&block.block.parent_hash);
+                            }
+                        }
+
+                        self.parent_to_child.remove(&block_hash);
+                    }
+                }
+            }
+
+            // The only blocks that exist at `finalized_num` now, are blocks in sidechains that
+            // should be removed.
+            //
+            // We first put their children into this vec.
+            // Then, we will iterate over them, removing them, adding their children, etc etc,
+            // until the vec is empty.
+            let mut parents_to_remove = self.blocks_by_number.remove(&num).unwrap_or_default();
+            while !parents_to_remove.is_empty() {
+                let mut next_children = Vec::new();
+                for block in &parents_to_remove {
+                    // we need to remove from:
+                    // * blocks_by_hash
+                    // * parent_to_child
+                    // * blocks_by_number
+                    let hash = block.block.hash();
+                    let number = block.block.number;
+                    let parent_hash = block.block.parent_hash;
+
+                    // start with blocks_by_hash, only useful for the first iteration
+                    self.blocks_by_hash.remove(&hash);
+
+                    // now remove from blocks_by_number, note that this will do nothing on the
+                    // first iteration
+                    let curr_by_number = self.blocks_by_number.get_mut(&number);
+                    if let Some(by_number_vec) = curr_by_number {
+                        // we have to find the index of the block since it exists in a vec
+                        if let Some(index) =
+                            by_number_vec.iter().position(|block| block.block.hash() == hash)
+                        {
+                            by_number_vec.swap_remove(index);
+                        }
+
+                        // if there are no blocks left then remove the entry for this block
+                        if by_number_vec.is_empty() {
+                            self.blocks_by_number.remove(&number);
                         }
                     }
 
-                    self.parent_to_child.remove(&block_hash);
+                    // then, remove references to this block from parent_to_child
+                    if let Some(parent_children) = self.parent_to_child.get_mut(&parent_hash) {
+                        parent_children.remove(&hash);
+                        if parent_children.is_empty() {
+                            self.parent_to_child.remove(&parent_hash);
+                        }
+                    }
+
+                    // now add to `next_children`, removing children before iterating
+                    if let Some(children) = self.parent_to_child.get(&hash) {
+                        for child in children {
+                            if let Some(child_block) = self.blocks_by_hash.remove(child) {
+                                next_children.push(child_block);
+                            }
+                        }
+                    }
                 }
+
+                // swap the two and shrink to fit
+                std::mem::swap(&mut next_children, &mut parents_to_remove);
+                parents_to_remove.shrink_to_fit();
             }
         }
     }
@@ -1021,7 +1159,10 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        self.state.tree_state.remove_before(backfill_height);
+        //
+        // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
+        // before that
+        self.state.tree_state.remove_before(backfill_height, Some(backfill_height));
         self.metrics.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // remove all buffered blocks below the backfill height
@@ -1195,7 +1336,19 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
-        self.state.tree_state.remove_before(self.persistence_state.last_persisted_block_number);
+        // TODO: is the sync target state the right thing to check for here?
+        let finalized = self.state.forkchoice_state_tracker.sync_target_state().and_then(|state| {
+            // if the hash is zero then we should act like there is no finalized hash
+            if state.finalized_block_hash == B256::ZERO {
+                None
+            } else {
+                Some(state.finalized_block_hash)
+            }
+        });
+
+        // TODO: which `finalized` num to fetch here
+        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)
+            .expect("todo: error handling");
         self.canonical_in_memory_state
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
     }
@@ -2015,6 +2168,26 @@ where
             Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
         }
     }
+
+    /// Remove all blocks up to __and including__ the given block number.
+    ///
+    /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
+    /// those which have a fork point at or below the finalized hash.
+    ///
+    /// Canonical blocks below the upper bound will still be removed.
+    pub(crate) fn remove_before(
+        &mut self,
+        upper_bound: BlockNumber,
+        finalized_hash: Option<B256>,
+    ) -> ProviderResult<()> {
+        // first fetch the finalized block number and then call the remove_before method on
+        // tree_state
+        let num =
+            if let Some(hash) = finalized_hash { self.provider.block_number(hash)? } else { None };
+
+        self.state.tree_state.remove_before(upper_bound, num);
+        Ok(())
+    }
 }
 
 /// The state of the persistence task.
@@ -2656,8 +2829,103 @@ mod tests {
             tree_state.insert_executed(block.clone());
         }
 
+        let last = blocks.last().unwrap();
+
+        // set the canonical head
+        tree_state.set_canonical_head(last.block.num_hash());
+
         // inclusive bound, so we should remove anything up to and including 2
-        tree_state.remove_before(2);
+        tree_state.remove_before(2, Some(2));
+
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
+        assert!(!tree_state.blocks_by_number.contains_key(&1));
+        assert!(!tree_state.blocks_by_number.contains_key(&2));
+
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].block.hash()));
+        assert!(tree_state.blocks_by_number.contains_key(&3));
+        assert!(tree_state.blocks_by_number.contains_key(&4));
+        assert!(tree_state.blocks_by_number.contains_key(&5));
+
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[3].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].block.hash()));
+
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[2].block.hash()),
+            Some(&HashSet::from([blocks[3].block.hash()]))
+        );
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[3].block.hash()),
+            Some(&HashSet::from([blocks[4].block.hash()]))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tree_state_remove_before_finalized() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        let last = blocks.last().unwrap();
+
+        // set the canonical head
+        tree_state.set_canonical_head(last.block.num_hash());
+
+        // we should still remove everything up to and including 2
+        tree_state.remove_before(2, None);
+
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
+        assert!(!tree_state.blocks_by_number.contains_key(&1));
+        assert!(!tree_state.blocks_by_number.contains_key(&2));
+
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].block.hash()));
+        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].block.hash()));
+        assert!(tree_state.blocks_by_number.contains_key(&3));
+        assert!(tree_state.blocks_by_number.contains_key(&4));
+        assert!(tree_state.blocks_by_number.contains_key(&5));
+
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[2].block.hash()));
+        assert!(tree_state.parent_to_child.contains_key(&blocks[3].block.hash()));
+        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].block.hash()));
+
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[2].block.hash()),
+            Some(&HashSet::from([blocks[3].block.hash()]))
+        );
+        assert_eq!(
+            tree_state.parent_to_child.get(&blocks[3].block.hash()),
+            Some(&HashSet::from([blocks[4].block.hash()]))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tree_state_remove_before_lower_finalized() {
+        let mut tree_state = TreeState::new(BlockNumHash::default());
+        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+
+        let last = blocks.last().unwrap();
+
+        // set the canonical head
+        tree_state.set_canonical_head(last.block.num_hash());
+
+        // we have no forks so we should still remove anything up to and including 2
+        tree_state.remove_before(2, Some(1));
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
