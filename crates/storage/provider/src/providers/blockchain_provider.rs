@@ -1860,7 +1860,11 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split them into database and in-memory blocks
-        let mut blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
+        let mut blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockParams { parent: Some(B256::ZERO), tx_count: Some(0..1), ..Default::default() },
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at_mut(5);
 
         // Take the first in-memory block and add 7 ommers to it

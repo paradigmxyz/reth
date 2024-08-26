@@ -2654,16 +2654,28 @@ mod tests {
                 })]))
                 .build();
 
-            let genesis = random_block(&mut rng, 0, BlockParams::default());
+            let genesis = random_block(
+                &mut rng,
+                0,
+                BlockParams { ommers_count: Some(0), ..Default::default() },
+            );
             let block1 = random_block(
                 &mut rng,
                 1,
-                BlockParams { parent: Some(genesis.hash()), ..Default::default() },
+                BlockParams {
+                    parent: Some(genesis.hash()),
+                    ommers_count: Some(0),
+                    ..Default::default()
+                },
             );
             let block2 = random_block(
                 &mut rng,
                 2,
-                BlockParams { parent: Some(block1.hash()), ..Default::default() },
+                BlockParams {
+                    parent: Some(block1.hash()),
+                    ommers_count: Some(0),
+                    ..Default::default()
+                },
             );
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();

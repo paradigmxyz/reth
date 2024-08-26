@@ -148,22 +148,20 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 /// The ommer headers are not assumed to be valid.
 pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams) -> SealedBlock {
     // Generate transactions
-    let tx_count = block_params.tx_count;
-    let tx_count = tx_count.unwrap_or_else(|| (0..rng.gen::<u8>()));
+    let tx_count = block_params.tx_count.unwrap_or_else(|| 0..rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> = tx_count.map(|_| random_signed_tx(rng)).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
 
     // Generate ommers
-    let parent = block_params.parent;
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
-    let ommers =
-        (0..ommers_count).map(|_| random_header(rng, number, parent).unseal()).collect::<Vec<_>>();
+    let ommers = (0..ommers_count)
+        .map(|_| random_header(rng, number, block_params.parent).unseal())
+        .collect::<Vec<_>>();
 
     // Generate requests
     let requests = block_params
         .requests_count
         .map(|count| count.map(|_| random_request(rng)).collect::<Vec<_>>());
-    let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
 
     // Generate withdrawals
     let withdrawals = block_params.withdrawals_count.map(|count| {
@@ -180,11 +178,12 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     // Calculate roots
     let transactions_root = proofs::calculate_transaction_root(&transactions);
     let ommers_hash = proofs::calculate_ommers_root(&ommers);
+    let requests_root = requests.as_ref().map(|requests| proofs::calculate_requests_root(requests));
     let withdrawals_root = withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w));
 
     SealedBlock {
         header: Header {
-            parent_hash: parent.unwrap_or_default(),
+            parent_hash: block_params.parent.unwrap_or_default(),
             number,
             gas_used: total_gas,
             gas_limit: total_gas,
