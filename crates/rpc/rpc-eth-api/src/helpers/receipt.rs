@@ -31,7 +31,7 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
                 .get_receipts(meta.block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(meta.block_hash))?;
 
             Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
         }
