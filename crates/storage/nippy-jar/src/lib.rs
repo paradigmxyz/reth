@@ -495,7 +495,7 @@ mod tests {
     use super::*;
     use compression::Compression;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::fs::OpenOptions;
+    use std::{fs::OpenOptions, io::Read};
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
@@ -521,6 +521,33 @@ mod tests {
 
     fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {
         col.iter().map(|v| Ok(v.clone())).collect()
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let jar = NippyJar::new_without_header(23, file.path()).with_lz4();
+        jar.freeze_config().unwrap();
+
+        let mut config_file = OpenOptions::new().read(true).open(jar.config_path()).unwrap();
+        let config_file_len = config_file.metadata().unwrap().len();
+        assert_eq!(config_file_len, 37);
+
+        let mut buf = Vec::with_capacity(config_file_len as usize);
+        config_file.read_to_end(&mut buf).unwrap();
+
+        assert_eq!(
+            vec![
+                1, 0, 0, 0, 0, 0, 0, 0, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ],
+            buf
+        );
+
+        let mut read_jar = bincode::deserialize_from::<_, NippyJar>(&buf[..]).unwrap();
+        // Path is not ser/de
+        read_jar.path = file.path().to_path_buf();
+        assert_eq!(jar, read_jar);
     }
 
     #[test]
