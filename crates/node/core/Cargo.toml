@@ -39,7 +39,7 @@ reth-network-peers.workspace = true
 reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
-reth-optimism-chainspec = { workspace = true, features = ["optimism"], optional = true }
+reth-optimism-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-genesis.workspace = true
