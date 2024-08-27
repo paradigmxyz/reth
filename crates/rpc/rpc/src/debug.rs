@@ -195,14 +195,14 @@ where
             .provider
             .block_hash_for_id(block_id)
             .map_err(Eth::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            .ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_hash.into()),
             self.inner.eth_api.block_with_senders(block_id),
         )?;
 
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
         // we need to get the state of the parent block because we're replaying this block on top of
         // its parent block's state
         let state_at = block.parent_hash;
@@ -468,7 +468,7 @@ where
         )?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_number.into()))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
@@ -825,7 +825,7 @@ where
             .provider
             .block_by_id(block_id)
             .to_rpc_result()?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            .ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
         let mut res = Vec::new();
         block.encode(&mut res);
         Ok(res.into())
