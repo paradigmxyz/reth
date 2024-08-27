@@ -186,10 +186,7 @@ impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> Cli<Ext, C> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<
-    Ext: clap::Args + fmt::Debug = NoArgs,
-    C: ChainSpecParser = DefaultChainSpecParser,
-> {
+pub enum Commands<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> {
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<Ext, C>>),
