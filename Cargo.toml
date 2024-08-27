@@ -220,6 +220,7 @@ zero_sized_map_values = "warn"
 implicit_clone = "warn"
 cloned_instead_of_copied = "warn"
 option_as_ref_cloned = "warn"
+needless_for_each = "warn"
 manual_is_variant_and = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
