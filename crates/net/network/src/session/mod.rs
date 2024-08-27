@@ -26,7 +26,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, multiplex::RlpxProtocolMultiplexer,
+    capability::CapabilityMessage,
+    errors::{EthHandshakeError, EthStreamError},
+    multiplex::RlpxProtocolMultiplexer,
     Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, Status,
     UnauthedEthStream, UnauthedP2PStream,
 };
@@ -467,7 +469,7 @@ impl SessionManager {
                         peer_id,
                         remote_addr,
                         direction,
-                    })
+                    });
                 }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -552,12 +554,74 @@ impl SessionManager {
                 self.remove_pending_session(&session_id);
                 match direction {
                     Direction::Incoming => {
+                        match error.as_ref().unwrap().as_eth_stream() {
+                            Some(EthStreamError::StreamTimeout) => {
+                                self.metrics.total_incoming_eth_handshake_timeouts.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::InvalidFork(_),
+                            )) => {
+                                self.metrics.total_incoming_eth_handshake_forkid_errors.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedChain(_),
+                            )) => self
+                                .metrics
+                                .total_incoming_eth_handshake_network_errors
+                                .increment(1),
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedProtocolVersion(_),
+                            )) => self
+                                .metrics
+                                .total_incoming_eth_handshake_version_errors
+                                .increment(1),
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedGenesis(_),
+                            )) => self
+                                .metrics
+                                .total_incoming_eth_handshake_genesis_errors
+                                .increment(1),
+                            // For all other errors we increment peer errors
+                            // TODO: Determine a more granular approach for peer errors
+                            _ => self.metrics.total_incoming_eth_handshake_peer_errors.increment(1),
+                        }
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
                             error,
                         })
                     }
                     Direction::Outgoing(peer_id) => {
+                        match error.as_ref().unwrap().as_eth_stream() {
+                            Some(EthStreamError::StreamTimeout) => {
+                                self.metrics.total_outgoing_eth_handshake_timeouts.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::InvalidFork(_),
+                            )) => {
+                                self.metrics.total_outgoing_eth_handshake_forkid_errors.increment(1)
+                            }
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedChain(_),
+                            )) => self
+                                .metrics
+                                .total_outgoing_eth_handshake_network_errors
+                                .increment(1),
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedProtocolVersion(_),
+                            )) => self
+                                .metrics
+                                .total_outgoing_eth_handshake_version_errors
+                                .increment(1),
+                            Some(EthStreamError::EthHandshakeError(
+                                EthHandshakeError::MismatchedGenesis(_),
+                            )) => self
+                                .metrics
+                                .total_outgoing_eth_handshake_genesis_errors
+                                .increment(1),
+                            // For all other errors we increment peer errors
+                            // TODO: Determine a more granular approach for peer errors
+                            _ => self.metrics.total_outgoing_eth_handshake_peer_errors.increment(1),
+                        }
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
                             peer_id,
@@ -739,6 +803,14 @@ impl PendingSessionHandshakeError {
             _ => None,
         }
     }
+
+    /// Returns the EthStreamError if the error is an eth stream error
+    pub const fn as_eth_stream(&self) -> Option<&EthStreamError> {
+        match self {
+            Self::Eth(eth_err) => Some(eth_err),
+            _ => None,
+        }
+    }
 }
 
 /// The error thrown when the max configured limit has been reached and no more connections are
@@ -833,7 +905,7 @@ async fn start_pending_outbound_session(
                     error,
                 })
                 .await;
-            return
+            return;
         }
     };
     authenticate(
@@ -879,7 +951,7 @@ async fn authenticate(
                     direction,
                 })
                 .await;
-            return
+            return;
         }
     };
 
