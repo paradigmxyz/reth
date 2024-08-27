@@ -39,7 +39,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::HashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
     ops::Bound,
@@ -81,6 +81,10 @@ pub struct TreeState {
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
     /// Map of any parent block hash to its children.
     parent_to_child: HashMap<B256, HashSet<B256>>,
+    /// Map of hash to trie updates for canonical blocks that are persisted but not finalized.
+    ///
+    /// Contains the block number for easy removal.
+    persisted_trie_updates: HashMap<B256, (BlockNumber, Arc<TrieUpdates>)>,
     /// Currently tracked canonical head of the chain.
     current_canonical_head: BlockNumHash,
 }
@@ -93,6 +97,7 @@ impl TreeState {
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
             parent_to_child: HashMap::new(),
+            persisted_trie_updates: HashMap::new(),
         }
     }
 
@@ -236,14 +241,17 @@ impl TreeState {
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
 
-        // TODO: move trie updates here
         // First, let's walk back the canonical chain and remove canonical blocks lower than the
         // upper bound
         let mut current_block = self.current_canonical_head.hash;
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
             current_block = executed.block.parent_hash;
             if executed.block.number <= upper_bound {
-                self.remove_by_hash(executed.block.hash());
+                if let Some((removed, _)) = self.remove_by_hash(executed.block.hash()) {
+                    // finally, move the trie updates
+                    self.persisted_trie_updates
+                        .insert(removed.block.hash(), (removed.block.number, removed.trie));
+                }
             }
         }
 
@@ -258,7 +266,6 @@ impl TreeState {
 
             // We _exclude_ the finalized block because we will be dealing with the blocks __at__
             // the finalized block later.
-            // TODO: remove trie updates whose root are below the finalized block
             let blocks_to_remove = self
                 .blocks_by_number
                 .range((Bound::Unbounded, Bound::Excluded(finalized)))
@@ -267,6 +274,9 @@ impl TreeState {
             for hash in blocks_to_remove {
                 self.remove_by_hash(hash);
             }
+
+            // remove trie updates that are below the finalized block
+            self.persisted_trie_updates.retain(|_, (block_num, _)| *block_num <= finalized);
 
             // The only blocks that exist at `finalized_num` now, are blocks in sidechains that
             // should be removed.
@@ -2258,6 +2268,7 @@ mod tests {
                 blocks_by_number,
                 current_canonical_head: blocks.last().unwrap().block().num_hash(),
                 parent_to_child,
+                persisted_trie_updates: HashMap::default(),
             };
 
             let last_executed_block = blocks.last().unwrap().clone();
