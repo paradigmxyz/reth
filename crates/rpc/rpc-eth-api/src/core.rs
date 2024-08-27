@@ -594,11 +594,12 @@ where
         )
         .await?;
 
-        let Some(BlockTransactions::Full(transactions)) =
-            self.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::UnknownBlockNumber.into());
-        };
+        let BlockTransactions::Full(transactions) = self
+            .block_by_number(num.into(), true)
+            .await?
+            .map(|block| block.transactions)
+            .ok_or(EthApiError::HeaderNotFound(num.into()))
+            .map_err(Self::Error::from_eth_err)?;
 
         Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
     }
