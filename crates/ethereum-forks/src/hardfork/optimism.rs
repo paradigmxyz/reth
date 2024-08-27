@@ -198,6 +198,7 @@ impl OptimismHardfork {
         ChainHardforks::new(vec![
             (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
@@ -209,11 +210,11 @@ impl OptimismHardfork {
             (EthereumHardfork::London.boxed(), ForkCondition::Block(105235063)),
             (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(105235063)),
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
+            (Self::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (
                 EthereumHardfork::Paris.boxed(),
                 ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::ZERO },
             ),
-            (Self::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
             (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
             (Self::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
