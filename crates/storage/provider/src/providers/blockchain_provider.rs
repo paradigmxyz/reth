@@ -1468,7 +1468,7 @@ mod tests {
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
-        random_receipt, random_signed_tx,
+        random_receipt, random_signed_tx, BlockParams, BlockRangeParams,
     };
     use revm::db::BundleState;
 
@@ -1485,10 +1485,12 @@ mod tests {
         let blocks = random_block_range(
             rng,
             0..=block_range,
-            B256::ZERO,
-            0..1,
-            requests_count,
-            withdrawals_count,
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: 0..1,
+                requests_count,
+                withdrawals_count,
+            },
         );
         let (database_blocks, in_memory_blocks) = blocks.split_at(database_blocks);
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
@@ -1500,8 +1502,7 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         database_blocks: usize,
         in_memory_blocks: usize,
-        requests_count: Option<Range<u8>>,
-        withdrawals_count: Option<Range<u8>>,
+        block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
@@ -1512,8 +1513,8 @@ mod tests {
             rng,
             database_blocks,
             in_memory_blocks,
-            requests_count,
-            withdrawals_count,
+            block_range_params.requests_count,
+            block_range_params.withdrawals_count,
         );
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
@@ -1585,8 +1586,7 @@ mod tests {
         rng: &mut impl Rng,
         database_blocks: usize,
         in_memory_blocks: usize,
-        requests_count: Option<Range<u8>>,
-        withdrawals_count: Option<Range<u8>>,
+        block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
@@ -1598,8 +1598,7 @@ mod tests {
             MAINNET.clone(),
             database_blocks,
             in_memory_blocks,
-            requests_count,
-            withdrawals_count,
+            block_range_params,
         )
     }
 
@@ -1610,7 +1609,11 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1704,7 +1707,11 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split into database and in-memory blocks
-        let blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at(5);
 
         // Insert first 5 blocks into the database
@@ -1772,13 +1779,16 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Generate a random block
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, Some(B256::ZERO), None, None, None, None);
+        let block = random_block(
+            &mut rng,
+            0,
+            BlockParams { parent: Some(B256::ZERO), ..Default::default() },
+        );
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
@@ -1813,8 +1823,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1850,7 +1859,11 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate 10 random blocks and split them into database and in-memory blocks
-        let mut blocks = random_block_range(&mut rng, 0..=10, B256::ZERO, 0..1, None, None);
+        let mut blocks = random_block_range(
+            &mut rng,
+            0..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
         let (database_blocks, in_memory_blocks) = blocks.split_at_mut(5);
 
         // Take the first in-memory block and add 7 ommers to it
@@ -1931,8 +1944,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first in-memory block
@@ -1956,8 +1968,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first in-memory block
@@ -1987,8 +1998,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first database block
@@ -2012,8 +2022,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first database block
@@ -2040,8 +2049,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Generate a random hash (non-existent block)
@@ -2072,8 +2080,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first in-memory block
@@ -2101,8 +2108,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first in-memory block
@@ -2129,8 +2135,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first database block
@@ -2158,8 +2163,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the first database block
@@ -2187,8 +2191,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Generate a random hash (non-existent block)
@@ -2219,8 +2222,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of in-memory blocks
@@ -2247,8 +2249,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0, // No blocks in memory
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of database blocks
@@ -2276,8 +2277,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of blocks across memory and database
@@ -2306,8 +2306,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Generate a non-existent range
@@ -2324,8 +2323,12 @@ mod tests {
     fn test_block_range_partial_overlap() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let mid_point = TEST_BLOCKS_COUNT / 2;
-        let (provider, database_blocks, in_memory_blocks, _) =
-            provider_with_random_blocks(&mut rng, mid_point, mid_point, None, None)?;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            mid_point,
+            mid_point,
+            BlockRangeParams::default(),
+        )?;
 
         // Get the range of blocks across memory and database
         let start_block_number = database_blocks.last().unwrap().number;
@@ -2349,8 +2352,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of blocks across memory and database
@@ -2390,8 +2392,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of in-memory blocks
@@ -2426,8 +2427,12 @@ mod tests {
     #[test]
     fn test_block_with_senders_range_only_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, 0, None, None)?;
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
 
         // Get the range of database blocks
         let start_block_number = database_blocks.first().unwrap().number;
@@ -2465,8 +2470,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Assuming this range does not exist
@@ -2490,8 +2494,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of blocks across memory and database
@@ -2537,8 +2540,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Get the range of in-memory blocks
@@ -2579,8 +2581,12 @@ mod tests {
     #[test]
     fn test_sealed_block_with_senders_range_only_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) =
-            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, 0, None, None)?;
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
 
         // Get the range of database blocks
         let start_block_number = database_blocks.first().unwrap().number;
@@ -2624,8 +2630,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Assuming this range does not exist
@@ -2648,8 +2653,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2677,8 +2681,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2794,8 +2797,7 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
-                None,
-                Some(1..3),
+                BlockRangeParams { withdrawals_count: Some(1..3), ..Default::default() },
             )?;
         let blocks = [database_blocks, in_memory_blocks].concat();
 
@@ -2845,8 +2847,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
@@ -2867,8 +2868,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2907,8 +2907,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -2965,8 +2964,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3024,8 +3022,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3065,8 +3062,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3106,8 +3102,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3263,8 +3258,7 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
-                Some(1..2),
-                None,
+                BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
             )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3292,8 +3286,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         let before = Instant::now();
@@ -3323,8 +3316,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            None,
-            None,
+            BlockRangeParams::default(),
         )?;
 
         // Set the pending block in memory
