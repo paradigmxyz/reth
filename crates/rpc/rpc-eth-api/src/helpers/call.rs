@@ -108,7 +108,9 @@ pub trait EthCall: Call + LoadPendingBlock {
                 self.block_with_senders(target_block)
             )?;
 
-            let Some(block) = block else { return Err(EthApiError::UnknownBlockNumber.into()) };
+            let block = block
+                .ok_or(EthApiError::HeaderNotFound(target_block))
+                .map_err(Self::Error::from_eth_err)?;
             let gas_limit = self.call_gas_limit();
 
             // we're essentially replaying the transactions in the block here, hence we need the
