@@ -7905,7 +7905,7 @@ version = "1.0.5"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
- "alloy-primitives",
+ "alloy-primitives 0.8.0",
  "derive_more 1.0.0",
  "once_cell",
  "op-alloy-rpc-types",
@@ -7919,7 +7919,7 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.0.5"
 dependencies = [
- "alloy-primitives",
+ "alloy-primitives 0.8.0",
  "alloy-rlp",
  "clap",
  "eyre",
@@ -7999,7 +7999,7 @@ version = "1.0.5"
 name = "reth-optimism-rpc"
 version = "1.0.5"
 dependencies = [
- "alloy-primitives",
+ "alloy-primitives 0.8.0",
  "jsonrpsee-types",
  "op-alloy-network",
  "parking_lot 0.12.3",
