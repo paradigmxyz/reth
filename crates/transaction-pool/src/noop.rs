@@ -203,7 +203,7 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn get_transactions_by_sender_and_nonce(
+    fn get_transaction_by_sender_and_nonce(
         &self,
         _sender: Address,
         _nonce: u64,

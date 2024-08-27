@@ -155,15 +155,15 @@ fn build_struct_field_flags(
 /// Returns the total number of bytes used by the flags struct and how many unused bits.
 fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, u8) {
     let remaining = 8 - total_bits % 8;
-    if remaining != 8 {
+    if remaining == 8 {
+        (total_bits / 8, 0)
+    } else {
         let bsize = format_ident!("B{remaining}");
         field_flags.push(quote! {
             #[skip]
             unused: #bsize ,
         });
         ((total_bits + remaining) / 8, remaining)
-    } else {
-        (total_bits / 8, 0)
     }
 }
 

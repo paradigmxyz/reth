@@ -12,7 +12,7 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
@@ -98,7 +98,10 @@ where
     /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.inner.stale_filter_ttl,
+            self.inner.stale_filter_ttl,
+        );
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -573,7 +576,10 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges
+    where
+        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+    {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -595,7 +601,7 @@ trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
 {
     async fn drain(&self) -> FilterChanges {
         Self::drain(self).await

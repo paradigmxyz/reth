@@ -17,6 +17,7 @@ use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+        pre_block_blockhashes_contract_call,
     },
     ConfigureEvm,
 };
@@ -35,7 +36,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -112,7 +113,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -123,8 +123,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.timestamp,
             attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -137,13 +135,15 @@ where
         })?;
 
         // apply eip-2935 blockhashes update
-        apply_blockhashes_update(
+        pre_block_blockhashes_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            initialized_block_env.timestamp.to::<u64>(),
-            block_number,
+            &initialized_cfg,
+            &initialized_block_env,
             parent_block.hash(),
-        ).map_err(|err| {
+        )
+        .map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
             PayloadBuilderError::Internal(err.into())
         })?;
@@ -302,8 +302,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -316,14 +314,18 @@ where
     })?;
 
     // apply eip-2935 blockhashes update
-    apply_blockhashes_update(
+    pre_block_blockhashes_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
         parent_block.hash(),
     )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    .map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {

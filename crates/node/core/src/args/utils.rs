@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use alloy_genesis::Genesis;
 use reth_chainspec::ChainSpec;
 #[cfg(not(feature = "optimism"))]
-use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
+use reth_chainspec::{DEV, HOLESKY, MAINNET, SEPOLIA};
 use reth_fs_util as fs;
 #[cfg(feature = "optimism")]
 use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA};
@@ -32,7 +32,7 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "mainnet" => MAINNET.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
-        "dev" => reth_chainspec::DEV.clone(),
+        "dev" => DEV.clone(),
         _ => Arc::new(parse_custom_chain_spec(s)?),
     })
 }

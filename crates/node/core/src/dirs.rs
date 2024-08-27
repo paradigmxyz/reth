@@ -295,7 +295,7 @@ impl<D> ChainPath<D> {
     pub fn static_files(&self) -> PathBuf {
         let datadir_args = &self.2;
         if let Some(static_files_path) = &datadir_args.static_files_path {
-            static_files_path.to_path_buf()
+            static_files_path.clone()
         } else {
             self.data_dir().join("static_files")
         }

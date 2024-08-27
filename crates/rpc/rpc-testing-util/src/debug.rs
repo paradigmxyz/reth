@@ -15,7 +15,7 @@ use reth_rpc_types::{
         common::TraceResult,
         geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
     },
-    RichBlock, Transaction, TransactionRequest,
+    Block, Transaction, TransactionRequest,
 };
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
@@ -77,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, RichBlock> + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block> + DebugApiClient + Sync,
 {
     type Provider = T;
 

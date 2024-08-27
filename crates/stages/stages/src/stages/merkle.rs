@@ -316,7 +316,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         // Unwind trie only if there are transitions
-        if !range.is_empty() {
+        if range.is_empty() {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
+        } else {
             let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -330,8 +332,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             provider.write_trie_updates(&updates)?;
 
             // TODO(alexey): update entities checkpoint
-        } else {
-            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
@@ -638,7 +638,7 @@ mod tests {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();
-                            if storage_entry.map(|v| v.key == hashed_slot).unwrap_or_default() {
+                            if storage_entry.is_some_and(|v| v.key == hashed_slot) {
                                 storage_cursor.delete_current().unwrap();
                             }
 

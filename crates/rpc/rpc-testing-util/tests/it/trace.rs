@@ -7,7 +7,7 @@ use reth_rpc_api_testing_util::{debug::DebugApiExt, trace::TraceApiExt, utils::p
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest},
-    RichBlock, Transaction,
+    Block, Transaction,
 };
 
 /// This is intended to be run locally against a running node.
@@ -110,7 +110,7 @@ async fn debug_trace_block_entire_chain() {
 
     let client = HttpClientBuilder::default().build(url).unwrap();
     let current_block: u64 =
-        <HttpClient as EthApiClient<Transaction, RichBlock>>::block_number(&client)
+        <HttpClient as EthApiClient<Transaction, Block>>::block_number(&client)
             .await
             .unwrap()
             .try_into()

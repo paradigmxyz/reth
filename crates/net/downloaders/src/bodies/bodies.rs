@@ -161,9 +161,7 @@ where
         let nothing_to_request = self.download_range.is_empty() ||
             // or all blocks have already been requested.
             self.in_progress_queue
-                .last_requested_block_number
-                .map(|last| last == *self.download_range.end())
-                .unwrap_or_default();
+                .last_requested_block_number.is_some_and(|last| last == *self.download_range.end());
 
         nothing_to_request &&
             self.in_progress_queue.is_empty() &&

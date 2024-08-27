@@ -7,8 +7,6 @@
 )]
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-//#![cfg(feature = "optimism")]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;

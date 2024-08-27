@@ -36,4 +36,3 @@ op-alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 std = []
-optimism = []
