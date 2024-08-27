@@ -45,12 +45,9 @@ where
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
-        block: Option<RpcBlock<Eth::NetworkTypes>>,
-        receipts: Option<Vec<AnyTransactionReceipt>>,
+        block: RpcBlock<Eth::NetworkTypes>,
+        receipts: Vec<AnyTransactionReceipt>,
     ) -> RpcResult<BlockDetails> {
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
@@ -167,16 +164,28 @@ where
 
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block = self
+            .eth
+            .block_by_number(block_number.into(), true)
+            .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
+        let receipts = self
+            .eth
+            .block_receipts(block_number.into())
+            .ok_or(EthApiError::ReceiptsNotFound(block_number.into()))?;
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
-        let block = self.eth.block_by_hash(block_hash, true);
-        let receipts = self.eth.block_receipts(block_hash.into());
+        let block = self
+            .eth
+            .block_by_hash(block_hash, true)
+            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let receipts = self
+            .eth
+            .block_receipts(block_hash.into())
+            .ok_or(EthApiError::ReceiptsNotFound(block_hash.into()))?;
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -193,7 +202,7 @@ where
         let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
         let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
 
         // check if the number of transactions matches the number of receipts
@@ -317,7 +326,7 @@ where
         let Some(BlockTransactions::Full(transactions)) =
             self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
         else {
-            return Err(EthApiError::UnknownBlockNumber.into());
+            return Err(EthApiError::HeaderNotFound(num.into()));
         };
 
         Ok(transactions

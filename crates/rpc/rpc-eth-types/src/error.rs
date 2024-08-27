@@ -9,8 +9,7 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, BlockNumberOrTag,
-    ToRpcError,
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
@@ -38,9 +37,12 @@ pub enum EthApiError {
     /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(RpcPoolError),
-    /// Header not found for block hash/number
+    /// Header not found for block hash/number/tag
     #[error("header not found")]
     HeaderNotFound(BlockId),
+    /// Receipts not found for block hash/number/tag
+    #[error("receipts not found")]
+    ReceiptsNotFound(BlockId),
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
@@ -163,25 +165,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::HeaderNotFound(id) => {
-                let arg = match id {
-                    BlockId::Hash(h) => {
-                        if h.require_canonical == Some(true) {
-                            format!("canonical hash {}", h.block_hash)
-                        } else {
-                            format!("hash {}", h.block_hash)
-                        }
-                    }
-                    BlockId::Number(n) => match n {
-                        BlockNumberOrTag::Number(n) => format!("number {}", n),
-                        _ => format!("{}", n),
-                    },
-                };
-                rpc_error_with_code(
-                    EthRpcErrorCode::ResourceNotFound.code(),
-                    format!("{}: {}", error, arg),
-                )
-            }
+            EthApiError::HeaderNotFound(id) => resource_not_found(id),
+            EthApiError::ReceiptsNotFound(id) => resource_not_found(id),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),

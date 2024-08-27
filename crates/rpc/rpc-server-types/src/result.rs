@@ -3,7 +3,8 @@
 use std::fmt::Display;
 
 use jsonrpsee_core::RpcResult;
-use reth_rpc_types::engine::PayloadError;
+use reth_primitives::BlockId;
+use reth_rpc_types::{engine::PayloadError, error::EthRpcErrorCode, BlockNumberOrTag};
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
@@ -146,6 +147,24 @@ pub fn rpc_err(
                 .expect("serializing String can't fail")
         }),
     )
+}
+
+/// Constructs a JSON-RPC error for a resource not found indexed by [`BlockId`].
+pub fn resource_not_found(id: BlockId) -> jsonrpsee_types::error::ErrorObject<'static> {
+    let arg = match id {
+        BlockId::Hash(h) => {
+            if h.require_canonical == Some(true) {
+                format!("canonical hash {}", h.block_hash)
+            } else {
+                format!("hash {}", h.block_hash)
+            }
+        }
+        BlockId::Number(n) => match n {
+            BlockNumberOrTag::Number(n) => format!("number {}", n),
+            _ => format!("{}", n),
+        },
+    };
+    rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), format!("{}: {}", error, arg))
 }
 
 #[cfg(test)]
