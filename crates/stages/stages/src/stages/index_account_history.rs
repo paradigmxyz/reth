@@ -598,7 +598,7 @@ mod tests {
                         .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
-                    chunks.into_iter().for_each(|list| {
+                    for list in chunks {
                         result.insert(
                             ShardedKey::new(
                                 address,
@@ -607,7 +607,7 @@ mod tests {
                             ),
                             list,
                         );
-                    });
+                    }
 
                     if let Some(last_list) = last_chunk {
                         result.insert(ShardedKey::new(address, u64::MAX), last_list);

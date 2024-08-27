@@ -624,7 +624,7 @@ mod tests {
                         .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
-                    chunks.into_iter().for_each(|list| {
+                    for list in chunks {
                         result.insert(
                             StorageShardedKey::new(
                                 partial_key.0,
@@ -634,7 +634,7 @@ mod tests {
                             ),
                             list,
                         );
-                    });
+                    }
 
                     if let Some(last_list) = last_chunk {
                         result.insert(
