@@ -442,7 +442,7 @@ impl NetworkState {
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
-                            if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
+                            if res.err().is_some_and(|err| err.is_channel_closed()) {
                                 debug!(
                                     target: "net",
                                     ?id,
