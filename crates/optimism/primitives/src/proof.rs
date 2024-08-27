@@ -36,10 +36,11 @@ pub fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
+#[cfg(feature = "optimism")]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bloom, hex_literal::hex, Log, TxType};
+    use reth_primitives::{bloom, hex_literal::hex, Log, TxType};
     use alloy_primitives::{b256, Address, LogData};
     use reth_chainspec::SEPOLIA;
 
@@ -303,6 +304,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "optimism")]
     #[test]
     fn check_receipt_root_optimism() {
         let logs = vec![Log {

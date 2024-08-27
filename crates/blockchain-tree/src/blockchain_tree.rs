@@ -1388,6 +1388,7 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;
+    #[cfg(feature = "optimism")]
     use reth_optimism_primitives::proof::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
@@ -1599,7 +1600,7 @@ mod tests {
 
             #[cfg(not(feature = "optimism"))]
             let receipts_root = calculate_receipt_root(&receipts);
-
+            #[cfg(feature = "optimism")]
             let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
