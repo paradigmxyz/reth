@@ -98,7 +98,10 @@ where
     /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.inner.stale_filter_ttl,
+            self.inner.stale_filter_ttl,
+        );
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;

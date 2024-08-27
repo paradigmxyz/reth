@@ -36,12 +36,30 @@ impl TrieUpdates {
 
     /// Extends the trie updates.
     pub fn extend(&mut self, other: Self) {
-        self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
-        self.account_nodes.extend(ExcludeEmptyFromPair::from_iter(other.account_nodes));
-        self.removed_nodes.extend(ExcludeEmpty::from_iter(other.removed_nodes));
+        self.extend_common(&other);
+        self.account_nodes.extend(exclude_empty_from_pair(other.account_nodes));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes));
         for (hashed_address, storage_trie) in other.storage_tries {
             self.storage_tries.entry(hashed_address).or_default().extend(storage_trie);
         }
+    }
+
+    /// Extends the trie updates.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_common(other);
+        self.account_nodes.extend(exclude_empty_from_pair(
+            other.account_nodes.iter().map(|(k, v)| (k.clone(), v.clone())),
+        ));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().cloned()));
+        for (hashed_address, storage_trie) in &other.storage_tries {
+            self.storage_tries.entry(*hashed_address).or_default().extend_ref(storage_trie);
+        }
+    }
+
+    fn extend_common(&mut self, other: &Self) {
+        self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
     }
 
     /// Insert storage updates for a given hashed address.
@@ -63,11 +81,11 @@ impl TrieUpdates {
     ) {
         // Retrieve deleted keys from trie walker.
         let (_, removed_node_keys) = walker.split();
-        self.removed_nodes.extend(ExcludeEmpty::from_iter(removed_node_keys));
+        self.removed_nodes.extend(exclude_empty(removed_node_keys));
 
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
-        self.account_nodes.extend(ExcludeEmptyFromPair::from_iter(updated_nodes));
+        self.account_nodes.extend(exclude_empty_from_pair(updated_nodes));
 
         // Add deleted storage tries for destroyed accounts.
         for destroyed in destroyed_accounts {
@@ -104,10 +122,7 @@ pub struct StorageTrieUpdates {
 impl StorageTrieUpdates {
     /// Creates a new storage trie updates that are not marked as deleted.
     pub fn new(updates: impl IntoIterator<Item = (Nibbles, BranchNodeCompact)>) -> Self {
-        Self {
-            storage_nodes: ExcludeEmptyFromPair::from_iter(updates).collect(),
-            ..Default::default()
-        }
+        Self { storage_nodes: exclude_empty_from_pair(updates).collect(), ..Default::default() }
     }
 }
 
@@ -153,25 +168,40 @@ impl StorageTrieUpdates {
 
     /// Extends storage trie updates.
     pub fn extend(&mut self, other: Self) {
+        self.extend_common(&other);
+        self.storage_nodes.extend(exclude_empty_from_pair(other.storage_nodes));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes));
+    }
+
+    /// Extends storage trie updates.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_common(other);
+        self.storage_nodes.extend(exclude_empty_from_pair(
+            other.storage_nodes.iter().map(|(k, v)| (k.clone(), v.clone())),
+        ));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().cloned()));
+    }
+
+    fn extend_common(&mut self, other: &Self) {
         if other.is_deleted {
             self.storage_nodes.clear();
             self.removed_nodes.clear();
         }
         self.is_deleted |= other.is_deleted;
         self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
-        self.storage_nodes.extend(ExcludeEmptyFromPair::from_iter(other.storage_nodes));
-        self.removed_nodes.extend(ExcludeEmpty::from_iter(other.removed_nodes));
     }
 
     /// Finalize storage trie updates for by taking updates from walker and hash builder.
     pub fn finalize<C>(&mut self, walker: TrieWalker<C>, hash_builder: HashBuilder) {
         // Retrieve deleted keys from trie walker.
         let (_, removed_keys) = walker.split();
-        self.removed_nodes.extend(ExcludeEmpty::from_iter(removed_keys));
+        self.removed_nodes.extend(exclude_empty(removed_keys));
 
         // Retrieve updated nodes from hash builder.
         let (_, updated_nodes) = hash_builder.split();
-        self.storage_nodes.extend(ExcludeEmptyFromPair::from_iter(updated_nodes));
+        self.storage_nodes.extend(exclude_empty_from_pair(updated_nodes));
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].
@@ -236,46 +266,14 @@ impl StorageTrieUpdatesSorted {
     }
 }
 
-// A wrapper iterator to exclude empty nibbles.
-struct ExcludeEmpty<I>(I);
-
-impl<I: Iterator<Item = Nibbles>> ExcludeEmpty<I> {
-    fn from_iter<T: IntoIterator<Item = Nibbles, IntoIter = I>>(iter: T) -> Self {
-        Self(iter.into_iter())
-    }
+/// Excludes empty nibbles from the given iterator.
+fn exclude_empty(iter: impl IntoIterator<Item = Nibbles>) -> impl Iterator<Item = Nibbles> {
+    iter.into_iter().filter(|n| !n.is_empty())
 }
 
-impl<I: Iterator<Item = Nibbles>> Iterator for ExcludeEmpty<I> {
-    type Item = Nibbles;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let next = self.0.next()?;
-            if !next.is_empty() {
-                return Some(next)
-            }
-        }
-    }
-}
-
-// A wrapper iterator to exclude empty nibbles from pair where nibbles are the key.
-struct ExcludeEmptyFromPair<I>(I);
-
-impl<V, I: Iterator<Item = (Nibbles, V)>> ExcludeEmptyFromPair<I> {
-    fn from_iter<T: IntoIterator<Item = (Nibbles, V), IntoIter = I>>(iter: T) -> Self {
-        Self(iter.into_iter())
-    }
-}
-
-impl<V, I: Iterator<Item = (Nibbles, V)>> Iterator for ExcludeEmptyFromPair<I> {
-    type Item = (Nibbles, V);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let next = self.0.next()?;
-            if !next.0.is_empty() {
-                return Some(next)
-            }
-        }
-    }
+/// Excludes empty nibbles from the given iterator of pairs where the nibbles are the key.
+fn exclude_empty_from_pair<V>(
+    iter: impl IntoIterator<Item = (Nibbles, V)>,
+) -> impl Iterator<Item = (Nibbles, V)> {
+    iter.into_iter().filter(|(n, _)| !n.is_empty())
 }
