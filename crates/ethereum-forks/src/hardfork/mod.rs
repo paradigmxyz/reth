@@ -49,17 +49,21 @@ impl Hash for dyn Hardfork + 'static {
 
 /// Configures hardforks from genesis [`ChainConfig`].
 pub trait ConfigureHardforks: Sized {
+    /// Hardfork type of network stack.
+    type Hardfork;
+
     /// Initializes block based hardforks from [`ChainConfig`].
     fn init_block_hardforks(
         config: &ChainConfig,
-    ) -> impl IntoIterator<Item = (Self, ForkCondition)>;
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)>;
 
     /// Initializes TTD based hardfork from [`ChainConfig`].
-    fn init_paris(config: &ChainConfig) -> Option<(Self, ForkCondition)>;
+    fn init_paris(config: &ChainConfig) -> Option<(Self::Hardfork, ForkCondition)>;
 
     /// Initializes time based hardforks from [`ChainConfig`].
-    fn init_time_hardforks(config: &ChainConfig)
-        -> impl IntoIterator<Item = (Self, ForkCondition)>;
+    fn init_time_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)>;
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use std::sync::Arc;
 
 use alloy_chains::{Chain, ChainKind, NamedChain};
-use alloy_genesis::Genesis;
+use alloy_genesis::{ChainConfig, Genesis};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
@@ -14,8 +14,8 @@ use once_cell::sync::Lazy;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::OptimismHardfork;
 use reth_ethereum_forks::{
-    ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
+    ChainHardforks, ConfigureHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks,
+    ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
@@ -702,6 +702,71 @@ impl From<Genesis> for ChainSpec {
             base_fee_params: optimism_genesis_info.base_fee_params,
             ..Default::default()
         }
+    }
+}
+
+impl ConfigureHardforks for ChainSpec {
+    type Hardfork = EthereumHardfork;
+
+    fn init_block_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)> {
+        let ChainConfig {
+            homestead_block,
+            dao_fork_block,
+            eip150_block,
+            eip155_block,
+            byzantium_block,
+            constantinople_block,
+            petersburg_block,
+            istanbul_block,
+            muir_glacier_block,
+            berlin_block,
+            london_block,
+            arrow_glacier_block,
+            gray_glacier_block,
+            ..
+        } = config;
+
+        [
+            (Self::Hardfork::Homestead, homestead_block),
+            (Self::Hardfork::Dao, dao_fork_block),
+            (Self::Hardfork::Tangerine, eip150_block),
+            (Self::Hardfork::SpuriousDragon, eip155_block),
+            (Self::Hardfork::Byzantium, byzantium_block),
+            (Self::Hardfork::Constantinople, constantinople_block),
+            (Self::Hardfork::Petersburg, petersburg_block),
+            (Self::Hardfork::Istanbul, istanbul_block),
+            (Self::Hardfork::MuirGlacier, muir_glacier_block),
+            (Self::Hardfork::Berlin, berlin_block),
+            (Self::Hardfork::London, london_block),
+            (Self::Hardfork::ArrowGlacier, arrow_glacier_block),
+            (Self::Hardfork::GrayGlacier, gray_glacier_block),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+    }
+
+    fn init_paris(config: &ChainConfig) -> Option<(Self::Hardfork, ForkCondition)> {
+        let ttd = config.terminal_total_difficulty?;
+        Some((
+            Self::Hardfork::Paris,
+            ForkCondition::TTD { total_difficulty: ttd, fork_block: config.merge_netsplit_block },
+        ))
+    }
+
+    fn init_time_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)> {
+        let ChainConfig { shanghai_time, cancun_time, prague_time, .. } = config;
+
+        [
+            (Self::Hardfork::Shanghai, shanghai_time),
+            (Self::Hardfork::Cancun, cancun_time),
+            (Self::Hardfork::Prague, prague_time),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, time)| time.map(|time| (hardfork, ForkCondition::Timestamp(time))))
     }
 }
 

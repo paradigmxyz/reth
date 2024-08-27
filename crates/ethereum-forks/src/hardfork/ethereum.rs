@@ -7,12 +7,11 @@ use core::{
 };
 
 use alloy_chains::Chain;
-use alloy_genesis::ChainConfig;
 use alloy_primitives::{uint, U256};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{hardfork, ChainHardforks, ConfigureHardforks, ForkCondition, Hardfork};
+use crate::{hardfork, ChainHardforks, ForkCondition, Hardfork};
 
 hardfork!(
     /// The name of an Ethereum hardfork.
@@ -428,49 +427,5 @@ impl<const N: usize> From<[(EthereumHardfork, ForkCondition); N]> for ChainHardf
                 .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
                 .collect(),
         )
-    }
-}
-
-impl ConfigureHardforks for EthereumHardfork {
-    fn init_block_hardforks(
-        config: &ChainConfig,
-    ) -> impl IntoIterator<Item = (Self, ForkCondition)> {
-        [
-            (Self::Homestead, config.homestead_block),
-            (Self::Dao, config.dao_fork_block),
-            (Self::Tangerine, config.eip150_block),
-            (Self::SpuriousDragon, config.eip155_block),
-            (Self::Byzantium, config.byzantium_block),
-            (Self::Constantinople, config.constantinople_block),
-            (Self::Petersburg, config.petersburg_block),
-            (Self::Istanbul, config.istanbul_block),
-            (Self::MuirGlacier, config.muir_glacier_block),
-            (Self::Berlin, config.berlin_block),
-            (Self::London, config.london_block),
-            (Self::ArrowGlacier, config.arrow_glacier_block),
-            (Self::GrayGlacier, config.gray_glacier_block),
-        ]
-        .into_iter()
-        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
-    }
-
-    fn init_paris(config: &ChainConfig) -> Option<(Self, ForkCondition)> {
-        let ttd = config.terminal_total_difficulty?;
-        Some((
-            Self::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: config.merge_netsplit_block },
-        ))
-    }
-
-    fn init_time_hardforks(
-        config: &ChainConfig,
-    ) -> impl IntoIterator<Item = (Self, ForkCondition)> {
-        [
-            (Self::Shanghai, config.shanghai_time),
-            (Self::Cancun, config.cancun_time),
-            (Self::Prague, config.prague_time),
-        ]
-        .into_iter()
-        .filter_map(|(hardfork, time)| time.map(|time| (hardfork, ForkCondition::Timestamp(time))))
     }
 }
