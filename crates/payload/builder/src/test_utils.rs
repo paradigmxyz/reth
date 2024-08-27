@@ -6,7 +6,7 @@ use crate::{
     PayloadJobGenerator,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives::{Block, U256};
+use reth_primitives::{Block, Receipt, U256};
 use reth_provider::CanonStateNotification;
 use std::{
     future::Future,
@@ -82,7 +82,12 @@ impl PayloadJob for TestPayloadJob {
     type BuiltPayload = EthBuiltPayload;
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
+        Ok(EthBuiltPayload::new(
+            self.attr.payload_id(),
+            Block::default().seal_slow(),
+            U256::ZERO,
+            [Receipt::default()].to_vec(),
+        ))
     }
 
     fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {

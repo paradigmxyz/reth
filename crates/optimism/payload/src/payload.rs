@@ -168,7 +168,7 @@ pub struct OptimismBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: SealedBlock,
-    /// Block execution data for the payload, if any.
+    /// Block execution data for the payload, if any. 
     pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
