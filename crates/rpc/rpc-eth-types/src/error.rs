@@ -6,7 +6,7 @@ use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, BlockId, Bytes};
 use reth_rpc_server_types::result::{
-    internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
+    format_block_id, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
@@ -40,6 +40,9 @@ pub enum EthApiError {
     /// Header not found for block hash/number/tag
     #[error("header not found")]
     HeaderNotFound(BlockId),
+    /// Header range not found for start block hash/number/tag to end block hash/number/tag
+    #[error("header range not found, start block {0:?}, end block {1:?}")]
+    HeaderRangeNotFound(BlockId, BlockId),
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -165,8 +168,20 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::HeaderNotFound(id) => resource_not_found(id),
-            EthApiError::ReceiptsNotFound(id) => resource_not_found(id),
+            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format_block_id(format!("{}: ", error), id),
+            ),
+            EthApiError::HeaderRangeNotFound(start_id, end_id) => {
+                let msg = format_block_id(format!("{}: start block: ", error), start_id);
+                let msg = format_block_id(format!("{}, end block: ", msg), end_id);
+
+                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), msg)
+            }
+            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format_block_id(format!("{}: ", error), id),
+            ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),

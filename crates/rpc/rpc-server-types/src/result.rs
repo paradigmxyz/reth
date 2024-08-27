@@ -1,6 +1,6 @@
 //! Additional helpers for converting errors.
 
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 use jsonrpsee_core::RpcResult;
 use reth_primitives::BlockId;
@@ -149,8 +149,8 @@ pub fn rpc_err(
     )
 }
 
-/// Constructs a JSON-RPC error for a resource not found indexed by [`BlockId`].
-pub fn resource_not_found(id: BlockId) -> jsonrpsee_types::error::ErrorObject<'static> {
+/// Formats a [`BlockId`] into an error message.
+pub fn format_block_id(error: &mut String, id: BlockId) -> Result<(), fmt::Error> {
     let arg = match id {
         BlockId::Hash(h) => {
             if h.require_canonical == Some(true) {
@@ -164,7 +164,7 @@ pub fn resource_not_found(id: BlockId) -> jsonrpsee_types::error::ErrorObject<'s
             _ => format!("{}", n),
         },
     };
-    rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), format!("{}: {}", error, arg))
+    write!(error, "{}", arg)
 }
 
 #[cfg(test)]

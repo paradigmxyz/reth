@@ -163,11 +163,10 @@ where
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
                 let end_block = best_number + 1;
-                let block_hashes = self
-                    .inner
-                    .provider
-                    .canonical_hashes_range(start_block, end_block)
-                    .map_err(|_| EthApiError::UnknownBlockNumber)?;
+                let block_hashes =
+                    self.inner.provider.canonical_hashes_range(start_block, end_block).map_err(
+                        |_| EthApiError::HeaderRangeNotFound(start_block.into(), end_block.into()),
+                    )?;
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
@@ -363,7 +362,7 @@ where
                     .eth_cache
                     .get_receipts(block_hash)
                     .await?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
 
                 let mut all_logs = Vec::new();
                 let filter = FilteredParams::new(Some(filter));
