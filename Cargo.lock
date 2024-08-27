@@ -7256,6 +7256,7 @@ name = "reth-ethereum-payload-builder"
 version = "1.0.5"
 dependencies = [
  "reth-basic-payload-builder",
+ "reth-chainspec",
  "reth-errors",
  "reth-evm",
  "reth-evm-ethereum",

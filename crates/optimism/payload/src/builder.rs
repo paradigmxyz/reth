@@ -4,6 +4,7 @@ use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
+use reth_chainspec::ChainSpec;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
@@ -11,6 +12,7 @@ use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
@@ -93,11 +95,9 @@ where
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
         let extra_data = config.extra_data();
         let PayloadConfig {
-            initialized_block_env,
             parent_block,
             attributes,
             chain_spec,
-            initialized_cfg,
             ..
         } = config;
 
@@ -269,8 +269,6 @@ where
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
     let extra_data = config.extra_data();
     let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
         parent_block,
         attributes,
         chain_spec,
