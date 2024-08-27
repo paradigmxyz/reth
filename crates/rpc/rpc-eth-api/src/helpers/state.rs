@@ -231,7 +231,7 @@ pub trait LoadState: EthApiTypes {
                 let block_hash = LoadPendingBlock::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .ok_or(EthApiError::HeaderNotFound(at.into()))?;
                 let (cfg, env) = self
                     .cache()
                     .get_evm_env(block_hash)
