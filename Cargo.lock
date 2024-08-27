@@ -6232,6 +6232,7 @@ dependencies = [
  "reth-node-optimism",
  "reth-optimism-cli",
  "reth-optimism-primitives",
+ "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -6502,7 +6503,6 @@ version = "1.0.5"
 dependencies = [
  "clap",
  "eyre",
- "reth-chainspec",
  "reth-cli-runner",
 ]
 
@@ -7278,6 +7278,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-prune-types",
@@ -7741,6 +7742,7 @@ dependencies = [
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-optimism-chainspec",
  "reth-primitives",
  "reth-provider",
  "reth-prune-types",
@@ -7875,6 +7877,7 @@ dependencies = [
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
@@ -7897,11 +7900,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-chainspec"
+version = "1.0.5"
+dependencies = [
+ "alloy-chains",
+ "alloy-genesis",
+ "alloy-primitives",
+ "derive_more 1.0.0",
+ "once_cell",
+ "op-alloy-rpc-types",
+ "reth-chainspec",
+ "reth-ethereum-forks",
+ "reth-primitives-traits",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-optimism-cli"
 version = "1.0.5"
 dependencies = [
- "alloy-genesis",
- "alloy-primitives 0.8.0",
+ "alloy-primitives",
  "alloy-rlp",
  "clap",
  "eyre",
@@ -7921,6 +7939,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-node-core",
  "reth-node-events",
+ "reth-optimism-chainspec",
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
@@ -7929,8 +7948,6 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
- "serde_json",
- "shellexpand",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -7982,11 +7999,11 @@ version = "1.0.5"
 name = "reth-optimism-rpc"
 version = "1.0.5"
 dependencies = [
- "alloy-primitives 0.8.0",
- "derive_more 1.0.0",
+ "alloy-primitives",
  "jsonrpsee-types",
  "op-alloy-network",
  "parking_lot 0.12.3",
+ "reqwest",
  "reth-chainspec",
  "reth-evm",
  "reth-evm-optimism",
@@ -8003,8 +8020,10 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8083,6 +8102,7 @@ dependencies = [
  "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
+ "reth-optimism-chainspec",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",

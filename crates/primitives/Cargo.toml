@@ -20,6 +20,7 @@ reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-chainspec = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true }
+reth-optimism-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
@@ -104,6 +105,7 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
+    "dep:reth-optimism-chainspec",
     "dep:op-alloy-rpc-types",
 ]
 alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde"]
