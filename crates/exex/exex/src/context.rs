@@ -4,9 +4,9 @@ use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
-use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotification};
+use crate::{ExExEvent, ExExNotificationsSubscriber};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -30,7 +30,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     ///
     /// Once a an [`ExExNotification`] is sent over the channel, it is considered delivered by the
     /// node.
-    pub notifications: Receiver<ExExNotification>,
+    pub notifications: ExExNotificationsSubscriber,
 
     /// node components
     pub components: Node,

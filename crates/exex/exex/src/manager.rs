@@ -1,11 +1,13 @@
 use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
 use metrics::Gauge;
+use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::BlockNumber;
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     future::{poll_fn, Future},
+    ops::{Deref, DerefMut},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -45,6 +47,7 @@ pub struct ExExHandle {
     sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
+    handle_rx: watch::Receiver<ExExHandleState>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
 
@@ -59,9 +62,12 @@ impl ExExHandle {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<ExExNotification>) {
+    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, ExExNotificationsSubscriber) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (handle_tx, handle_rx) = watch::channel(ExExHandleState::Inactive);
+
+        let notifications = ExExNotificationsSubscriber::new(notification_rx, handle_tx);
 
         (
             Self {
@@ -69,11 +75,12 @@ impl ExExHandle {
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(notification_tx),
                 receiver: event_rx,
+                handle_rx,
                 next_notification_id: 0,
                 finished_height: None,
             },
             event_tx,
-            notification_rx,
+            notifications,
         )
     }
 
@@ -86,6 +93,10 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
     ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
+        if !self.handle_rx.borrow().is_active() {
+            return Poll::Ready(Ok(()))
+        }
+
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -136,6 +147,72 @@ impl ExExHandle {
             }
             Err(err) => Poll::Ready(Err(err)),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ExExNotificationsSubscriber {
+    notifications: ExExNotifications,
+    handle_tx: watch::Sender<ExExHandleState>,
+}
+
+impl ExExNotificationsSubscriber {
+    pub(crate) fn new(
+        receiver: Receiver<ExExNotification>,
+        handle_tx: watch::Sender<ExExHandleState>,
+    ) -> Self {
+        Self {
+            notifications: ExExNotifications { receiver, handle_tx: handle_tx.clone() },
+            handle_tx,
+        }
+    }
+
+    pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
+        self.handle_tx.send(ExExHandleState::Active(Some(head))).unwrap();
+        &mut self.notifications
+    }
+
+    pub fn subscribe(&mut self) -> &mut ExExNotifications {
+        self.handle_tx.send(ExExHandleState::Active(None)).unwrap();
+        &mut self.notifications
+    }
+}
+
+#[derive(Debug)]
+pub enum ExExHandleState {
+    Active(Option<ExExHead>),
+    Inactive,
+}
+
+impl ExExHandleState {
+    pub(crate) const fn is_active(&self) -> bool {
+        matches!(self, Self::Active(_))
+    }
+}
+
+#[derive(Debug)]
+pub struct ExExNotifications {
+    receiver: Receiver<ExExNotification>,
+    handle_tx: watch::Sender<ExExHandleState>,
+}
+
+impl Deref for ExExNotifications {
+    type Target = Receiver<ExExNotification>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.receiver
+    }
+}
+
+impl DerefMut for ExExNotifications {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.receiver
+    }
+}
+
+impl Drop for ExExNotifications {
+    fn drop(&mut self) {
+        let _ = self.handle_tx.send(ExExHandleState::Inactive);
     }
 }
 
@@ -730,7 +807,8 @@ mod tests {
 
     #[tokio::test]
     async fn exex_handle_new() {
-        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
+        let notifications_rx = notifications.subscribe();
 
         // Check initial state
         assert_eq!(exex_handle.id, "test_exex");
@@ -759,7 +837,7 @@ mod tests {
         // Send a notification and ensure it's received correctly
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notification_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending => panic!("Notification send is pending"),
@@ -772,7 +850,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
-        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
+        let notifications_rx = notifications.subscribe();
 
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(15);
@@ -792,7 +871,7 @@ mod tests {
             Poll::Ready(Ok(())) => {
                 // The notification should be skipped, so nothing should be sent.
                 // Check that the receiver channel is indeed empty
-                assert!(notification_rx.try_recv().is_err(), "Receiver channel should be empty");
+                assert!(notifications_rx.try_recv().is_err(), "Receiver channel should be empty");
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail");
@@ -805,7 +884,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reorged_notification() {
-        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
+        let notifications_rx = notifications.subscribe();
 
         let notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::default()),
@@ -821,7 +901,7 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notification_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
@@ -835,7 +915,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reverted_notification() {
-        let (mut exex_handle, _, mut notification_rx) = ExExHandle::new("test_exex".to_string());
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
+        let notifications_rx = notifications.subscribe();
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
 
@@ -848,7 +929,7 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notification_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.recv().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
