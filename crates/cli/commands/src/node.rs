@@ -1,14 +1,15 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
+use reth_ethereum_cli::chainspec::EthChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
@@ -20,7 +21,10 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 
 /// Start the node
 #[derive(Debug, Parser)]
-pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct NodeCommand<
+    Ext: clap::Args + fmt::Debug = NoArgs,
+    C: ChainSpecParser = EthChainSpecParser,
+> {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
@@ -34,10 +38,10 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
-        value_parser = chain_value_parser,
+        value_parser = C::default(),
         required = false,
     )]
-    pub chain: Arc<ChainSpec>,
+    pub chain: C::Value,
 
     /// Enable Prometheus metrics.
     ///
@@ -109,7 +113,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     pub ext: Ext,
 }
 
-impl NodeCommand {
+impl<C: ChainSpecParser> NodeCommand<NoArgs, C> {
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
@@ -125,7 +129,7 @@ impl NodeCommand {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
+impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> NodeCommand<Ext, C> {
     /// Launches the node
     ///
     /// This transforms the node command into a node config and launches the node using the given
@@ -210,7 +214,7 @@ mod tests {
 
     #[test]
     fn parse_help_node_command() {
-        let err = NodeCommand::try_parse_args_from(["reth", "--help"]).unwrap_err();
+        let err = NodeCommand::<_>::try_parse_args_from(["reth", "--help"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 
@@ -224,14 +228,14 @@ mod tests {
 
     #[test]
     fn parse_discovery_addr() {
-        let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"]).unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from(["reth", "--discovery.addr", "127.0.0.1"])
+            .unwrap();
         assert_eq!(cmd.network.discovery.addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
 
     #[test]
     fn parse_addr() {
-        let cmd = NodeCommand::try_parse_args_from([
+        let cmd = NodeCommand::<_>::try_parse_args_from([
             "reth",
             "--discovery.addr",
             "127.0.0.1",
@@ -245,42 +249,49 @@ mod tests {
 
     #[test]
     fn parse_discovery_port() {
-        let cmd = NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300"]).unwrap();
+        let cmd =
+            NodeCommand::<_>::try_parse_args_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
     }
 
     #[test]
     fn parse_port() {
-        let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--discovery.port", "300", "--port", "99"])
-                .unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from([
+            "reth",
+            "--discovery.port",
+            "300",
+            "--port",
+            "99",
+        ])
+        .unwrap();
         assert_eq!(cmd.network.discovery.port, 300);
         assert_eq!(cmd.network.port, 99);
     }
 
     #[test]
     fn parse_metrics_port() {
-        let cmd = NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
-        let cmd = NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
 
         let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
+            NodeCommand::<_>::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
     #[test]
     fn parse_config_path() {
         let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+            NodeCommand::<_>::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"])
+                .unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
@@ -291,7 +302,7 @@ mod tests {
 
     #[test]
     fn parse_db_path() {
-        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+        let cmd = NodeCommand::<_>::try_parse_args_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
         let db_path = data_dir.db();
@@ -299,7 +310,7 @@ mod tests {
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+            NodeCommand::<_>::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
         let db_path = data_dir.db();
@@ -365,9 +376,13 @@ mod tests {
 
     #[test]
     fn with_unused_ports_conflicts_with_instance() {
-        let err =
-            NodeCommand::try_parse_args_from(["reth", "--with-unused-ports", "--instance", "2"])
-                .unwrap_err();
+        let err = NodeCommand::<_>::try_parse_args_from([
+            "reth",
+            "--with-unused-ports",
+            "--instance",
+            "2",
+        ])
+        .unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 

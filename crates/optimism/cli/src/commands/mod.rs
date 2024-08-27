@@ -1,3 +1,4 @@
+use crate::chainspec::OpChainSpecParser;
 use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
@@ -18,7 +19,7 @@ pub mod import_receipts;
 pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::NodeCommand<Ext>),
+    Node(Box<node::NodeCommand<Ext, OpChainSpecParser>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),

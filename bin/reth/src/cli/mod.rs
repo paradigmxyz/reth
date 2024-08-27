@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, SUPPORTED_CHAINS},
         LogArgs,
     },
     commands::debug_cmd,
@@ -11,6 +11,7 @@ use crate::{
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, dump_genesis, import, init_cmd, init_state,
     node::{self, NoArgs},
@@ -18,6 +19,7 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_ethereum_cli::chainspec::EthChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -35,10 +37,10 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = EthChainSpecParser> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Ext>,
+    command: Commands<Ext, C>,
 
     /// The chain this node is running.
     ///
@@ -48,7 +50,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_value_parser,
+        value_parser = C::default(),
         global = true,
     )]
     chain: Arc<ChainSpec>,
@@ -89,7 +91,7 @@ impl Cli {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
+impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> Cli<Ext, C> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -187,10 +189,10 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = EthChainSpecParser> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::NodeCommand<Ext>),
+    Node(Box<node::NodeCommand<Ext, C>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),
