@@ -29,6 +29,7 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
@@ -82,7 +83,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 .provider()
                 .latest_header()
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
             let (mut latest_header, block_hash) = latest.split();
             // child block
