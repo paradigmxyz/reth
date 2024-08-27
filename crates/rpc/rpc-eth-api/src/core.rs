@@ -598,8 +598,7 @@ where
             .block_by_number(num.into(), true)
             .await?
             .map(|block| block.transactions)
-            .ok_or(EthApiError::HeaderNotFound(num.into()))
-            .map_err(Self::Error::from_eth_err)?;
+            .ok_or(EthApiError::HeaderNotFound(num.into()))?;
 
         Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
     }

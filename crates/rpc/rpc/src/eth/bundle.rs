@@ -128,7 +128,7 @@ where
             let parent = LoadPendingBlock::provider(&self.inner.eth_api)
                 .header_by_number(parent_block)
                 .map_err(Eth::Error::from_eth_err)?
-                .ok_or_else(|| EthApiError::HeaderNotFound(parent_block.into())?;
+                .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
             if let Some(base_fee) = parent.next_block_base_fee(
                 LoadPendingBlock::provider(&self.inner.eth_api)
                     .chain_spec()

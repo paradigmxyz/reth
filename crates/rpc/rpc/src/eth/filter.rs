@@ -362,7 +362,7 @@ where
                     .eth_cache
                     .get_receipts(block_hash)
                     .await?
-                    .ok_or_else(|| EthApiError::HeaderNotFound(block_hash.into()))?;
+                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
                 let mut all_logs = Vec::new();
                 let filter = FilteredParams::new(Some(filter));

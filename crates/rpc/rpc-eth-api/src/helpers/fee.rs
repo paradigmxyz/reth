@@ -85,8 +85,7 @@ pub trait EthFees: LoadFee {
             let Some(end_block) = LoadFee::provider(self)
                 .block_number_for_id(newest_block.into())
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(newest_block.into()))
-                .map_err(Self::Error::from_eth_err)?;
+                .ok_or(EthApiError::HeaderNotFound(newest_block.into()))?;
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
