@@ -6568,7 +6568,6 @@ version = "1.0.5"
 dependencies = [
  "clap",
  "eyre",
- "reth-chainspec",
  "reth-cli-runner",
 ]
 
@@ -7344,6 +7343,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-prune-types",
@@ -7971,6 +7971,7 @@ dependencies = [
  "alloy-chains",
  "alloy-genesis",
  "alloy-primitives",
+ "derive_more 1.0.0",
  "once_cell",
  "op-alloy-rpc-types",
  "reth-chainspec",
@@ -7983,7 +7984,6 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.0.5"
 dependencies = [
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "clap",
@@ -8013,8 +8013,6 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
- "serde_json",
- "shellexpand",
  "tempfile",
  "tokio",
  "tokio-util",
