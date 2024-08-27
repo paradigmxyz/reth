@@ -581,6 +581,8 @@ impl SessionManager {
                                 .metrics
                                 .total_incoming_eth_handshake_genesis_errors
                                 .increment(1),
+                            // Do nothing if not an EthStreamError
+                            None => (),
                             // For all other errors we increment peer errors
                             // TODO: Determine a more granular approach for peer errors
                             _ => self.metrics.total_incoming_eth_handshake_peer_errors.increment(1),
@@ -618,6 +620,8 @@ impl SessionManager {
                                 .metrics
                                 .total_outgoing_eth_handshake_genesis_errors
                                 .increment(1),
+                            // Do nothing if not an EthStreamError
+                            None => (),
                             // For all other errors we increment peer errors
                             // TODO: Determine a more granular approach for peer errors
                             _ => self.metrics.total_outgoing_eth_handshake_peer_errors.increment(1),
@@ -804,7 +808,7 @@ impl PendingSessionHandshakeError {
         }
     }
 
-    /// Returns the EthStreamError if the error is an eth stream error
+    /// Returns the `EthStreamError` if the error is an eth stream error
     pub const fn as_eth_stream(&self) -> Option<&EthStreamError> {
         match self {
             Self::Eth(eth_err) => Some(eth_err),
