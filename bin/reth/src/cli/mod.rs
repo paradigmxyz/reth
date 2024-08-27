@@ -1,10 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{
-        utils::{chain_help, SUPPORTED_CHAINS},
-        LogArgs,
-    },
+    args::{utils::chain_help, LogArgs},
     commands::debug_cmd,
     macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
@@ -19,8 +16,8 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_ethereum_cli::chainspec::EthChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::utils::DefaultChainSpecParser;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -37,7 +34,7 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = EthChainSpecParser> {
+pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = DefaultChainSpecParser> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Ext, C>,
@@ -49,7 +46,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = EthCh
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
+        default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::default(),
         global = true,
     )]
@@ -189,7 +186,10 @@ impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> Cli<Ext, C> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = EthChainSpecParser> {
+pub enum Commands<
+    Ext: clap::Args + fmt::Debug = NoArgs,
+    C: ChainSpecParser = DefaultChainSpecParser,
+> {
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<Ext, C>>),
@@ -244,6 +244,7 @@ mod tests {
     use super::*;
     use crate::args::ColorMode;
     use clap::CommandFactory;
+    use reth_node_core::args::utils::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_color_mode() {

@@ -5,11 +5,10 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
-use reth_ethereum_cli::chainspec::EthChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        utils::{chain_help, SUPPORTED_CHAINS},
+        utils::{chain_help, DefaultChainSpecParser},
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
@@ -23,7 +22,7 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 #[derive(Debug, Parser)]
 pub struct NodeCommand<
     Ext: clap::Args + fmt::Debug = NoArgs,
-    C: ChainSpecParser = EthChainSpecParser,
+    C: ChainSpecParser = DefaultChainSpecParser,
 > {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
@@ -36,7 +35,7 @@ pub struct NodeCommand<
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
+        default_value = C::SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
         value_parser = C::default(),
         required = false,
@@ -207,6 +206,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
+    use reth_node_core::args::utils::SUPPORTED_CHAINS;
     use std::{
         net::{IpAddr, Ipv4Addr},
         path::Path,

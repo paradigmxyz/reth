@@ -1,7 +1,7 @@
 //! Command that dumps genesis block JSON configuration to stdout
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_node_core::args::utils::{chain_help, SUPPORTED_CHAINS};
+use reth_node_core::args::utils::chain_help;
 use std::sync::Arc;
 
 /// Dumps genesis block JSON configuration to stdout
@@ -14,7 +14,7 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
+        default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::default()
     )]
     chain: Arc<C::Value>,
@@ -30,14 +30,13 @@ impl<C: ChainSpecParser> DumpGenesisCommand<C> {
 
 #[cfg(test)]
 mod tests {
-    use reth_ethereum_cli::chainspec::EthChainSpecParser;
-
     use super::*;
+    use reth_node_core::args::utils::{DefaultChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_dump_genesis_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: DumpGenesisCommand<EthChainSpecParser> =
+            let args: DumpGenesisCommand<DefaultChainSpecParser> =
                 DumpGenesisCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(
                 Ok(args.chain.chain),

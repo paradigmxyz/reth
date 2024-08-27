@@ -9,10 +9,7 @@ use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_node_core::{
-    args::{
-        utils::{chain_help, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs,
-    },
+    args::{utils::chain_help, DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_primitives::B256;
@@ -41,7 +38,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
+        default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::default()
     )]
     pub chain: C::Value,

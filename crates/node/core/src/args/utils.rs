@@ -3,9 +3,11 @@
 use std::{path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
+use clap::builder::TypedValueParser;
 use reth_chainspec::{ChainSpec, DEV};
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
+use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 #[cfg(feature = "optimism")]
 use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
@@ -63,6 +65,47 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
             Arc::new(genesis.into())
         }
     })
+}
+
+/// Default chain specification parser.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultChainSpecParser;
+
+impl ChainSpecParser for DefaultChainSpecParser {
+    const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
+
+    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
+        chain_value_parser(s)
+    }
+}
+
+impl TypedValueParser for DefaultChainSpecParser {
+    type Value = Arc<ChainSpec>;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let val =
+            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        <Self as ChainSpecParser>::parse(val).map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = Self::SUPPORTED_CHAINS.join(",");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        let values = Self::SUPPORTED_CHAINS.iter().map(clap::builder::PossibleValue::new);
+        Some(Box::new(values))
+    }
 }
 
 #[cfg(test)]
