@@ -47,10 +47,10 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = Defau
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::default(),
+        value_parser = C::parser(),
         global = true,
     )]
-    chain: C::Value,
+    chain: Arc<C::ChainSpec>,
 
     /// Add a new instance of a node.
     ///

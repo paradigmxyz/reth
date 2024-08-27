@@ -3,7 +3,6 @@
 use std::{path::PathBuf, sync::Arc};
 
 use alloy_genesis::Genesis;
-use clap::builder::TypedValueParser;
 use reth_chainspec::ChainSpec;
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{DEV, HOLESKY, MAINNET, SEPOLIA};
@@ -88,35 +87,6 @@ impl ChainSpecParser for DefaultChainSpecParser {
 
     fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
         chain_value_parser(s)
-    }
-}
-
-impl TypedValueParser for DefaultChainSpecParser {
-    type Value = Arc<ChainSpec>;
-
-    fn parse_ref(
-        &self,
-        _cmd: &clap::Command,
-        arg: Option<&clap::Arg>,
-        value: &std::ffi::OsStr,
-    ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser>::parse(val).map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = Self::SUPPORTED_CHAINS.join(",");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-        })
-    }
-
-    fn possible_values(
-        &self,
-    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
-        let values = Self::SUPPORTED_CHAINS.iter().map(clap::builder::PossibleValue::new);
-        Some(Box::new(values))
     }
 }
 

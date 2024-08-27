@@ -1,6 +1,5 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::sync::Arc;
 
-use clap::{builder::TypedValueParser, error::Result, Arg, Command};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::utils::parse_custom_chain_spec;
 use reth_optimism_chainspec::{
@@ -41,37 +40,6 @@ impl ChainSpecParser for OpChainSpecParser {
 
     fn parse(s: &str) -> eyre::Result<Arc<OpChainSpec>> {
         chain_value_parser(s)
-    }
-}
-
-impl TypedValueParser for OpChainSpecParser {
-    type Value = Arc<OpChainSpec>;
-
-    fn parse_ref(
-        &self,
-        _cmd: &Command,
-        arg: Option<&Arg>,
-        value: &OsStr,
-    ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser>::parse(val).map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = Self::SUPPORTED_CHAINS.join(", ");
-            clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                format!(
-                    "Invalid value '{val}' for {arg}: {err}. [possible values: {possible_values}]"
-                ),
-            )
-        })
-    }
-
-    fn possible_values(
-        &self,
-    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
-        let values = Self::SUPPORTED_CHAINS.iter().map(clap::builder::PossibleValue::new);
-        Some(Box::new(values))
     }
 }
 

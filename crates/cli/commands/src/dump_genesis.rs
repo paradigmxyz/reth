@@ -1,4 +1,6 @@
 //! Command that dumps genesis block JSON configuration to stdout
+use std::sync::Arc;
+
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -15,9 +17,9 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::default()
+        value_parser = C::parser()
     )]
-    chain: C::Value,
+    chain: Arc<C::ChainSpec>,
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> DumpGenesisCommand<C> {

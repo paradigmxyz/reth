@@ -40,9 +40,9 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::default()
+        value_parser = C::parser()
     )]
-    pub chain: C::Value,
+    pub chain: Arc<C::ChainSpec>,
 
     /// All database related arguments
     #[command(flatten)]

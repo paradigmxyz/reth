@@ -38,10 +38,10 @@ pub struct NodeCommand<
         long_help = chain_help(),
         default_value = C::SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
-        value_parser = C::default(),
+        value_parser = C::parser(),
         required = false,
     )]
-    pub chain: C::Value,
+    pub chain: Arc<C::ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///

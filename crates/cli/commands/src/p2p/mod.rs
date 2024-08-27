@@ -1,6 +1,6 @@
 //! P2P Debugging tool
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
@@ -33,9 +33,9 @@ pub struct Command<C: ChainSpecParser> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::default()
+        value_parser = C::parser()
     )]
-    chain: C::Value,
+    chain: Arc<C::ChainSpec>,
 
     /// The number of retries per request
     #[arg(long, default_value = "5")]
