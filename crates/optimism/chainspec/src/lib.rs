@@ -558,4 +558,51 @@ mod tests {
 
         assert!(chainspec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
     }
+
+
+    #[test]
+    fn hardfork_order_init_from_config() {
+        let extra_fields = OtherFields::new(BTreeMap::from_iter([
+            (String::from("bedrockBlock"), json!(0)),
+            (String::from("regolithTime"), json!(0)),
+            (String::from("canyonTime"), json!(0)),
+            (String::from("ecotoneTime"), json!(0)),
+            (String::from("fjordTime"), json!(0)),
+            (String::from("graniteTime"), json!(0)),
+        ]));
+
+        // custom genesis with chain config
+        let config = ChainConfig {
+            chain_id: 2600,
+            homestead_block: Some(0),
+            dao_fork_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            muir_glacier_block: Some(0),
+            berlin_block: Some(0),
+            london_block: Some(0),
+            arrow_glacier_block: Some(0),
+            gray_glacier_block: Some(0),
+            terminal_total_difficulty: Some(U256::ZERO),
+            shanghai_time: Some(0),
+            cancun_time: Some(0),
+            prague_time: Some(0),
+            extra_fields,
+            ..Default::default()
+        };
+
+        // test order of hardforks against mainnet hardforks of super chain
+        for (super_chain_hf, hf) in OptimismHardfork::op_mainnet().forks_iter().skip(1).zip(
+            OpChainSpec::init_block_hardforks(&config).into_iter().chain(
+                iter::once(OpChainSpec::init_paris(&config).unwrap())
+                    .chain(OpChainSpec::init_time_hardforks(&config)),
+            ),
+        ) {
+            assert_eq!(super_chain_hf.0, &*hf.0);
+        }
+    }
 }
