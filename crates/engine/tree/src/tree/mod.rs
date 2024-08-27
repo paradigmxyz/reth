@@ -176,10 +176,12 @@ impl TreeState {
         true
     }
 
-    /// Remove all blocks up to the given block number.
-    pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
+    /// Remove all blocks up to __and including__ the given block number.
+    pub(crate) fn remove_before(&mut self, upper_bound: BlockNumber) {
         let mut numbers_to_remove = Vec::new();
-        for (&number, _) in self.blocks_by_number.range((Bound::Unbounded, upper_bound)) {
+        for (&number, _) in
+            self.blocks_by_number.range((Bound::Unbounded, Bound::Included(upper_bound)))
+        {
             numbers_to_remove.push(number);
         }
 
@@ -1019,7 +1021,7 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        self.state.tree_state.remove_before(Bound::Included(backfill_height));
+        self.state.tree_state.remove_before(backfill_height);
         self.metrics.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // remove all buffered blocks below the backfill height
@@ -1193,9 +1195,7 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
-        self.state
-            .tree_state
-            .remove_before(Bound::Included(self.persistence_state.last_persisted_block_number));
+        self.state.tree_state.remove_before(self.persistence_state.last_persisted_block_number);
         self.canonical_in_memory_state
             .remove_persisted_blocks(self.persistence_state.last_persisted_block_number);
     }
@@ -2656,7 +2656,8 @@ mod tests {
             tree_state.insert_executed(block.clone());
         }
 
-        tree_state.remove_before(Bound::Excluded(3));
+        // inclusive bound, so we should remove anything up to and including 2
+        tree_state.remove_before(2);
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
