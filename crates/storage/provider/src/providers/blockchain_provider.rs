@@ -1458,13 +1458,13 @@ mod tests {
     };
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, Header, Receipt, SealedBlock,
-        StaticFileSegment, Withdrawals, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Header, Receipt,
+        SealedBlock, SealedBlockWithSenders, StaticFileSegment, Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
-        WithdrawalsProvider,
+        TransactionVariant, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1920,6 +1920,723 @@ mod tests {
         let mut rng = rand::thread_rng();
         let random_block_number: u64 = rng.gen();
         assert_eq!(provider.block_body_indices(random_block_number)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_by_hash_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first in-memory block
+        let first_in_mem_block = in_memory_blocks.first().unwrap();
+        let block_hash = first_in_mem_block.hash();
+
+        // Get the block with senders by hash and check if it matches the first in-memory block
+        let block_with_senders = provider
+            .block_with_senders(BlockHashOrNumber::Hash(block_hash), TransactionVariant::WithHash)?
+            .unwrap();
+        assert_eq!(block_with_senders.block.seal(block_hash), first_in_mem_block.clone());
+        assert_eq!(block_with_senders.senders, first_in_mem_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_by_number_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first in-memory block
+        let first_in_mem_block = in_memory_blocks.first().unwrap();
+        let block_number = first_in_mem_block.number;
+
+        // Get the block with senders by number and check if it matches the first in-memory block
+        let block_with_senders = provider
+            .block_with_senders(
+                BlockHashOrNumber::Number(block_number),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(
+            block_with_senders.block.seal(first_in_mem_block.hash()),
+            first_in_mem_block.clone()
+        );
+        assert_eq!(block_with_senders.senders, first_in_mem_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_by_hash_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first database block
+        let first_db_block = database_blocks.first().unwrap();
+        let block_hash = first_db_block.hash();
+
+        // Get the block with senders by hash and check if it matches the first database block
+        let block_with_senders = provider
+            .block_with_senders(BlockHashOrNumber::Hash(block_hash), TransactionVariant::WithHash)?
+            .unwrap();
+        assert_eq!(block_with_senders.block.seal(block_hash), first_db_block.clone());
+        assert_eq!(block_with_senders.senders, first_db_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_by_number_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first database block
+        let first_db_block = database_blocks.first().unwrap();
+        let block_number = first_db_block.number;
+
+        // Get the block with senders by number and check if it matches the first database block
+        let block_with_senders = provider
+            .block_with_senders(
+                BlockHashOrNumber::Number(block_number),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(block_with_senders.block.seal(first_db_block.hash()), first_db_block.clone());
+        assert_eq!(block_with_senders.senders, first_db_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_non_existent_block() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Generate a random hash (non-existent block)
+        let non_existent_hash = B256::random();
+        let result = provider.block_with_senders(
+            BlockHashOrNumber::Hash(non_existent_hash),
+            TransactionVariant::WithHash,
+        )?;
+        // The block should not be found
+        assert!(result.is_none());
+
+        // Generate a random number (non-existent block)
+        let non_existent_number = 9999;
+        let result = provider.block_with_senders(
+            BlockHashOrNumber::Number(non_existent_number),
+            TransactionVariant::WithHash,
+        )?;
+        // The block should not be found
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_by_hash_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first in-memory block
+        let first_in_mem_block = in_memory_blocks.first().unwrap();
+        let block_hash = first_in_mem_block.hash();
+
+        // Get the sealed block with senders by hash and check if it matches the first in-memory
+        // block
+        let sealed_block_with_senders = provider
+            .sealed_block_with_senders(
+                BlockHashOrNumber::Hash(block_hash),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(sealed_block_with_senders.block, first_in_mem_block.clone());
+        assert_eq!(sealed_block_with_senders.senders, first_in_mem_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_by_number_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first in-memory block
+        let first_in_mem_block = in_memory_blocks.first().unwrap();
+        let block_number = first_in_mem_block.number;
+
+        // Get the sealed block with senders by number and check if it matches the first in-memory
+        let sealed_block_with_senders = provider
+            .sealed_block_with_senders(
+                BlockHashOrNumber::Number(block_number),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(sealed_block_with_senders.block, first_in_mem_block.clone());
+        assert_eq!(sealed_block_with_senders.senders, first_in_mem_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_by_hash_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first database block
+        let first_db_block = database_blocks.first().unwrap();
+        let block_hash = first_db_block.hash();
+
+        // Get the sealed block with senders by hash and check if it matches the first database
+        // block
+        let sealed_block_with_senders = provider
+            .sealed_block_with_senders(
+                BlockHashOrNumber::Hash(block_hash),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(sealed_block_with_senders.block, first_db_block.clone());
+        assert_eq!(sealed_block_with_senders.senders, first_db_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_by_number_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the first database block
+        let first_db_block = database_blocks.first().unwrap();
+        let block_number = first_db_block.number;
+
+        // Get the sealed block with senders by number and check if it matches the first database
+        // block
+        let sealed_block_with_senders = provider
+            .sealed_block_with_senders(
+                BlockHashOrNumber::Number(block_number),
+                TransactionVariant::WithHash,
+            )?
+            .unwrap();
+        assert_eq!(sealed_block_with_senders.block, first_db_block.clone());
+        assert_eq!(sealed_block_with_senders.senders, first_db_block.senders().unwrap());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_non_existent_block() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Generate a random hash (non-existent block)
+        let non_existent_hash = B256::random();
+        let result = provider.sealed_block_with_senders(
+            BlockHashOrNumber::Hash(non_existent_hash),
+            TransactionVariant::WithHash,
+        )?;
+        // The block should not be found
+        assert!(result.is_none());
+
+        // Generate a random number (non-existent block)
+        let non_existent_number = 9999;
+        let result = provider.sealed_block_with_senders(
+            BlockHashOrNumber::Number(non_existent_number),
+            TransactionVariant::WithHash,
+        )?;
+        // The block should not be found
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_range_in_memory_only() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the range of in-memory blocks
+        let start_block_number = in_memory_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks = provider.block_range(range)?;
+
+        // Check if the retrieved blocks match the in-memory blocks
+        assert_eq!(blocks.len(), in_memory_blocks.len());
+        // Check if the blocks are equal
+        for (retrieved_block, expected_block) in blocks.iter().zip(in_memory_blocks.iter()) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_range_in_database_only() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0, // No blocks in memory
+            None,
+            None,
+        )?;
+
+        // Get the range of database blocks
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = database_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks = provider.block_range(range)?;
+
+        // Check if the retrieved blocks match the database blocks
+        assert_eq!(blocks.len(), database_blocks.len());
+        // Check if the blocks are equal
+        for (retrieved_block, expected_block) in blocks.iter().zip(database_blocks.iter()) {
+            assert_eq!(retrieved_block, &expected_block.clone().unseal());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_range_across_memory_and_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let mid_point = TEST_BLOCKS_COUNT / 2;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            mid_point,
+            TEST_BLOCKS_COUNT - mid_point,
+            None,
+            None,
+        )?;
+
+        // Get the range of blocks across memory and database
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks = provider.block_range(range)?;
+
+        // Check if the retrieved blocks match the database and in-memory blocks
+        assert_eq!(blocks.len(), TEST_BLOCKS_COUNT);
+        let all_expected_blocks =
+            database_blocks.iter().chain(in_memory_blocks.iter()).collect::<Vec<_>>();
+        // Check if the blocks are equal
+        for (retrieved_block, expected_block) in blocks.iter().zip(all_expected_blocks.iter()) {
+            assert_eq!(retrieved_block.clone(), (*expected_block).clone().unseal());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_range_non_existent_range() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Generate a non-existent range
+        let non_existent_range = 9999..=10000;
+        let blocks = provider.block_range(non_existent_range)?;
+
+        // The range is non-existent, so the blocks should be empty
+        assert!(blocks.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_range_partial_overlap() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let mid_point = TEST_BLOCKS_COUNT / 2;
+        let (provider, database_blocks, in_memory_blocks, _) =
+            provider_with_random_blocks(&mut rng, mid_point, mid_point, None, None)?;
+
+        // Get the range of blocks across memory and database
+        let start_block_number = database_blocks.last().unwrap().number;
+        let end_block_number = in_memory_blocks.first().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks = provider.block_range(range)?;
+
+        assert_eq!(blocks.len(), 2); // Only one block from each side of the overlap
+        assert_eq!(blocks[0], database_blocks.last().unwrap().clone().unseal());
+        assert_eq!(blocks[1], in_memory_blocks.first().unwrap().clone().unseal());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_range_across_memory_and_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let mid_point = TEST_BLOCKS_COUNT / 2;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            mid_point,
+            TEST_BLOCKS_COUNT - mid_point,
+            None,
+            None,
+        )?;
+
+        // Get the range of blocks across memory and database
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks_with_senders = provider.block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the database and in-memory blocks
+        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let all_expected_blocks_with_senders = database_blocks
+            .iter()
+            .chain(in_memory_blocks.iter())
+            .map(|sealed_block| BlockWithSenders {
+                block: sealed_block.clone().unseal(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_block_with_senders, expected_block_with_senders) in
+            blocks_with_senders.iter().zip(all_expected_blocks_with_senders.iter())
+        {
+            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
+            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_range_only_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the range of in-memory blocks
+        let start_block_number = in_memory_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks_with_senders = provider.block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the in-memory blocks
+        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let expected_blocks_with_senders = in_memory_blocks
+            .iter()
+            .map(|sealed_block| BlockWithSenders {
+                block: sealed_block.clone().unseal(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_block_with_senders, expected_block_with_senders) in
+            blocks_with_senders.iter().zip(expected_blocks_with_senders.iter())
+        {
+            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
+            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_range_only_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) =
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, 0, None, None)?;
+
+        // Get the range of database blocks
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = database_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let blocks_with_senders = provider.block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the database blocks
+        assert_eq!(blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let expected_blocks_with_senders = database_blocks
+            .iter()
+            .map(|sealed_block| BlockWithSenders {
+                block: sealed_block.clone().unseal(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_block_with_senders, expected_block_with_senders) in
+            blocks_with_senders.iter().zip(expected_blocks_with_senders.iter())
+        {
+            assert_eq!(retrieved_block_with_senders.block, expected_block_with_senders.block);
+            assert_eq!(retrieved_block_with_senders.senders, expected_block_with_senders.senders);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_with_senders_range_non_existent_range() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Assuming this range does not exist
+        let start_block_number = 1000;
+        let end_block_number = 2000;
+
+        let range = start_block_number..=end_block_number;
+        let blocks_with_senders = provider.block_with_senders_range(range)?;
+
+        // The range is non-existent, so the blocks should be empty
+        assert!(blocks_with_senders.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_range_across_memory_and_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let mid_point = TEST_BLOCKS_COUNT / 2;
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            mid_point,
+            TEST_BLOCKS_COUNT - mid_point,
+            None,
+            None,
+        )?;
+
+        // Get the range of blocks across memory and database
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the database and in-memory blocks
+        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let all_expected_sealed_blocks_with_senders = database_blocks
+            .iter()
+            .chain(in_memory_blocks.iter())
+            .map(|sealed_block| SealedBlockWithSenders {
+                block: sealed_block.clone(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
+            sealed_blocks_with_senders.iter().zip(all_expected_sealed_blocks_with_senders.iter())
+        {
+            assert_eq!(
+                retrieved_sealed_block_with_senders.block,
+                expected_sealed_block_with_senders.block
+            );
+            assert_eq!(
+                retrieved_sealed_block_with_senders.senders,
+                expected_sealed_block_with_senders.senders
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_range_only_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Get the range of in-memory blocks
+        let start_block_number = in_memory_blocks.first().unwrap().number;
+        let end_block_number = in_memory_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the in-memory blocks
+        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let expected_sealed_blocks_with_senders = in_memory_blocks
+            .iter()
+            .map(|sealed_block| SealedBlockWithSenders {
+                block: sealed_block.clone(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
+            sealed_blocks_with_senders.iter().zip(expected_sealed_blocks_with_senders.iter())
+        {
+            assert_eq!(
+                retrieved_sealed_block_with_senders.block,
+                expected_sealed_block_with_senders.block
+            );
+            assert_eq!(
+                retrieved_sealed_block_with_senders.senders,
+                expected_sealed_block_with_senders.senders
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_range_only_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) =
+            provider_with_random_blocks(&mut rng, TEST_BLOCKS_COUNT, 0, None, None)?;
+
+        // Get the range of database blocks
+        let start_block_number = database_blocks.first().unwrap().number;
+        let end_block_number = database_blocks.last().unwrap().number;
+
+        let range = start_block_number..=end_block_number;
+        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
+
+        // Check if the retrieved blocks match the database blocks
+        assert_eq!(sealed_blocks_with_senders.len(), TEST_BLOCKS_COUNT);
+
+        let expected_sealed_blocks_with_senders = database_blocks
+            .iter()
+            .map(|sealed_block| SealedBlockWithSenders {
+                block: sealed_block.clone(),
+                senders: sealed_block.senders().unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        // Check if the blocks are equal
+        for (retrieved_sealed_block_with_senders, expected_sealed_block_with_senders) in
+            sealed_blocks_with_senders.iter().zip(expected_sealed_blocks_with_senders.iter())
+        {
+            assert_eq!(
+                retrieved_sealed_block_with_senders.block,
+                expected_sealed_block_with_senders.block
+            );
+            assert_eq!(
+                retrieved_sealed_block_with_senders.senders,
+                expected_sealed_block_with_senders.senders
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sealed_block_with_senders_range_non_existent_range() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            None,
+            None,
+        )?;
+
+        // Assuming this range does not exist
+        let start_block_number = 1000;
+        let end_block_number = 2000;
+
+        let range = start_block_number..=end_block_number;
+        let sealed_blocks_with_senders = provider.sealed_block_with_senders_range(range)?;
+
+        // The range is non-existent, so the blocks should be empty
+        assert!(sealed_blocks_with_senders.is_empty());
 
         Ok(())
     }
