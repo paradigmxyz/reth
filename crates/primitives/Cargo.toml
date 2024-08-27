@@ -30,6 +30,9 @@ alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 
+# optimism
+op-alloy-rpc-types = { workspace = true, optional = true }
+
 # crypto
 secp256k1 = { workspace = true, features = [
     "global-context",
@@ -101,6 +104,7 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
+    "dep:op-alloy-rpc-types",
 ]
 alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde"]
 test-utils = ["reth-primitives-traits/test-utils"]

@@ -7,7 +7,7 @@ use reth_rpc_eth_api::{
     FromEthApiError,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
+use reth_rpc_types::{optimism::OptimismTransactionReceiptFields, AnyTransactionReceipt};
 
 use crate::{OpEthApi, OpEthApiError, OptimismTxMeta};
 

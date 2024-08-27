@@ -47,7 +47,7 @@ pub trait BlockProvider: Send + Sync + 'static {
                 None => return Ok(B256::default()),
             };
             let block = self.get_block(previous_block_number).await?;
-            block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))
+            Ok(block.header.hash)
         }
     }
 }
@@ -204,7 +204,7 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
                 timestamp: block.header.timestamp,
                 extra_data: block.header.extra_data.clone(),
                 base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
-                block_hash: block.header.hash.unwrap(),
+                block_hash: block.header.hash,
                 transactions: transactions
                     .into_iter()
                     .map(|tx| {

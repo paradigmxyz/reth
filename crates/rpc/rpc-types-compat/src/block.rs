@@ -127,7 +127,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
     } = header;
 
     Header {
-        hash: Some(hash),
+        hash,
         parent_hash,
         uncles_hash: ommers_hash,
         miner: beneficiary,
