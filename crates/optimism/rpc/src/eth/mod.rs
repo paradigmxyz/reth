@@ -12,7 +12,6 @@ use std::{fmt, sync::Arc};
 
 use crate::eth::rpc::SequencerClient;
 use alloy_primitives::U256;
-use derive_more::Deref;
 use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
