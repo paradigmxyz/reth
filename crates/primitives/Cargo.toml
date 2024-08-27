@@ -106,9 +106,8 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
     "dep:reth-optimism-chainspec",
-    "dep:op-alloy-rpc-types",
 ]
-alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde"]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde", "dep:op-alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]

@@ -8,6 +8,7 @@ use crate::{
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
+use op_alloy_rpc_types as _;
 
 #[cfg(not(feature = "std"))]
 use alloc::{string::ToString, vec::Vec};
