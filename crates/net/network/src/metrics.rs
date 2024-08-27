@@ -99,9 +99,9 @@ pub struct SessionManagerMetrics {
     pub(crate) total_incoming_eth_handshake_version_errors: Counter,
     /// Number of outgoing protocol version mismatch errors
     pub(crate) total_outgoing_eth_handshake_version_errors: Counter,
-    /// Number of incoming genesis block mismatch errors 
+    /// Number of incoming genesis block mismatch errors
     pub(crate) total_incoming_eth_handshake_genesis_errors: Counter,
-    /// Number of outgoing genesis block mismatch errors 
+    /// Number of outgoing genesis block mismatch errors
     pub(crate) total_outgoing_eth_handshake_genesis_errors: Counter,
     /// Number of incoming fork id mismatch errors
     pub(crate) total_incoming_eth_handshake_forkid_errors: Counter,
