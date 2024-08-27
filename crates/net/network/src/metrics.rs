@@ -87,25 +87,25 @@ pub struct SessionManagerMetrics {
     /// Number of errors related to outgoing incorrect peer behaviour, such as invalid message
     /// code, size, encoding, etc.
     pub(crate) total_outgoing_eth_handshake_peer_errors: Counter,
-    /// Number of incoming `StreamTimeout` errors
+    /// Number of incoming timeout errors
     pub(crate) total_incoming_eth_handshake_timeouts: Counter,
-    /// Number of outgoing `StreamTimeout` errors
+    /// Number of outgoing timeout errors
     pub(crate) total_outgoing_eth_handshake_timeouts: Counter,
-    /// Number of incoming `MismatchedChain` errors
+    /// Number of incoming network id mismatch errors
     pub(crate) total_incoming_eth_handshake_network_errors: Counter,
-    /// Number of outgoing `MismatchedChain` errors
+    /// Number of outgoing network id mismatch errors
     pub(crate) total_outgoing_eth_handshake_network_errors: Counter,
-    /// Number of incoming `MismatchedProtocolVersion` errors
+    /// Number of incoming protocol version mismatch errors
     pub(crate) total_incoming_eth_handshake_version_errors: Counter,
-    /// Number of outgoing `MismatchedProtocolVersion` errors
+    /// Number of outgoing protocol version mismatch errors
     pub(crate) total_outgoing_eth_handshake_version_errors: Counter,
-    /// Number of incoming `MismatchedGenesis` errors
+    /// Number of incoming genesis block mismatch errors 
     pub(crate) total_incoming_eth_handshake_genesis_errors: Counter,
-    /// Number of outgoing `MismatchedGenesis` errors
+    /// Number of outgoing genesis block mismatch errors 
     pub(crate) total_outgoing_eth_handshake_genesis_errors: Counter,
-    /// Number of incoming `InvalidFork` errors
+    /// Number of incoming fork id mismatch errors
     pub(crate) total_incoming_eth_handshake_forkid_errors: Counter,
-    /// Number of outgoing `InvalidFork` errors
+    /// Number of outgoing fork id mismatch errors
     pub(crate) total_outgoing_eth_handshake_forkid_errors: Counter,
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
