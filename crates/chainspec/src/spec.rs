@@ -1110,7 +1110,7 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 #[cfg(test)]
 mod tests {
     use core::ops::Deref;
-    use std::{collections::HashMap, str::FromStr};
+    use std::{collections::HashMap, iter, str::FromStr};
 
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
@@ -2413,5 +2413,41 @@ Post-merge hard forks (timestamp based):
             ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
             MAINNET.latest_fork_id()
         )
+    }
+
+    #[test]
+    fn hardfork_order_init_from_config() {
+        // custom genesis with chain config
+        let config = ChainConfig {
+            chain_id: 2600,
+            homestead_block: Some(0),
+            dao_fork_block: Some(0),
+            eip150_block: Some(0),
+            eip155_block: Some(0),
+            byzantium_block: Some(0),
+            constantinople_block: Some(0),
+            petersburg_block: Some(0),
+            istanbul_block: Some(0),
+            muir_glacier_block: Some(0),
+            berlin_block: Some(0),
+            london_block: Some(0),
+            arrow_glacier_block: Some(0),
+            gray_glacier_block: Some(0),
+            terminal_total_difficulty: Some(U256::ZERO),
+            shanghai_time: Some(0),
+            cancun_time: Some(0),
+            prague_time: Some(0),
+            ..Default::default()
+        };
+
+        // test order of hardforks against mainnet hardforks of super chain
+        for (super_chain_hf, hf) in EthereumHardfork::MAINNET.iter().skip(1).zip(
+            ChainSpec::init_block_hardforks(&config).into_iter().chain(
+                iter::once(ChainSpec::init_paris(&config).unwrap())
+                    .chain(ChainSpec::init_time_hardforks(&config)),
+            ),
+        ) {
+            assert_eq!(super_chain_hf.0, hf.0);
+        }
     }
 }
