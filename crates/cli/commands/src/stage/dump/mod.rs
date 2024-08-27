@@ -85,7 +85,7 @@ macro_rules! handle_stage {
     }};
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `dump-stage` command
     pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
     where

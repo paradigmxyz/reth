@@ -55,7 +55,7 @@ pub struct ImportCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser> ImportCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
     /// Execute `import` command
     pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
     where

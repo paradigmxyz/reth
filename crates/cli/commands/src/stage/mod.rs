@@ -38,7 +38,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     Unwind(unwind::Command<C>),
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where

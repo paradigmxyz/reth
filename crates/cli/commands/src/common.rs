@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
@@ -48,7 +49,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     pub db: DatabaseArgs,
 }
 
-impl<C: ChainSpecParser> EnvironmentArgs<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {

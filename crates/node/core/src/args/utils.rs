@@ -82,6 +82,8 @@ pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> 
 pub struct DefaultChainSpecParser;
 
 impl ChainSpecParser for DefaultChainSpecParser {
+    type ChainSpec = ChainSpec;
+
     const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
 
     fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {

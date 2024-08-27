@@ -1,6 +1,7 @@
 //! `reth recover` command.
 
 use clap::{Parser, Subcommand};
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 
@@ -20,7 +21,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     StorageTries(storage_tries::Command<C>),
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `recover` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {

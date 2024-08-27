@@ -2,6 +2,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
@@ -23,7 +24,7 @@ pub struct Command<C: ChainSpecParser> {
     stage: StageEnum,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;

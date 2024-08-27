@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
@@ -44,7 +45,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser> ImportReceiptsOpCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);

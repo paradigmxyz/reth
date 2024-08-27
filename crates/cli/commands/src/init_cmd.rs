@@ -2,6 +2,7 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::BlockHashReader;
 use tracing::info;
@@ -13,7 +14,7 @@ pub struct InitCommand<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 }
 
-impl<C: ChainSpecParser> InitCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitCommand<C> {
     /// Execute the `init` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");

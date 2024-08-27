@@ -10,6 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -78,7 +79,7 @@ pub struct Command<C: ChainSpecParser> {
     blobs_bundle_path: Option<PathBuf>,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.

@@ -88,7 +88,7 @@ impl Cli {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> Cli<Ext, C> {
+impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser<ChainSpec = ChainSpec>> Cli<Ext, C> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the

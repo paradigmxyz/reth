@@ -1,6 +1,7 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -112,7 +113,7 @@ pub struct NodeCommand<
     pub ext: Ext,
 }
 
-impl<C: ChainSpecParser> NodeCommand<NoArgs, C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<NoArgs, C> {
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
@@ -128,7 +129,7 @@ impl<C: ChainSpecParser> NodeCommand<NoArgs, C> {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> NodeCommand<Ext, C> {
+impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<Ext, C> {
     /// Launches the node
     ///
     /// This transforms the node command into a node config and launches the node using the given

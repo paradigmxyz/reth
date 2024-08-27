@@ -5,6 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -56,7 +57,7 @@ pub struct Command<C: ChainSpecParser> {
     pub interval: u64,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn build_pipeline<DB, Client>(
         &self,
         config: &Config,

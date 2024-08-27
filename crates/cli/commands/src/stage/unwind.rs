@@ -3,6 +3,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -45,7 +46,7 @@ pub struct Command<C: ChainSpecParser> {
     offline: bool,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;

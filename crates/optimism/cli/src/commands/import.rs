@@ -1,6 +1,7 @@
 //! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
 //! file.
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::noop::NoopConsensus;
@@ -38,7 +39,7 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
     path: PathBuf,
 }
 
-impl<C: ChainSpecParser> ImportOpCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);

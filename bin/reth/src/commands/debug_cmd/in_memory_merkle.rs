@@ -4,6 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -55,7 +56,7 @@ pub struct Command<C: ChainSpecParser> {
     skip_node_depth: Option<usize>,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network(
         &self,
         config: &Config,

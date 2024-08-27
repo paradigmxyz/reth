@@ -1,8 +1,8 @@
 //! Command that dumps genesis block JSON configuration to stdout
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::utils::chain_help;
-use std::sync::Arc;
 
 /// Dumps genesis block JSON configuration to stdout
 #[derive(Debug, Parser)]
@@ -20,7 +20,7 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
     chain: C::Value,
 }
 
-impl<C: ChainSpecParser> DumpGenesisCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> DumpGenesisCommand<C> {
     /// Execute the `dump-genesis` command
     pub async fn execute(self) -> eyre::Result<()> {
         println!("{}", serde_json::to_string_pretty(self.chain.genesis())?);

@@ -26,7 +26,9 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>, eyre::Error> {
 #[derive(Debug, Clone, Default)]
 pub struct OpChainSpecParser;
 
-impl ChainSpecParser<OpChainSpec> for OpChainSpecParser {
+impl ChainSpecParser for OpChainSpecParser {
+    type ChainSpec = OpChainSpec;
+
     const SUPPORTED_CHAINS: &'static [&'static str] = &[
         "dev",
         "optimism",
@@ -53,7 +55,7 @@ impl TypedValueParser for OpChainSpecParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser<OpChainSpec>>::parse(val).map_err(|err| {
+        <Self as ChainSpecParser>::parse(val).map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = Self::SUPPORTED_CHAINS.join(", ");
             clap::Error::raw(
@@ -80,7 +82,7 @@ mod tests {
     #[test]
     fn parse_known_chain_spec() {
         for &chain in OpChainSpecParser::SUPPORTED_CHAINS {
-            assert!(<OpChainSpecParser as ChainSpecParser<OpChainSpec>>::parse(chain).is_ok());
+            assert!(<OpChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
         }
     }
 }

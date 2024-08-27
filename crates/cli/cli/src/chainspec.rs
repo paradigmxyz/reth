@@ -7,7 +7,10 @@ use clap::builder::TypedValueParser;
 /// This trait extends [`clap::builder::TypedValueParser`] to provide a parser for chain
 /// specifications. Implementers of this trait must provide a list of supported chains and a
 /// function to parse a given string into a chain spec.
-pub trait ChainSpecParser<ChainSpec>: TypedValueParser<Value = Arc<ChainSpec>> + Default {
+pub trait ChainSpecParser: TypedValueParser<Value = Arc<Self::ChainSpec>> + Default {
+    /// The chain specification type.
+    type ChainSpec: std::fmt::Debug + Send + Sync;
+
     /// List of supported chains.
     const SUPPORTED_CHAINS: &'static [&'static str];
 
@@ -21,5 +24,5 @@ pub trait ChainSpecParser<ChainSpec>: TypedValueParser<Value = Arc<ChainSpec>> +
     ///
     /// This function will return an error if the input string cannot be parsed into a valid
     /// chain spec.
-    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>>;
+    fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>>;
 }

@@ -7,6 +7,7 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -52,7 +53,7 @@ pub struct Command<C: ChainSpecParser> {
     interval: u64,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network(
         &self,
         config: &Config,

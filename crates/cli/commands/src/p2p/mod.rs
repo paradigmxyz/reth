@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
@@ -72,7 +73,7 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `p2p` command
     pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
