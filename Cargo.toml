@@ -592,7 +592,7 @@ alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "05cc4e0
 revm = { git = "https://github.com/klkvr/revm", rev = "7b27584" }
 revm-primitives = { git = "https://github.com/klkvr/revm", rev = "7b27584" }
 revm-inspectors = { git = "https://github.com/klkvr/evm-inspectors", rev = "45955f7" }
-op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "f64a7ef" }
-op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "f64a7ef" }
-op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "f64a7ef" }
+op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "21aadc0" }
+op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "21aadc0" }
+op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "21aadc0" }
 alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "a8f8c3f" }

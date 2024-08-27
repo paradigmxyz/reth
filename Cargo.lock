@@ -5183,7 +5183,7 @@ checksum = "b410bbe7e14ab526a0e86877eb47c6996a2bd7746f027ba551028c925390e4e9"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.1.5"
-source = "git+https://github.com/alloy-rs/op-alloy?rev=f64a7ef#f64a7ef8b146a7c053b14e0f6655b208678f18e1"
+source = "git+https://github.com/alloy-rs/op-alloy?rev=21aadc0#21aadc00b7549646c3f3b68ad9ab09d160025935"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5197,7 +5197,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-network"
 version = "0.1.5"
-source = "git+https://github.com/alloy-rs/op-alloy?rev=f64a7ef#f64a7ef8b146a7c053b14e0f6655b208678f18e1"
+source = "git+https://github.com/alloy-rs/op-alloy?rev=21aadc0#21aadc00b7549646c3f3b68ad9ab09d160025935"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5211,7 +5211,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.1.5"
-source = "git+https://github.com/alloy-rs/op-alloy?rev=f64a7ef#f64a7ef8b146a7c053b14e0f6655b208678f18e1"
+source = "git+https://github.com/alloy-rs/op-alloy?rev=21aadc0#21aadc00b7549646c3f3b68ad9ab09d160025935"
 dependencies = [
  "alloy-network",
  "alloy-primitives 0.8.0",
@@ -5225,7 +5225,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.1.5"
-source = "git+https://github.com/alloy-rs/op-alloy?rev=f64a7ef#f64a7ef8b146a7c053b14e0f6655b208678f18e1"
+source = "git+https://github.com/alloy-rs/op-alloy?rev=21aadc0#21aadc00b7549646c3f3b68ad9ab09d160025935"
 dependencies = [
  "alloy-primitives 0.8.0",
  "alloy-rpc-types-engine",
