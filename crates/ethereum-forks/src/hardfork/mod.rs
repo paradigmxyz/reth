@@ -64,6 +64,14 @@ pub trait ConfigureHardforks: Sized {
     /// Initializes time based hardforks from [`ChainConfig`].
     fn init_time_hardforks(config: &ChainConfig)
         -> impl IntoIterator<Item = (Self, ForkCondition)>;
+
+    /// Initializes hardforks from [`ChainConfig`].
+    fn init(config: &ChainConfig) -> impl IntoIterator<Item = (Self, ForkCondition)> {
+        Self::init_block_hardforks(config)
+            .into_iter()
+            .chain(Self::init_paris(config))
+            .chain(Self::init_time_hardforks(config))
+    }
 }
 
 #[cfg(test)]

@@ -701,55 +701,39 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec
 where
-    <Self as EthChainSpec>::Hardfork: ConfigureHardforks,
+    Self: EthChainSpec<Hardfork: ConfigureHardforks>,
 {
     fn from(genesis: Genesis) -> Self {
-        let mut hardforks = Vec::with_capacity(
-            <Self as EthChainSpec>::Hardfork::super_chain_mainnet_hardforks().count(),
-        );
+        // Configure hardforks
+        let hardforks =
+            <Self as EthChainSpec>::Hardfork::init(&genesis.config).into_iter().collect();
 
-        // Block-based hardforks
-        hardforks.extend(<Self as EthChainSpec>::Hardfork::init_block_hardforks(&genesis.config));
-
-        // Paris
-        let paris_block_and_final_difficulty = || -> Option<(u64, U256)> {
-            let ttd = genesis.config.terminal_total_difficulty?;
-            let paris = <Self as EthChainSpec>::Hardfork::init_paris(&genesis.config)?;
-            hardforks.push(paris);
-
-            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-        }();
-
-        // Time-based hardforks
-        hardforks.extend(<Self as EthChainSpec>::Hardfork::init_time_hardforks(&genesis.config));
-
-        let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
-
-        // Uses super chain mainnet to find proper order, e.g. op mainnet for op stack chains
-        for (hardfork, _) in <Self as EthChainSpec>::Hardfork::super_chain_mainnet_hardforks() {
-            if let Some(pos) = hardforks.iter().position(|(e, _)| e.name() == hardfork.name()) {
-                ordered_hardforks.push(hardforks[pos].clone());
-            }
-        }
+        let ChainConfig {
+            chain_id,
+            deposit_contract_address,
+            merge_netsplit_block,
+            terminal_total_difficulty,
+            ..
+        } = &genesis.config;
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
         // genesis json.
-        let deposit_contract = genesis.config.deposit_contract_address.map(|address| {
-            DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
+        let deposit_contract = deposit_contract_address.map(|address| DepositContract {
+            address,
+            block: 0,
+            topic: MAINNET_DEPOSIT_CONTRACT.topic,
         });
 
-        let base_fee_params = <Self as EthChainSpec>::base_fee_params(&genesis.config);
-
         Self {
-            chain: genesis.config.chain_id.into(),
-            genesis,
+            chain: chain_id.into(),
             genesis_hash: None,
-            hardforks: hardforks.into_iter().collect(),
-            paris_block_and_final_difficulty,
+            hardforks,
+            paris_block_and_final_difficulty: merge_netsplit_block.zip(terminal_total_difficulty),
             deposit_contract,
-            base_fee_params,
+            base_fee_params: Self::base_fee_params(&genesis.config),
+            genesis,
             ..Default::default()
         }
     }
