@@ -32,7 +32,9 @@ where
             .get_block_and_receipts(meta.block_hash)
             .await
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(Self::Error::from_eth_err(EthApiError::UnknownBlockNumber))?;
+            .ok_or(Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                meta.block_hash.into(),
+            )))?;
 
         let block = block.unseal();
         let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();

@@ -56,7 +56,7 @@ where
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            .ok_or_else(|| EthApiError::HeaderNotFound(BlockNumberOrTag::latest().into()))?;
         let (_, block_hash) = latest.split();
         self.provider()
             .sealed_block_with_senders(BlockHashOrNumber::from(block_hash), Default::default())
