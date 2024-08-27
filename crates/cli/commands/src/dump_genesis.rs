@@ -17,7 +17,7 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::default()
     )]
-    chain: Arc<C::Value>,
+    chain: C::Value,
 }
 
 impl<C: ChainSpecParser> DumpGenesisCommand<C> {

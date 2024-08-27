@@ -50,7 +50,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = Defau
         value_parser = C::default(),
         global = true,
     )]
-    chain: Arc<ChainSpec>,
+    chain: C::Value,
 
     /// Add a new instance of a node.
     ///
