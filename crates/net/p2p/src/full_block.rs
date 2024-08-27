@@ -184,12 +184,12 @@ where
                             let (peer, maybe_header) =
                                 maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
                             if let Some(header) = maybe_header {
-                                if header.hash() != this.hash {
+                                if header.hash() == this.hash {
+                                    this.header = Some(header);
+                                } else {
                                     debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
                                     // received a different header than requested
                                     this.client.report_bad_message(peer)
-                                } else {
-                                    this.header = Some(header);
                                 }
                             }
                         }
@@ -491,16 +491,12 @@ where
             headers_falling.sort_unstable_by_key(|h| Reverse(h.number));
 
             // check the starting hash
-            if headers_falling[0].hash() != self.start_hash {
-                // received a different header than requested
-                self.client.report_bad_message(peer);
-            } else {
+            if headers_falling[0].hash() == self.start_hash {
                 let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
-                // ensure the downloaded headers are valid
+                // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
-                    return
                 }
 
                 // get the bodies request so it can be polled later
@@ -517,6 +513,9 @@ where
 
                 // set the headers response
                 self.headers = Some(headers_falling);
+            } else {
+                // received a different header than requested
+                self.client.report_bad_message(peer);
             }
         }
     }
@@ -757,6 +756,25 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 50).await;
         assert_eq!(received.len(), 50);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_invalid_header() {
+        let client = TestFullBlockClient::default();
+        let range_length: usize = 3;
+        let (header, _) = insert_headers_into_client(&client, 0..range_length);
+
+        let test_consensus = reth_consensus::test_utils::TestConsensus::default();
+        test_consensus.set_fail_validation(true);
+        let client = FullBlockClient::new(client, Arc::new(test_consensus));
+
+        let received = client.get_full_block_range(header.hash(), range_length as u64).await;
+
+        assert_eq!(received.len(), range_length);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
             assert_eq!(block.header.number, expected_number);

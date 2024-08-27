@@ -136,9 +136,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut storage = bundle_state
             .account(&address)
-            .map(|account| HashedStorage::from_bundle_state(account.status, &account.storage))
+            .map(|account| {
+                HashedStorage::from_plain_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            })
             .unwrap_or_else(|| HashedStorage::new(false));
-        storage.extend(hashed_storage);
+        storage.extend(&hashed_storage);
         self.state_provider.hashed_storage_root(address, storage)
     }
 }

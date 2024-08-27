@@ -1,39 +1,24 @@
-use alloy_genesis::Genesis;
-use clap::{builder::TypedValueParser, error::Result, Arg, Command};
-use reth_chainspec::{ChainSpec, BASE_MAINNET, BASE_SEPOLIA, DEV, OP_MAINNET, OP_SEPOLIA};
-use reth_cli::chainspec::ChainSpecParser;
-use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
+use std::{ffi::OsStr, sync::Arc};
 
-/// Clap value parser for [`ChainSpec`]s.
+use clap::{builder::TypedValueParser, error::Result, Arg, Command};
+use reth_cli::chainspec::ChainSpecParser;
+use reth_node_core::args::utils::parse_custom_chain_spec;
+use reth_optimism_chainspec::{
+    OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
+};
+
+/// Clap value parser for [`OpChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
-fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
+fn chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>, eyre::Error> {
     Ok(match s {
-        "dev" => DEV.clone(),
+        "dev" => OP_DEV.clone(),
         "optimism" => OP_MAINNET.clone(),
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         "base" => BASE_MAINNET.clone(),
         "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        _ => {
-            // try to read json from path first
-            let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
-                Ok(raw) => raw,
-                Err(io_err) => {
-                    // valid json may start with "\n", but must contain "{"
-                    if s.contains('{') {
-                        s.to_string()
-                    } else {
-                        return Err(io_err.into()) // assume invalid path
-                    }
-                }
-            };
-
-            // both serialized Genesis and ChainSpec structs supported
-            let genesis: Genesis = serde_json::from_str(&raw)?;
-
-            Arc::new(genesis.into())
-        }
+        _ => Arc::new(OpChainSpec { inner: parse_custom_chain_spec(s)? }),
     })
 }
 
@@ -41,8 +26,9 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
 #[derive(Debug, Clone, Default)]
 pub struct OpChainSpecParser;
 
-impl ChainSpecParser for OpChainSpecParser {
+impl ChainSpecParser<OpChainSpec> for OpChainSpecParser {
     const SUPPORTED_CHAINS: &'static [&'static str] = &[
+        "dev",
         "optimism",
         "optimism_sepolia",
         "optimism-sepolia",
@@ -51,13 +37,13 @@ impl ChainSpecParser for OpChainSpecParser {
         "base-sepolia",
     ];
 
-    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
+    fn parse(s: &str) -> eyre::Result<Arc<OpChainSpec>> {
         chain_value_parser(s)
     }
 }
 
 impl TypedValueParser for OpChainSpecParser {
-    type Value = Arc<ChainSpec>;
+    type Value = Arc<OpChainSpec>;
 
     fn parse_ref(
         &self,
@@ -67,7 +53,7 @@ impl TypedValueParser for OpChainSpecParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser>::parse(val).map_err(|err| {
+        <Self as ChainSpecParser<OpChainSpec>>::parse(val).map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = Self::SUPPORTED_CHAINS.join(", ");
             clap::Error::raw(
@@ -94,7 +80,7 @@ mod tests {
     #[test]
     fn parse_known_chain_spec() {
         for &chain in OpChainSpecParser::SUPPORTED_CHAINS {
-            assert!(<OpChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
+            assert!(<OpChainSpecParser as ChainSpecParser<OpChainSpec>>::parse(chain).is_ok());
         }
     }
 }
