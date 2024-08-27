@@ -1,17 +1,17 @@
 //! P2P Debugging tool
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
-use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
     args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs, NetworkArgs,
     },
     utils::get_single_header,
@@ -22,7 +22,7 @@ mod rlpx;
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
@@ -35,9 +35,9 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_value_parser
+        value_parser = C::default()
     )]
-    chain: Arc<ChainSpec>,
+    chain: C::Value,
 
     /// The number of retries per request
     #[arg(long, default_value = "5")]
@@ -75,7 +75,7 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl Command {
+impl<C: ChainSpecParser> Command<C> {
     /// Execute `p2p` command
     pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);

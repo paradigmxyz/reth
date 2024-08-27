@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
@@ -10,7 +10,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_node_core::{
     args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs,
     },
     dirs::{ChainPath, DataDirPath},
@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
-pub struct EnvironmentArgs {
+pub struct EnvironmentArgs<C: ChainSpecParser> {
     /// Parameters for datadir configuration
     #[command(flatten)]
     pub datadir: DatadirArgs,
@@ -42,16 +42,16 @@ pub struct EnvironmentArgs {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_value_parser
+        value_parser = C::default()
     )]
-    pub chain: Arc<ChainSpec>,
+    pub chain: C::Value,
 
     /// All database related arguments
     #[command(flatten)]
     pub db: DatabaseArgs,
 }
 
-impl EnvironmentArgs {
+impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
     pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {

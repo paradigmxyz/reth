@@ -1,5 +1,6 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
 use std::io::{self, Write};
@@ -15,9 +16,9 @@ mod tui;
 
 /// `reth db` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
     command: Subcommands,
@@ -60,7 +61,7 @@ macro_rules! db_ro_exec {
     };
 }
 
-impl Command {
+impl<C: ChainSpecParser> Command<C> {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain);
@@ -155,13 +156,16 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_ethereum_cli::chainspec::EthChainSpecParser;
     use reth_node_core::args::utils::SUPPORTED_CHAINS;
     use std::path::Path;
 
     #[test]
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
-        let cmd = Command::try_parse_from(["reth", "--datadir", &path, "stats"]).unwrap();
+        let cmd =
+            Command::<EthChainSpecParser>::try_parse_from(["reth", "--datadir", &path, "stats"])
+                .unwrap();
         assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
     }
 }

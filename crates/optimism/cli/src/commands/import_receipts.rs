@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_db_api::database::Database;
@@ -27,9 +28,9 @@ use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct ImportReceiptsOpCommand {
+pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -43,7 +44,7 @@ pub struct ImportReceiptsOpCommand {
     path: PathBuf,
 }
 
-impl ImportReceiptsOpCommand {
+impl<C: ChainSpecParser> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);

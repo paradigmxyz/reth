@@ -5,6 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -33,9 +34,9 @@ use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header}
 
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -53,7 +54,7 @@ pub struct Command {
     skip_node_depth: Option<usize>,
 }
 
-impl Command {
+impl<C: ChainSpecParser> Command<C> {
     async fn build_network(
         &self,
         config: &Config,

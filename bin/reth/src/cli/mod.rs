@@ -195,32 +195,32 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = Et
     Node(Box<node::NodeCommand<Ext, C>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(init_cmd::InitCommand),
+    Init(init_cmd::InitCommand<C>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand),
+    InitState(init_state::InitStateCommand<C>),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
-    Import(import::ImportCommand),
+    Import(import::ImportCommand<C>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(reth_optimism_cli::ImportOpCommand),
+    ImportOp(reth_optimism_cli::ImportOpCommand<C>),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(reth_optimism_cli::ImportReceiptsOpCommand),
+    ImportReceiptsOp(reth_optimism_cli::ImportReceiptsOpCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
-    DumpGenesis(dump_genesis::DumpGenesisCommand),
+    DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command),
+    Db(db::Command<C>),
     /// Manipulate individual stages.
     #[command(name = "stage")]
-    Stage(stage::Command),
+    Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command),
+    P2P(p2p::Command<C>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
@@ -230,13 +230,13 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = Et
     Config(config_cmd::Command),
     /// Various debug routines
     #[command(name = "debug")]
-    Debug(debug_cmd::Command),
+    Debug(debug_cmd::Command<C>),
     /// Scripts for node recovery
     #[command(name = "recover")]
-    Recover(recover::Command),
+    Recover(recover::Command<C>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
-    Prune(prune::PruneCommand),
+    Prune(prune::PruneCommand<C>),
 }
 
 #[cfg(test)]

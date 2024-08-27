@@ -5,6 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -38,9 +39,9 @@ use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header}
 
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -55,7 +56,7 @@ pub struct Command {
     pub interval: u64,
 }
 
-impl Command {
+impl<C: ChainSpecParser> Command<C> {
     fn build_pipeline<DB, Client>(
         &self,
         config: &Config,
