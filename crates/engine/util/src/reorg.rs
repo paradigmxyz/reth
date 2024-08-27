@@ -146,7 +146,7 @@ where
                 (
                     Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }),
                     Some(last_forkchoice_state),
-                ) if this.forkchoice_states_forwarded <= this.frequency &&
+                ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
                         last_forkchoice_state.head_block_hash == payload.parent_hash() =>
                 {
