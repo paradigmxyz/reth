@@ -205,8 +205,36 @@ where
             requests_root: None,
         };
 
+        // Create an EVM instance
+        let mut evm = self.evm_config.evm(db);
+
+        let ResultAndState { result, .. } = match evm.transact() {
+            Ok(res) => res,
+            Err(err) => return Err(PayloadBuilderError::EvmExecutionError(err)),
+        };
+
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
+
+        let mut receipts = Vec::new();
+
+        let mut cumulative_gas_used = 0;
+
+        // Process transaction
+        for tx in sealed_block.clone().body {
+            let tx_gas_used = tx.gas_limit();
+            cumulative_gas_used += tx_gas_used;
+
+            #[allow(clippy::needless_update)]
+            receipts.push(Receipt {
+                tx_type: tx.transaction.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().to_vec(),
+                ..Default::default()
+            });
+        }
+        drop(evm);
 
         Ok(OptimismBuiltPayload::new(
             attributes.payload_attributes.payload_id(),
@@ -215,6 +243,7 @@ where
             chain_spec,
             attributes,
             None,
+            receipts,
         ))
     }
 }
@@ -514,8 +543,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome =
-        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let execution_outcome = ExecutionOutcome::new(
+        db.take_bundle(),
+        vec![receipts.clone()].into(),
+        block_number,
+        Vec::new(),
+    );
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -602,6 +635,7 @@ where
         trie: Arc::new(trie_output),
     };
 
+    let receipts_pay: Vec<Receipt> = receipts.iter().flatten().cloned().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -609,6 +643,7 @@ where
         chain_spec,
         attributes,
         Some(executed),
+        receipts_pay,
     );
 
     // extend the payload with the blob sidecars from the executed txs

@@ -259,11 +259,13 @@ where
             let tx_gas_used = tx.gas_limit();
             cumulative_gas_used += tx_gas_used;
 
+            #[allow(clippy::needless_update)]
             receipts.push(Receipt {
                 tx_type: tx.transaction.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs: result.logs().to_vec()
+                logs: result.logs().to_vec(),
+                ..Default::default()
             });
         }
         drop(evm);
