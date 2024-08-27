@@ -726,7 +726,7 @@ impl ConfigureHardforks for ChainSpec {
             arrow_glacier_block,
             gray_glacier_block,
             ..
-        } = config;
+        } = *config;
 
         [
             (Self::Hardfork::Homestead, homestead_block),
@@ -744,21 +744,23 @@ impl ConfigureHardforks for ChainSpec {
             (Self::Hardfork::GrayGlacier, gray_glacier_block),
         ]
         .into_iter()
-        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+        .filter_map(|(hardfork, block)| block.map(|block| (hardfork, ForkCondition::Block(block))))
     }
 
     fn init_paris(config: &ChainConfig) -> Option<(Self::Hardfork, ForkCondition)> {
-        let ttd = config.terminal_total_difficulty?;
+        let ChainConfig { terminal_total_difficulty, merge_netsplit_block, .. } = *config;
+
+        let total_difficulty = terminal_total_difficulty?;
         Some((
             Self::Hardfork::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: config.merge_netsplit_block },
+            ForkCondition::TTD { total_difficulty, fork_block: merge_netsplit_block },
         ))
     }
 
     fn init_time_hardforks(
         config: &ChainConfig,
     ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)> {
-        let ChainConfig { shanghai_time, cancun_time, prague_time, .. } = config;
+        let ChainConfig { shanghai_time, cancun_time, prague_time, .. } = *config;
 
         [
             (Self::Hardfork::Shanghai, shanghai_time),
@@ -1096,6 +1098,7 @@ impl OptimismGenesisInfo {
 
 /// Verifies [`ChainSpec`] configuration against expected data in given cases.
 #[cfg(any(test, feature = "test-utils"))]
+#[allow(unreachable_pub)]
 pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
     for (block, expected_id) in cases {
         let computed_id = spec.fork_id(block);
