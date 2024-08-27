@@ -7972,6 +7972,7 @@ dependencies = [
  "alloy-chains",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-serde",
  "derive_more 1.0.0",
  "once_cell",
  "op-alloy-rpc-types",

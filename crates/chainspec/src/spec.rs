@@ -596,7 +596,7 @@ impl ChainSpec {
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         #[cfg(feature = "optimism")]
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis.config);
         #[cfg(feature = "optimism")]
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
@@ -1047,22 +1047,26 @@ impl DepositContract {
 #[cfg(feature = "optimism")]
 #[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct OptimismGenesisInfo {
-    optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
+pub struct OptimismGenesisInfo {
+    /// [`OptimismChainInfo`].
+    pub optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
     #[serde(skip)]
-    base_fee_params: BaseFeeParamsKind,
+    /// Base fee parameters.
+    pub base_fee_params: BaseFeeParamsKind,
 }
 
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
-    fn extract_from(genesis: &Genesis) -> Self {
+    /// Returns new instance, from parsing optimism fields of [`ChainConfig`].
+    pub fn extract_from(config: &ChainConfig) -> Self {
         let mut info = Self {
             optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
-                &genesis.config.extra_fields,
+                &config.extra_fields,
             )
             .unwrap_or_default(),
             ..Default::default()
         };
+
         if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info {
             if let (Some(elasticity), Some(denominator)) = (
                 optimism_base_fee_info.eip1559_elasticity,

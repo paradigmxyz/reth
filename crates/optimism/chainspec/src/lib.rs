@@ -24,8 +24,11 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
+use alloy_genesis::ChainConfig;
 use derive_more::{Constructor, Deref, Into};
-use reth_chainspec::ChainSpec;
+use op_alloy_rpc_types::genesis::OptimismGenesisInfo;
+use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
+use reth_ethereum_forks::{ConfigureHardforks, EthereumHardfork, OptimismHardfork};
 
 /// OP stack chain spec type.
 #[derive(Debug, Deref, Into, Constructor)]
@@ -34,15 +37,109 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
+impl ConfigureHardforks for OpChainSpec {
+    type Hardfork = Box<dyn Hardfork>;
+
+    fn init_block_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)> {
+        let ChainConfig {
+            homestead_block,
+            dao_fork_block,
+            eip150_block,
+            eip155_block,
+            byzantium_block,
+            constantinople_block,
+            petersburg_block,
+            istanbul_block,
+            muir_glacier_block,
+            berlin_block,
+            london_block,
+            arrow_glacier_block,
+            gray_glacier_block,
+            ..
+        } = *config;
+
+        let genesis_info = reth_chainspec::OptimismGenesisInfo::extract_from(config)
+            .optimism_chain_info
+            .genesis_info
+            .unwrap_or_default();
+
+        [
+            (EthereumHardfork::Homestead.boxed(), homestead_block),
+            (EthereumHardfork::Dao.boxed(), dao_fork_block),
+            (EthereumHardfork::Tangerine.boxed(), eip150_block),
+            (EthereumHardfork::SpuriousDragon.boxed(), eip155_block),
+            (EthereumHardfork::Byzantium.boxed(), byzantium_block),
+            (EthereumHardfork::Constantinople.boxed(), constantinople_block),
+            (EthereumHardfork::Petersburg.boxed(), petersburg_block),
+            (EthereumHardfork::Istanbul.boxed(), istanbul_block),
+            (EthereumHardfork::MuirGlacier.boxed(), muir_glacier_block),
+            (EthereumHardfork::Berlin.boxed(), berlin_block),
+            (EthereumHardfork::London.boxed(), london_block),
+            (EthereumHardfork::ArrowGlacier.boxed(), arrow_glacier_block),
+            (EthereumHardfork::GrayGlacier.boxed(), gray_glacier_block),
+            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+    }
+
+    fn init_paris(config: &ChainConfig) -> Option<(Self::Hardfork, ForkCondition)> {
+        let ChainConfig { terminal_total_difficulty, merge_netsplit_block, .. } = *config;
+
+        let total_difficulty = terminal_total_difficulty?;
+        Some((
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD { total_difficulty, fork_block: merge_netsplit_block },
+        ))
+    }
+
+    fn init_time_hardforks(
+        config: &ChainConfig,
+    ) -> impl IntoIterator<Item = (Self::Hardfork, ForkCondition)> {
+        let ChainConfig { shanghai_time, cancun_time, prague_time, .. } = *config;
+
+        let OptimismGenesisInfo {
+            regolith_time,
+            canyon_time,
+            ecotone_time,
+            fjord_time,
+            granite_time,
+            ..
+        } = reth_chainspec::OptimismGenesisInfo::extract_from(config)
+            .optimism_chain_info
+            .genesis_info
+            .unwrap_or_default();
+
+        [
+            (OptimismHardfork::Regolith.boxed(), regolith_time),
+            (EthereumHardfork::Shanghai.boxed(), shanghai_time),
+            (OptimismHardfork::Canyon.boxed(), canyon_time),
+            (EthereumHardfork::Cancun.boxed(), cancun_time),
+            (OptimismHardfork::Ecotone.boxed(), ecotone_time),
+            (OptimismHardfork::Fjord.boxed(), fjord_time),
+            (OptimismHardfork::Granite.boxed(), granite_time),
+            (EthereumHardfork::Prague.boxed(), prague_time),
+        ]
+        .into_iter()
+        .filter_map(|(hardfork, time)| time.map(|time| (hardfork, ForkCondition::Timestamp(time))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, iter};
+
     use alloy_genesis::Genesis;
-    use alloy_primitives::b256;
+    use alloy_primitives::{b256, U256};
+    use alloy_serde::OtherFields;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
     use reth_ethereum_forks::{
         EthereumHardfork, ForkCondition, ForkHash, ForkId, Head, OptimismHardfork,
         OptimismHardforks,
     };
+    use serde_json::json;
 
     use crate::*;
 

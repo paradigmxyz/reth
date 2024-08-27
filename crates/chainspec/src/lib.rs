@@ -29,6 +29,8 @@ pub use api::EthChainSpec;
 pub use info::ChainInfo;
 #[cfg(feature = "test-utils")]
 pub use spec::test_fork_ids;
+#[cfg(feature = "optimism")]
+pub use spec::OptimismGenesisInfo;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
