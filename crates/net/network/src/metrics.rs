@@ -81,29 +81,31 @@ pub struct NetworkMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct SessionManagerMetrics {
-    /// Number of errors related to incoming incorrect peer behaviour, such as invalid message code, size, encoding, etc.
+    /// Number of errors related to incoming incorrect peer behaviour, such as invalid message
+    /// code, size, encoding, etc.
     pub(crate) total_incoming_eth_handshake_peer_errors: Counter,
-    /// Number of errors related to outgoing incorrect peer behaviour, such as invalid message code, size, encoding, etc.
+    /// Number of errors related to outgoing incorrect peer behaviour, such as invalid message
+    /// code, size, encoding, etc.
     pub(crate) total_outgoing_eth_handshake_peer_errors: Counter,
-    /// Number of incoming StreamTimeout errors
+    /// Number of incoming `StreamTimeout` errors
     pub(crate) total_incoming_eth_handshake_timeouts: Counter,
-    /// Number of outgoing StreamTimeout errors
+    /// Number of outgoing `StreamTimeout` errors
     pub(crate) total_outgoing_eth_handshake_timeouts: Counter,
-    /// Number of incoming MismatchedChain errors
+    /// Number of incoming `MismatchedChain` errors
     pub(crate) total_incoming_eth_handshake_network_errors: Counter,
-    /// Number of outgoing MismatchedChain errors
+    /// Number of outgoing `MismatchedChain` errors
     pub(crate) total_outgoing_eth_handshake_network_errors: Counter,
-    /// Number of incoming MismatchedProtocolVersion errors
+    /// Number of incoming `MismatchedProtocolVersion` errors
     pub(crate) total_incoming_eth_handshake_version_errors: Counter,
-    /// Number of outgoing MismatchedProtocolVersion errors
+    /// Number of outgoing `MismatchedProtocolVersion` errors
     pub(crate) total_outgoing_eth_handshake_version_errors: Counter,
-    /// Number of incoming MismatchedGenesis errors
+    /// Number of incoming `MismatchedGenesis` errors
     pub(crate) total_incoming_eth_handshake_genesis_errors: Counter,
-    /// Number of outgoing MismatchedGenesis errors
+    /// Number of outgoing `MismatchedGenesis` errors
     pub(crate) total_outgoing_eth_handshake_genesis_errors: Counter,
-    /// Number of incoming InvalidFork errors
+    /// Number of incoming `InvalidFork` errors
     pub(crate) total_incoming_eth_handshake_forkid_errors: Counter,
-    /// Number of outgoing InvalidFork errors
+    /// Number of outgoing `InvalidFork` errors
     pub(crate) total_outgoing_eth_handshake_forkid_errors: Counter,
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
