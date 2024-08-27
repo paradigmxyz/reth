@@ -5,10 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
@@ -17,13 +14,25 @@ pub mod constants;
 
 mod base;
 mod base_sepolia;
+mod dev;
 mod op;
 mod op_sepolia;
 
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
+
+use derive_more::{Constructor, Deref, Into};
+use reth_chainspec::ChainSpec;
+
+/// OP stack chain spec type.
+#[derive(Debug, Deref, Into, Constructor)]
+pub struct OpChainSpec {
+    /// [`ChainSpec`].
+    pub inner: ChainSpec,
+}
 
 #[cfg(test)]
 mod tests {
