@@ -2,9 +2,7 @@
 
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_primitives::{
-    proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
-};
+use reth_primitives::{proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, U256};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
@@ -12,7 +10,9 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
     try_payload_v1_to_block,
 };
-use reth_testing_utils::generators::{self, random_block, random_block_range, random_header, Rng};
+use reth_testing_utils::generators::{
+    self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams, Rng,
+};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -32,7 +32,11 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
 #[test]
 fn payload_body_roundtrip() {
     let mut rng = generators::rng();
-    for block in random_block_range(&mut rng, 0..=99, B256::default(), 0..2, None, None) {
+    for block in random_block_range(
+        &mut rng,
+        0..=99,
+        BlockRangeParams { tx_count: 0..2, ..Default::default() },
+    ) {
         let unsealed = block.clone().unseal();
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
@@ -53,7 +57,16 @@ fn payload_body_roundtrip() {
 fn payload_validation() {
     let mut rng = generators::rng();
     let parent = rng.gen();
-    let block = random_block(&mut rng, 100, Some(parent), Some(3), Some(0), None, None);
+    let block = random_block(
+        &mut rng,
+        100,
+        BlockParams {
+            parent: Some(parent),
+            tx_count: Some(3),
+            ommers_count: Some(0),
+            ..Default::default()
+        },
+    );
 
     // Valid extra data
     let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
