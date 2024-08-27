@@ -246,25 +246,27 @@ where
         .map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
-    let mut parent_hash = next_block.parent_hash;
+    let mut previous_hash = next_block.parent_hash;
     let mut candidate_transactions = next_block.body;
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
-                .block_by_hash(parent_hash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(parent_hash.into()))?;
+                .block_by_hash(previous_hash)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
             if depth == 0 {
                 break 'target reorg_target
             }
 
             depth -= 1;
-            parent_hash = reorg_target.parent_hash;
+            previous_hash = reorg_target.parent_hash;
             candidate_transactions = reorg_target.body;
         }
     };
     let reorg_target_parent = provider
         .block_by_hash(reorg_target.parent_hash)?
         .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.parent_hash.into()))?;
+
+    debug!(target: "engine::stream::reorg", number = reorg_target.number, hash = %previous_hash, "Selected reorg target");
 
     // Configure state
     let state_provider = provider.state_by_block_hash(reorg_target.parent_hash)?;
