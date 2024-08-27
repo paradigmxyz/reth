@@ -8,7 +8,8 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
+    revm_primitives::Bytecode, Account, Address, Receipts, StaticFileSegment, StorageEntry, B256,
+    U256,
 };
 use reth_provider::{
     errors::provider::ProviderResult,
@@ -160,10 +161,16 @@ pub fn insert_state<'a, 'b, DB: Database>(
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            let bytecode = Bytecode::new_raw(code.clone());
-            let hash = bytecode.hash_slow();
-            contracts.insert(hash, bytecode);
-            Some(hash)
+            match Bytecode::new_raw_checked(code.clone()) {
+                Ok(bytecode) => {
+                    let hash = bytecode.hash_slow();
+                    contracts.insert(hash, bytecode);
+                    Some(hash)
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
         } else {
             None
         };
