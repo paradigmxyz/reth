@@ -1,17 +1,17 @@
 //! Additional helpers for converting errors.
 
-use std::fmt::{Display, Write};
+use std::fmt::{self, Write};
 
 use jsonrpsee_core::RpcResult;
 use reth_primitives::BlockId;
-use reth_rpc_types::{engine::PayloadError, error::EthRpcErrorCode, BlockNumberOrTag};
+use reth_rpc_types::{engine::PayloadError, BlockNumberOrTag};
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
     /// Converts the error of the [Result] to an [`RpcResult`] via the `Err` [Display] impl.
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
-        Err: Display,
+        Err: fmt::Display,
     {
         self.map_internal_err(|err| err.to_string())
     }
@@ -150,6 +150,7 @@ pub fn rpc_err(
 }
 
 /// Formats a [`BlockId`] into an error message.
+// todo: impl Display for `alloy_eips::eip1898::BlockId`
 pub fn format_block_id(error: &mut String, id: BlockId) -> Result<(), fmt::Error> {
     let arg = match id {
         BlockId::Hash(h) => {
