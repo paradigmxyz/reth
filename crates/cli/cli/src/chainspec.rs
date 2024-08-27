@@ -25,13 +25,6 @@ impl<C: ChainSpecParser> TypedValueParser for Parser<C> {
             clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
         })
     }
-
-    fn possible_values(
-        &self,
-    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
-        let values = C::SUPPORTED_CHAINS.iter().map(clap::builder::PossibleValue::new);
-        Some(Box::new(values))
-    }
 }
 
 /// Trait for parsing chain specifications.
