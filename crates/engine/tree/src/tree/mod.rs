@@ -222,7 +222,7 @@ impl TreeState {
     /// Canonical blocks below the upper bound will still be removed.
     ///
     /// NOTE: This assumes that the `finalized_num` is below or equal to the `upper_bound`
-    pub(crate) fn remove_before(
+    pub(crate) fn remove_until(
         &mut self,
         upper_bound: BlockNumber,
         finalized_num: Option<BlockNumber>,
@@ -1108,7 +1108,7 @@ where
         //
         // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
         // before that
-        self.state.tree_state.remove_before(backfill_height, Some(backfill_height));
+        self.state.tree_state.remove_until(backfill_height, Some(backfill_height));
         self.metrics.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // remove all buffered blocks below the backfill height
@@ -2131,7 +2131,7 @@ where
         let num =
             if let Some(hash) = finalized_hash { self.provider.block_number(hash)? } else { None };
 
-        self.state.tree_state.remove_before(upper_bound, num);
+        self.state.tree_state.remove_until(upper_bound, num);
         Ok(())
     }
 }
@@ -2781,7 +2781,7 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // inclusive bound, so we should remove anything up to and including 2
-        tree_state.remove_before(2, Some(2));
+        tree_state.remove_until(2, Some(2));
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -2826,7 +2826,7 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // we should still remove everything up to and including 2
-        tree_state.remove_before(2, None);
+        tree_state.remove_until(2, None);
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
@@ -2871,7 +2871,7 @@ mod tests {
         tree_state.set_canonical_head(last.block.num_hash());
 
         // we have no forks so we should still remove anything up to and including 2
-        tree_state.remove_before(2, Some(1));
+        tree_state.remove_until(2, Some(1));
 
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].block.hash()));
         assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].block.hash()));
