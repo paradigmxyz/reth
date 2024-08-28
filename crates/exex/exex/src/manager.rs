@@ -47,6 +47,7 @@ pub struct ExExHandle {
     sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
+    /// The state of the notifications channel.
     notifications_state_rx: watch::Receiver<ExExNotificationsState>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
