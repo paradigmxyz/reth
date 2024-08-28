@@ -41,7 +41,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap, HashSet},
+    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -176,6 +176,44 @@ impl TreeState {
         true
     }
 
+    /// Remove single executed block by its hash.
+    ///
+    /// ## Returns
+    ///
+    /// The removed block and the block hashes of its children.
+    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock, HashSet<B256>)> {
+        let executed = self.blocks_by_hash.remove(&hash)?;
+
+        // Remove this block from collection of children of its parent block.
+        let parent_entry = self.parent_to_child.entry(executed.block.parent_hash);
+        if let hash_map::Entry::Occupied(mut entry) = parent_entry {
+            entry.get_mut().remove(&hash);
+
+            if entry.get().is_empty() {
+                entry.remove();
+            }
+        }
+
+        // Remove point to children of this block.
+        let children = self.parent_to_child.remove(&hash).unwrap_or_default();
+
+        // Remove this block from `blocks_by_number`.
+        let block_number_entry = self.blocks_by_number.entry(executed.block.number);
+        if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
+            // We have to find the index of the block since it exists in a vec
+            if let Some(index) = entry.get().iter().position(|b| b.block.hash() == hash) {
+                entry.get_mut().swap_remove(index);
+
+                // If there are no blocks left then remove the entry for this block
+                if entry.get().is_empty() {
+                    entry.remove();
+                }
+            }
+        }
+
+        Some((executed, children))
+    }
+
     /// Remove all blocks up to __and including__ the given block number.
     ///
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
@@ -202,83 +240,32 @@ impl TreeState {
         // First, let's walk back the canonical chain and remove canonical blocks lower than the
         // upper bound
         let mut current_block = self.current_canonical_head.hash;
-        while let Entry::Occupied(block_entry) = self.blocks_by_hash.entry(current_block) {
-            if block_entry.get().block.number <= upper_bound {
-                let block = block_entry.remove();
-                let block_hash = block.block.hash();
-                let block_number = block.block.number;
-
-                if let Some(parent_children) =
-                    self.parent_to_child.get_mut(&block.block.parent_hash)
-                {
-                    parent_children.remove(&block_hash);
-                    if parent_children.is_empty() {
-                        self.parent_to_child.remove(&block.block.parent_hash);
-                    }
-                }
-
-                self.parent_to_child.remove(&block_hash);
-
-                // now remove from blocks_by_number
-                let curr_by_number = self.blocks_by_number.get_mut(&block_number);
-                if let Some(by_number_vec) = curr_by_number {
-                    // we have to find the index of the block since it exists in a vec
-                    if let Some(index) =
-                        by_number_vec.iter().position(|block| block.block.hash() == block_hash)
-                    {
-                        by_number_vec.swap_remove(index);
-                    }
-
-                    // if there are no blocks left then remove the entry for this block
-                    if by_number_vec.is_empty() {
-                        self.blocks_by_number.remove(&block_number);
-                    }
-                }
-
-                current_block = block.block.parent_hash;
-            } else {
-                current_block = block_entry.get().block.parent_hash;
+        while let Some(executed) = self.blocks_by_hash.get(&current_block) {
+            current_block = executed.block.parent_hash;
+            if executed.block.number <= upper_bound {
+                self.remove_by_hash(executed.block.hash());
             }
         }
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
-        if let Some(num) = finalized_num {
+        if let Some(finalized) = finalized_num {
             // We remove disconnected sidechains in three steps:
             // * first, remove everything with a block number __below__ the finalized block.
             // * next, we populate a vec with parents __at__ the finalized block.
             // * finally, we iterate through the vec, removing children until the vec is empty
             // (BFS).
-            let mut numbers_to_remove = Vec::new();
 
             // We _exclude_ the finalized block because we will be dealing with the blocks __at__
             // the finalized block later.
-            for (&number, _) in
-                self.blocks_by_number.range((Bound::Unbounded, Bound::Excluded(num)))
-            {
-                numbers_to_remove.push(number);
-            }
-
             // TODO: remove trie updates whose root are below the finalized block
-            // Now that we have the numbers, let's remove **all** blocks before the finalized block
-            for number in numbers_to_remove {
-                if let Some(blocks) = self.blocks_by_number.remove(&number) {
-                    for block in blocks {
-                        let block_hash = block.block.hash();
-                        self.blocks_by_hash.remove(&block_hash);
-
-                        if let Some(parent_children) =
-                            self.parent_to_child.get_mut(&block.block.parent_hash)
-                        {
-                            parent_children.remove(&block_hash);
-                            if parent_children.is_empty() {
-                                self.parent_to_child.remove(&block.block.parent_hash);
-                            }
-                        }
-
-                        self.parent_to_child.remove(&block_hash);
-                    }
-                }
+            let blocks_to_remove = self
+                .blocks_by_number
+                .range((Bound::Unbounded, Bound::Excluded(finalized)))
+                .flat_map(|(_, blocks)| blocks.into_iter().map(|b| b.block.hash()))
+                .collect::<Vec<_>>();
+            for hash in blocks_to_remove {
+                self.remove_by_hash(hash);
             }
 
             // The only blocks that exist at `finalized_num` now, are blocks in sidechains that
@@ -287,59 +274,18 @@ impl TreeState {
             // We first put their children into this vec.
             // Then, we will iterate over them, removing them, adding their children, etc etc,
             // until the vec is empty.
-            let mut parents_to_remove = self.blocks_by_number.remove(&num).unwrap_or_default();
-            while !parents_to_remove.is_empty() {
-                let mut next_children = Vec::new();
-                for block in &parents_to_remove {
-                    // we need to remove from:
-                    // * blocks_by_hash
-                    // * parent_to_child
-                    // * blocks_by_number
-                    let hash = block.block.hash();
-                    let number = block.block.number;
-                    let parent_hash = block.block.parent_hash;
-
-                    // start with blocks_by_hash, only useful for the first iteration
-                    self.blocks_by_hash.remove(&hash);
-
-                    // now remove from blocks_by_number, note that this will do nothing on the
-                    // first iteration
-                    let curr_by_number = self.blocks_by_number.get_mut(&number);
-                    if let Some(by_number_vec) = curr_by_number {
-                        // we have to find the index of the block since it exists in a vec
-                        if let Some(index) =
-                            by_number_vec.iter().position(|block| block.block.hash() == hash)
-                        {
-                            by_number_vec.swap_remove(index);
-                        }
-
-                        // if there are no blocks left then remove the entry for this block
-                        if by_number_vec.is_empty() {
-                            self.blocks_by_number.remove(&number);
-                        }
-                    }
-
-                    // then, remove references to this block from parent_to_child
-                    if let Some(parent_children) = self.parent_to_child.get_mut(&parent_hash) {
-                        parent_children.remove(&hash);
-                        if parent_children.is_empty() {
-                            self.parent_to_child.remove(&parent_hash);
-                        }
-                    }
-
-                    // now add to `next_children`, removing children before iterating
-                    if let Some(children) = self.parent_to_child.get(&hash) {
-                        for child in children {
-                            if let Some(child_block) = self.blocks_by_hash.remove(child) {
-                                next_children.push(child_block);
-                            }
-                        }
+            let mut blocks_to_remove = self
+                .blocks_by_number
+                .remove(&finalized)
+                .map(|blocks| blocks.into_iter().map(|e| e.block.hash()).collect::<Vec<_>>())
+                .unwrap_or_default();
+            while !blocks_to_remove.is_empty() {
+                let to_remove = std::mem::take(&mut blocks_to_remove);
+                for block in to_remove {
+                    if let Some((_, children)) = self.remove_by_hash(block) {
+                        blocks_to_remove.extend(children);
                     }
                 }
-
-                // swap the two and shrink to fit
-                std::mem::swap(&mut next_children, &mut parents_to_remove);
-                parents_to_remove.shrink_to_fit();
             }
         }
     }
