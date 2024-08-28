@@ -1,16 +1,17 @@
-use crate::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
-use alloy_chains::Chain;
-use alloy_primitives::U256;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::String, vec};
 use core::{
     any::Any,
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
+
+use alloy_chains::Chain;
+use alloy_primitives::U256;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, format, string::String, vec};
+use crate::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 hardfork!(
     /// The name of an optimism hardfork.

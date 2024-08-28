@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
-    Bundle, RichBlock, StateContext, TransactionRequest,
+    Block, Bundle, StateContext, TransactionRequest,
 };
 use std::collections::HashMap;
 
@@ -37,7 +37,7 @@ pub trait DebugApi {
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
-    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<Block>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.

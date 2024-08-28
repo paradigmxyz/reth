@@ -640,9 +640,8 @@ mod tests {
             StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
-        use reth_testing_utils::{
-            generators,
-            generators::{random_block_range, random_signed_tx},
+        use reth_testing_utils::generators::{
+            self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
             collections::{HashMap, VecDeque},
@@ -719,7 +718,15 @@ mod tests {
                 let mut rng = generators::rng();
 
                 // Static files do not support gaps in headers, so we need to generate 0 to end
-                let blocks = random_block_range(&mut rng, 0..=end, GENESIS_HASH, 0..2, None, None);
+                let blocks = random_block_range(
+                    &mut rng,
+                    0..=end,
+                    BlockRangeParams {
+                        parent: Some(GENESIS_HASH),
+                        tx_count: 0..2,
+                        ..Default::default()
+                    },
+                );
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data

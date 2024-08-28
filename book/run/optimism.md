@@ -26,7 +26,7 @@ For this example, we'll start a `Base Mainnet` node.
 To run Reth on Optimism, first install `op-reth` via the `Makefile` in the workspace root:
 
 ```sh
-git clone git@github.com:paradigmxyz/reth.git && \
+git clone https://github.com/paradigmxyz/reth.git && \
     cd reth && \
     make install-op
 ```
@@ -48,7 +48,7 @@ have access to the L1 archive node on the same machine as your L2 node.
 
 To build the `op-node` with the `rethdb` build tag enabled:
 ```sh
-git clone git@github.com:ethereum-optimism/optimism.git && \
+git clone https://github.com/ethereum-optimism/optimism.git && \
     (cd optimism/op-service/rethdb-reader && cargo build --release) && \ 
     cd optimism/op-node && \
     go build -v -tags rethdb -o ./bin/op-node ./cmd/main.go && \
