@@ -123,7 +123,7 @@ impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser<ChainSpec = ChainSpec>> Cl
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::parse()
+    /// Cli::<MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
