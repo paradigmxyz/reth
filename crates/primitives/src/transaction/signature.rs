@@ -21,8 +21,9 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-/// 
-/// This type is unaware of the chain id, and thus shouldn't be used when encoding or decoding legacy transactions. Use `SignatureWithParity` instead.
+///
+/// This type is unaware of the chain id, and thus shouldn't be used when encoding or decoding
+/// legacy transactions. Use `SignatureWithParity` instead.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
