@@ -176,33 +176,60 @@ impl TreeState {
         true
     }
 
-    /// Remove all blocks up to the given block number.
-    pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>) {
-        let mut numbers_to_remove = Vec::new();
-        for (&number, _) in self.blocks_by_number.range((Bound::Unbounded, upper_bound)) {
-            numbers_to_remove.push(number);
-        }
+    /// Remove all blocks up to the given block number, considering finalized hash.
+pub(crate) fn remove_before(&mut self, upper_bound: Bound<BlockNumber>, finalized_hash: Option<B256>) {
+    let mut numbers_to_remove = Vec::new();
+    
+    // Collect block numbers to remove based on the upper_bound
+    for (&number, _) in self.blocks_by_number.range((Bound::Unbounded, upper_bound)) {
+        numbers_to_remove.push(number);
+    }
 
-        for number in numbers_to_remove {
-            if let Some(blocks) = self.blocks_by_number.remove(&number) {
-                for block in blocks {
-                    let block_hash = block.block.hash();
+    for number in numbers_to_remove {
+        if let Some(blocks) = self.blocks_by_number.remove(&number) {
+            for block in blocks {
+                let block_hash = block.block.hash();
+
+                // Check if the block is part of the canonical chain
+                if self.is_canonical_chain_block(&block) {
+                    // Remove the block from both maps
                     self.blocks_by_hash.remove(&block_hash);
-
-                    if let Some(parent_children) =
-                        self.parent_to_child.get_mut(&block.block.parent_hash)
-                    {
-                        parent_children.remove(&block_hash);
-                        if parent_children.is_empty() {
-                            self.parent_to_child.remove(&block.block.parent_hash);
+                    self.remove_from_parent_children(&block);
+                } else if let Some(finalized_hash) = &finalized_hash {
+                    // Check if the block is part of a sidechain
+                    if block.block.hash() < *finalized_hash {
+                        // Remove the block if its number is within the upper bound
+                        if number <= upper_bound {
+                            self.blocks_by_hash.remove(&block_hash);
+                            self.remove_from_parent_children(&block);
                         }
                     }
-
-                    self.parent_to_child.remove(&block_hash);
                 }
             }
         }
     }
+}
+
+/// Helper function to check if a block is part of the canonical chain
+fn is_canonical_chain_block(&self, block: &BlockType) -> bool {
+    // Implement logic to determine if the block is part of the canonical chain
+    // This might involve checking against a list of canonical hashes or similar
+}
+
+/// Helper function to remove a block from its parent's children
+fn remove_from_parent_children(&mut self, block: &BlockType) {
+    let block_hash = block.block.hash();
+    
+    if let Some(parent_children) = self.parent_to_child.get_mut(&block.block.parent_hash) {
+        parent_children.remove(&block_hash);
+        if parent_children.is_empty() {
+            self.parent_to_child.remove(&block.block.parent_hash);
+        }
+    }
+    
+    // Also remove the block from its own children map
+    self.parent_to_child.remove(&block_hash);
+}
 
     /// Updates the canonical head to the given block.
     fn set_canonical_head(&mut self, new_head: BlockNumHash) {
