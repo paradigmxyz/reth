@@ -131,7 +131,7 @@ where
 /// type via [`EngineRequestHandler::on_event`]. This type is responsible for processing the
 /// incoming requests and advancing the chain and emit events when it is polled.
 pub trait EngineRequestHandler: Send + Sync {
-    /// Even type this handler can emit
+    /// Event type this handler can emit
     type Event: Send;
     /// The request type this handler can process.
     type Request;
@@ -210,7 +210,7 @@ where
     }
 }
 
-/// The type for specify which is kind of engine api
+/// The type for specifying the kind of engine api
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineApiKind {
     /// The chain contains Ethereum configuration.
@@ -231,6 +231,12 @@ pub enum EngineApiRequest<T: EngineTypes> {
 impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
     fn from(msg: BeaconEngineMessage<T>) -> Self {
         Self::Beacon(msg)
+    }
+}
+
+impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T>> {
+    fn from(req: EngineApiRequest<T>) -> Self {
+        Self::Request(req)
     }
 }
 

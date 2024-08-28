@@ -12,7 +12,7 @@ where
     Provider: HeaderProvider,
 {
     #[inline]
-    fn provider(&self) -> impl reth_provider::HeaderProvider {
+    fn provider(&self) -> impl HeaderProvider {
         self.inner.provider()
     }
 }

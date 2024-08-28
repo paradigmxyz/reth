@@ -4,8 +4,11 @@
 use std::time::{Duration, Instant};
 
 use futures::Future;
-use reth_chainspec::EthereumHardforks;
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm::{
+    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    ConfigureEvm, ConfigureEvmEnv,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
@@ -25,16 +28,12 @@ use reth_provider::{
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
-use reth_rpc_eth_types::{
-    pending_block::pre_block_blockhashes_update, EthApiError, PendingBlock, PendingBlockEnv,
-    PendingBlockEnvOrigin,
-};
-use reth_rpc_types::BlockHashOrNumber;
+use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
 use tracing::debug;
-
+use reth_rpc_types::BlockHashOrNumber;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
 use super::SpawnBlocking;
@@ -48,7 +47,10 @@ pub trait LoadPendingBlock: EthApiTypes {
     /// Data access in default (L1) trait method implementations.
     fn provider(
         &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory;
+    ) -> impl BlockReaderIdExt
+           + EvmEnvProvider
+           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
     ///
@@ -326,8 +328,6 @@ pub trait LoadPendingBlock: EthApiTypes {
                 chain_spec.as_ref(),
                 &cfg,
                 &block_env,
-                block_number,
-                block_env.timestamp.to::<u64>(),
                 origin.header().parent_beacon_block_root,
             )
             .map_err(|err| EthApiError::Internal(err.into()))?;
@@ -335,13 +335,15 @@ pub trait LoadPendingBlock: EthApiTypes {
         } else {
             None
         };
-        pre_block_blockhashes_update(
+        pre_block_blockhashes_contract_call(
             &mut db,
+            self.evm_config(),
             chain_spec.as_ref(),
+            &cfg,
             &block_env,
-            block_number,
-            parent_hash,
-        )?;
+            origin.header().hash(),
+        )
+        .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut receipts = Vec::new();
 

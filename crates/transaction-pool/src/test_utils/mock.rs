@@ -558,9 +558,19 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()
@@ -718,7 +728,7 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the encoded length of the transaction.
     fn encoded_length(&self) -> usize {
-        0
+        self.size()
     }
 
     /// Returns the chain ID associated with the transaction.

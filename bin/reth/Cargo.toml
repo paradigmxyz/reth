@@ -72,6 +72,7 @@ reth-engine-util.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-optimism-cli = { workspace = true, optional = true }
+reth-optimism-rpc.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -83,7 +84,6 @@ tracing.workspace = true
 fdlimit.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics

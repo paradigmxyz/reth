@@ -19,7 +19,10 @@ use reth_primitives::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StageCheckpointReader, StateProofProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
+use reth_trie::{
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -194,6 +197,8 @@ impl HeaderProvider for MockEthProvider {
 }
 
 impl ChainSpecProvider for MockEthProvider {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()
     }
@@ -564,8 +569,16 @@ impl StageCheckpointReader for MockEthProvider {
 
 impl StateRootProvider for MockEthProvider {
     fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
-        let state_root = self.state_roots.lock().pop().unwrap_or_default();
-        Ok(state_root)
+        Ok(self.state_roots.lock().pop().unwrap_or_default())
+    }
+
+    fn hashed_state_root_from_nodes(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<B256> {
+        Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
     fn hashed_state_root_with_updates(
@@ -582,6 +595,16 @@ impl StateRootProvider for MockEthProvider {
         _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
+    }
+
+    fn hashed_state_root_from_nodes_with_updates(
+        &self,
+        _nodes: TrieUpdates,
+        _hashed_state: HashedPostState,
+        _prefix_sets: TriePrefixSetsMut,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let state_root = self.state_roots.lock().pop().unwrap_or_default();
+        Ok((state_root, Default::default()))
     }
 }
 
@@ -611,7 +634,7 @@ impl StateProvider for MockEthProvider {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         let lock = self.accounts.lock();
-        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {

@@ -18,8 +18,9 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
@@ -200,6 +201,12 @@ impl Signature {
     #[inline]
     pub const fn size(&self) -> usize {
         core::mem::size_of::<Self>()
+    }
+}
+
+impl From<alloy_primitives::Signature> for Signature {
+    fn from(value: alloy_primitives::Signature) -> Self {
+        Self { r: value.r(), s: value.s(), odd_y_parity: value.v().y_parity() }
     }
 }
 

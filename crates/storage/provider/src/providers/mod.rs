@@ -12,8 +12,8 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::ChainInfoTracker;
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
+use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
 use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -68,16 +68,16 @@ pub use blockchain_provider::BlockchainProvider2;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[allow(missing_debug_implementations)]
-pub struct BlockchainProvider<DB> {
+pub struct BlockchainProvider<DB, Spec = ChainSpec> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    database: ProviderFactory<DB, Spec>,
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
 }
 
-impl<DB> Clone for BlockchainProvider<DB> {
+impl<DB, Spec> Clone for BlockchainProvider<DB, Spec> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
@@ -613,11 +613,14 @@ where
     }
 }
 
-impl<DB> ChainSpecProvider for BlockchainProvider<DB>
+impl<DB, ChainSpec> ChainSpecProvider for BlockchainProvider<DB, ChainSpec>
 where
     DB: Send + Sync,
+    ChainSpec: EthChainSpec,
 {
-    fn chain_spec(&self) -> Arc<ChainSpec> {
+    type ChainSpec = ChainSpec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.database.chain_spec()
     }
 }
@@ -937,6 +940,21 @@ where
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.tree.subscribe_to_canonical_state()
+    }
+}
+
+impl<DB> ForkChoiceSubscriptions for BlockchainProvider<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.chain_info.subscribe_safe_block();
+        ForkChoiceNotifications(receiver)
+    }
+
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
+        let receiver = self.chain_info.subscribe_finalized_block();
+        ForkChoiceNotifications(receiver)
     }
 }
 

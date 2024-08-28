@@ -27,6 +27,7 @@ reth-primitives.workspace = true
 
 ## optimisim
 reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
 
 reth-chainspec.workspace = true
 reth-stages-types.workspace = true
@@ -38,14 +39,11 @@ reth-evm-optimism.workspace = true
 reth-cli.workspace = true
 
 # eth
-alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 
 # misc
-shellexpand.workspace = true
-serde_json.workspace = true
 futures-util.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 

@@ -15,7 +15,7 @@ use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_errors::RethResult;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
@@ -273,22 +273,16 @@ impl Command {
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
                 let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
-                let BlockExecutionOutput { state, receipts, requests, .. } =
+                let block_execution_output =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
-                let execution_outcome = ExecutionOutcome::new(
-                    state,
-                    receipts.into(),
-                    block.number,
-                    vec![requests.into()],
-                );
-
+                let execution_outcome =
+                    ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
                 let hashed_post_state = execution_outcome.hash_state_slow();
                 let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
                     provider_factory.provider()?.tx_ref(),
                     hashed_post_state.clone(),
-                    Default::default(),
                 )?;
 
                 if state_root != block_with_senders.state_root {
