@@ -7451,6 +7451,7 @@ name = "reth-exex-types"
 version = "1.0.5"
 dependencies = [
  "alloy-primitives",
+ "reth-primitives",
  "reth-provider",
  "serde",
 ]

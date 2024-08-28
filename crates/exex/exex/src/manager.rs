@@ -47,7 +47,7 @@ pub struct ExExHandle {
     sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
-    handle_rx: watch::Receiver<ExExHandleState>,
+    notifications_state_rx: watch::Receiver<ExExNotificationsState>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
 
@@ -65,9 +65,11 @@ impl ExExHandle {
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, ExExNotificationsSubscriber) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (handle_tx, handle_rx) = watch::channel(ExExHandleState::Inactive);
+        let (notifications_state_tx, notifications_state_rx) =
+            watch::channel(ExExNotificationsState::Inactive);
 
-        let notifications = ExExNotificationsSubscriber::new(notification_rx, handle_tx);
+        let notifications =
+            ExExNotificationsSubscriber::new(notification_rx, notifications_state_tx);
 
         (
             Self {
@@ -75,7 +77,7 @@ impl ExExHandle {
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(notification_tx),
                 receiver: event_rx,
-                handle_rx,
+                notifications_state_rx,
                 next_notification_id: 0,
                 finished_height: None,
             },
@@ -93,7 +95,7 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
     ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
-        if !self.handle_rx.borrow().is_active() {
+        if !self.notifications_state_rx.borrow().is_active() {
             return Poll::Ready(Ok(()))
         }
 
@@ -150,50 +152,57 @@ impl ExExHandle {
     }
 }
 
+/// A subscriber for [`ExExNotifications`].
 #[derive(Debug)]
 pub struct ExExNotificationsSubscriber {
     notifications: ExExNotifications,
-    handle_tx: watch::Sender<ExExHandleState>,
+    state_tx: watch::Sender<ExExNotificationsState>,
 }
 
 impl ExExNotificationsSubscriber {
-    pub(crate) fn new(
+    /// Creates a new [`ExExNotificationsSubscriber`].
+    pub fn new(
         receiver: Receiver<ExExNotification>,
-        handle_tx: watch::Sender<ExExHandleState>,
+        state_tx: watch::Sender<ExExNotificationsState>,
     ) -> Self {
-        Self {
-            notifications: ExExNotifications { receiver, handle_tx: handle_tx.clone() },
-            handle_tx,
-        }
+        Self { notifications: ExExNotifications { receiver, state_tx: state_tx.clone() }, state_tx }
     }
 
+    /// Subscribe to notifications with the given head.
     pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
-        self.handle_tx.send(ExExHandleState::Active(Some(head))).unwrap();
+        self.state_tx.send(ExExNotificationsState::Active(Some(head))).unwrap();
         &mut self.notifications
     }
 
+    /// Subscribe to notifications.
     pub fn subscribe(&mut self) -> &mut ExExNotifications {
-        self.handle_tx.send(ExExHandleState::Active(None)).unwrap();
+        self.state_tx.send(ExExNotificationsState::Active(None)).unwrap();
         &mut self.notifications
     }
 }
 
+#[allow(clippy::doc_markdown)]
+/// A state of the ExEx notifications subscription.
 #[derive(Debug)]
-pub enum ExExHandleState {
+pub enum ExExNotificationsState {
+    /// The subscription is active and will receive notifications according to the given head, if
+    /// provided.
     Active(Option<ExExHead>),
+    /// The subscription is inactive.
     Inactive,
 }
 
-impl ExExHandleState {
+impl ExExNotificationsState {
     pub(crate) const fn is_active(&self) -> bool {
         matches!(self, Self::Active(_))
     }
 }
 
+/// An active subscription to [`ExExNotification`]s.
 #[derive(Debug)]
 pub struct ExExNotifications {
     receiver: Receiver<ExExNotification>,
-    handle_tx: watch::Sender<ExExHandleState>,
+    state_tx: watch::Sender<ExExNotificationsState>,
 }
 
 impl Deref for ExExNotifications {
@@ -212,7 +221,7 @@ impl DerefMut for ExExNotifications {
 
 impl Drop for ExExNotifications {
     fn drop(&mut self) {
-        let _ = self.handle_tx.send(ExExHandleState::Inactive);
+        let _ = self.state_tx.send(ExExNotificationsState::Inactive);
     }
 }
 
