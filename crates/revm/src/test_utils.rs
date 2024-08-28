@@ -3,7 +3,8 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, OverlayStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -67,6 +68,16 @@ impl BlockHashReader for StateProviderTest {
             .iter()
             .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
             .collect())
+    }
+}
+
+impl OverlayStateProvider for StateProviderTest {
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
+
+    fn overlay_storage(&self, _address: Address) -> ProviderResult<HashedStorage> {
+        Ok(HashedStorage::default())
     }
 }
 

@@ -4,8 +4,8 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateRootProvider,
+    AccountReader, BlockHashReader, OverlayStateProvider, StateProofProvider, StateProvider,
+    StateProviderBox, StateRootProvider,
 };
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -98,6 +98,16 @@ impl AccountReader for MemoryOverlayStateProvider {
         }
 
         self.historical.basic_account(address)
+    }
+}
+
+impl OverlayStateProvider for MemoryOverlayStateProvider {
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        self.historical.overlay_state()
+    }
+
+    fn overlay_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
+        self.historical.overlay_storage(address)
     }
 }
 

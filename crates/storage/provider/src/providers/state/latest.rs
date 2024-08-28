@@ -13,7 +13,7 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment, StorageKey, StorageValue,
     B256,
 };
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{OverlayStateProvider, StateProofProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
@@ -77,6 +77,16 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
             },
             |_| true,
         )
+    }
+}
+
+impl<'b, TX: DbTx> OverlayStateProvider for LatestStateProviderRef<'b, TX> {
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
+
+    fn overlay_storage(&self, _address: Address) -> ProviderResult<HashedStorage> {
+        Ok(HashedStorage::default())
     }
 }
 

@@ -17,6 +17,19 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 #[allow(missing_debug_implementations)]
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
+impl<'a> reth_storage_api::OverlayStateProvider for StateProviderTraitObjWrapper<'a> {
+    fn overlay_state(&self) -> reth_errors::ProviderResult<reth_trie::HashedPostState> {
+        self.0.overlay_state()
+    }
+
+    fn overlay_storage(
+        &self,
+        address: Address,
+    ) -> reth_errors::ProviderResult<reth_trie::HashedStorage> {
+        self.0.overlay_storage(address)
+    }
+}
+
 impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_state_root(
         &self,

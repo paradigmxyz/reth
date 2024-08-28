@@ -2,7 +2,7 @@ use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{OverlayStateProvider, StateProofProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -63,6 +63,18 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStat
         } else {
             self.state_provider.basic_account(address)
         }
+    }
+}
+
+impl<SP: StateProvider, EDP: ExecutionDataProvider> OverlayStateProvider
+    for BundleStateProvider<SP, EDP>
+{
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        self.state_provider.overlay_state()
+    }
+
+    fn overlay_storage(&self, address: Address) -> ProviderResult<HashedStorage> {
+        self.state_provider.overlay_storage(address)
     }
 }
 

@@ -20,10 +20,11 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{OverlayStateProvider, StateProofProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
@@ -317,6 +318,16 @@ impl ChangeSetReader for NoopProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+}
+
+impl OverlayStateProvider for NoopProvider {
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
+
+    fn overlay_storage(&self, _address: Address) -> ProviderResult<HashedStorage> {
+        Ok(HashedStorage::default())
     }
 }
 

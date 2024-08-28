@@ -17,7 +17,7 @@ use reth_primitives::{
     U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StageCheckpointReader, StateProofProvider};
+use reth_storage_api::{OverlayStateProvider, StageCheckpointReader, StateProofProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -564,6 +564,16 @@ impl StageCheckpointReader for MockEthProvider {
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         Ok(vec![])
+    }
+}
+
+impl OverlayStateProvider for MockEthProvider {
+    fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
+    }
+
+    fn overlay_storage(&self, _address: Address) -> ProviderResult<HashedStorage> {
+        Ok(HashedStorage::default())
     }
 }
 

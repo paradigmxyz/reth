@@ -7,6 +7,17 @@ use reth_trie::{
 use revm::db::BundleState;
 use std::collections::HashMap;
 
+/// A type that can retrieve overlay state necessary for state root computation.
+/// This is necessary to be able to iterate over sorted state at historical blocks.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait OverlayStateProvider: Send + Sync {
+    /// TODO:
+    fn overlay_state(&self) -> ProviderResult<HashedPostState>;
+
+    /// TODO:
+    fn overlay_storage(&self, address: Address) -> ProviderResult<HashedStorage>;
+}
+
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateRootProvider: Send + Sync {

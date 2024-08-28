@@ -813,7 +813,8 @@ mod tests {
         Account, BlockNumber, Bytecode, Bytes, Receipt, Requests, StorageKey, StorageValue,
     };
     use reth_storage_api::{
-        AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+        AccountReader, BlockHashReader, OverlayStateProvider, StateProofProvider, StateProvider,
+        StateRootProvider,
     };
     use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
 
@@ -939,6 +940,16 @@ mod tests {
             _target: HashedPostState,
         ) -> ProviderResult<HashMap<B256, Bytes>> {
             Ok(HashMap::default())
+        }
+    }
+
+    impl OverlayStateProvider for MockStateProvider {
+        fn overlay_state(&self) -> ProviderResult<HashedPostState> {
+            Ok(HashedPostState::default())
+        }
+
+        fn overlay_storage(&self, _address: Address) -> ProviderResult<HashedStorage> {
+            Ok(HashedStorage::default())
         }
     }
 

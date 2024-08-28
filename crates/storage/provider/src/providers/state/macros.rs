@@ -5,7 +5,7 @@
 ///
 /// Used to implement provider traits.
 macro_rules! delegate_impls_to_as_ref {
-    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
+    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self $(, $arg:ident: $argty:ty)* $(,)?) -> $ret:path;)* })* ) => {
 
         $(
           impl<'a, $($($generics)*)?> $trait for $target {
@@ -40,6 +40,10 @@ macro_rules! delegate_provider_impls {
             StateProvider $(where [$($generics)*])? {
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::StorageValue>>;
                 fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
+            }
+            OverlayStateProvider $(where [$($generics)*])? {
+                fn overlay_state(&self) -> reth_storage_errors::provider::ProviderResult<reth_trie::HashedPostState>;
+                fn overlay_storage(&self, address: reth_primitives::Address) -> reth_storage_errors::provider::ProviderResult<reth_trie::HashedStorage>;
             }
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
