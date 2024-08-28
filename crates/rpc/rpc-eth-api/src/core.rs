@@ -28,16 +28,22 @@ use crate::{
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
-    EthApiServer<RpcTransaction<Self::NetworkTypes>, RpcBlock<Self::NetworkTypes>>
-    + FullEthApi
+    EthApiServer<
+        RpcTransaction<Self::NetworkTypes>,
+        RpcBlock<Self::NetworkTypes>,
+        <Self::NetworkTypes as alloy_network::Network>::ReceiptResponse,
+    > + FullEthApi
     + UpdateRawTxForwarder
     + Clone
 {
 }
 
 impl<T> FullEthApiServer for T where
-    T: EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>>
-        + FullEthApi
+    T: EthApiServer<
+            RpcTransaction<T::NetworkTypes>,
+            RpcBlock<T::NetworkTypes>,
+            <T::NetworkTypes as alloy_network::Network>::ReceiptResponse,
+        > + FullEthApi
         + UpdateRawTxForwarder
         + Clone
 {
@@ -46,7 +52,7 @@ impl<T> FullEthApiServer for T where
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: RpcObject, B: RpcObject> {
+pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -166,7 +172,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]
@@ -356,7 +362,12 @@ pub trait EthApi<T: RpcObject, B: RpcObject> {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer<RpcTransaction<T::NetworkTypes>, RpcBlock<T::NetworkTypes>> for T
+impl<T>
+    EthApiServer<
+        RpcTransaction<T::NetworkTypes>,
+        RpcBlock<T::NetworkTypes>,
+        <T::NetworkTypes as alloy_network::Network>::ReceiptResponse,
+    > for T
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
@@ -449,10 +460,7 @@ where
     }
 
     /// Handler for: `eth_getBlockReceipts`
-    async fn block_receipts(
-        &self,
-        block_id: BlockId,
-    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>> {
+    async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<<Self::EthApiTypes>::Receipt>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthBlocks::block_receipts(self, block_id).await?)
     }
@@ -528,7 +536,6 @@ where
         )
         .await?)
     }
-
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
     async fn transaction_by_block_number_and_index(
         &self,

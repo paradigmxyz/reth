@@ -1968,6 +1968,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "crates"
+version = "1.0.5"
+
+[[package]]
 name = "crc"
 version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
