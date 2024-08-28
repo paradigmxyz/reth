@@ -8,7 +8,6 @@ use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
     HashedStorage,
 };
-use revm::db::BundleState;
 use std::collections::HashMap;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -69,20 +68,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStat
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        let mut state = self.block_execution_data_provider.execution_outcome().state().clone();
-        state.extend(bundle_state.clone());
-        self.state_provider.state_root(&state)
-    }
-
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.hashed_state_root(state)
+        self.state_provider.state_root(state)
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         _nodes: TrieUpdates,
         _hashed_state: HashedPostState,
@@ -93,24 +86,15 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 
     fn state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut state = self.block_execution_data_provider.execution_outcome().state().clone();
-        state.extend(bundle_state.clone());
-        self.state_provider.state_root_with_updates(&state)
-    }
-
-    fn hashed_state_root_with_updates(
-        &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.hashed_state_root_with_updates(state)
+        self.state_provider.state_root_with_updates(state)
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -121,18 +105,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         let mut state_prefix_sets = state.construct_prefix_sets();
         state.extend(hashed_state);
         state_prefix_sets.extend(prefix_sets);
-        self.state_provider.hashed_state_root_from_nodes_with_updates(
-            nodes,
-            state,
-            state_prefix_sets,
-        )
+        self.state_provider.state_root_from_nodes_with_updates(nodes, state, state_prefix_sets)
     }
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn hashed_storage_root(
+    fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,
@@ -148,7 +128,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
             })
             .unwrap_or_else(|| HashedStorage::new(false));
         storage.extend(&hashed_storage);
-        self.state_provider.hashed_storage_root(address, storage)
+        self.state_provider.storage_root(address, storage)
     }
 }
 

@@ -568,11 +568,11 @@ impl StageCheckpointReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         _nodes: TrieUpdates,
         _hashed_state: HashedPostState,
@@ -581,7 +581,7 @@ impl StateRootProvider for MockEthProvider {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -589,7 +589,7 @@ impl StateRootProvider for MockEthProvider {
         Ok((state_root, Default::default()))
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         _nodes: TrieUpdates,
         _hashed_state: HashedPostState,
@@ -601,7 +601,7 @@ impl StateRootProvider for MockEthProvider {
 }
 
 impl StorageRootProvider for MockEthProvider {
-    fn hashed_storage_root(
+    fn storage_root(
         &self,
         _address: Address,
         _hashed_storage: HashedStorage,

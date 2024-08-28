@@ -4,7 +4,6 @@ use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
     HashedStorage,
 };
-use revm::db::BundleState;
 use std::collections::HashMap;
 
 /// A type that can compute the state root of a given post state.
@@ -17,42 +16,28 @@ pub trait StateRootProvider: Send + Sync {
     /// It is recommended to provide a different implementation from
     /// `state_root_with_updates` since it affects the memory usage during state root
     /// computation.
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        self.hashed_state_root(HashedPostState::from_bundle_state(&bundle_state.state))
-    }
-
-    /// Returns the state root of the `HashedPostState` on top of the current state.
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256>;
 
     /// Returns the state root of the `HashedPostState` on top of the current state but re-uses the
     /// intermediate nodes to speed up the computation. It's up to the caller to construct the
     /// prefix sets and inform the provider of the trie paths that have changes.
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
         prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<B256>;
 
-    /// Returns the state root of the BundleState on top of the current state with trie
-    /// updates to be committed to the database.
-    fn state_root_with_updates(
-        &self,
-        bundle_state: &BundleState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.hashed_state_root_with_updates(HashedPostState::from_bundle_state(&bundle_state.state))
-    }
-
     /// Returns the state root of the `HashedPostState` on top of the current state with trie
     /// updates to be committed to the database.
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
     /// Returns state root and trie updates.
     /// See [`StateRootProvider::hashed_state_root_from_nodes`] for more info.
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -65,11 +50,8 @@ pub trait StateRootProvider: Send + Sync {
 pub trait StorageRootProvider: Send + Sync {
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
-    fn hashed_storage_root(
-        &self,
-        address: Address,
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<B256>;
+    fn storage_root(&self, address: Address, hashed_storage: HashedStorage)
+        -> ProviderResult<B256>;
 }
 
 /// A type that can generate state proof on top of a given post state.
