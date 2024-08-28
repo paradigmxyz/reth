@@ -13,7 +13,7 @@ use reth_primitives::{
     constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment,
     StorageKey, StorageValue, B256,
 };
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
@@ -334,7 +334,9 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         )
         .map_err(|err| ProviderError::Database(err.into()))
     }
+}
 
+impl<'b, TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn hashed_storage_root(
         &self,
         address: Address,

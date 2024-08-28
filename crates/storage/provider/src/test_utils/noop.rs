@@ -20,10 +20,11 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
@@ -349,11 +350,13 @@ impl StateRootProvider for NoopProvider {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
+}
 
+impl StorageRootProvider for NoopProvider {
     fn hashed_storage_root(
         &self,
         _address: Address,
-        _hashed_storage: reth_trie::HashedStorage,
+        _hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
     }
