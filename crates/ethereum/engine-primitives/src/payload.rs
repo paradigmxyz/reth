@@ -102,7 +102,7 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
     }
 
     fn receipts(&self) -> Vec<Receipt> {
-        (self).receipts.clone()
+        self.receipts.clone()
     }
 }
 
