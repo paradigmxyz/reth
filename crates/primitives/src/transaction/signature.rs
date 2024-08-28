@@ -58,26 +58,6 @@ impl reth_codecs::Compact for Signature {
 }
 
 impl Signature {
-    /// Output the `v` of the signature depends on `chain_id`
-    #[inline]
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn v(&self, chain_id: Option<u64>) -> u64 {
-        if let Some(chain_id) = chain_id {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            self.odd_y_parity as u64 + chain_id * 2 + 35
-        } else {
-            #[cfg(feature = "optimism")]
-            // pre bedrock system transactions were sent from the zero address as legacy
-            // transactions with an empty signature
-            //
-            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-            if *self == Self::optimism_deposit_tx_signature() {
-                return 0
-            }
-            self.odd_y_parity as u64 + 27
-        }
-    }
-
     /// Decodes the `v`, `r`, `s` values without a RLP header.
     /// This will return a chain ID if the `v` value is [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) compatible.
     pub(crate) fn decode_with_eip155_chain_id(
@@ -179,31 +159,29 @@ impl Signature {
         core::mem::size_of::<Self>()
     }
 
+    /// Returns [Parity] value based on chain_id for legacy transaction signature.
+    pub fn legacy_parity(&self, chain_id: Option<u64>) -> Parity {
+        if let Some(chain_id) = chain_id {
+            Parity::Parity(self.odd_y_parity).with_chain_id(chain_id)
+        } else {
+            #[cfg(feature = "optimism")]
+            // pre bedrock system transactions were sent from the zero address as legacy
+            // transactions with an empty signature
+            //
+            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
+            if *self == Self::optimism_deposit_tx_signature() {
+                return Parity::Parity(false)
+            }
+            Parity::NonEip155(self.odd_y_parity)
+        }
+    }
+
     /// Returns a signature with the given chain ID applied to the `v` value.
     pub(crate) fn as_signature_with_eip155_parity(
         &self,
         chain_id: Option<u64>,
     ) -> SignatureWithParity {
-        let parity = match chain_id {
-            Some(chain_id) => EncodableSignature::v(self).with_chain_id(chain_id),
-            None => EncodableSignature::v(self),
-        };
-
-        #[cfg(feature = "optimism")]
-        // pre bedrock system transactions were sent from the zero address as legacy
-        // transactions with an empty signature
-        //
-        // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-        if *self == Self::optimism_deposit_tx_signature() {
-            let parity = match chain_id {
-                Some(chain_id) => Parity::Parity(false).with_chain_id(chain_id),
-                None => Parity::Parity(false),
-            };
-
-            return SignatureWithParity::new(self.r(), self.s(), parity);
-        }
-
-        SignatureWithParity::new(self.r(), self.s(), parity)
+        SignatureWithParity::new(self.r, self.s, self.legacy_parity(chain_id))
     }
 
     /// Returns the signature for the optimism deposit transactions, which don't include a
@@ -229,38 +207,6 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
         let odd_y_parity = ((v - 35) % 2) != 0;
         let chain_id = (v - 35) >> 1;
         Ok((odd_y_parity, Some(chain_id)))
-    }
-}
-
-impl EncodableSignature for Signature {
-    fn from_rs_and_parity<
-        P: TryInto<alloy_primitives::Parity, Error = E>,
-        E: Into<alloy_primitives::SignatureError>,
-    >(
-        r: U256,
-        s: U256,
-        parity: P,
-    ) -> Result<Self, alloy_primitives::SignatureError> {
-        let parity: alloy_primitives::Parity = parity.try_into().map_err(Into::into)?;
-        let signature = Self { r, s, odd_y_parity: parity.y_parity() };
-
-        Ok(signature)
-    }
-
-    fn r(&self) -> U256 {
-        self.r
-    }
-
-    fn s(&self) -> U256 {
-        self.s
-    }
-
-    fn v(&self) -> alloy_primitives::Parity {
-        alloy_primitives::Parity::NonEip155(self.odd_y_parity)
-    }
-
-    fn with_parity<T: Into<alloy_primitives::Parity>>(self, parity: T) -> Self {
-        Self { r: self.r, s: self.s, odd_y_parity: parity.into().y_parity() }
     }
 }
 
