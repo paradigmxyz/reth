@@ -285,14 +285,14 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
         StateRoot::overlay_root(self.tx, revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -306,7 +306,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -316,7 +316,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -337,7 +337,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StorageRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn hashed_storage_root(
+    fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,

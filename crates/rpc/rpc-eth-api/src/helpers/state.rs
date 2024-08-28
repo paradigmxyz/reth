@@ -147,7 +147,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             // Provide a default `HashedStorage` value in order to
             // get the storage root hash of the current state.
             let storage_root = state
-                .hashed_storage_root(address, Default::default())
+                .storage_root(address, Default::default())
                 .map_err(Self::Error::from_eth_err)?;
 
             Ok(Some(Account { balance, nonce, code_hash, storage_root }))

@@ -1776,7 +1776,7 @@ where
 
         let root_time = Instant::now();
         let (state_root, trie_output) =
-            state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
+            state_provider.state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),

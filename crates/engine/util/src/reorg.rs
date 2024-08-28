@@ -23,6 +23,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_trie::HashedPostState;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
@@ -367,6 +368,7 @@ where
         reorg_target.number,
         Default::default(),
     );
+    let hashed_state = HashedPostState::from_bundle_state(&outcome.state().state);
 
     let (blob_gas_used, excess_blob_gas) =
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
@@ -406,7 +408,7 @@ where
             gas_used: cumulative_gas_used,
             blob_gas_used,
             excess_blob_gas,
-            state_root: state_provider.state_root(outcome.state())?,
+            state_root: state_provider.state_root(hashed_state)?,
         },
         body: transactions,
         ommers: reorg_target.ommers,
