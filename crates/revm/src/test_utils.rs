@@ -4,6 +4,7 @@ use reth_primitives::{
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -99,7 +100,9 @@ impl StateRootProvider for StateProviderTest {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
+}
 
+impl StorageRootProvider for StateProviderTest {
     fn hashed_storage_root(
         &self,
         _address: Address,

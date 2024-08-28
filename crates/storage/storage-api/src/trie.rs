@@ -58,7 +58,11 @@ pub trait StateRootProvider: Send + Sync {
         hashed_state: HashedPostState,
         prefix_sets: TriePrefixSetsMut,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+}
 
+/// A type that can compute the storage root for a given account.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait StorageRootProvider: Send + Sync {
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
     fn hashed_storage_root(

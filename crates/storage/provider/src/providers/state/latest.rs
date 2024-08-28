@@ -13,7 +13,7 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment, StorageKey, StorageValue,
     B256,
 };
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
@@ -113,7 +113,9 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         StateRoot::overlay_root_from_nodes_with_updates(self.tx, nodes, hashed_state, prefix_sets)
             .map_err(|err| ProviderError::Database(err.into()))
     }
+}
 
+impl<'b, TX: DbTx> StorageRootProvider for LatestStateProviderRef<'b, TX> {
     fn hashed_storage_root(
         &self,
         address: Address,

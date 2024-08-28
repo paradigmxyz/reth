@@ -17,7 +17,7 @@ use reth_primitives::{
     U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StageCheckpointReader, StateProofProvider};
+use reth_storage_api::{StageCheckpointReader, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -589,14 +589,6 @@ impl StateRootProvider for MockEthProvider {
         Ok((state_root, Default::default()))
     }
 
-    fn hashed_storage_root(
-        &self,
-        _address: Address,
-        _hashed_storage: HashedStorage,
-    ) -> ProviderResult<B256> {
-        Ok(B256::default())
-    }
-
     fn hashed_state_root_from_nodes_with_updates(
         &self,
         _nodes: TrieUpdates,
@@ -605,6 +597,16 @@ impl StateRootProvider for MockEthProvider {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))
+    }
+}
+
+impl StorageRootProvider for MockEthProvider {
+    fn hashed_storage_root(
+        &self,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
     }
 }
 

@@ -2,7 +2,7 @@ use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -127,7 +127,11 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
             state_prefix_sets,
         )
     }
+}
 
+impl<SP: StateProvider, EDP: ExecutionDataProvider> StorageRootProvider
+    for BundleStateProvider<SP, EDP>
+{
     fn hashed_storage_root(
         &self,
         address: Address,
