@@ -200,6 +200,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
