@@ -52,6 +52,7 @@ optimism = [
     "serde",
     "dep:op-alloy-rpc-types",
 ]
+telos = []
 std = []
 arbitrary = [
     "alloy-chains/arbitrary"

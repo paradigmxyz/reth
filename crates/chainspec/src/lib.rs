@@ -18,6 +18,9 @@ pub use spec::{
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
+#[cfg(feature = "telos")]
+pub use spec::{TEVMMAINNET, TEVMTESTNET, TEVMMAINNET_BASE, TEVMTESTNET_BASE};
+
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
