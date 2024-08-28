@@ -36,9 +36,14 @@ pub fn validate_header_base_fee(
     }
     Ok(())
 }
-// EIP-4895: Beacon chain push withdrawals as operations
+
+/// Validate that withdrawals are present in Shanghai
+///
+/// See [EIP-4895]: Beacon chain push withdrawals as operations
+///
+/// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
+pub fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
     let withdrawals = block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
@@ -51,9 +56,13 @@ fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusErr
     Ok(())
 }
 
-// EIP-4844: Shard Blob Transactions
+/// Validate that blob gas is present in the block if Cancun is active.
+///
+/// See [EIP-4844]: Shard Blob Transactions
+///
+/// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 #[inline]
-fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
+pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
     // blob tx
     let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
@@ -67,9 +76,13 @@ fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
     Ok(())
 }
 
-// EIP-7685: General purpose execution layer requests
+/// Validate that requests root is present if Prague is active.
+///
+/// See [EIP-7685]: General purpose execution layer requests
+///
+/// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
 #[inline]
-fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
+pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
     let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
     let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
     let header_requests_root =
