@@ -814,6 +814,7 @@ mod tests {
     };
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+        StorageRootProvider,
     };
     use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
 
@@ -913,7 +914,9 @@ mod tests {
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
+    }
 
+    impl StorageRootProvider for MockStateProvider {
         fn hashed_storage_root(
             &self,
             _address: Address,
