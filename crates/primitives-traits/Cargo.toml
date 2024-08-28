@@ -61,3 +61,4 @@ arbitrary = [
     "dep:proptest-arbitrary-interop",
 ]
 alloy-compat = ["alloy-rpc-types-eth"]
+telos = []

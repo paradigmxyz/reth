@@ -2,6 +2,7 @@
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[clap(next_help_heading = "Telos")]
+/// Telos arguments
 pub struct TelosArgs {
     /// TelosZero endpoint to use for API calls (send_transaction, get gas price from table)
     #[arg(long = "telos.telos_endpoint", value_name = "HTTP_URL")]

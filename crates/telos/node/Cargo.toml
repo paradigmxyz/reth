@@ -26,6 +26,7 @@ reth-node-ethereum.workspace = true
 reth-payload-builder.workspace = true
 reth-provider.workspace = true
 reth-rpc.workspace = true
+reth-stages.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
@@ -37,7 +38,16 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 
 [features]
-telos = []
+telos = [
+    "reth-chainspec/telos",
+    "reth-basic-payload-builder/telos",
+    "reth-payload-builder/telos",
+    "reth-provider/telos",
+    "reth-rpc/telos",
+    "reth-stages/telos",
+    "reth-transaction-pool/telos",
+    "reth-primitives/telos",
+]
 
 [dev-dependencies]
 reth.workspace = true
@@ -45,5 +55,5 @@ reth-chainspec.workspace = true
 reth-e2e-test-utils.workspace = true
 eyre.workspace = true
 
-telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "translator_integration"}
+telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "translator_integration" }
 testcontainers = "0.21.1"

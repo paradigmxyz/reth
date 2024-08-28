@@ -121,6 +121,9 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     // insert sync stage
     for stage in StageId::ALL {
+        #[cfg(feature = "telos")]
+        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(genesis.number.unwrap_or_default()))?;
+        #[cfg(not(feature = "telos"))]
         provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
@@ -299,8 +302,14 @@ pub fn insert_genesis_header<DB: Database>(
         Err(e) => return Err(e),
     }
 
-    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
-    provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
+    if cfg!(feature = "telos") {
+        provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, header.number)?;
+        provider.tx_ref().put::<tables::BlockBodyIndices>(header.number, Default::default())?;
+	return Ok(())
+    }
+
+     provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
+     provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())
 }
@@ -538,6 +547,11 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    #[cfg(feature = "telos")]
+    use reth_primitives::{
+        TEVMMAINNET, TEVMMAINNET_BASE, TEVMMAINNET_BASE_GENESIS_HASH, TEVMMAINNET_GENESIS_HASH,
+        TEVMTESTNET, TEVMTESTNET_BASE, TEVMTESTNET_BASE_GENESIS_HASH, TEVMTESTNET_GENESIS_HASH,
+    };
     use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
@@ -576,6 +590,50 @@ mod tests {
 
         // actual, expected
         assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "telos")]
+    fn success_init_genesis_tevmmainnet() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(TEVMMAINNET.clone()))
+                .unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, TEVMMAINNET_GENESIS_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "telos")]
+    fn success_init_genesis_tevmtestnet() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(TEVMTESTNET.clone()))
+                .unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, TEVMTESTNET_GENESIS_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "telos")]
+    fn success_init_genesis_tevmmainnet_base() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(TEVMMAINNET_BASE.clone()))
+                .unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, TEVMMAINNET_BASE_GENESIS_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "telos")]
+    fn success_init_genesis_tevmtestnet_base() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(TEVMTESTNET_BASE.clone()))
+                .unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, TEVMTESTNET_BASE_GENESIS_HASH);
     }
 
     #[test]

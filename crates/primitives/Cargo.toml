@@ -103,6 +103,8 @@ optimism = [
 alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]
 telos = [
+    "reth-chainspec/telos",
+    "reth-primitives-traits/telos",
     "revm-primitives/telos",
 ]
 

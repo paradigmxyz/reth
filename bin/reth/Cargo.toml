@@ -154,10 +154,12 @@ ethereum = []
 telos = [
     "dep:reth-node-telos",
     "dep:reth-telos-rpc",
+    "reth-chainspec/telos",
     "reth-basic-payload-builder/telos",
     "reth-ethereum-payload-builder/telos",
     "reth-evm/telos",
     "reth-execution-types/telos",
+    "reth-node-core/telos",
     "reth-payload-builder/telos",
     "reth-provider/telos",
     "reth-revm/telos",

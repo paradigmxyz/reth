@@ -1,3 +1,5 @@
+//! Telos node implementation
+
 use crate::args::TelosArgs;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthEngineTypes, EthPayloadAttributes, EthPayloadBuilderAttributes,
