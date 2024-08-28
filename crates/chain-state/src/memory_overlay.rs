@@ -5,7 +5,7 @@ use reth_primitives::{
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateRootProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -146,7 +146,9 @@ impl StateRootProvider for MemoryOverlayStateProvider {
             prefix_sets,
         )
     }
+}
 
+impl StorageRootProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_storage_root(
         &self,

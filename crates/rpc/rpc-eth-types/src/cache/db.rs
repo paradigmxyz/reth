@@ -49,7 +49,9 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.hashed_state_root_from_nodes_with_updates(nodes, hashed_state, prefix_sets)
     }
+}
 
+impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<'a> {
     fn hashed_storage_root(
         &self,
         address: Address,

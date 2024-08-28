@@ -8,7 +8,6 @@ use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
