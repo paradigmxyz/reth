@@ -1459,12 +1459,13 @@ mod tests {
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
         BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Header, Receipt,
-        SealedBlock, SealedBlockWithSenders, StaticFileSegment, Withdrawals, B256,
+        SealedBlock, SealedBlockWithSenders, StaticFileSegment, TransactionMeta,
+        TransactionSignedNoHash, Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
-        TransactionVariant, WithdrawalsProvider,
+        TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1503,19 +1504,49 @@ mod tests {
         database_blocks: usize,
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
+        with_random_txs: bool,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
     )> {
-        let (database_blocks, in_memory_blocks) = random_blocks(
+        let (mut database_blocks, mut in_memory_blocks) = random_blocks(
             rng,
             database_blocks,
             in_memory_blocks,
             block_range_params.requests_count,
             block_range_params.withdrawals_count,
         );
+
+        if with_random_txs {
+            for block in database_blocks.iter_mut() {
+                *block = SealedBlock {
+                    ommers: vec![Header::default(); 7],
+                    body: vec![
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                    ],
+                    ..block.clone()
+                };
+            }
+
+            for block in in_memory_blocks.iter_mut() {
+                *block = SealedBlock {
+                    ommers: vec![Header::default(); 7],
+                    body: vec![
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                        random_signed_tx(rng),
+                    ],
+                    ..block.clone()
+                };
+            }
+        }
+
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
@@ -1599,6 +1630,29 @@ mod tests {
             database_blocks,
             in_memory_blocks,
             block_range_params,
+            false,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn provider_with_random_blocks_and_txs(
+        rng: &mut impl Rng,
+        database_blocks: usize,
+        in_memory_blocks: usize,
+        block_range_params: BlockRangeParams,
+    ) -> eyre::Result<(
+        BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
+        Vec<SealedBlock>,
+        Vec<SealedBlock>,
+        Vec<Vec<Receipt>>,
+    )> {
+        provider_with_chain_spec_and_random_blocks(
+            rng,
+            MAINNET.clone(),
+            database_blocks,
+            in_memory_blocks,
+            block_range_params,
+            true,
         )
     }
 
@@ -2798,6 +2852,7 @@ mod tests {
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
                 BlockRangeParams { withdrawals_count: Some(1..3), ..Default::default() },
+                false,
             )?;
         let blocks = [database_blocks, in_memory_blocks].concat();
 
@@ -3259,6 +3314,7 @@ mod tests {
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
                 BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
+                false,
             )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3353,6 +3409,881 @@ mod tests {
         assert_eq!(
             provider.finalized_block_num_hash()?,
             Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_id_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the database blocks
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        println!("tx hash: {:?}", tx);
+
+        println!("result: {:?}", provider.transaction_id(tx_hash)?);
+
+        // Ensure the transaction ID can be found in the database
+        let result = provider.transaction_id(tx_hash)?;
+        assert_eq!(result, Some(0));
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_id_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the in-memory blocks
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Ensure the transaction ID can be found in the in-memory state
+        let result = provider.transaction_id(tx_hash)?;
+        assert!(result.is_some(), "Transaction ID should be found in the in-memory state");
+
+        // Check that the transaction ID is greater than the last database transaction ID
+        let last_db_tx_id = provider.database.last_block_number()?;
+        let last_db_tx_id =
+            provider.database.block_body_indices(last_db_tx_id)?.unwrap().last_tx_num();
+
+        assert!(
+            result.unwrap() > last_db_tx_id,
+            "In-memory transaction ID should be greater than the last database transaction ID"
+        );
+        assert_eq!(result, Some(20));
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_id_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random hash not present in any transaction
+        let random_tx_hash = B256::random();
+
+        // Ensure the transaction ID is not found
+        let result = provider.transaction_id(random_tx_hash)?;
+        assert!(result.is_none(), "Transaction ID should not be found");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction ID from in-memory blocks
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        // Ensure the transaction can be retrieved by its ID
+        let result = provider.transaction_by_id(tx_id)?;
+        assert_eq!(
+            result.unwrap(),
+            *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction ID from the database blocks
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        // Ensure the transaction can be retrieved by its ID
+        let result = provider.transaction_by_id(tx_id)?;
+        assert!(result.is_some(), "Transaction should be found in the database");
+        assert_eq!(
+            result.unwrap(),
+            *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random transaction ID not present in any block
+        let random_tx_id = 999999;
+
+        // Ensure the transaction is not found
+        let result = provider.transaction_by_id(random_tx_id)?;
+        assert!(result.is_none(), "Transaction should not be found");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_no_hash_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction ID from in-memory blocks
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        // Ensure the transaction can be retrieved by its ID without hash
+        let result = provider.transaction_by_id_no_hash(tx_id)?;
+        let expected_tx: TransactionSignedNoHash = tx.clone().into();
+        assert_eq!(
+            result.unwrap(),
+            expected_tx,
+            "The retrieved transaction without hash should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_no_hash_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction ID from the database blocks
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        // Ensure the transaction can be retrieved by its ID without hash
+        let result = provider.transaction_by_id_no_hash(tx_id)?;
+        let expected_tx: TransactionSignedNoHash = tx.clone().into();
+        assert_eq!(
+            result.unwrap(),
+            expected_tx,
+            "The retrieved transaction without hash should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_id_no_hash_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random transaction ID not present in any block
+        let random_tx_id = 7656898;
+
+        // Ensure the transaction is not found without hash
+        let result = provider.transaction_by_id_no_hash(random_tx_id)?;
+        assert!(result.is_none(), "Transaction should not be found without hash");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction hash from the in-memory blocks
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Ensure the transaction can be retrieved by its hash from the in-memory state
+        let result = provider.transaction_by_hash(tx_hash)?;
+        assert_eq!(
+            result.unwrap(),
+            *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction hash from the database blocks
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Ensure the transaction can be retrieved by its hash from the database
+        let result = provider.transaction_by_hash(tx_hash)?;
+        assert_eq!(
+            result.unwrap(),
+            *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random hash not present in any transaction
+        let random_tx_hash = B256::random();
+
+        // Ensure the transaction is not found by the random hash
+        let result = provider.transaction_by_hash(random_tx_hash)?;
+        assert!(result.is_none(), "Transaction should not be found");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_with_meta_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the in-memory block
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Create the expected metadata for this transaction
+        let meta = TransactionMeta {
+            tx_hash,
+            index: 0,
+            block_hash: in_memory_blocks[0].header.hash(),
+            block_number: in_memory_blocks[0].header.number,
+            base_fee: in_memory_blocks[0].header.base_fee_per_gas,
+            excess_blob_gas: None,
+            timestamp: in_memory_blocks[0].header.timestamp,
+        };
+
+        // Ensure the transaction and its metadata can be retrieved from the in-memory state
+        let result = provider.transaction_by_hash_with_meta(tx_hash)?;
+        let (retrieved_tx, retrieved_meta) = result.unwrap();
+        assert_eq!(
+            retrieved_tx, *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+        assert_eq!(
+            retrieved_meta, meta,
+            "The retrieved metadata should match the expected metadata"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_with_meta_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the database blocks
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Create the expected metadata for this transaction
+        let meta = TransactionMeta {
+            tx_hash,
+            index: 0,
+            block_hash: database_blocks[0].header.hash(),
+            block_number: database_blocks[0].header.number,
+            base_fee: database_blocks[0].header.base_fee_per_gas,
+            excess_blob_gas: None,
+            timestamp: database_blocks[0].header.timestamp,
+        };
+
+        // Ensure the transaction and its metadata can be retrieved from the database
+        let result = provider.transaction_by_hash_with_meta(tx_hash)?;
+        let (retrieved_tx, retrieved_meta) = result.unwrap();
+        assert_eq!(
+            retrieved_tx, *tx,
+            "The retrieved transaction should match the expected transaction"
+        );
+        assert_eq!(
+            retrieved_meta, meta,
+            "The retrieved metadata should match the expected metadata"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_by_hash_with_meta_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random hash not present in any transaction
+        let random_tx_hash = B256::random();
+
+        // Ensure the transaction with metadata is not found by the random hash
+        let result = provider.transaction_by_hash_with_meta(random_tx_hash)?;
+        assert!(result.is_none(), "Transaction with metadata should not be found");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_block_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction ID from in-memory blocks
+        let tx = &in_memory_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        // Retrieve the block number for this transaction
+        let result = provider.transaction_block(tx_id)?;
+        let block_number = result.unwrap();
+
+        // Ensure the block number matches the expected block number
+        assert_eq!(
+            block_number, in_memory_blocks[0].header.number,
+            "The block number should match the in-memory block number"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_block_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the database block
+        let tx = &database_blocks[0].body[0];
+        let tx_hash = tx.hash();
+
+        // Fetch the transaction ID
+        let tx_id = provider.transaction_id(tx_hash)?.unwrap();
+
+        println!("tx_id: {:?}", tx_id);
+
+        // Retrieve the block number for this transaction
+        let result = provider.transaction_block(tx_id)?;
+        assert!(
+            result.is_none(),
+            "`block_state_by_tx_id` should be None if the block is in database"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_block_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Ensure that invalid transaction ID returns None
+        let result = provider.transaction_block(67675657)?;
+        assert!(result.is_none(), "Block number should not be found for an invalid transaction ID");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_by_block_hash_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random block hash from in-memory blocks
+        let block_hash = in_memory_blocks[0].header.hash();
+
+        // Retrieve the transactions for this block using the block hash
+        let result = provider.transactions_by_block(BlockHashOrNumber::Hash(block_hash))?;
+        let transactions = result.unwrap();
+
+        // Ensure the transactions match the expected transactions in the block
+        assert_eq!(
+            transactions, in_memory_blocks[0].body,
+            "The transactions should match the in-memory block transactions"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_by_block_number_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random block number from in-memory blocks
+        let block_number = in_memory_blocks[0].header.number;
+
+        // Retrieve the transactions for this block using the block number
+        let result = provider.transactions_by_block(BlockHashOrNumber::Number(block_number))?;
+        let transactions = result.unwrap();
+
+        // Ensure the transactions match the expected transactions in the block
+        assert_eq!(
+            transactions, in_memory_blocks[0].body,
+            "The transactions should match the in-memory block transactions"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_by_block_hash_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random block hash from the database blocks
+        let block_hash = database_blocks[0].header.hash();
+
+        // Retrieve the transactions for this block using the block hash
+        let result = provider.transactions_by_block(BlockHashOrNumber::Hash(block_hash))?;
+        let transactions = result.unwrap();
+
+        // Ensure the transactions match the expected transactions in the block
+        assert_eq!(
+            transactions, database_blocks[0].body,
+            "The transactions should match the database block transactions"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_by_block_number_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random block number from the database blocks
+        let block_number = database_blocks[0].header.number;
+
+        // Retrieve the transactions for this block using the block number
+        let result = provider.transactions_by_block(BlockHashOrNumber::Number(block_number))?;
+        let transactions = result.unwrap();
+
+        // Ensure the transactions match the expected transactions in the block
+        assert_eq!(
+            transactions, database_blocks[0].body,
+            "The transactions should match the database block transactions"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_not_found_for_non_existent_block_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random block hash that does not exist
+        let random_block_hash = B256::random();
+
+        // Try to retrieve transactions for a non-existent block hash
+        let result = provider.transactions_by_block(BlockHashOrNumber::Hash(random_block_hash))?;
+
+        // Ensure no transactions are found
+        assert!(result.is_none(), "No transactions should be found for a non-existent block hash");
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_not_found_for_non_existent_block_number() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a block number that is out of range (non-existent)
+        let non_existent_block_number = u64::MAX;
+
+        // Try to retrieve transactions for a non-existent block number
+        let result =
+            provider.transactions_by_block(BlockHashOrNumber::Number(non_existent_block_number))?;
+
+        // Ensure no transactions are found
+        assert!(
+            result.is_none(),
+            "No transactions should be found for a non-existent block number"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_entirely_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define a block range entirely within in-memory blocks
+        let start_block = in_memory_blocks[0].header.number;
+        let end_block = in_memory_blocks[1].header.number;
+
+        // Retrieve the transactions for this block range
+        let result = provider.transactions_by_block_range(start_block..=end_block)?;
+
+        // Ensure the transactions match the expected transactions in the in-memory blocks
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], in_memory_blocks[0].body);
+        assert_eq!(result[1], in_memory_blocks[1].body);
+
+        Ok(())
+    }
+
+    #[test]
+    fn transactions_found_entirely_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define a block range entirely within database blocks
+        let start_block = database_blocks[0].header.number;
+        let end_block = database_blocks[1].header.number;
+
+        // Retrieve the transactions for this block range
+        let result = provider.transactions_by_block_range(start_block..=end_block)?;
+
+        // Ensure the transactions match the expected transactions in the database blocks
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], database_blocks[0].body);
+        assert_eq!(result[1], database_blocks[1].body);
+
+        Ok(())
+    }
+
+    #[test]
+    fn valid_range_returns_transactions() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define a valid transaction range within the database
+        let start_tx_num = 0;
+        let end_tx_num = 1;
+
+        // Retrieve the transactions for this transaction number range
+        let result = provider.transactions_by_tx_range(start_tx_num..=end_tx_num)?;
+
+        // Ensure the transactions match the expected transactions in the database
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], database_blocks[0].body[0].clone().into());
+        assert_eq!(result[1], database_blocks[0].body[1].clone().into());
+
+        Ok(())
+    }
+
+    #[test]
+    fn empty_range_returns_no_transactions() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define an empty range that should return no transactions
+        let start_tx_num = u64::MAX;
+        let end_tx_num = u64::MAX;
+
+        // Retrieve the transactions for this range
+        let result = provider.transactions_by_tx_range(start_tx_num..end_tx_num)?;
+
+        // Ensure no transactions are returned
+        assert!(
+            result.is_empty(),
+            "No transactions should be found for an empty transaction range"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn valid_range_returns_senders() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define a valid transaction range within the database
+        let start_tx_num = 0;
+        let end_tx_num = 1;
+
+        // Retrieve the senders for this transaction number range
+        let result = provider.senders_by_tx_range(start_tx_num..=end_tx_num)?;
+
+        // Ensure the sender addresses match the expected addresses in the database
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            database_blocks[0].senders().unwrap()[0],
+            "The sender address should match the expected sender address"
+        );
+        assert_eq!(
+            result[1],
+            database_blocks[0].senders().unwrap()[1],
+            "The sender address should match the expected sender address"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn empty_range_returns_no_senders() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Define an empty range that should return no sender addresses
+        let start_tx_num = u64::MAX;
+        let end_tx_num = u64::MAX;
+
+        // Retrieve the senders for this range
+        let result = provider.senders_by_tx_range(start_tx_num..end_tx_num)?;
+
+        // Ensure no sender addresses are returned
+        assert!(
+            result.is_empty(),
+            "No sender addresses should be found for an empty transaction range"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_sender_found_in_memory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the in-memory block
+        let tx = &in_memory_blocks[0].body[0];
+
+        // Retrieve the transaction ID
+        let tx_id = provider.transaction_id(tx.hash())?.unwrap();
+
+        // Retrieve the sender address for this transaction
+        let result = provider.transaction_sender(tx_id)?;
+
+        // Ensure the sender address matches the expected sender address
+        let expected_sender = tx.recover_signer().unwrap();
+        assert_eq!(
+            result,
+            Some(expected_sender),
+            "The sender address should match the expected sender address"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_sender_found_in_database() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        // Choose a random transaction from the database block
+        let tx = &database_blocks[0].body[0];
+
+        // Retrieve the transaction ID
+        let tx_id = provider.transaction_id(tx.hash())?.unwrap();
+
+        // Retrieve the sender address for this transaction
+        let result = provider.transaction_sender(tx_id)?;
+
+        // Ensure the sender address matches the expected sender address
+        let expected_sender = tx.recover_signer().unwrap();
+        assert_eq!(
+            result,
+            Some(expected_sender),
+            "The sender address should match the expected sender address"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn transaction_sender_not_found() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // Generate a random transaction ID that does not exist
+        let invalid_tx_id = u64::MAX;
+
+        // Attempt to retrieve the sender address for this invalid transaction ID
+        let result = provider.transaction_sender(invalid_tx_id)?;
+
+        // Ensure no sender address is found
+        assert!(
+            result.is_none(),
+            "No sender address should be found for an invalid transaction ID"
         );
 
         Ok(())
