@@ -886,11 +886,11 @@ mod tests {
     }
 
     impl StateRootProvider for MockStateProvider {
-        fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+        fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
-        fn hashed_state_root_from_nodes(
+        fn state_root_from_nodes(
             &self,
             _nodes: TrieUpdates,
             _post_state: HashedPostState,
@@ -899,14 +899,14 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn hashed_state_root_with_updates(
+        fn state_root_with_updates(
             &self,
             _hashed_state: HashedPostState,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
 
-        fn hashed_state_root_from_nodes_with_updates(
+        fn state_root_from_nodes_with_updates(
             &self,
             _nodes: TrieUpdates,
             _post_state: HashedPostState,
@@ -917,7 +917,7 @@ mod tests {
     }
 
     impl StorageRootProvider for MockStateProvider {
-        fn hashed_storage_root(
+        fn storage_root(
             &self,
             _address: Address,
             _hashed_storage: HashedStorage,
