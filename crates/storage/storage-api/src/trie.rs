@@ -36,7 +36,7 @@ pub trait StateRootProvider: Send + Sync {
     ) -> ProviderResult<(B256, TrieUpdates)>;
 
     /// Returns state root and trie updates.
-    /// See [`StateRootProvider::hashed_state_root_from_nodes`] for more info.
+    /// See [`StateRootProvider::state_root_from_nodes`] for more info.
     fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
