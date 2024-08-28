@@ -647,7 +647,7 @@ pub trait LoadTransaction: SpawnBlocking {
     }
 }
 
-/// Find a transction by sender and nonce
+/// Find a transaction by sender and nonce
 pub async fn get_transaction_by_sender_and_nonce<Eth>(
     eth: &Eth,
     sender: Address,
