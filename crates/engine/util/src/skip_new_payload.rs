@@ -54,10 +54,9 @@ where
                         );
                         let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
                         continue
-                    } else {
-                        *this.skipped = 0;
-                        Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
                     }
+                    *this.skipped = 0;
+                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
                 }
                 next => next,
             };

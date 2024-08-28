@@ -97,7 +97,7 @@ impl InMemoryState {
 
     /// Returns the hash for a specific block number
     pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.numbers.read().get(&number).cloned()
+        self.numbers.read().get(&number).copied()
     }
 
     /// Returns the current chain head state.
@@ -493,7 +493,7 @@ impl CanonicalInMemoryState {
             Vec::new()
         };
 
-        MemoryOverlayStateProvider::new(in_memory, historical)
+        MemoryOverlayStateProvider::new(historical, in_memory)
     }
 
     /// Returns an iterator over all canonical blocks in the in-memory state, from newest to oldest.

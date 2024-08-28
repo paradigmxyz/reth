@@ -73,7 +73,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         )
     }
@@ -99,7 +98,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         )
     }

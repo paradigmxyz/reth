@@ -259,9 +259,8 @@ where
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
-        } else {
-            return Ok(list.iter().collect::<Vec<_>>())
         }
+        return Ok(list.iter().collect::<Vec<_>>())
     }
 
     Ok(Vec::new())
@@ -646,10 +645,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1292,10 +1291,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1591,9 +1590,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
             if done {
                 break true
-            } else {
-                deleted_entries += 1;
             }
+            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))

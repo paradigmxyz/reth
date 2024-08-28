@@ -37,26 +37,17 @@ revm.workspace = true
 # async
 parking_lot.workspace = true
 tokio.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 
 # rpc
-jsonrpsee.workspace = true
 jsonrpsee-types.workspace = true
+serde_json.workspace = true
 
 # misc
 thiserror.workspace = true
-serde = { workspace = true, features = ["derive"] }
-derive_more.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
+tracing.workspace = true
 
 [features]
-client = [
-    "jsonrpsee/client",
-    "jsonrpsee/async-client",
-    "reth-rpc-eth-api/client"
-]
-
 optimism = [
     "reth-evm-optimism/optimism",
     "reth-primitives/optimism",

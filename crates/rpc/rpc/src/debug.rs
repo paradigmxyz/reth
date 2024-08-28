@@ -2,7 +2,10 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
+use reth_evm::{
+    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    ConfigureEvmEnv,
+};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
@@ -10,7 +13,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
@@ -24,7 +27,7 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
+    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -588,18 +591,17 @@ where
                     &this.inner.provider.chain_spec(),
                     &cfg,
                     &block_env,
-                    block.timestamp,
-                    block.number,
                     block.parent_beacon_block_root,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 // apply eip-2935 blockhashes update
-                apply_blockhashes_update(
+                pre_block_blockhashes_contract_call(
                     &mut db,
+                    &evm_config,
                     &this.inner.provider.chain_spec(),
-                    block.timestamp,
-                    block.number,
+                    &cfg,
+                    &block_env,
                     block.parent_hash,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
@@ -864,7 +866,7 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
+    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
