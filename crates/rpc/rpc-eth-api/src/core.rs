@@ -3,11 +3,10 @@
 
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
-use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -16,12 +15,12 @@ use reth_rpc_types::{
     BlockOverrides, BlockTransactions, Bundle, EIP1186AccountProofResponse, EthCallResponse,
     FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use tracing::trace;
 
 use crate::{
     helpers::{
-        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi, LoadState,
+        transaction::get_transaction_by_sender_and_nonce, EthApiSpec, EthBlocks, EthCall, EthFees,
+        EthState, EthTransactions, FullEthApi,
     },
     RpcBlock, RpcReceipt, RpcTransaction,
 };
@@ -562,55 +561,7 @@ where
         nonce: U64,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
-        let nonce = nonce.to::<u64>();
-
-        // Check the pool first
-        if let Some(tx) = LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce) {
-            let transaction = tx.transaction.clone().into_consensus();
-            return Ok(Some(reth_rpc_types_compat::transaction::from_recovered(transaction)))
-        }
-
-        // Check if the sender is a contract
-        if self.get_code(sender, None).await?.len() > 0 {
-            return Ok(None)
-        }
-
-        let highest = EthState::transaction_count(self, sender, None).await?.saturating_to::<u64>();
-
-        // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-        // exists.
-        if nonce >= highest {
-            return Ok(None)
-        }
-
-        // perform a binary search over the block range to find the block in which the sender's
-        // nonce reached the requested nonce.
-        let num = binary_search::<_, _, ErrorObjectOwned>(
-            1,
-            self.block_number()?.saturating_to(),
-            |mid| {
-                async move {
-                    let mid_nonce = EthState::transaction_count(self, sender, Some(mid.into()))
-                        .await?
-                        .saturating_to::<u64>();
-
-                    // The `transaction_count` returns the `nonce` after the transaction was
-                    // executed, which is the state of the account after the block, and we need to
-                    // find the transaction whose nonce is the pre-state, so
-                    // need to compare with `nonce`(no equal).
-                    Ok(mid_nonce > nonce)
-                }
-            },
-        )
-        .await?;
-
-        let Some(BlockTransactions::Full(transactions)) =
-            self.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::UnknownBlockNumber.into());
-        };
-
-        Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
+        Ok(get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`

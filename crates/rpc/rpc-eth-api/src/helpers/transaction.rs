@@ -1,24 +1,27 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
+use crate::helpers::{EthBlocks, EthState, LoadState};
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
     Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
     TxHash, TxKind, B256, U256,
 };
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
-    utils::recover_raw_transaction, EthApiError, EthStateCache, SignError, TransactionSource,
+    utils::{binary_search, recover_raw_transaction},
+    EthApiError, EthStateCache, SignError, TransactionSource,
 };
 use reth_rpc_types::{
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, BlockTransactions, TransactionInfo, TransactionRequest,
+    TypedTransactionRequest,
 };
-use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
+use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
@@ -642,4 +645,59 @@ pub trait LoadTransaction: SpawnBlocking {
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
     }
+}
+
+/// Find a transction by sender and nonce
+pub async fn get_transaction_by_sender_and_nonce<Eth>(
+    eth: &Eth,
+    sender: Address,
+    nonce: u64,
+    include_pending: bool,
+) -> Result<Option<RpcTransaction<Eth::NetworkTypes>>, Eth::Error>
+where
+    Eth: EthBlocks + EthState,
+{
+    // Check the pool first
+    if include_pending {
+        if let Some(tx) = LoadState::pool(eth).get_transaction_by_sender_and_nonce(sender, nonce) {
+            let transaction = tx.transaction.clone().into_consensus();
+            return Ok(Some(from_recovered(transaction)));
+        }
+    }
+
+    // Check if the sender is a contract
+    if EthState::get_code(eth, sender, None).await?.len() > 0 {
+        return Ok(None);
+    }
+
+    let highest = EthState::transaction_count(eth, sender, None).await?.saturating_to::<u64>();
+
+    // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
+    // exists.
+    if nonce >= highest {
+        return Ok(None);
+    }
+
+    let Ok(high) = LoadBlock::provider(eth).best_block_number() else {
+        return Err(EthApiError::UnknownBlockNumber.into());
+    };
+
+    // perform a binary search over the block range to find the block in which the sender's
+    // nonce reached the requested nonce.
+    let num = binary_search::<_, _, Eth::Error>(1, high, |mid| async move {
+        let mid_nonce = EthState::transaction_count(eth, sender, Some(mid.into()))
+            .await?
+            .saturating_to::<u64>();
+
+        Ok(mid_nonce > nonce)
+    })
+    .await?;
+
+    let Some(BlockTransactions::Full(transactions)) =
+        eth.rpc_block(num.into(), true).await?.map(|block| block.transactions)
+    else {
+        return Err(EthApiError::UnknownBlockNumber.into());
+    };
+
+    Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
 }
