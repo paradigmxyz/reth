@@ -1520,7 +1520,7 @@ mod tests {
         );
 
         if with_random_txs {
-            for block in database_blocks.iter_mut() {
+            for block in &mut database_blocks {
                 *block = SealedBlock {
                     ommers: vec![Header::default(); 7],
                     body: vec![
@@ -1533,7 +1533,7 @@ mod tests {
                 };
             }
 
-            for block in in_memory_blocks.iter_mut() {
+            for block in &mut in_memory_blocks {
                 *block = SealedBlock {
                     ommers: vec![Header::default(); 7],
                     body: vec![
