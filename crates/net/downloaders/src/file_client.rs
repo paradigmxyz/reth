@@ -398,7 +398,6 @@ impl ChunkedFileReader {
         T: FromReader,
     {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
-            dbg!(self.chunk.is_empty());
             // eof
             return Ok(None)
         }
