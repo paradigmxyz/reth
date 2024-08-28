@@ -88,9 +88,8 @@ mod tests {
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_receipt, BlockRangeParams,
     };
     use std::ops::Sub;
 
@@ -99,7 +98,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();

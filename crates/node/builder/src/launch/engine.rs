@@ -1,20 +1,12 @@
 //! Engine node related functionality.
 
-use crate::{
-    components::NodeComponents,
-    hooks::NodeHooks,
-    launch::{LaunchContext, LaunchNode},
-    rpc::{launch_rpc_servers, EthApiBuilderProvider},
-    setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
-    NodeHandle, NodeTypesAdapter,
-};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -42,6 +34,14 @@ use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::{
+    hooks::NodeHooks,
+    rpc::{launch_rpc_servers, EthApiBuilderProvider},
+    setup::build_networked_pipeline,
+    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+};
+
 /// The engine node launcher.
 #[derive(Debug)]
 pub struct EngineNodeLauncher {
@@ -58,11 +58,18 @@ impl EngineNodeLauncher {
 
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
+        ChainSpec = ChainSpec,
+    >,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
+    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -143,6 +150,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
@@ -176,6 +184,9 @@ where
             ctx.components().block_executor().clone(),
             pipeline_exex_handle,
         )?;
+
+        // The new engine writes directly to static files. This ensures that they're up to the tip.
+        pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
 
@@ -233,7 +244,6 @@ where
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-                database.clone(),
             ),
         );
 

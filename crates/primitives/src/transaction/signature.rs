@@ -21,6 +21,8 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
+/// 
+/// This type is unaware of the chain id, and thus shouldn't be used when encoding or decoding legacy transactions. Use `SignatureWithParity` instead.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
@@ -159,7 +161,8 @@ impl Signature {
         core::mem::size_of::<Self>()
     }
 
-    /// Returns [Parity] value based on chain_id for legacy transaction signature.
+    /// Returns [Parity] value based on `chain_id` for legacy transaction signature.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn legacy_parity(&self, chain_id: Option<u64>) -> Parity {
         if let Some(chain_id) = chain_id {
             Parity::Parity(self.odd_y_parity).with_chain_id(chain_id)
@@ -189,6 +192,12 @@ impl Signature {
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
         Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+    }
+}
+
+impl From<alloy_primitives::Signature> for Signature {
+    fn from(value: alloy_primitives::Signature) -> Self {
+        Self { r: value.r(), s: value.s(), odd_y_parity: value.v().y_parity() }
     }
 }
 
@@ -259,20 +268,20 @@ impl EncodableSignature for SignatureWithParity {
 
 #[cfg(test)]
 mod tests {
-    use crate::{transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
-    use alloy_primitives::{hex, hex::FromHex, Bytes};
+    use crate::{hex, transaction::signature::SECP256K1N_HALF, Address, Signature, B256, U256};
+    use alloy_primitives::{hex::FromHex, Bytes, Parity};
     use std::str::FromStr;
 
     #[test]
-    fn test_v() {
+    fn test_legacy_parity() {
         // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
-        assert_eq!(27, signature.v(None));
-        assert_eq!(37, signature.v(Some(1)));
+        assert_eq!(Parity::NonEip155(false), signature.legacy_parity(None));
+        assert_eq!(Parity::Eip155(37), signature.legacy_parity(Some(1)));
 
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
-        assert_eq!(28, signature.v(None));
-        assert_eq!(38, signature.v(Some(1)));
+        assert_eq!(Parity::NonEip155(true), signature.legacy_parity(None));
+        assert_eq!(Parity::Eip155(38), signature.legacy_parity(Some(1)));
     }
 
     #[test]

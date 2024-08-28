@@ -206,7 +206,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypes,
+        T: NodeTypes<ChainSpec = ChainSpec>,
     {
         self.with_types_and_provider()
     }
@@ -216,8 +216,8 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypes,
-        P: FullProvider<DB>,
+        T: NodeTypes<ChainSpec = ChainSpec>,
+        P: FullProvider<DB, T::ChainSpec>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
@@ -230,7 +230,7 @@ where
         node: N,
     ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
-        N: Node<RethFullAdapter<DB, N>>,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
@@ -264,7 +264,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypes,
+        T: NodeTypes<ChainSpec = ChainSpec>,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -274,8 +274,8 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypes,
-        P: FullProvider<DB>,
+        T: NodeTypes<ChainSpec = ChainSpec>,
+        P: FullProvider<DB, T::ChainSpec>,
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
@@ -293,7 +293,7 @@ where
         NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
     >
     where
-        N: Node<RethFullAdapter<DB, N>>,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
@@ -316,18 +316,25 @@ where
         >,
     >
     where
-        N: Node<RethFullAdapter<DB, N>>,
-        <N::AddOns as NodeAddOns<
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec>,
+        N::AddOns: NodeAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
-        >>::EthApi: EthApiBuilderProvider<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        > + FullEthApiServer + AddDevSigners,
+            EthApi: EthApiBuilderProvider<
+                        NodeAdapter<
+                            RethFullAdapter<DB, N>,
+                            <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+                        >
+                    >
+                        + FullEthApiServer<
+                            NetworkTypes: alloy_network::Network<
+                                TransactionResponse = reth_rpc_types::Transaction
+                            >,
+                        >
+                        + AddDevSigners
+        >,
     {
         self.node(node).launch().await
     }
@@ -371,8 +378,7 @@ impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<NodeAdapter<T, CB::Components>, EthApi: FullEthApiServer + AddDevSigners>,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig {
@@ -467,12 +473,15 @@ where
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypes,
+    T: NodeTypes<ChainSpec = ChainSpec>,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    AO::EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
-        + FullEthApiServer
-        + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
+    >,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
@@ -536,7 +545,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the chain spec of the node.
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
         self.provider().chain_spec()
     }
 

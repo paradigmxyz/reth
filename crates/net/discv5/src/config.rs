@@ -8,8 +8,10 @@ use std::{
 
 use alloy_primitives::Bytes;
 use derive_more::Display;
-use discv5::ListenConfig;
-use multiaddr::{Multiaddr, Protocol};
+use discv5::{
+    multiaddr::{Multiaddr, Protocol},
+    ListenConfig,
+};
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::NodeRecord;
 use tracing::warn;
@@ -440,10 +442,10 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
-    #[display(fmt = "{_0}")]
+    #[display("{_0}")]
     Enode(Multiaddr),
     /// A signed node record.
-    #[display(fmt = "{_0:?}")]
+    #[display("{_0:?}")]
     Enr(discv5::Enr),
 }
 

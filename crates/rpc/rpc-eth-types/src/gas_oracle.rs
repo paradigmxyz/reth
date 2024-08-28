@@ -176,13 +176,13 @@ where
         }
 
         // sort results then take the configured percentile result
-        let mut price = if !results.is_empty() {
+        let mut price = if results.is_empty() {
+            inner.last_price.price
+        } else {
             results.sort_unstable();
             *results.get((results.len() - 1) * self.oracle_config.percentile as usize / 100).expect(
                 "gas price index is a percent of nonzero array length, so a value always exists",
             )
-        } else {
-            inner.last_price.price
         };
 
         // constrain to the max price

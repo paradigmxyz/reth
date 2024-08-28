@@ -5,20 +5,22 @@ use crate::{
     EvmEnvProvider, HeaderProvider, StageCheckpointReader, StateProviderFactory,
     StaticFileProviderFactory, TransactionsProvider,
 };
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database>:
+pub trait FullProvider<DB: Database, ChainSpec: EthChainSpec>:
     DatabaseProviderFactory<DB>
     + StaticFileProviderFactory
     + BlockReaderIdExt
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
+    + ForkChoiceSubscriptions
     + StageCheckpointReader
     + Clone
     + Unpin
@@ -26,16 +28,17 @@ pub trait FullProvider<DB: Database>:
 {
 }
 
-impl<T, DB: Database> FullProvider<DB> for T where
+impl<T, DB: Database, ChainSpec: EthChainSpec> FullProvider<DB, ChainSpec> for T where
     T: DatabaseProviderFactory<DB>
         + StaticFileProviderFactory
         + BlockReaderIdExt
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions
+        + ForkChoiceSubscriptions
         + StageCheckpointReader
         + Clone
         + Unpin
@@ -48,7 +51,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
 pub trait FullRpcProvider:
     StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = ChainSpec>
     + BlockReaderIdExt
     + HeaderProvider
     + TransactionsProvider
@@ -62,7 +65,7 @@ pub trait FullRpcProvider:
 impl<T> FullRpcProvider for T where
     T: StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + BlockReaderIdExt
         + HeaderProvider
         + TransactionsProvider

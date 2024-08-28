@@ -29,7 +29,7 @@ pub use trie::*;
 #[derive(Clone, Debug, Display, Eq, PartialEq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
-    #[display(fmt = "EVM reported invalid transaction ({hash}): {error}")]
+    #[display("EVM reported invalid transaction ({hash}): {error}")]
     EVM {
         /// The hash of the transaction
         hash: B256,
@@ -37,17 +37,17 @@ pub enum BlockValidationError {
         error: Box<EVMError<ProviderError>>,
     },
     /// Error when recovering the sender for a transaction
-    #[display(fmt = "failed to recover sender for transaction")]
+    #[display("failed to recover sender for transaction")]
     SenderRecoveryError,
     /// Error when incrementing balance in post execution
-    #[display(fmt = "incrementing balance in post execution failed")]
+    #[display("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
     /// Error when the state root does not match the expected value.
     // #[from(ignore)]
     StateRoot(StateRootError),
     /// Error when transaction gas limit exceeds available block gas
     #[display(
-        fmt = "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
+        "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
     )]
     TransactionGasLimitMoreThanAvailableBlockGas {
         /// The transaction's gas limit
@@ -56,23 +56,23 @@ pub enum BlockValidationError {
         block_available_gas: u64,
     },
     /// Error for pre-merge block
-    #[display(fmt = "block {hash} is pre merge")]
+    #[display("block {hash} is pre merge")]
     BlockPreMerge {
         /// The hash of the block
         hash: B256,
     },
     /// Error for missing total difficulty
-    #[display(fmt = "missing total difficulty for block {hash}")]
+    #[display("missing total difficulty for block {hash}")]
     MissingTotalDifficulty {
         /// The hash of the block
         hash: B256,
     },
     /// Error for EIP-4788 when parent beacon block root is missing
-    #[display(fmt = "EIP-4788 parent beacon block root missing for active Cancun block")]
+    #[display("EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
     #[display(
-        fmt = "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}"
+        "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}"
     )]
     CancunGenesisParentBeaconBlockRootNotZero {
         /// The beacon block root
@@ -82,7 +82,7 @@ pub enum BlockValidationError {
     ///
     /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
     #[display(
-        fmt = "failed to apply beacon root contract call at {parent_beacon_block_root}: {message}"
+        "failed to apply beacon root contract call at {parent_beacon_block_root}: {message}"
     )]
     BeaconRootContractCall {
         /// The beacon block root
@@ -90,14 +90,18 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// Provider error during the [EIP-2935] block hash account loading.
+    /// EVM error during [EIP-2935] blockhash contract call.
     ///
     /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-    BlockHashAccountLoadingFailed(ProviderError),
+    #[display("failed to apply blockhash contract call: {message}")]
+    BlockHashContractCall {
+        /// The error message.
+        message: String,
+    },
     /// EVM error during withdrawal requests contract call [EIP-7002]
     ///
     /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
-    #[display(fmt = "failed to apply withdrawal requests contract call: {message}")]
+    #[display("failed to apply withdrawal requests contract call: {message}")]
     WithdrawalRequestsContractCall {
         /// The error message.
         message: String,
@@ -105,7 +109,7 @@ pub enum BlockValidationError {
     /// EVM error during consolidation requests contract call [EIP-7251]
     ///
     /// [EIP-7251]: https://eips.ethereum.org/EIPS/eip-7251
-    #[display(fmt = "failed to apply consolidation requests contract call: {message}")]
+    #[display("failed to apply consolidation requests contract call: {message}")]
     ConsolidationRequestsContractCall {
         /// The error message.
         message: String,
@@ -113,7 +117,7 @@ pub enum BlockValidationError {
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    #[display(fmt = "failed to decode deposit requests from receipts: {_0}")]
+    #[display("failed to decode deposit requests from receipts: {_0}")]
     DepositRequestDecode(String),
 }
 
@@ -219,7 +223,7 @@ pub enum InternalBlockExecutionError {
     Pruning(PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[display(
-        fmt = "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain

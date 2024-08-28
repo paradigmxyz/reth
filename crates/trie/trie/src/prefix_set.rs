@@ -75,17 +75,19 @@ pub struct TriePrefixSets {
 /// ```
 /// use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
 ///
-/// let mut prefix_set = PrefixSetMut::default();
-/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
-/// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
+/// let mut prefix_set_mut = PrefixSetMut::default();
+/// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
+/// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
+/// let mut prefix_set = prefix_set_mut.freeze();
 /// assert!(prefix_set.contains(&[0xa, 0xb]));
 /// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
 /// ```
 #[derive(Clone, Default, Debug)]
 pub struct PrefixSetMut {
+    /// Flag indicating that any entry should be considered changed.
+    /// If set, the keys will be discarded.
+    all: bool,
     keys: Vec<Nibbles>,
-    sorted: bool,
-    index: usize,
 }
 
 impl<I> From<I> for PrefixSetMut
@@ -93,47 +95,23 @@ where
     I: IntoIterator<Item = Nibbles>,
 {
     fn from(value: I) -> Self {
-        Self { keys: value.into_iter().collect(), ..Default::default() }
+        Self { all: false, keys: value.into_iter().collect() }
     }
 }
 
 impl PrefixSetMut {
     /// Create [`PrefixSetMut`] with pre-allocated capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self { keys: Vec::with_capacity(capacity), ..Default::default() }
+        Self { all: false, keys: Vec::with_capacity(capacity) }
     }
 
-    /// Returns `true` if any of the keys in the set has the given prefix or
-    /// if the given prefix is a prefix of any key in the set.
-    pub fn contains(&mut self, prefix: &[u8]) -> bool {
-        if !self.sorted {
-            self.keys.sort();
-            self.keys.dedup();
-            self.sorted = true;
-        }
-
-        while self.index > 0 && self.keys[self.index] > *prefix {
-            self.index -= 1;
-        }
-
-        for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.has_prefix(prefix) {
-                self.index += idx;
-                return true
-            }
-
-            if *key > *prefix {
-                self.index += idx;
-                return false
-            }
-        }
-
-        false
+    /// Create [`PrefixSetMut`] that considers all key changed.
+    pub const fn all() -> Self {
+        Self { all: true, keys: Vec::new() }
     }
 
     /// Inserts the given `nibbles` into the set.
     pub fn insert(&mut self, nibbles: Nibbles) {
-        self.sorted = false;
         self.keys.push(nibbles);
     }
 
@@ -142,7 +120,6 @@ impl PrefixSetMut {
     where
         I: IntoIterator<Item = Nibbles>,
     {
-        self.sorted = false;
         self.keys.extend(nibbles_iter);
     }
 
@@ -160,15 +137,16 @@ impl PrefixSetMut {
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
-        if !self.sorted {
+        if self.all {
+            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
+        } else {
             self.keys.sort();
             self.keys.dedup();
+            // we need to shrink in both the sorted and non-sorted cases because deduping may have
+            // occurred either on `freeze`, or during `contains`.
+            self.keys.shrink_to_fit();
+            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
-
-        // we need to shrink in both the sorted and non-sorted cases because deduping may have
-        // occurred either on `freeze`, or during `contains`.
-        self.keys.shrink_to_fit();
-        PrefixSet { keys: Arc::new(self.keys), index: self.index }
     }
 }
 
@@ -177,15 +155,21 @@ impl PrefixSetMut {
 /// See also [`PrefixSetMut::freeze`].
 #[derive(Debug, Default, Clone)]
 pub struct PrefixSet {
-    keys: Arc<Vec<Nibbles>>,
+    /// Flag indicating that any entry should be considered changed.
+    all: bool,
     index: usize,
+    keys: Arc<Vec<Nibbles>>,
 }
 
 impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix or
     /// if the given prefix is a prefix of any key in the set.
     #[inline]
-    pub fn contains(&mut self, prefix: &Nibbles) -> bool {
+    pub fn contains(&mut self, prefix: &[u8]) -> bool {
+        if self.all {
+            return true
+        }
+
         while self.index > 0 && &self.keys[self.index] > prefix {
             self.index -= 1;
         }
@@ -235,12 +219,13 @@ mod tests {
 
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
-        let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 4]));
-        prefix_set.insert(Nibbles::from_nibbles([4, 5, 6]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 4]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
+        let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&[1, 2]));
         assert!(prefix_set.contains(&[4, 5]));
         assert!(!prefix_set.contains(&[7, 8]));
@@ -249,40 +234,40 @@ mod tests {
 
     #[test]
     fn test_freeze_shrinks_capacity() {
-        let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 4]));
-        prefix_set.insert(Nibbles::from_nibbles([4, 5, 6]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 4]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
+
+        let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&[1, 2]));
         assert!(prefix_set.contains(&[4, 5]));
         assert!(!prefix_set.contains(&[7, 8]));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
-
-        let frozen = prefix_set.freeze();
-        assert_eq!(frozen.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(frozen.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
     }
 
     #[test]
     fn test_freeze_shrinks_existing_capacity() {
         // do the above test but with preallocated capacity
-        let mut prefix_set = PrefixSetMut::with_capacity(101);
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 4]));
-        prefix_set.insert(Nibbles::from_nibbles([4, 5, 6]));
-        prefix_set.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
+        let mut prefix_set_mut = PrefixSetMut::with_capacity(101);
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 4]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
+        prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
+
+        let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&[1, 2]));
         assert!(prefix_set.contains(&[4, 5]));
         assert!(!prefix_set.contains(&[7, 8]));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
-
-        let frozen = prefix_set.freeze();
-        assert_eq!(frozen.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(frozen.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
     }
 }

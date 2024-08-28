@@ -21,11 +21,11 @@ pub(crate) mod utils;
 
 use reth_db_api::{
     models::{
-        accounts::{AccountBeforeTx, BlockNumberAddress},
+        accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         client_version::ClientVersion,
         storage_sharded_key::StorageShardedKey,
-        CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table},
 };

@@ -1,5 +1,5 @@
 use reth_metrics::{
-    metrics::{Counter, Gauge},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
@@ -15,5 +15,7 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) forkchoice_updated_messages: Counter,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
+    /// Histogram of persistence operation durations (in seconds)
+    pub(crate) persistence_duration: Histogram,
     // TODO add latency metrics
 }

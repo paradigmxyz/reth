@@ -6,13 +6,13 @@ use reth_primitives::StaticFileSegment;
 #[derive(Clone, Debug, derive_more::Display, PartialEq, Eq)]
 pub enum UnifiedStorageWriterError {
     /// Database writer is missing
-    #[display(fmt = "Database writer is missing")]
+    #[display("Database writer is missing")]
     MissingDatabaseWriter,
     /// Static file writer is missing
-    #[display(fmt = "Static file writer is missing")]
+    #[display("Static file writer is missing")]
     MissingStaticFileWriter,
     /// Static file writer is of wrong segment
-    #[display(fmt = "Static file writer is of wrong segment: got {_0}, expected {_1}")]
+    #[display("Static file writer is of wrong segment: got {_0}, expected {_1}")]
     IncorrectStaticFileWriter(StaticFileSegment, StaticFileSegment),
     /// Database-related errors.
     Database(DatabaseError),

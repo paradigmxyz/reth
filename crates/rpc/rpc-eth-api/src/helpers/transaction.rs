@@ -1,8 +1,6 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::{fmt, ops::Deref, sync::Arc};
-
 use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
@@ -11,20 +9,19 @@ use reth_primitives::{
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
-    utils::recover_raw_transaction, EthApiError, EthResult, EthStateCache, SignError,
-    TransactionSource,
+    utils::recover_raw_transaction, EthApiError, EthStateCache, SignError, TransactionSource,
 };
 use reth_rpc_types::{
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError};
+use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
@@ -58,11 +55,6 @@ pub trait EthTransactions: LoadTransaction {
     ///
     /// Data access in default (L1) trait method implementations.
     fn provider(&self) -> impl BlockReaderIdExt;
-
-    /// Returns a handle for forwarding received raw transactions.
-    ///
-    /// Access to transaction forwarder in default (L1) trait method implementations.
-    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>>;
 
     /// Returns a handle for signing data.
     ///
@@ -188,14 +180,14 @@ pub trait EthTransactions: LoadTransaction {
         })
     }
 
-    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    /// Get transaction by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
         index: usize,
-    ) -> impl Future<Output = Result<Option<Transaction>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
@@ -205,13 +197,14 @@ pub trait EthTransactions: LoadTransaction {
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
                 if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
-                    return Ok(Some(from_recovered_with_block_context(
-                        tx,
-                        block_hash,
-                        block_number,
-                        base_fee_per_gas,
-                        index,
-                    )))
+                    let tx_info = TransactionInfo {
+                        hash: Some(tx.hash()),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        base_fee: base_fee_per_gas.map(u128::from),
+                        index: Some(index as u64),
+                    };
+                    return Ok(Some(from_recovered_with_block_context(tx, tx_info)))
                 }
             }
 
@@ -252,15 +245,6 @@ pub trait EthTransactions: LoadTransaction {
             let recovered = recover_raw_transaction(tx.clone())?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-
-            // On optimism, transactions are forwarded directly to the sequencer to be included in
-            // blocks that it builds.
-            if let Some(client) = self.raw_tx_forwarder().as_ref() {
-                tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
-                let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
-                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
-                });
-            }
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -470,10 +454,7 @@ pub trait EthTransactions: LoadTransaction {
             let recovered =
                 signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-            let pool_transaction = match recovered.try_into() {
-                Ok(converted) => converted,
-                Err(_) => return Err(EthApiError::TransactionConversionError.into()),
-            };
+            let pool_transaction = <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::try_from_consensus(recovered).map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = LoadTransaction::pool(self)
@@ -607,7 +588,9 @@ pub trait LoadTransaction: SpawnBlocking {
 
             if resp.is_none() {
                 // tx not found on disk, check pool
-                if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone().into()) {
+                if let Some(tx) =
+                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
+                {
                     resp = Some(TransactionSource::Pool(tx));
                 }
             }
@@ -658,32 +641,5 @@ pub trait LoadTransaction: SpawnBlocking {
                 .map_err(Self::Error::from_eth_err)?;
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
-    }
-}
-
-/// A trait that allows for forwarding raw transactions.
-///
-/// For example to a sequencer.
-#[async_trait::async_trait]
-pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
-    /// Forwards raw transaction bytes for `eth_sendRawTransaction`
-    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
-}
-
-/// Configure server's forwarder for `eth_sendRawTransaction`, at runtime.
-pub trait UpdateRawTxForwarder {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>);
-}
-
-impl<T, K> UpdateRawTxForwarder for T
-where
-    T: Deref<Target = Arc<K>>,
-    K: UpdateRawTxForwarder,
-{
-    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.deref().deref().set_eth_raw_transaction_forwarder(forwarder);
     }
 }

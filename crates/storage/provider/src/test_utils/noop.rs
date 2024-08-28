@@ -44,6 +44,8 @@ use crate::{
 pub struct NoopProvider;
 
 impl ChainSpecProvider for NoopProvider {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         MAINNET.clone()
     }
@@ -557,12 +559,12 @@ impl CanonStateSubscriptions for NoopProvider {
 }
 
 impl ForkChoiceSubscriptions for NoopProvider {
-    fn subscribe_to_safe_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)
     }
 
-    fn subscribe_to_finalized_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)
     }

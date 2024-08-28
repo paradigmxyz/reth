@@ -47,7 +47,9 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned, TxHash, B256};
+use reth_primitives::{
+    PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256,
+};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -245,6 +247,8 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
+    /// Max number of seen transactions to store for each peer.
+    max_transactions_seen_by_peer_history: u32,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
@@ -286,7 +290,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_pool_imports_info: PendingPoolImportsInfo::new(
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
-            bad_imports: LruCache::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS),
+            bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -295,6 +299,8 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
                 from_network,
                 NETWORK_POOL_TRANSACTIONS_SCOPE,
             ),
+            max_transactions_seen_by_peer_history: transactions_manager_config
+                .max_transactions_seen_by_peer_history,
             metrics,
         }
     }
@@ -904,7 +910,12 @@ where
                 peer_id, client_version, messages, version, ..
             } => {
                 // Insert a new peer into the peerset.
-                let peer = PeerMetadata::new(messages, version, client_version);
+                let peer = PeerMetadata::new(
+                    messages,
+                    version,
+                    client_version,
+                    self.max_transactions_seen_by_peer_history,
+                );
                 let peer = match self.peers.entry(peer_id) {
                     Entry::Occupied(mut entry) => {
                         entry.insert(peer);
@@ -1013,13 +1024,7 @@ where
                         entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
-                        if !self.bad_imports.contains(tx.hash()) {
-                            // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
-                            new_txs.push(pool_transaction);
-
-                            entry.insert(HashSet::from([peer_id]));
-                        } else {
+                        if self.bad_imports.contains(tx.hash()) {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
@@ -1027,6 +1032,12 @@ where
                                 "received a known bad transaction from peer"
                             );
                             has_bad_transactions = true;
+                        } else {
+                            // this is a new transaction that should be imported into the pool
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            new_txs.push(pool_transaction);
+
+                            entry.insert(HashSet::from([peer_id]));
                         }
                     }
                 }
@@ -1386,9 +1397,11 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
+    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        tx: Arc<ValidPoolTransaction<T>>,
+    ) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.clone().into().into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
         Self { size, transaction }
     }
 }
@@ -1613,9 +1626,14 @@ pub struct PeerMetadata {
 
 impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
-    fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
+    fn new(
+        request_tx: PeerRequestSender,
+        version: EthVersion,
+        client_version: Arc<str>,
+        max_transactions_seen_by_peer: u32,
+    ) -> Self {
         Self {
-            seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
+            seen_transactions: LruCache::new(max_transactions_seen_by_peer),
             request_tx,
             version,
             client_version,
@@ -1782,6 +1800,7 @@ mod tests {
                 PeerRequestSender::new(peer_id, to_mock_session_tx),
                 version,
                 Arc::from(""),
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             ),
             to_mock_session_rx,
         )
