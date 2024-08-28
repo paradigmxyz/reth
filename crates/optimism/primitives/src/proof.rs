@@ -1,3 +1,4 @@
+//! Helper function for Receipt root calculation for Optimism hardforks.  
 use reth_primitives::{
     ReceiptWithBloom,B256,
 };
