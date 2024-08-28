@@ -41,7 +41,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
-    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
+    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -277,14 +277,11 @@ impl TreeState {
             let mut blocks_to_remove = self
                 .blocks_by_number
                 .remove(&finalized)
-                .map(|blocks| blocks.into_iter().map(|e| e.block.hash()).collect::<Vec<_>>())
+                .map(|blocks| blocks.into_iter().map(|e| e.block.hash()).collect::<VecDeque<_>>())
                 .unwrap_or_default();
-            while !blocks_to_remove.is_empty() {
-                let to_remove = std::mem::take(&mut blocks_to_remove);
-                for block in to_remove {
-                    if let Some((_, children)) = self.remove_by_hash(block) {
-                        blocks_to_remove.extend(children);
-                    }
+            while let Some(block) = blocks_to_remove.pop_front() {
+                if let Some((_, children)) = self.remove_by_hash(block) {
+                    blocks_to_remove.extend(children);
                 }
             }
         }
@@ -1282,17 +1279,7 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) {
-        // TODO: is the sync target state the right thing to check for here?
-        let finalized = self.state.forkchoice_state_tracker.sync_target_state().and_then(|state| {
-            // if the hash is zero then we should act like there is no finalized hash
-            if state.finalized_block_hash == B256::ZERO {
-                None
-            } else {
-                Some(state.finalized_block_hash)
-            }
-        });
-
-        // TODO: which `finalized` num to fetch here
+        let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block_number, finalized)
             .expect("todo: error handling");
         self.canonical_in_memory_state
