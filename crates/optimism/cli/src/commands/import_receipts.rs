@@ -184,7 +184,7 @@ where
     let static_file_provider = provider_factory.static_file_provider();
 
     while let Some(file_client) =
-        reader.next_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
     {
         // create a new file client from chunk read from file
         let ReceiptFileClient {
