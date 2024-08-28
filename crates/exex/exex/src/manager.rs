@@ -96,6 +96,7 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
     ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
+        // If the notifications channel is not active, we don't need to send any notifications.
         if !self.notifications_state_rx.borrow().is_active() {
             return Poll::Ready(Ok(()))
         }
@@ -169,7 +170,8 @@ impl ExExNotificationsSubscriber {
         Self { notifications: ExExNotifications { receiver, state_tx: state_tx.clone() }, state_tx }
     }
 
-    /// Subscribe to notifications with the given head.
+    /// Subscribe to notifications with the given head. Notifications will be sent starting from the
+    /// head, not inclusive.
     pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
         self.state_tx.send(ExExNotificationsState::Active(Some(head))).unwrap();
         &mut self.notifications

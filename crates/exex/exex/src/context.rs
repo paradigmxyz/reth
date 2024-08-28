@@ -28,7 +28,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     ///
     /// # Important
     ///
-    /// Once a an [`ExExNotification`] is sent over the channel, it is considered delivered by the
+    /// Once an [`ExExNotification`] is sent over the channel, it is considered delivered by the
     /// node.
     pub notifications: ExExNotificationsSubscriber,
 
