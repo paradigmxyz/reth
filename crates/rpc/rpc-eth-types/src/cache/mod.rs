@@ -1,5 +1,4 @@
 //! Async caching support for eth RPC
-
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};

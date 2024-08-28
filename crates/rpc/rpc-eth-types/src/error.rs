@@ -236,10 +236,17 @@ where
 {
     fn from(err: EVMError<T>) -> Self {
         match err {
-            
-            EVMError::Transaction(_) => EthApiError::InvalidTransaction(
-                RpcInvalidTransactionError::NonceTooLow { tx: 0, state: 0 }
-            ),
+            EVMError::Transaction(invalid_tx) => match invalid_tx {
+                InvalidTransaction::NonceTooLow { tx_nonce, state_nonce } => {
+                    EthApiError::InvalidTransaction(
+                        RpcInvalidTransactionError::NonceTooLow { tx: tx_nonce, state: state_nonce }
+                    )
+                }
+                // Handle other cases for InvalidTransaction here if needed
+                _ => {
+                    // Handle other InvalidTransaction errors
+                }
+        }
 
             EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
@@ -267,7 +274,7 @@ where
 #[derive(thiserror::Error, Debug)]
 pub enum RpcInvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
-    #[error("nonce too low")]
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
     NonceTooLow {
          /// The nonce of the transaction.
         tx: u64,
@@ -701,6 +708,11 @@ pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
             Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
         }
     }
+}
+
+// Function to return a detailed nonce error message
+fn detailed_nonce_error(tx_nonce: u64, state_nonce: u64) -> String {
+    format!("nonce too low: next nonce {}, tx nonce {}", state_nonce, tx_nonce)
 }
 
 #[cfg(test)]

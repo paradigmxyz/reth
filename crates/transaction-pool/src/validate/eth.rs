@@ -1,5 +1,6 @@
 //! Ethereum transaction validator.
 
+use crate::error::EthApiError;
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
     blobstore::BlobStore,
@@ -339,7 +340,7 @@ where
         if transaction.nonce() < account.nonce {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::NonceNotConsistent.into(),
+                EthApiError::detailed_nonce_error(transaction.nonce(), account.nonce).into(),
             )
         }
 
