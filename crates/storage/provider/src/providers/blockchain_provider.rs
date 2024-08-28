@@ -1475,7 +1475,7 @@ mod tests {
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
-    const TEST_TRANSACTIONS_COUNT: usize = 4;
+    const TEST_TRANSACTIONS_COUNT: u8 = 4;
 
     fn random_blocks(
         rng: &mut impl Rng,
@@ -1505,7 +1505,6 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         database_blocks: usize,
         in_memory_blocks: usize,
-        tx_count: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
@@ -1524,7 +1523,7 @@ mod tests {
         for block in &mut database_blocks {
             *block = SealedBlock {
                 ommers: vec![Header::default(); 7],
-                body: (0..tx_count).map(|_| random_signed_tx(rng)).collect(),
+                body: (0..block_range_params.tx_count.end).map(|_| random_signed_tx(rng)).collect(),
                 ..block.clone()
             };
         }
@@ -1532,7 +1531,7 @@ mod tests {
         for block in &mut in_memory_blocks {
             *block = SealedBlock {
                 ommers: vec![Header::default(); 7],
-                body: (0..tx_count).map(|_| random_signed_tx(rng)).collect(),
+                body: (0..block_range_params.tx_count.end).map(|_| random_signed_tx(rng)).collect(),
                 ..block.clone()
             };
         }
@@ -1607,7 +1606,6 @@ mod tests {
         rng: &mut impl Rng,
         database_blocks: usize,
         in_memory_blocks: usize,
-        tx_count: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
@@ -1620,7 +1618,6 @@ mod tests {
             MAINNET.clone(),
             database_blocks,
             in_memory_blocks,
-            tx_count,
             block_range_params,
         )
     }
@@ -1802,7 +1799,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1847,7 +1843,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1885,8 +1880,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1936,7 +1933,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1961,7 +1957,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1992,7 +1987,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2017,7 +2011,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2045,7 +2038,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2077,7 +2069,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2106,7 +2097,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2134,7 +2124,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2163,7 +2152,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2192,7 +2180,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2224,7 +2211,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2252,7 +2238,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0, // No blocks in memory
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2281,7 +2266,6 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2311,7 +2295,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2333,7 +2316,6 @@ mod tests {
             &mut rng,
             mid_point,
             mid_point,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2359,7 +2341,6 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2400,7 +2381,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2439,7 +2419,6 @@ mod tests {
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
-            0,
             0,
             BlockRangeParams::default(),
         )?;
@@ -2480,7 +2459,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2505,7 +2483,6 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2552,7 +2529,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2597,7 +2573,6 @@ mod tests {
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
-            0,
             0,
             BlockRangeParams::default(),
         )?;
@@ -2644,7 +2619,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2668,7 +2642,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2697,7 +2670,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2814,7 +2786,6 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
-                0,
                 BlockRangeParams { withdrawals_count: Some(1..3), ..Default::default() },
             )?;
         let blocks = [database_blocks, in_memory_blocks].concat();
@@ -2865,7 +2836,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2887,7 +2857,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2927,7 +2896,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2985,7 +2953,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3044,7 +3011,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3085,7 +3051,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3126,7 +3091,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3283,7 +3247,6 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
-                0,
                 BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
             )?;
 
@@ -3312,7 +3275,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3343,7 +3305,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3393,8 +3354,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the database blocks
@@ -3419,8 +3382,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the in-memory blocks
@@ -3452,7 +3417,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3473,8 +3437,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction ID from in-memory blocks
@@ -3502,8 +3468,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction ID from the database blocks
@@ -3532,7 +3500,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3553,8 +3520,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction ID from in-memory blocks
@@ -3583,8 +3552,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction ID from the database blocks
@@ -3613,7 +3584,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3634,8 +3604,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction hash from the in-memory blocks
@@ -3660,8 +3632,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction hash from the database blocks
@@ -3686,7 +3660,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3707,8 +3680,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the in-memory block
@@ -3748,8 +3723,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the database blocks
@@ -3789,7 +3766,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3810,8 +3786,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction ID from in-memory blocks
@@ -3841,8 +3819,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the database block
@@ -3871,7 +3851,6 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3889,8 +3868,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random block hash from in-memory blocks
@@ -3916,8 +3897,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random block number from in-memory blocks
@@ -3943,8 +3926,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random block hash from the database blocks
@@ -3970,8 +3955,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random block number from the database blocks
@@ -3997,8 +3984,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Generate a random block hash that does not exist
@@ -4020,8 +4009,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Generate a block number that is out of range (non-existent)
@@ -4047,8 +4038,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define a block range entirely within in-memory blocks
@@ -4073,8 +4066,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define a block range entirely within database blocks
@@ -4099,8 +4094,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define a valid transaction range within the database
@@ -4125,8 +4122,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define an empty range that should return no transactions
@@ -4152,8 +4151,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define a valid transaction range within the database
@@ -4186,8 +4187,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Define an empty range that should return no sender addresses
@@ -4213,8 +4216,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the in-memory block
@@ -4244,8 +4249,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Choose a random transaction from the database block
@@ -4275,8 +4282,10 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            TEST_TRANSACTIONS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams {
+                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
+                ..Default::default()
+            },
         )?;
 
         // Generate a random transaction ID that does not exist
