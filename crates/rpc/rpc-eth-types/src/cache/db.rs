@@ -60,13 +60,13 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
 }
 
 impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'a> {
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: reth_trie::HashedPostState,
         address: revm_primitives::Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.hashed_proof(hashed_state, address, slots)
+        self.0.proof(hashed_state, address, slots)
     }
 
     fn witness(

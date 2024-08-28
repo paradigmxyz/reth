@@ -71,21 +71,9 @@ pub trait StateRootProvider: Send + Sync {
 /// A type that can generate state proof on top of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateProofProvider: Send + Sync {
-    /// Get account and storage proofs of target keys in the `BundleState`
-    /// on top of the current state.
-    fn proof(
-        &self,
-        state: &BundleState,
-        address: Address,
-        slots: &[B256],
-    ) -> ProviderResult<AccountProof> {
-        let hashed_state = HashedPostState::from_bundle_state(&state.state);
-        self.hashed_proof(hashed_state, address, slots)
-    }
-
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: HashedPostState,
         address: Address,

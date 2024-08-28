@@ -349,7 +349,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: HashedPostState,
         address: Address,
