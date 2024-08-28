@@ -2,7 +2,7 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use verkle_trie::{database::memory_db::MemoryDb, VerkleConfig};
 
-/// Global configuration for the Verkle trie using an in-memory database.
+/// configuration for the Verkle trie using an in-memory database.
 pub static TRIE_CONFIG: Lazy<Mutex<VerkleConfig<MemoryDb>>> =
     Lazy::new(|| Mutex::new(VerkleConfig::new(MemoryDb::new())));
 
