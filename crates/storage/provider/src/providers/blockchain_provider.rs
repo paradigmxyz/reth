@@ -1908,57 +1908,23 @@ mod tests {
 
     #[test]
     fn test_block_body_indices() -> eyre::Result<()> {
-        // Initialize random number generator and provider factory
-        let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
-
-        // Generate 10 random blocks and split them into database and in-memory blocks
-        let mut blocks = random_block_range(
-            &mut rng,
-            0..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
-        );
-        let (database_blocks, in_memory_blocks) = blocks.split_at_mut(5);
-
-        // Take the first in-memory block and add 7 ommers to it
-        let first_in_mem_block = SealedBlock {
-            ommers: vec![Header::default(); 7],
-            body: vec![
-                random_signed_tx(&mut rng),
-                random_signed_tx(&mut rng),
-                random_signed_tx(&mut rng),
-                random_signed_tx(&mut rng),
-            ],
-            ..in_memory_blocks.first().unwrap().clone()
-        };
-
-        // Insert the first 5 blocks into the database
-        let provider_rw = factory.provider_rw()?;
-        for block in database_blocks.iter_mut() {
-            *block = SealedBlock {
-                body: vec![
-                    random_signed_tx(&mut rng),
-                    random_signed_tx(&mut rng),
-                    random_signed_tx(&mut rng),
-                    random_signed_tx(&mut rng),
-                ],
-                ..block.clone()
-            };
-            provider_rw.insert_historical_block(
-                block.clone().seal_with_senders().expect("failed to seal block with senders"),
-            )?;
-        }
-        provider_rw.commit()?;
-
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        let first_in_mem_block = in_memory_blocks.first().unwrap();
 
         // Insert the first block into the in-memory state
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block),
+                Arc::new(first_in_mem_block.clone()),
                 Arc::new(in_memory_block_senders),
                 Default::default(),
                 Default::default(),
