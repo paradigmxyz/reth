@@ -110,7 +110,7 @@ impl StateRootProvider for StateProviderTest {
 }
 
 impl StateProofProvider for StateProviderTest {
-    fn hashed_proof(
+    fn proof(
         &self,
         _hashed_state: HashedPostState,
         _address: Address,
