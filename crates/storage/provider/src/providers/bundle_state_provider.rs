@@ -151,7 +151,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: HashedPostState,
         address: Address,
@@ -160,7 +160,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
         state.extend(hashed_state);
-        self.state_provider.hashed_proof(state, address, slots)
+        self.state_provider.proof(state, address, slots)
     }
 
     fn witness(

@@ -125,7 +125,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: HashedPostState,
         address: Address,
