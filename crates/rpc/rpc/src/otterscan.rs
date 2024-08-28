@@ -84,7 +84,9 @@ where
 
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
-        self.eth.get_code(address, block_number.map(Into::into)).await.map(|code| !code.is_empty())
+        EthApiServer::get_code(&self.eth, address, block_number.map(Into::into))
+            .await
+            .map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -172,7 +174,7 @@ where
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let receipts = EthApiServer::block_receipts(&self.eth, block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -180,7 +182,7 @@ where
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_hash(block_hash, true);
-        let receipts = self.eth.block_receipts(block_hash.into());
+        let receipts = EthApiServer::block_receipts(&self.eth, block_hash.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -194,7 +196,7 @@ where
     ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let receipts = EthApiServer::block_receipts(&self.eth, block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -282,51 +284,9 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Option<TxHash>> {
-        // Check if the sender is a contract
-        if self.has_code(sender, None).await? {
-            return Ok(None)
-        }
-
-        let highest =
-            EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
-
-        // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-        // exists.
-        if nonce >= highest {
-            return Ok(None)
-        }
-
-        // perform a binary search over the block range to find the block in which the sender's
-        // nonce reached the requested nonce.
-        let num = binary_search::<_, _, ErrorObjectOwned>(
-            1,
-            self.eth.block_number()?.saturating_to(),
-            |mid| {
-                async move {
-                    let mid_nonce =
-                        EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
-                            .await?
-                            .saturating_to::<u64>();
-
-                    // The `transaction_count` returns the `nonce` after the transaction was
-                    // executed, which is the state of the account after the block, and we need to
-                    // find the transaction whose nonce is the pre-state, so
-                    // need to compare with `nonce`(no equal).
-                    Ok(mid_nonce > nonce)
-                }
-            },
-        )
-        .await?;
-
-        let Some(BlockTransactions::Full(transactions)) =
-            self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::UnknownBlockNumber.into());
-        };
-
-        Ok(transactions
-            .into_iter()
-            .find(|tx| *tx.from == *sender && tx.nonce == nonce)
+        Ok(get_transaction_by_sender_and_nonce(&self.eth, sender, nonce, false)
+            .await
+            .map_err(|e| e.into())?
             .map(|tx| tx.hash))
     }
 
@@ -341,7 +301,9 @@ where
             self.eth.block_number()?.saturating_to(),
             |mid| {
                 Box::pin(async move {
-                    Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty())
+                    Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
+                        .await?
+                        .is_empty())
                 })
             },
         )

@@ -913,11 +913,15 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
     where
+<<<<<<< HEAD
         EthApi: EthApiServer<
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
                 reth_rpc_types::AnyTransactionReceipt,
             > + TraceExt,
+=======
+        EthApi: FullEthApiServer,
+>>>>>>> 977982954 (feat(rpc/otterscan): implement FullEthApiServer)
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)
