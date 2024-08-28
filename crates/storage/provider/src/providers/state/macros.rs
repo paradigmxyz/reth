@@ -51,8 +51,7 @@ macro_rules! delegate_provider_impls {
                 fn hashed_storage_root(&self, address: reth_primitives::Address, storage: reth_trie::HashedStorage) ->  reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
             }
             StateProofProvider $(where [$($generics)*])? {
-                fn proof(&self, state: &revm::db::BundleState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
-                fn hashed_proof(&self, state: reth_trie::HashedPostState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
+                fn proof(&self, state: reth_trie::HashedPostState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
                 fn witness(&self, state: reth_trie::HashedPostState, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<std::collections::HashMap<reth_primitives::B256, reth_primitives::Bytes>>;
             }
         );

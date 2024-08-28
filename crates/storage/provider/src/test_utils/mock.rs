@@ -609,7 +609,7 @@ impl StateRootProvider for MockEthProvider {
 }
 
 impl StateProofProvider for MockEthProvider {
-    fn hashed_proof(
+    fn proof(
         &self,
         _hashed_state: HashedPostState,
         address: Address,

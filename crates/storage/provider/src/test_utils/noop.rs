@@ -360,7 +360,7 @@ impl StateRootProvider for NoopProvider {
 }
 
 impl StateProofProvider for NoopProvider {
-    fn hashed_proof(
+    fn proof(
         &self,
         _hashed_state: HashedPostState,
         address: Address,

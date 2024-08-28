@@ -167,7 +167,7 @@ impl StateRootProvider for MemoryOverlayStateProvider {
 
 impl StateProofProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
-    fn hashed_proof(
+    fn proof(
         &self,
         state: HashedPostState,
         address: Address,
@@ -175,7 +175,7 @@ impl StateProofProvider for MemoryOverlayStateProvider {
     ) -> ProviderResult<AccountProof> {
         let mut hashed_state = self.trie_state().hashed_state.clone();
         hashed_state.extend(state);
-        self.historical.hashed_proof(hashed_state, address, slots)
+        self.historical.proof(hashed_state, address, slots)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
