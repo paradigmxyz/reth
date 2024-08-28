@@ -262,7 +262,7 @@ impl TreeState {
             let blocks_to_remove = self
                 .blocks_by_number
                 .range((Bound::Unbounded, Bound::Excluded(finalized)))
-                .flat_map(|(_, blocks)| blocks.into_iter().map(|b| b.block.hash()))
+                .flat_map(|(_, blocks)| blocks.iter().map(|b| b.block.hash()))
                 .collect::<Vec<_>>();
             for hash in blocks_to_remove {
                 self.remove_by_hash(hash);
