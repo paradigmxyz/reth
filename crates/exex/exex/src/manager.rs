@@ -202,24 +202,12 @@ impl ExExNotificationsState {
 }
 
 /// An active subscription to [`ExExNotification`]s.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
 pub struct ExExNotifications {
+    #[deref]
+    #[deref_mut]
     receiver: Receiver<ExExNotification>,
     state_tx: watch::Sender<ExExNotificationsState>,
-}
-
-impl Deref for ExExNotifications {
-    type Target = Receiver<ExExNotification>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.receiver
-    }
-}
-
-impl DerefMut for ExExNotifications {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.receiver
-    }
 }
 
 impl Drop for ExExNotifications {
