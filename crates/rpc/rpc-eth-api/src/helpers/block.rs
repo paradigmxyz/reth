@@ -145,7 +145,8 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             if block_id.is_pending() {
-                // First, try to get the pending block from the provider
+                // First, try to get the pending block from the provider, in case we already
+                // received the actual pending block from the CL.
                 if let Some((block, receipts)) = LoadBlock::provider(self)
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
@@ -153,7 +154,7 @@ pub trait EthBlocks: LoadBlock {
                     return Ok(Some((block, Arc::new(receipts))));
                 }
 
-                // If no pending block from provider, check the local pending block
+                // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
                     return Ok(Some((block.block, Arc::new(receipts))));
                 }

@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 use futures::Future;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -33,8 +34,6 @@ use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use tokio::sync::Mutex;
 use tracing::debug;
-use reth_rpc_types::BlockHashOrNumber;
-use crate::{EthApiTypes, FromEthApiError, FromEvmError};
 
 use super::SpawnBlocking;
 
@@ -133,27 +132,18 @@ pub trait LoadPendingBlock: EthApiTypes {
             let pending = self.pending_block_env_and_cfg()?;
             if pending.origin.is_actual_pending() {
                 if let Some(block) = pending.origin.clone().into_actual_pending() {
-                    match self
+                    // we have the real pending block, so we should also have its receipts
+                    if let Some(receipts) = self
                         .provider()
-                        .receipts_by_block(BlockHashOrNumber::Number(block.number))
+                        .receipts_by_block(block.hash().into())
                         .map_err(Self::Error::from_eth_err)?
                     {
-                        Some(receipts) => return Ok(Some((block, receipts))),
-                        None => {
-                            // Log that we couldn't get receipts for the actual pending block
-                            debug!(
-                                "Couldn't get receipts for actual pending block {}",
-                                block.number
-                            );
-
-                            // Fall through to build our own block
-                            let receipts = self.assemble_block_receipts(&block, &pending)?;
-                            return Ok(Some((block, receipts)));
-                        }
+                        return Ok(Some((block, receipts)))
                     }
                 }
             }
 
+            // we couldn't find the real pending block, so we need to build it ourselves
             let mut lock = self.pending_block().lock().await;
 
             let now = Instant::now();
@@ -186,62 +176,13 @@ pub trait LoadPendingBlock: EthApiTypes {
 
             let now = Instant::now();
             *lock = Some(PendingBlock::new(
-                sealed_block.clone(),
                 now + Duration::from_secs(1),
+                sealed_block.clone(),
                 receipts.clone(),
             ));
 
             Ok(Some((sealed_block, receipts)))
         }
-    }
-
-    /// Assembles an array [`Receipt`] based on its [`SealedBlockWithSenders`] and
-    /// [`PendingBlockEnv`]
-    fn assemble_block_receipts(
-        &self,
-        block: &SealedBlockWithSenders,
-        env: &PendingBlockEnv,
-    ) -> Result<Vec<Receipt>, Self::Error> {
-        let parent_hash = env.origin.build_target_hash();
-        let state_provider = self
-            .provider()
-            .history_by_block_hash(parent_hash)
-            .map_err(Self::Error::from_eth_err)?;
-        let state = StateProviderDatabase::new(state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::new();
-
-        for tx in block.transactions() {
-            // Convert the transaction once and handle potential errors
-            let ecrecovered_tx = tx
-                .clone()
-                .try_into_ecrecovered()
-                .map_err(|_| Self::Error::from_eth_err(EthApiError::InternalEthError))?;
-
-            // Configure the environment for the block.
-            let env = Env::boxed(
-                env.cfg.cfg_env.clone(),
-                env.block_env.clone(),
-                Self::evm_config(self).tx_env(&ecrecovered_tx),
-            );
-
-            let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
-
-            let result = evm.transact().map_err(Self::Error::from_evm_err)?.result;
-
-            // drop evm to release db reference.
-            drop(evm);
-
-            let gas_used = result.gas_used();
-            cumulative_gas_used += gas_used;
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(self.assemble_receipt(&ecrecovered_tx, result, cumulative_gas_used));
-        }
-
-        Ok(receipts)
     }
 
     /// Assembles a [`Receipt`] for a transaction, based on its [`ExecutionResult`].
