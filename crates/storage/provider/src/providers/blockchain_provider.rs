@@ -1475,6 +1475,8 @@ mod tests {
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
+    const TEST_TRANSACTIONS_COUNT: usize = 4;
+
     fn random_blocks(
         rng: &mut impl Rng,
         database_blocks: usize,
@@ -1503,8 +1505,8 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         database_blocks: usize,
         in_memory_blocks: usize,
+        tx_count: usize,
         block_range_params: BlockRangeParams,
-        with_random_txs: bool,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
         Vec<SealedBlock>,
@@ -1519,32 +1521,20 @@ mod tests {
             block_range_params.withdrawals_count,
         );
 
-        if with_random_txs {
-            for block in &mut database_blocks {
-                *block = SealedBlock {
-                    ommers: vec![Header::default(); 7],
-                    body: vec![
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                    ],
-                    ..block.clone()
-                };
-            }
+        for block in &mut database_blocks {
+            *block = SealedBlock {
+                ommers: vec![Header::default(); 7],
+                body: (0..tx_count).map(|_| random_signed_tx(rng)).collect(),
+                ..block.clone()
+            };
+        }
 
-            for block in &mut in_memory_blocks {
-                *block = SealedBlock {
-                    ommers: vec![Header::default(); 7],
-                    body: vec![
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                        random_signed_tx(rng),
-                    ],
-                    ..block.clone()
-                };
-            }
+        for block in &mut in_memory_blocks {
+            *block = SealedBlock {
+                ommers: vec![Header::default(); 7],
+                body: (0..tx_count).map(|_| random_signed_tx(rng)).collect(),
+                ..block.clone()
+            };
         }
 
         let receipts: Vec<Vec<_>> = database_blocks
@@ -1617,6 +1607,7 @@ mod tests {
         rng: &mut impl Rng,
         database_blocks: usize,
         in_memory_blocks: usize,
+        tx_count: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
         BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
@@ -1629,30 +1620,8 @@ mod tests {
             MAINNET.clone(),
             database_blocks,
             in_memory_blocks,
+            tx_count,
             block_range_params,
-            false,
-        )
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn provider_with_random_blocks_and_txs(
-        rng: &mut impl Rng,
-        database_blocks: usize,
-        in_memory_blocks: usize,
-        block_range_params: BlockRangeParams,
-    ) -> eyre::Result<(
-        BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
-        Vec<SealedBlock>,
-        Vec<SealedBlock>,
-        Vec<Vec<Receipt>>,
-    )> {
-        provider_with_chain_spec_and_random_blocks(
-            rng,
-            MAINNET.clone(),
-            database_blocks,
-            in_memory_blocks,
-            block_range_params,
-            true,
         )
     }
 
@@ -1833,6 +1802,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1877,6 +1847,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1910,10 +1881,11 @@ mod tests {
     fn test_block_body_indices() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -1964,6 +1936,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -1988,6 +1961,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2018,6 +1992,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2042,6 +2017,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2069,6 +2045,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2100,6 +2077,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2128,6 +2106,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2155,6 +2134,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2183,6 +2163,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2211,6 +2192,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2242,6 +2224,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2269,6 +2252,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             0, // No blocks in memory
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2297,6 +2281,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2326,6 +2311,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2347,6 +2333,7 @@ mod tests {
             &mut rng,
             mid_point,
             mid_point,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2372,6 +2359,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2412,6 +2400,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2450,6 +2439,7 @@ mod tests {
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
+            0,
             0,
             BlockRangeParams::default(),
         )?;
@@ -2490,6 +2480,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2514,6 +2505,7 @@ mod tests {
             &mut rng,
             mid_point,
             TEST_BLOCKS_COUNT - mid_point,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2560,6 +2552,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2604,6 +2597,7 @@ mod tests {
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
+            0,
             0,
             BlockRangeParams::default(),
         )?;
@@ -2650,6 +2644,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2673,6 +2668,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2701,6 +2697,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2817,8 +2814,8 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
+                0,
                 BlockRangeParams { withdrawals_count: Some(1..3), ..Default::default() },
-                false,
             )?;
         let blocks = [database_blocks, in_memory_blocks].concat();
 
@@ -2868,6 +2865,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2889,6 +2887,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2928,6 +2927,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -2985,6 +2985,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3043,6 +3044,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3083,6 +3085,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3123,6 +3126,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3279,8 +3283,8 @@ mod tests {
                 chain_spec.clone(),
                 TEST_BLOCKS_COUNT,
                 TEST_BLOCKS_COUNT,
+                0,
                 BlockRangeParams { requests_count: Some(1..2), ..Default::default() },
-                false,
             )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3308,6 +3312,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3338,6 +3343,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3383,10 +3389,11 @@ mod tests {
     #[test]
     fn transaction_id_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3408,10 +3415,11 @@ mod tests {
     #[test]
     fn transaction_id_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3444,6 +3452,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3460,10 +3469,11 @@ mod tests {
     #[test]
     fn transaction_by_id_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3488,10 +3498,11 @@ mod tests {
     #[test]
     fn transaction_by_id_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3521,6 +3532,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3537,10 +3549,11 @@ mod tests {
     #[test]
     fn transaction_by_id_no_hash_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3566,10 +3579,11 @@ mod tests {
     #[test]
     fn transaction_by_id_no_hash_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3599,6 +3613,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3615,10 +3630,11 @@ mod tests {
     #[test]
     fn transaction_by_hash_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3640,10 +3656,11 @@ mod tests {
     #[test]
     fn transaction_by_hash_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3669,6 +3686,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3685,10 +3703,11 @@ mod tests {
     #[test]
     fn transaction_by_hash_with_meta_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3725,10 +3744,11 @@ mod tests {
     #[test]
     fn transaction_by_hash_with_meta_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3769,6 +3789,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3785,10 +3806,11 @@ mod tests {
     #[test]
     fn transaction_block_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3815,10 +3837,11 @@ mod tests {
     #[test]
     fn transaction_block_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3848,6 +3871,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            0,
             BlockRangeParams::default(),
         )?;
 
@@ -3861,10 +3885,11 @@ mod tests {
     #[test]
     fn transactions_found_by_block_hash_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3887,10 +3912,11 @@ mod tests {
     #[test]
     fn transactions_found_by_block_number_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3913,10 +3939,11 @@ mod tests {
     #[test]
     fn transactions_found_by_block_hash_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3939,10 +3966,11 @@ mod tests {
     #[test]
     fn transactions_found_by_block_number_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3965,10 +3993,11 @@ mod tests {
     #[test]
     fn transactions_not_found_for_non_existent_block_hash() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -3987,10 +4016,11 @@ mod tests {
     #[test]
     fn transactions_not_found_for_non_existent_block_number() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4013,10 +4043,11 @@ mod tests {
     #[test]
     fn transactions_found_entirely_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4038,10 +4069,11 @@ mod tests {
     #[test]
     fn transactions_found_entirely_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4063,10 +4095,11 @@ mod tests {
     #[test]
     fn valid_range_returns_transactions() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4088,10 +4121,11 @@ mod tests {
     #[test]
     fn empty_range_returns_no_transactions() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4114,10 +4148,11 @@ mod tests {
     #[test]
     fn valid_range_returns_senders() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4147,10 +4182,11 @@ mod tests {
     #[test]
     fn empty_range_returns_no_senders() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4173,10 +4209,11 @@ mod tests {
     #[test]
     fn transaction_sender_found_in_memory() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4203,10 +4240,11 @@ mod tests {
     #[test]
     fn transaction_sender_found_in_database() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             0,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
@@ -4233,10 +4271,11 @@ mod tests {
     #[test]
     fn transaction_sender_not_found() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks_and_txs(
+        let (provider, _, _, _) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
+            TEST_TRANSACTIONS_COUNT,
             BlockRangeParams::default(),
         )?;
 
