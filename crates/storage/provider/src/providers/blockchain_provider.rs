@@ -1458,9 +1458,9 @@ mod tests {
     };
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Header, Receipt,
-        SealedBlock, SealedBlockWithSenders, StaticFileSegment, TransactionMeta,
-        TransactionSignedNoHash, Withdrawals, B256,
+        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Receipt, SealedBlock,
+        SealedBlockWithSenders, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
+        Withdrawals, B256,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
@@ -1469,7 +1469,7 @@ mod tests {
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
-        random_receipt, random_signed_tx, BlockParams, BlockRangeParams,
+        random_receipt, BlockParams, BlockRangeParams,
     };
     use revm::db::BundleState;
 
@@ -1483,6 +1483,7 @@ mod tests {
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
         withdrawals_count: Option<Range<u8>>,
+        tx_count: Range<u8>,
     ) -> (Vec<SealedBlock>, Vec<SealedBlock>) {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
         let blocks = random_block_range(
@@ -1490,7 +1491,11 @@ mod tests {
             0..=block_range,
             BlockRangeParams {
                 parent: Some(B256::ZERO),
-                tx_count: 0..1,
+                tx_count: if tx_count.end == tx_count.start {
+                    tx_count.start..tx_count.start + 1
+                } else {
+                    tx_count
+                },
                 requests_count,
                 withdrawals_count,
             },
@@ -1512,29 +1517,14 @@ mod tests {
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
     )> {
-        let (mut database_blocks, mut in_memory_blocks) = random_blocks(
+        let (database_blocks, in_memory_blocks) = random_blocks(
             rng,
             database_blocks,
             in_memory_blocks,
             block_range_params.requests_count,
             block_range_params.withdrawals_count,
+            block_range_params.tx_count,
         );
-
-        for block in &mut database_blocks {
-            *block = SealedBlock {
-                ommers: vec![Header::default(); 7],
-                body: (0..block_range_params.tx_count.end).map(|_| random_signed_tx(rng)).collect(),
-                ..block.clone()
-            };
-        }
-
-        for block in &mut in_memory_blocks {
-            *block = SealedBlock {
-                ommers: vec![Header::default(); 7],
-                body: (0..block_range_params.tx_count.end).map(|_| random_signed_tx(rng)).collect(),
-                ..block.clone()
-            };
-        }
 
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
@@ -3126,7 +3116,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let (database_blocks, in_memory_blocks) =
-            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None, None);
+            random_blocks(&mut rng, TEST_BLOCKS_COUNT, 1, None, None, 0..1);
 
         let first_database_block = database_blocks.first().map(|block| block.number).unwrap();
         let last_database_block = database_blocks.last().map(|block| block.number).unwrap();
