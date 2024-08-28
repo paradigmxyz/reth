@@ -64,7 +64,7 @@ where
     /// Create a new collector with some capacity.
     ///
     /// Once the capacity (in bytes) is reached, the data is sorted and flushed to disk.
-    pub fn new(buffer_capacity_bytes: usize, parent_dir: Option<PathBuf>) -> Self {
+    pub const fn new(buffer_capacity_bytes: usize, parent_dir: Option<PathBuf>) -> Self {
         Self {
             parent_dir,
             dir: None,
@@ -77,12 +77,12 @@ where
     }
 
     /// Returns number of elements currently in the collector.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if there are currently no elements in the collector.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
 
@@ -299,7 +299,7 @@ mod tests {
             let expected = entries[id];
             assert_eq!(
                 entry.unwrap(),
-                (expected.0.encode().to_vec(), expected.1.compress().to_vec())
+                (expected.0.encode().to_vec(), expected.1.compress().clone())
             );
         }
 

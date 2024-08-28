@@ -1,0 +1,38 @@
+[package]
+name = "reth-optimism-chainspec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "EVM chain spec implementation for optimism."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec = { workspace = true, features = ["optimism"] }
+reth-ethereum-forks = { workspace = true, features = ["optimism"] }
+reth-primitives-traits.workspace = true
+
+# ethereum
+alloy-chains.workspace = true
+alloy-primitives.workspace = true
+
+# io
+serde_json.workspace = true
+
+# misc
+once_cell.workspace = true
+derive_more.workspace = true
+
+[dev-dependencies]
+reth-chainspec = { workspace = true, features = ["test-utils"] }
+alloy-genesis.workspace = true
+op-alloy-rpc-types.workspace = true
+
+[features]
+default = ["std"]
+std = []

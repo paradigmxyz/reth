@@ -265,9 +265,8 @@ mod tests {
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_receipt, BlockRangeParams,
     };
     use std::{
         sync::{mpsc::channel, Arc},
@@ -279,7 +278,11 @@ mod tests {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=3,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
@@ -291,10 +294,10 @@ mod tests {
         static_file_writer.commit().expect("prune headers");
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
-        blocks.iter().for_each(|block| {
+        for block in &blocks {
             TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
                 .expect("insert block header");
-        });
+        }
         tx.commit().expect("commit tx");
 
         let mut receipts = Vec::new();

@@ -622,10 +622,7 @@ mod tests {
     use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, random_header},
-    };
+    use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
 
@@ -713,7 +710,8 @@ mod tests {
         let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, None, Some(3), None, None, None);
+        let block =
+            random_block(&mut rng, 0, BlockParams { tx_count: Some(3), ..Default::default() });
 
         let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {

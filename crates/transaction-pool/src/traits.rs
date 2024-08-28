@@ -716,7 +716,31 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+}
 
+impl<T> BestTransactions for Box<T>
+where
+    T: BestTransactions + ?Sized,
+{
+    fn mark_invalid(&mut self, transaction: &Self::Item) {
+        (**self).mark_invalid(transaction);
+    }
+
+    fn no_updates(&mut self) {
+        (**self).no_updates();
+    }
+
+    fn skip_blobs(&mut self) {
+        (**self).skip_blobs();
+    }
+
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        (**self).set_skip_blobs(skip_blobs);
+    }
+}
+
+/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
+pub trait BestTransactionsFilter: BestTransactions {
     /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
     ///
     /// Given an element the closure must return true or false. The returned iterator will yield
@@ -732,6 +756,8 @@ pub trait BestTransactions: Iterator + Send {
     }
 }
 
+impl<T> BestTransactionsFilter for T where T: BestTransactions {}
+
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -743,7 +769,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
-/// A Helper type that bundles best transactions attributes together.
+/// A Helper type that bundles the best transactions attributes together.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BestTransactionsAttributes {
     /// The base fee attribute for best transactions.
