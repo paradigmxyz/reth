@@ -18,7 +18,7 @@ use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
@@ -126,8 +126,7 @@ mod tests {
         inspectors::NoOpInspector,
         JournaledState,
     };
-    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::collections::HashSet;
+    use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg, HashSet};
 
     #[test]
     fn test_fill_cfg_and_block_env() {

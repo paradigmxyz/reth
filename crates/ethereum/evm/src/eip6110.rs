@@ -7,7 +7,7 @@ use reth_primitives::{Receipt, Request};
 use revm_primitives::Log;
 
 #[cfg(not(feature = "std"))]
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, vec, vec::Vec};
 
 sol! {
     #[allow(missing_docs)]
