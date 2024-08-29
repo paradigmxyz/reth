@@ -7,7 +7,6 @@ use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     future::{poll_fn, Future},
-    ops::{Deref, DerefMut},
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
