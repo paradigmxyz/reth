@@ -21,6 +21,7 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
+use reth_rpc_types::WithOtherFields;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -300,7 +301,9 @@ where
     Engine: EngineApiServer<Node::Engine>,
     EthApi: EthApiBuilderProvider<Node>
         + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         >,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;

@@ -15,7 +15,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, Rich,
+    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -40,7 +40,9 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>,
+    Eth: EthApiTypes<
+        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+    >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
@@ -57,11 +59,7 @@ where
             .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
-        Ok(BlockDetails::new(
-            Rich { inner: block, extra_info: Default::default() },
-            Default::default(),
-            U256::from(total_fees),
-        ))
+        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
     }
 }
 
@@ -69,8 +67,11 @@ where
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
     Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
-        + EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>
-        + TraceExt
+        + EthApiTypes<
+            NetworkTypes: Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + TraceExt
         + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
@@ -187,7 +188,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions> {
+    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number.into(), true);
         let receipts = self.eth.block_receipts(block_number.into());

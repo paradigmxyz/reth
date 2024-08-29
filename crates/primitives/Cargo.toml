@@ -26,9 +26,13 @@ reth-optimism-chainspec = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
+alloy-serde = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
+
+# optimism
+op-alloy-rpc-types = { workspace = true, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
@@ -103,7 +107,7 @@ optimism = [
     "revm-primitives/optimism",
     "dep:reth-optimism-chainspec",
 ]
-alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde", "dep:op-alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]

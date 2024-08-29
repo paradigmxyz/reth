@@ -2,9 +2,9 @@
 
 use std::error::Error;
 
-use alloy_network::{Ethereum, Network};
+use alloy_network::{AnyNetwork, Network};
 use reth_rpc_eth_types::EthApiError;
-use reth_rpc_types::{Block, Transaction};
+use reth_rpc_types::{Block, Transaction, WithOtherFields};
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -20,12 +20,12 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     // todo: remove restriction `reth_rpc_types::Transaction`
-    type NetworkTypes: Network<TransactionResponse = Transaction>;
+    type NetworkTypes: Network<TransactionResponse = WithOtherFields<Transaction>>;
 }
 
 impl EthApiTypes for () {
     type Error = EthApiError;
-    type NetworkTypes = Ethereum;
+    type NetworkTypes = AnyNetwork;
 }
 
 /// Adapter for network specific transaction type.
