@@ -189,3 +189,51 @@ impl<N: FullNodeComponents> BuilderProvider<N> for () {
 }
 
 const fn noop_builder(_: ()) {}
+
+/// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
+pub trait NodeTy {
+    /// The node's primitive types, defining basic operations and structures.
+    type Primitives;
+    /// The node's engine types, defining the interaction with the consensus engine.
+    type Engine;
+    /// The type used for configuration of the EVM.
+    type ChainSpec;
+}
+
+impl<T> NodeTy for T
+where
+    T: NodeTypes,
+{
+    type Primitives = <T as NodeTypes>::Primitives;
+    type Engine = <T as NodeTypes>::Engine;
+    type ChainSpec = <T as NodeTypes>::ChainSpec;
+}
+
+/// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
+/// defining types.
+pub trait NodeCore: NodeTy {
+    /// Underlying database type used by the node to store and retrieve data.
+    type DB;
+    /// The provider type used to interact with the node.
+    type Provider;
+    /// The transaction pool of the node.
+    type Pool;
+    /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
+    type Evm;
+    /// The type that knows how to execute blocks.
+    type Executor;
+    /// Network API.
+    type Network;
+}
+
+impl<T> NodeCore for T
+where
+    T: FullNodeComponents,
+{
+    type DB = <T as FullNodeTypes>::DB;
+    type Provider = <T as FullNodeTypes>::Provider;
+    type Pool = <T as FullNodeComponents>::Pool;
+    type Network = <T as FullNodeComponents>::Network;
+    type Evm = <T as FullNodeComponents>::Evm;
+    type Executor = <T as FullNodeComponents>::Executor;
+}
