@@ -2855,8 +2855,6 @@ mod tests {
 
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
-        let provider_block =
-            provider.block_by_id(block_number.into()).unwrap().unwrap().withdrawals;
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
@@ -3836,7 +3834,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_range_returns_transactions() -> eyre::Result<()> {
+    fn test_transactions_by_tx_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
@@ -3860,22 +3858,6 @@ mod tests {
         assert_eq!(result[0], database_blocks[0].body[0].clone().into());
         assert_eq!(result[1], database_blocks[0].body[1].clone().into());
 
-        Ok(())
-    }
-
-    #[test]
-    fn empty_range_returns_no_transactions() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
-
         // Define an empty range that should return no transactions
         let start_tx_num = u64::MAX;
         let end_tx_num = u64::MAX;
@@ -3893,7 +3875,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_range_returns_senders() -> eyre::Result<()> {
+    fn test_senders_by_tx_range() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, _, _) = provider_with_random_blocks(
             &mut rng,
@@ -3924,22 +3906,6 @@ mod tests {
             database_blocks[0].senders().unwrap()[1],
             "The sender address should match the expected sender address"
         );
-
-        Ok(())
-    }
-
-    #[test]
-    fn empty_range_returns_no_senders() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            0,
-            BlockRangeParams {
-                tx_count: TEST_TRANSACTIONS_COUNT..TEST_TRANSACTIONS_COUNT,
-                ..Default::default()
-            },
-        )?;
 
         // Define an empty range that should return no sender addresses
         let start_tx_num = u64::MAX;
