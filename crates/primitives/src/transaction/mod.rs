@@ -5,6 +5,7 @@ use crate::{
     B256, U256,
 };
 
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -276,8 +277,8 @@ impl Transaction {
             Self::Legacy(TxLegacy { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) |
             Self::Eip1559(TxEip1559 { gas_limit, .. }) |
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
-            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit,
+            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
         }
@@ -504,7 +505,7 @@ impl Transaction {
             }
             Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
             Self::Eip7702(set_code_tx) => {
-                set_code_tx.encode_with_signature(signature, out, with_header)
+                set_code_tx.encode_with_signature(&signature.to_alloy_signature(), out, with_header)
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
@@ -518,7 +519,7 @@ impl Transaction {
             Self::Eip2930(tx) => tx.gas_limit = gas_limit,
             Self::Eip1559(tx) => tx.gas_limit = gas_limit,
             Self::Eip4844(tx) => tx.gas_limit = gas_limit,
-            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit as u128,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_limit = gas_limit,
         }
@@ -1183,7 +1184,7 @@ impl TransactionSigned {
             }
             Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
             Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature(&self.signature)
+                set_code_tx.payload_len_with_signature(&self.signature.to_alloy_signature())
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
@@ -1311,7 +1312,7 @@ impl TransactionSigned {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
-            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
+            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
             TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
@@ -1388,9 +1389,8 @@ impl TransactionSigned {
             Transaction::Eip4844(blob_tx) => {
                 blob_tx.payload_len_with_signature_without_header(&self.signature)
             }
-            Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature_without_header(&self.signature)
-            }
+            Transaction::Eip7702(set_code_tx) => set_code_tx
+                .payload_len_with_signature_without_header(&self.signature.to_alloy_signature()),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
         }
