@@ -35,6 +35,21 @@ where
             .ok_or(Self::Error::from_eth_err(EthApiError::UnknownBlockNumber))?;
 
         let block = block.unseal();
+
+        Ok(self.build_receipt(receipts, block, meta))
+    }
+}
+
+impl<N> OpEthApi<N>
+where
+    N: NodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
+{
+    pub fn build_receipt(
+        &self,
+        receipts: Arc<Vec<Receipt>>,
+        block: Block,
+        meta: TransactionMeta,
+    ) -> Result<AnyTransactionReceipt, Self::Error> {
         let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
