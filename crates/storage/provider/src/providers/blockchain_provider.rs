@@ -1435,7 +1435,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::Range, sync::Arc, time::Instant};
+    use std::{
+        ops::{Range, RangeBounds},
+        sync::Arc,
+        time::Instant,
+    };
 
     use crate::{
         providers::BlockchainProvider2,
@@ -1472,6 +1476,7 @@ mod tests {
         random_receipt, BlockParams, BlockRangeParams,
     };
     use revm::db::BundleState;
+    use std::ops::Bound;
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -1483,19 +1488,27 @@ mod tests {
         in_memory_blocks: usize,
         requests_count: Option<Range<u8>>,
         withdrawals_count: Option<Range<u8>>,
-        tx_count: Range<u8>,
+        tx_count: impl RangeBounds<u8>,
     ) -> (Vec<SealedBlock>, Vec<SealedBlock>) {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
+
+        let tx_start = match tx_count.start_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n,
+            Bound::Unbounded => u8::MIN,
+        };
+        let tx_end = match tx_count.end_bound() {
+            Bound::Included(&n) => n,
+            Bound::Excluded(&n) => n + 1,
+            Bound::Unbounded => u8::MAX,
+        };
+
         let blocks = random_block_range(
             rng,
             0..=block_range,
             BlockRangeParams {
                 parent: Some(B256::ZERO),
-                tx_count: if tx_count.end == tx_count.start {
-                    tx_count.start..tx_count.start + 1
-                } else {
-                    tx_count
-                },
+                tx_count: tx_start..tx_end,
                 requests_count,
                 withdrawals_count,
             },
