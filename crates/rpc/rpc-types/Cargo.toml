@@ -15,16 +15,16 @@ workspace = true
 
 # ethereum
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
-alloy-rpc-types = { workspace = true, features = [
-    "admin",
-    "anvil",
-    "debug",
-    "engine",
-    "mev",
-    "trace",
-    "txpool"
-] }
+alloy-rpc-types.workspace = true
+alloy-rpc-types-admin.workspace = true
+alloy-rpc-types-anvil.workspace = true
+alloy-rpc-types-beacon = { workspace = true, optional = true }
+alloy-rpc-types-mev.workspace = true
+alloy-rpc-types-trace.workspace = true
+alloy-rpc-types-txpool.workspace = true
+alloy-rpc-types-debug.workspace = true
 alloy-serde.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"], optional = true }
 
 # optimism
 op-alloy-rpc-types.workspace = true
@@ -43,8 +43,9 @@ rand.workspace = true
 default = ["jsonrpsee-types"]
 jsonrpsee-types = [
     "dep:jsonrpsee-types",
+    "dep:alloy-rpc-types-beacon",
+    "dep:alloy-rpc-types-engine",
     "alloy-rpc-types/jsonrpsee-types",
-    "alloy-rpc-types/beacon",
-    "alloy-rpc-types/engine",
+    "alloy-rpc-types-engine/jsonrpsee-types",
 ]
 arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
