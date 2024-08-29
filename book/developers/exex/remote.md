@@ -274,7 +274,8 @@ async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.recv().await {
+    let notifications = ctx.notifications.subscribe();
+    while let Some(notification) = notifications.recv().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
                 .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
@@ -381,7 +382,8 @@ async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.recv().await {
+    let notifications = ctx.notifications.subscribe();
+    while let Some(notification) = notifications.recv().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
                 .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;

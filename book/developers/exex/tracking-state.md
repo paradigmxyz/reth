@@ -32,6 +32,16 @@ use reth_tracing::tracing::info;
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
+    notifications: ExExNotifications,
+}
+
+impl<Node: FullNodeComponents> MyExEx<Node> {
+    fn new(ctx: ExExContext<Node>) -> Self {
+        Self {
+            ctx,
+            notifications: ctx.notifications.subscribe(),
+        }
+    }
 }
 
 impl<Node: FullNodeComponents> Future for MyExEx<Node> {
@@ -40,7 +50,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
+        while let Some(notification) = ready!(this.notifications.poll_recv(cx)) {
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
