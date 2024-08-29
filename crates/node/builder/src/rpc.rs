@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeCore};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -376,7 +376,7 @@ where
 }
 
 /// Provides builder for the core `eth` API type.
-pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + EthApiTypes {
+pub trait EthApiBuilderProvider<N: NodeCore>: BuilderProvider<N> + EthApiTypes {
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
     fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
@@ -384,7 +384,7 @@ pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + Eth
 
 impl<N, F> EthApiBuilderProvider<N> for F
 where
-    N: FullNodeComponents,
+    N: NodeCore,
     for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>> + EthApiTypes,
 {
     fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {

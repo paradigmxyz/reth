@@ -195,14 +195,14 @@ pub trait NodeTy {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives;
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine;
+    type Engine: Send + Sync + Clone + Unpin;
     /// The type used for configuration of the EVM.
-    type ChainSpec;
+    type ChainSpec: Send + Sync;
 }
 
 impl<T> NodeTy for T
 where
-    T: NodeTypes,
+    T: NodeTypes + Clone,
 {
     type Primitives = <T as NodeTypes>::Primitives;
     type Engine = <T as NodeTypes>::Engine;
@@ -211,19 +211,19 @@ where
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
 /// defining types.
-pub trait NodeCore: NodeTy {
+pub trait NodeCore: NodeTy + Clone {
     /// Underlying database type used by the node to store and retrieve data.
-    type DB;
+    type DB: Send + Sync + Clone + Unpin;
     /// The provider type used to interact with the node.
-    type Provider;
+    type Provider: Send + Sync + Clone + Unpin;
     /// The transaction pool of the node.
-    type Pool;
+    type Pool: Send + Sync + Clone + Unpin;
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm;
+    type Evm: Send + Sync + Clone + Unpin;
     /// The type that knows how to execute blocks.
-    type Executor;
+    type Executor: Send + Sync + Clone + Unpin;
     /// Network API.
-    type Network;
+    type Network: Send + Sync + Clone;
 }
 
 impl<T> NodeCore for T
