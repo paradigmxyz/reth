@@ -47,3 +47,6 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+reth-optimism-chainspec.workspace = true 

@@ -169,7 +169,7 @@ impl OpReceiptMetaBuilder {
             l1_fee,
             l1_data_gas: l1_gas_used,
             l1_fee_scalar,
-            l1_base_fee,
+            l1_base_fee: l1_gas_price,
             deposit_nonce,
             deposit_receipt_version,
             l1_base_fee_scalar,
@@ -178,7 +178,7 @@ impl OpReceiptMetaBuilder {
         } = self;
 
         OptimismTransactionReceiptFields {
-            l1_gas_price: l1_base_fee,
+            l1_gas_price,
             l1_gas_used,
             l1_fee,
             l1_fee_scalar,
@@ -188,5 +188,96 @@ impl OpReceiptMetaBuilder {
             l1_blob_base_fee,
             l1_blob_base_fee_scalar,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_optimism_chainspec::OP_MAINNET;
+    use reth_primitives::Block;
+
+    use super::*;
+
+    /// OP Mainnet transaction at index 0 in block 124665056.
+    ///
+    /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
+    const TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056: &str = r#"{"hash":"0x312e290cf36df704a2217b015d6455396830b0ce678b860ebfcc30f41403d7b1","signature":{"r":0,"s":0,"odd_y_parity":false},"transaction":{"Legacy":{"chain_id":10,"nonce":19429994,"gas_price":142541,"gas_limit":300000,"to":"0x4200000000000000000000000000000000000015","value":0,"input":"0x440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985"}}}"#;
+
+    /// OP Mainnet transaction at index 1 in block 124665056.
+    ///
+    /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
+    const TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056: &str = r#"{"hash":"0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a","signature":{"r":"13007002095092827311851034925236438545740246347271474487442111518983474121409","s":"17538143614307881621478789077517273085472409472482011425440968747716890363014","odd_y_parity":true},"transaction":{"Legacy":{"chain_id":10,"nonce":261031,"gas_price":142541,"gas_limit":300000,"to":"0x3E6f4f7866654c18f536170780344AA8772950b6","value":0,"input":"0x6a761202000000000000000000000000087000a300de7200382b55d40045000000e5d60e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000022482ad56cb0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000120000000000000000000000000dc6ff44d5d932cbd77b52e5612ba0529dc6226f1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c0000000000000000000000000000000000000000000000049b9ca9a6943400000000000000000000000000000000000000000000000000000000000000000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024b6b55f250000000000000000000000000000000000000000000000049b9ca9a694340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000415ec214a3950bea839a7e6fbb0ba1540ac2076acd50820e2d5ef83d0902cdffb24a47aff7de5190290769c4f0a9c6fabf63012986a0d590b1b571547a8c7050ea1b00000000000000000000000000000000000000000000000000000000000000"}}}"#;
+
+    /// L1 block info for transaction at index 1 in block 124665056.
+    ///
+    /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
+    const L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056: OptimismTransactionReceiptFields =
+        OptimismTransactionReceiptFields {
+            l1_gas_price: Some(1055991687),
+            l1_gas_used: Some(4471),
+            l1_fee: Some(24681034813),
+            l1_fee_scalar: None,
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+            l1_base_fee_scalar: Some(0), /* todo: what was it for tx 0x10..41 in block mainnet
+                                          * 124665056? */
+            l1_blob_base_fee: None,
+            l1_blob_base_fee_scalar: None,
+        };
+
+    #[test]
+    fn op_receipt_fields_from_block_and_tx() {
+        // rig
+        let tx_0 =
+            serde_json::from_str::<TransactionSigned>(TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056)
+                .unwrap();
+
+        let tx_1 =
+            serde_json::from_str::<TransactionSigned>(TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056)
+                .unwrap();
+
+        let block = Block { body: [tx_0, tx_1.clone()].to_vec(), ..Default::default() };
+
+        let l1_block_info =
+            reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
+
+        // test
+        let receipt_meta = OpReceiptMetaBuilder::new(1724928899)
+            .l1_block_info(&OP_MAINNET, &tx_1, l1_block_info)
+            .expect("should parse revm l1 info")
+            .build();
+
+        let OptimismTransactionReceiptFields {
+            l1_gas_price,
+            l1_gas_used,
+            l1_fee,
+            l1_fee_scalar,
+            l1_base_fee_scalar,
+            ..
+        } = receipt_meta;
+
+        assert_eq!(
+            l1_gas_price, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_gas_price,
+            "incorrect l1 base fee (former gas price)"
+        );
+        assert_eq!(
+            l1_gas_used, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_gas_used,
+            "incorrect l1 gas used"
+        );
+        assert_eq!(
+            l1_fee, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_fee,
+            "incorrect l1 fee"
+        );
+        assert_eq!(
+            l1_fee_scalar, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_fee_scalar,
+            "incorrect l1 fee scalar"
+        );
+        assert_eq!(
+            l1_base_fee_scalar, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_base_fee_scalar,
+            "incorrect l1 base fee scalar"
+        );
+
+        // can catch some bugs from failing to upgrade for next hf
+        assert_eq!(receipt_meta, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056);
     }
 }
