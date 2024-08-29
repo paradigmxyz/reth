@@ -6,6 +6,7 @@ use alloy_genesis::Genesis;
 use reth_chainspec::ChainSpec;
 #[cfg(not(feature = "optimism"))]
 use reth_chainspec::{DEV, HOLESKY, MAINNET, SEPOLIA};
+use reth_cli::chainspec::ChainSpecParser;
 use reth_fs_util as fs;
 #[cfg(feature = "optimism")]
 use reth_optimism_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA};
@@ -73,6 +74,20 @@ pub fn parse_custom_chain_spec(s: &str) -> eyre::Result<ChainSpec, eyre::Error> 
     let genesis: Genesis = serde_json::from_str(&raw)?;
 
     Ok(genesis.into())
+}
+
+/// Default chain specification parser.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultChainSpecParser;
+
+impl ChainSpecParser for DefaultChainSpecParser {
+    type ChainSpec = ChainSpec;
+
+    const SUPPORTED_CHAINS: &'static [&'static str] = SUPPORTED_CHAINS;
+
+    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
+        chain_value_parser(s)
+    }
 }
 
 #[cfg(test)]

@@ -6074,6 +6074,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-cli-util",
@@ -6399,6 +6400,7 @@ dependencies = [
  "ratatui",
  "reth-beacon-consensus",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-config",
@@ -7019,7 +7021,6 @@ name = "reth-ethereum-cli"
 version = "1.0.6"
 dependencies = [
  "alloy-genesis",
- "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli",
@@ -7603,6 +7604,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-util",
  "reth-config",
  "reth-consensus-common",
