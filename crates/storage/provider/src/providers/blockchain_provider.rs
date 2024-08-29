@@ -3395,7 +3395,7 @@ mod tests {
             result.unwrap() > last_db_tx_id,
             "In-memory transaction ID should be greater than the last database transaction ID"
         );
-        assert_eq!(result, Some(20));
+        assert_eq!(result, Some(last_db_tx_id + 1));
 
         Ok(())
     }
