@@ -170,21 +170,24 @@ impl ExExNotificationsSubscriber {
         Self { notifications: ExExNotifications { receiver, state_tx: state_tx.clone() }, state_tx }
     }
 
-    /// Subscribe to notifications with the given head. Notifications will be sent starting from the
-    /// head, not inclusive.
-    ///
-    /// When the return value is dropped, the subscription is cancelled.
-    pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
-        self.state_tx.send(ExExNotificationsState::Active(Some(head))).unwrap();
-        &mut self.notifications
-    }
+    // TODO(alexey): uncomment when we have a way to subscribe to notifications with a head
+    // /// Subscribe to notifications with the given head. Notifications will be sent starting from
+    // /// the head, not inclusive. For example, if `head.number == 10`, then the first
+    // /// notification will be with `block.number == 11`.
+    // ///
+    // /// When the return value is dropped, the subscription is cancelled.
+    // pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
+    //     self.state_tx.send(ExExNotificationsState::Active(Some(head))).unwrap();
+    //     &mut self.notifications
+    // }
 
     /// Subscribe to notifications.
     ///
     /// When the return value is dropped, the subscription is cancelled.
     /// It means that you will miss some of the notifications that could have arrived while the
-    /// subscription is inactive. To prevent this, you can use [`Self::subscribe_with_head`] to
-    /// explicitly pass the head where you stopped and continue from there.
+    /// subscription is inactive.
+    // /// To prevent this, you can use [`Self::subscribe_with_head`] to
+    // /// explicitly pass the head where you stopped and continue from there.
     pub fn subscribe(&mut self) -> &mut ExExNotifications {
         self.state_tx.send(ExExNotificationsState::Active(None)).unwrap();
         &mut self.notifications
