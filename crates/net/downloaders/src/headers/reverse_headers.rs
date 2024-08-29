@@ -651,12 +651,7 @@ where
 {
     fn update_local_head(&mut self, head: SealedHeader) {
         // ensure we're only yielding headers that are in range and follow the current local head.
-        while self
-            .queued_validated_headers
-            .last()
-            .map(|last| last.number <= head.number)
-            .unwrap_or_default()
-        {
+        while self.queued_validated_headers.last().is_some_and(|last| last.number <= head.number) {
             // headers are sorted high to low
             self.queued_validated_headers.pop();
         }

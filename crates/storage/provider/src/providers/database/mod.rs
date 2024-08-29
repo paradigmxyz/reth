@@ -7,7 +7,7 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
@@ -39,11 +39,11 @@ mod metrics;
 ///
 /// This provider implements most provider or provider factory traits.
 #[derive(Debug)]
-pub struct ProviderFactory<DB> {
+pub struct ProviderFactory<DB, Spec = ChainSpec> {
     /// Database
     db: Arc<DB>,
     /// Chain spec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<Spec>,
     /// Static File Provider
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
@@ -569,10 +569,12 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
     }
 }
 
-impl<DB> ChainSpecProvider for ProviderFactory<DB>
+impl<DB, ChainSpec> ChainSpecProvider for ProviderFactory<DB, ChainSpec>
 where
     DB: Send + Sync,
+    ChainSpec: EthChainSpec,
 {
+    type ChainSpec = ChainSpec;
     fn chain_spec(&self) -> Arc<ChainSpec> {
         self.chain_spec.clone()
     }
@@ -591,7 +593,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     }
 }
 
-impl<DB> Clone for ProviderFactory<DB> {
+impl<DB, Spec> Clone for ProviderFactory<DB, Spec> {
     fn clone(&self) -> Self {
         Self {
             db: Arc::clone(&self.db),
@@ -620,10 +622,7 @@ mod tests {
     use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, random_header},
-    };
+    use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
 
@@ -711,7 +710,8 @@ mod tests {
         let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
-        let block = random_block(&mut rng, 0, None, Some(3), None, None);
+        let block =
+            random_block(&mut rng, 0, BlockParams { tx_count: Some(3), ..Default::default() });
 
         let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {

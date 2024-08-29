@@ -3,7 +3,7 @@ use alloy_eips::eip2718::Encodable2718;
 use reth_node_api::EngineTypes;
 use reth_node_core::{
     primitives::B256,
-    rpc::types::{BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3, RichBlock},
+    rpc::types::{Block, BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3},
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
@@ -19,10 +19,10 @@ pub trait BlockProvider: Send + Sync + 'static {
     /// Runs a block provider to send new blocks to the given sender.
     ///
     /// Note: This is expected to be spawned in a separate task.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
+    fn subscribe_blocks(&self, tx: mpsc::Sender<Block>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.
-    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<RichBlock>> + Send;
+    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<Block>> + Send;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
@@ -78,7 +78,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
 
         let mut block_stream = {
-            let (tx, rx) = mpsc::channel::<RichBlock>(64);
+            let (tx, rx) = mpsc::channel::<Block>(64);
             let block_provider = self.block_provider.clone();
             tokio::spawn(async move {
                 block_provider.subscribe_blocks(tx).await;
@@ -87,7 +87,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = rich_block_to_execution_payload_v3(block);
+            let payload = block_to_execution_payload_v3(block);
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -170,9 +170,9 @@ impl ExecutionNewPayload {
     }
 }
 
-/// Convert a rich block from RPC / Etherscan to params for an execution client's "new payload"
+/// Convert a block from RPC / Etherscan to params for an execution client's "new payload"
 /// method. Assumes that the block contains full transactions.
-pub fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
+pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
     let transactions = match &block.transactions {
         BlockTransactions::Full(txs) => txs.clone(),
         // Empty array gets deserialized as BlockTransactions::Hashes.

@@ -296,6 +296,11 @@ impl NetworkState {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
+    /// Connects a peer and its address with the given kind
+    pub(crate) fn add_and_connect(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
+        self.peers_manager.add_and_connect_kind(peer_id, kind, addr, None)
+    }
+
     /// Removes a peer and its address with the given kind from the peerset.
     pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
@@ -437,7 +442,7 @@ impl NetworkState {
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
-                            if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
+                            if res.err().is_some_and(|err| err.is_channel_closed()) {
                                 debug!(
                                     target: "net",
                                     ?id,

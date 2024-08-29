@@ -90,10 +90,14 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// Provider error during the [EIP-2935] block hash account loading.
+    /// EVM error during [EIP-2935] blockhash contract call.
     ///
     /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-    BlockHashAccountLoadingFailed(ProviderError),
+    #[display("failed to apply blockhash contract call: {message}")]
+    BlockHashContractCall {
+        /// The error message.
+        message: String,
+    },
     /// EVM error during withdrawal requests contract call [EIP-7002]
     ///
     /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002

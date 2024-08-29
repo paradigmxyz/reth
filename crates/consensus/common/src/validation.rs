@@ -37,6 +37,64 @@ pub fn validate_header_base_fee(
     Ok(())
 }
 
+/// Validate that withdrawals are present in Shanghai
+///
+/// See [EIP-4895]: Beacon chain push withdrawals as operations
+///
+/// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
+#[inline]
+pub fn validate_shanghai_withdrawals(block: &SealedBlock) -> Result<(), ConsensusError> {
+    let withdrawals = block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+    let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+    let header_withdrawals_root =
+        block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
+    if withdrawals_root != *header_withdrawals_root {
+        return Err(ConsensusError::BodyWithdrawalsRootDiff(
+            GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that blob gas is present in the block if Cancun is active.
+///
+/// See [EIP-4844]: Shard Blob Transactions
+///
+/// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
+#[inline]
+pub fn validate_cancun_gas(block: &SealedBlock) -> Result<(), ConsensusError> {
+    // Check that the blob gas used in the header matches the sum of the blob gas used by each
+    // blob tx
+    let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
+    let total_blob_gas = block.blob_gas_used();
+    if total_blob_gas != header_blob_gas_used {
+        return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+            got: header_blob_gas_used,
+            expected: total_blob_gas,
+        }));
+    }
+    Ok(())
+}
+
+/// Validate that requests root is present if Prague is active.
+///
+/// See [EIP-7685]: General purpose execution layer requests
+///
+/// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
+#[inline]
+pub fn validate_prague_request(block: &SealedBlock) -> Result<(), ConsensusError> {
+    let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+    let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+    let header_requests_root =
+        block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+    if requests_root != *header_requests_root {
+        return Err(ConsensusError::BodyRequestsRootDiff(
+            GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Validate a block without regard for state:
 ///
 /// - Compares the ommer hash in the block header to the block body
@@ -62,43 +120,15 @@ pub fn validate_block_pre_execution(
 
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.is_shanghai_active_at_timestamp(block.timestamp) {
-        let withdrawals =
-            block.withdrawals.as_ref().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
-        let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
-        let header_withdrawals_root =
-            block.withdrawals_root.as_ref().ok_or(ConsensusError::WithdrawalsRootMissing)?;
-        if withdrawals_root != *header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
-            ))
-        }
+        validate_shanghai_withdrawals(block)?;
     }
 
-    // EIP-4844: Shard Blob Transactions
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp) {
-        // Check that the blob gas used in the header matches the sum of the blob gas used by each
-        // blob tx
-        let header_blob_gas_used = block.blob_gas_used.ok_or(ConsensusError::BlobGasUsedMissing)?;
-        let total_blob_gas = block.blob_gas_used();
-        if total_blob_gas != header_blob_gas_used {
-            return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: header_blob_gas_used,
-                expected: total_blob_gas,
-            }))
-        }
+        validate_cancun_gas(block)?;
     }
 
-    // EIP-7685: General purpose execution layer requests
     if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
-        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
-        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
-        let header_requests_root =
-            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
-        if requests_root != *header_requests_root {
-            return Err(ConsensusError::BodyRequestsRootDiff(
-                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
-            ))
-        }
+        validate_prague_request(block)?;
     }
 
     Ok(())

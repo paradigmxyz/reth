@@ -5,6 +5,7 @@ use std::sync::Arc;
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -66,6 +67,7 @@ impl EthereumNode {
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
+    type ChainSpec = ChainSpec;
 }
 
 /// Add-ons w.r.t. l1 ethereum.
@@ -78,7 +80,7 @@ impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
