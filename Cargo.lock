@@ -1320,19 +1320,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bls12_381"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7bc6d6292be3a19e6379786dac800f551e5865a5bb51ebbe3064ab80433f403"
-dependencies = [
- "ff",
- "group",
- "pairing",
- "rand_core 0.6.4",
- "subtle",
-]
-
-[[package]]
 name = "blst"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3070,7 +3057,6 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
- "bitvec",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -4381,21 +4367,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
-name = "kzg-rs"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd9920cd4460ce3cbca19c62f3bb9a9611562478a4dc9d2c556f4a7d049c5b6b"
-dependencies = [
- "bls12_381",
- "glob",
- "hex",
- "once_cell",
- "serde",
- "serde_derive",
- "serde_yaml",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5196,15 +5167,6 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "pairing"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
-dependencies = [
- "group",
 ]
 
 [[package]]
@@ -8828,8 +8790,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "13.0.0"
-source = "git+https://github.com/klkvr/revm?rev=84839ba#84839ba3bdf3aa965e292fb48ee27984678e6856"
+version = "14.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69eae90188e48c81588fe1987b4bd35cd90d69b3602cb0c3a9ab12b882f18d91"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8842,8 +8805,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.5.7"
-source = "git+https://github.com/klkvr/evm-inspectors?rev=4674d04#4674d04c3e722fdfdff539e51e1674b76a3c5aa0"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48184032103bb23788e42e42c7c85207f5b0b8a248b09ea8f5233077f35ab56e"
 dependencies = [
  "alloy-primitives 0.8.0",
  "alloy-rpc-types",
@@ -8859,8 +8823,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "9.0.0"
-source = "git+https://github.com/klkvr/revm?rev=84839ba#84839ba3bdf3aa965e292fb48ee27984678e6856"
+version = "10.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7bad33a4f862ed8e2dc8bb5e7935852990da74f6db986732ef4f47f9021b2e4"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8868,8 +8833,9 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "10.0.0"
-source = "git+https://github.com/klkvr/revm?rev=84839ba#84839ba3bdf3aa965e292fb48ee27984678e6856"
+version = "11.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24db0f8fb5bc636e18b4d36bdc4c402ea941be79cfbdb096469887b616959a46"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8887,8 +8853,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "8.0.0"
-source = "git+https://github.com/klkvr/revm?rev=84839ba#84839ba3bdf3aa965e292fb48ee27984678e6856"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13132ed599b17fa9057fcfc1d37d2954921958f3b96173fc4f4cf52803b32c3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives 0.8.0",
@@ -8897,13 +8864,10 @@ dependencies = [
  "bitvec",
  "c-kzg",
  "cfg-if",
- "derive_more 0.99.18",
  "dyn-clone",
  "enumn",
  "hashbrown 0.14.5",
  "hex",
- "kzg-rs",
- "once_cell",
  "serde",
 ]
 
@@ -9447,19 +9411,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.76",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap 2.4.0",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]
@@ -10663,12 +10614,6 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "unsigned-varint"

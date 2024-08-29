@@ -395,13 +395,13 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "13.0.0", features = [
+revm = { version = "14.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.5"
-revm-primitives = { version = "8.0.0", features = [
+revm-inspectors = "0.6"
+revm-primitives = { version = "9.0.0", features = [
     "std",
 ], default-features = false }
 
@@ -562,8 +562,3 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
-
-[patch.crates-io]
-revm = { git = "https://github.com/klkvr/revm", rev = "84839ba" }
-revm-primitives = { git = "https://github.com/klkvr/revm", rev = "84839ba" }
-revm-inspectors = { git = "https://github.com/klkvr/evm-inspectors", rev = "4674d04" }
