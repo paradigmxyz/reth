@@ -116,8 +116,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::cli::Cli;
-    /// use reth::args::utils::DefaultChainSpecParser;
+    /// use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
