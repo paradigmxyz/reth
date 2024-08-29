@@ -4,7 +4,7 @@ use reth_primitives::{
     gas_spent_by_transactions, BlockWithSenders, Bloom,
     GotExpected, Receipt, B256,
 };
-use reth_optimism_primitives::proof::calculate_receipt_root_optimism;
+use crate::proof::calculate_receipt_root_optimism;
 
 /// Validate a block with regard to execution results:
 ///

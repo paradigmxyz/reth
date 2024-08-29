@@ -17,7 +17,7 @@ reth-consensus-common.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-consensus.workspace = true
-reth-optimism-primitives.workspace = true
+reth-trie-common.workspace = true
 
 tracing.workspace = true
 

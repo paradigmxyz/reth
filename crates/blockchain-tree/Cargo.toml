@@ -30,6 +30,9 @@ reth-trie-parallel = { workspace = true, features = ["parallel"] }
 reth-network.workspace = true
 reth-consensus.workspace = true
 
+# Optimism
+reth-optimism-consensus.workspace = true
+
 # common
 parking_lot.workspace = true
 tracing.workspace = true

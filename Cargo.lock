@@ -6343,6 +6343,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-network",
+ "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
  "reth-prune-types",
@@ -7879,8 +7880,8 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
- "reth-optimism-primitives",
  "reth-primitives",
+ "reth-trie-common",
  "tracing",
 ]
 
@@ -7913,11 +7914,6 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.5"
-dependencies = [
- "reth-chainspec",
- "reth-primitives",
- "reth-trie-common",
-]
 
 [[package]]
 name = "reth-optimism-rpc"

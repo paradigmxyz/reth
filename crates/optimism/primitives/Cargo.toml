@@ -8,21 +8,5 @@ homepage.workspace = true
 repository.workspace = true
 description = "OP primitive types"
 
-# reth
-
-[dependencies]
-reth-chainspec.workspace = true
-reth-primitives.workspace = true
-reth-trie-common.workspace = true
-
-[dev-dependencies]
-reth-primitives = { workspace = true, features = ["test-utils"] }
-
-[features]
-
-optimism = [
-    "reth-chainspec/optimism",
-]
-
 [lints]
 workspace = true
