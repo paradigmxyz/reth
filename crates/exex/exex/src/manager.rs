@@ -817,7 +817,6 @@ mod tests {
     #[tokio::test]
     async fn exex_handle_new() {
         let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
-        let notifications_rx = notifications.subscribe();
 
         // Check initial state
         assert_eq!(exex_handle.id, "test_exex");
@@ -843,7 +842,20 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
-        // Send a notification and ensure it's received correctly
+        // Send a notification and ensure it's not received because the subscription is inactive
+        match exex_handle.send(&mut cx, &(22, notification.clone())) {
+            Poll::Ready(Ok(())) => {
+                assert!(
+                    notifications.notifications.receiver.is_empty(),
+                    "Receiver channel should be empty"
+                );
+            }
+            Poll::Pending => panic!("Notification send is pending"),
+            Poll::Ready(Err(e)) => panic!("Failed to send notification: {:?}", e),
+        }
+
+        // Send a notification and ensure it's received correctly because the subscription is active
+        let notifications_rx = notifications.subscribe();
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
                 let received_notification = notifications_rx.recv().await.unwrap();
