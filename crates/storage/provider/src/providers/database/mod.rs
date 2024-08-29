@@ -603,6 +603,7 @@ impl<DB, Spec> Clone for ProviderFactory<DB, Spec> {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
