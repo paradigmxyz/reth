@@ -239,7 +239,7 @@ mod test {
             reth_evm_optimism::extract_l1_info(&block).expect("should extract l1 info");
 
         // test
-        let receipt_meta = OpReceiptMetaBuilder::new(1724928899)
+        let receipt_meta = OpReceiptFieldsBuilder::new(1724928899)
             .l1_block_info(&OP_MAINNET, &tx_1, l1_block_info)
             .expect("should parse revm l1 info")
             .build();
