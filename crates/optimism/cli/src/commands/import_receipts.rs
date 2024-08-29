@@ -216,9 +216,6 @@ where
             debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
-            // we don't count this as decoded so the partial import check later does not error if
-            // this branch is executed
-            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to
