@@ -834,45 +834,6 @@ impl Encodable for Transaction {
     }
 }
 
-/// A [`Transaction`] wrapper used to performs proptest tests on it, while limiting alloy
-/// TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct MockTransaction(Transaction);
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for MockTransaction {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut transaction = u.arbitrary::<Transaction>()?;
-
-        match &mut transaction {
-            Transaction::Legacy(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip2930(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip1559(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip4844(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip7702(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-        }
-
-        Ok(Self(transaction))
-    }
-}
-
-#[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for MockTransaction {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        self.0.to_compact(buf)
-    }
-
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (transaction, buf) = Transaction::from_compact(buf, len);
-
-        (Self(transaction), buf)
-    }
-}
-
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
@@ -1048,49 +1009,6 @@ impl From<TransactionSignedNoHash> for TransactionSigned {
 impl From<TransactionSigned> for TransactionSignedNoHash {
     fn from(tx: TransactionSigned) -> Self {
         Self { signature: tx.signature, transaction: tx.transaction }
-    }
-}
-
-/// A [`TransactionSignedNoHash`] wrapper used to performs proptest tests on it,
-/// while limiting alloy TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct MockTransactionSignedNoHash(TransactionSignedNoHash);
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for MockTransactionSignedNoHash {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut transaction_signed_no_hash = u.arbitrary::<TransactionSignedNoHash>()?;
-
-        match &mut transaction_signed_no_hash.transaction {
-            Transaction::Legacy(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip2930(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip1559(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip4844(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip7702(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-        }
-
-        if let Transaction::Legacy(ref mut legacy) = transaction_signed_no_hash.transaction {
-            legacy.gas_limit = (legacy.gas_limit as u64).into();
-        }
-
-        Ok(Self(transaction_signed_no_hash))
-    }
-}
-
-#[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for MockTransactionSignedNoHash {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        self.0.to_compact(buf)
-    }
-
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (transaction_signed_no_hash, buf) = TransactionSignedNoHash::from_compact(buf, len);
-
-        (Self(transaction_signed_no_hash), buf)
     }
 }
 
@@ -1603,14 +1521,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
-
-        match &mut transaction {
-            Transaction::Legacy(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip2930(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip1559(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip4844(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
-            Transaction::Eip7702(tx) => tx.gas_limit = (tx.gas_limit as u64).into(),
         }
 
         if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {

@@ -2,12 +2,12 @@ use crate::Compact;
 use alloy_consensus::TxEip1559 as AlloyTxEip1559;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
-use reth_codecs_derive::reth_codec;
 use serde::{Deserialize, Serialize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 pub(crate) struct TxEip1559 {
     /// Added as EIP-155: Simple replay attack protection
     chain_id: ChainId,
