@@ -5,7 +5,7 @@ use reth_primitives::{
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateRootProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
@@ -102,12 +102,12 @@ impl AccountReader for MemoryOverlayStateProvider {
 }
 
 impl StateRootProvider for MemoryOverlayStateProvider {
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let prefix_sets = hashed_state.construct_prefix_sets();
-        self.hashed_state_root_from_nodes(TrieUpdates::default(), hashed_state, prefix_sets)
+        self.state_root_from_nodes(TrieUpdates::default(), hashed_state, prefix_sets)
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         nodes: TrieUpdates,
         state: HashedPostState,
@@ -116,22 +116,18 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         let MemoryOverlayTrieState { mut trie_nodes, mut hashed_state } = self.trie_state().clone();
         trie_nodes.extend(nodes);
         hashed_state.extend(state);
-        self.historical.hashed_state_root_from_nodes(trie_nodes, hashed_state, prefix_sets)
+        self.historical.state_root_from_nodes(trie_nodes, hashed_state, prefix_sets)
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let prefix_sets = hashed_state.construct_prefix_sets();
-        self.hashed_state_root_from_nodes_with_updates(
-            TrieUpdates::default(),
-            hashed_state,
-            prefix_sets,
-        )
+        self.state_root_from_nodes_with_updates(TrieUpdates::default(), hashed_state, prefix_sets)
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
         state: HashedPostState,
@@ -140,19 +136,13 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         let MemoryOverlayTrieState { mut trie_nodes, mut hashed_state } = self.trie_state().clone();
         trie_nodes.extend(nodes);
         hashed_state.extend(state);
-        self.historical.hashed_state_root_from_nodes_with_updates(
-            trie_nodes,
-            hashed_state,
-            prefix_sets,
-        )
+        self.historical.state_root_from_nodes_with_updates(trie_nodes, hashed_state, prefix_sets)
     }
+}
 
+impl StorageRootProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
-    fn hashed_storage_root(
-        &self,
-        address: Address,
-        storage: HashedStorage,
-    ) -> ProviderResult<B256> {
+    fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         let mut hashed_storage = self
             .trie_state()
             .hashed_state
@@ -161,13 +151,13 @@ impl StateRootProvider for MemoryOverlayStateProvider {
             .cloned()
             .unwrap_or_default();
         hashed_storage.extend(&storage);
-        self.historical.hashed_storage_root(address, hashed_storage)
+        self.historical.storage_root(address, hashed_storage)
     }
 }
 
 impl StateProofProvider for MemoryOverlayStateProvider {
     // TODO: Currently this does not reuse available in-memory trie nodes.
-    fn hashed_proof(
+    fn proof(
         &self,
         state: HashedPostState,
         address: Address,
@@ -175,7 +165,7 @@ impl StateProofProvider for MemoryOverlayStateProvider {
     ) -> ProviderResult<AccountProof> {
         let mut hashed_state = self.trie_state().hashed_state.clone();
         hashed_state.extend(state);
-        self.historical.hashed_proof(hashed_state, address, slots)
+        self.historical.proof(hashed_state, address, slots)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.
