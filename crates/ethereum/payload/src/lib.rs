@@ -544,7 +544,7 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let receipts_pay: Vec<Receipt> = receipts.into_iter();
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay);
 
     // extend the payload with the blob sidecars from the executed txs

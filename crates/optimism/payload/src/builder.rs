@@ -609,7 +609,7 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let receipts_pay: Vec<Receipt> = receipts.into_iter();
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
