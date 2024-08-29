@@ -90,6 +90,11 @@ pub mod dirs {
     pub use reth_node_core::dirs::*;
 }
 
+/// Re-exported from `reth_chainspec`
+pub mod chainspec {
+    pub use reth_chainspec::*;
+}
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;
