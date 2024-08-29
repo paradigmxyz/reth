@@ -2857,8 +2857,7 @@ mod tests {
         let block_hash = database_block.header.hash();
         let provider_block =
             provider.block_by_id(block_number.into()).unwrap().unwrap().withdrawals;
-        println!("provider_block {:#?}", provider_block);
-        println!("db block withdrawals {:#?}", database_block.withdrawals);
+
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(database_block.clone().unseal())
