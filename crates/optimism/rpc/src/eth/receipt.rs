@@ -66,7 +66,7 @@ where
         l1_block_info: L1BlockInfo,
         receipt: &Receipt,
     ) -> Result<OptimismTransactionReceiptFields, OpEthApiError> {
-        Ok(OpReceiptMetaBuilder::default()
+        Ok(OpReceiptFieldsBuilder::default()
             .l1_block_info(&self.inner.provider().chain_spec(), tx, l1_block_info)?
             .deposit_nonce(receipt.deposit_nonce)
             .deposit_version(receipt.deposit_receipt_version)
@@ -77,7 +77,7 @@ where
 /// L1 fee and data gas for a non-deposit transaction, or deposit nonce and receipt version for a
 /// deposit transaction.
 #[derive(Debug, Default, Clone)]
-pub struct OpReceiptMetaBuilder {
+pub struct OpReceiptFieldsBuilder {
     /// Block timestamp.
     pub l1_block_timestamp: u64,
     /// The L1 fee for transaction.
@@ -104,7 +104,7 @@ pub struct OpReceiptMetaBuilder {
     pub l1_blob_base_fee_scalar: Option<u128>,
 }
 
-impl OpReceiptMetaBuilder {
+impl OpReceiptFieldsBuilder {
     /// Returns a new builder.
     pub fn new(block_timestamp: u64) -> Self {
         Self { l1_block_timestamp: block_timestamp, ..Default::default() }
