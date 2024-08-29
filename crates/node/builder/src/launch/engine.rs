@@ -35,13 +35,11 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    components::NodeComponents,
     hooks::NodeHooks,
-    launch::{LaunchContext, LaunchNode},
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
-    NodeHandle, NodeTypesAdapter,
+    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 
 /// The engine node launcher.
@@ -68,8 +66,9 @@ where
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -151,6 +150,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine

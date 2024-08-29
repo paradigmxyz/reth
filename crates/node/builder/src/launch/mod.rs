@@ -110,8 +110,9 @@ where
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+        > + AddDevSigners,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -197,6 +198,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine

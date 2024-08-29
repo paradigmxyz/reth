@@ -230,7 +230,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -254,7 +254,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -521,6 +521,9 @@ Debug:
 
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
+
+      --debug.reorg-depth <REORG_DEPTH>
+          The reorg depth for chain reorgs
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location

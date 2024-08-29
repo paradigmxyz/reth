@@ -304,13 +304,13 @@ where
     ) -> Result<(), UnifiedStorageWriterError> {
         match &self.static_file {
             Some(writer) => {
-                if writer.user_header().segment() != segment {
+                if writer.user_header().segment() == segment {
+                    Ok(())
+                } else {
                     Err(UnifiedStorageWriterError::IncorrectStaticFileWriter(
                         writer.user_header().segment(),
                         segment,
                     ))
-                } else {
-                    Ok(())
                 }
             }
             None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),
@@ -511,7 +511,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, AccountReader, TrieWriter};
+    use crate::{
+        test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
+    };
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -521,8 +523,11 @@ mod tests {
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
-    use reth_trie::{test_utils::state_root, HashedPostState, HashedStorage, StateRoot};
-    use reth_trie_db::DatabaseStateRoot;
+    use reth_trie::{
+        test_utils::{state_root, storage_root_prehashed},
+        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+    };
+    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm::{
         db::{
             states::{
@@ -535,7 +540,10 @@ mod tests {
         },
         DatabaseCommit, State,
     };
-    use std::collections::{BTreeMap, HashMap};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        str::FromStr,
+    };
 
     #[test]
     fn wiped_entries_are_removed() {
@@ -1575,5 +1583,56 @@ mod tests {
         assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
         // account2 got inserted
         assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
+    }
+
+    #[test]
+    fn hashed_state_storage_root() {
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.provider_rw().unwrap();
+        let tx = provider_rw.tx_ref();
+
+        // insert initial account storage
+        let init_storage = HashedStorage::from_iter(
+            false,
+            [
+                "50000000000000000000000000000004253371b55351a08cb3267d4d265530b6",
+                "512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e",
+                "51e6784c736ef8548f856909870b38e49ef7a4e3e77e5e945e0d5e6fcaa3037f",
+            ]
+            .into_iter()
+            .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
+        );
+        let mut state = HashedPostState::default();
+        state.storages.insert(hashed_address, init_storage.clone());
+        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+
+        // calculate database storage root and write intermediate storage nodes.
+        let (storage_root, _, storage_updates) =
+            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
+        assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
+        assert!(!storage_updates.is_empty());
+        provider_rw
+            .write_individual_storage_trie_updates(hashed_address, &storage_updates)
+            .unwrap();
+
+        // destroy the storage and re-create with new slots
+        let updated_storage = HashedStorage::from_iter(
+            true,
+            [
+                "00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917",
+                "88d233b7380bb1bcdc866f6871c94685848f54cf0ee033b1480310b4ddb75fc9",
+            ]
+            .into_iter()
+            .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
+        );
+        let mut state = HashedPostState::default();
+        state.storages.insert(hashed_address, updated_storage.clone());
+        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+
+        // re-calculate database storage root
+        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
+        assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

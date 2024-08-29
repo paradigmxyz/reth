@@ -366,17 +366,12 @@ mod tests {
 
     #[test]
     fn test_rpc_server_eth_call_bundle_args() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth",
-            "--http.api",
-            "eth,admin,debug,eth-call-bundle",
-        ])
-        .args;
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "eth,admin,debug"])
+                .args;
 
         let apis = args.http_api.unwrap();
-        let expected =
-            RpcModuleSelection::try_from_selection(["eth", "admin", "debug", "eth-call-bundle"])
-                .unwrap();
+        let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
         assert_eq!(apis, expected);
     }
