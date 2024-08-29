@@ -55,5 +55,5 @@ reth-chainspec.workspace = true
 reth-e2e-test-utils.workspace = true
 eyre.workspace = true
 
-telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "translator_integration" }
+telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "master" }
 testcontainers = "0.21.1"
