@@ -7,7 +7,7 @@ pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
-    SyncStatus, TransactionRequest,
+    SyncStatus, TransactionRequest, WithOtherFields,
 };
 use tracing_futures::Instrument;
 
@@ -33,15 +33,16 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 }
 
 #[async_trait::async_trait]
-impl<Eth, EthFilter>
-    EngineEthApiServer<
-        reth_rpc_types::Transaction,
-        reth_rpc_types::Block<reth_rpc_types::Transaction>,
-    > for EngineEthApi<Eth, EthFilter>
+impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
+    for EngineEthApi<Eth, EthFilter>
 where
     Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
-        + EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>,
-    EthFilter: EthFilterApiServer<reth_rpc_types::Transaction>,
+        + EthApiTypes<
+            NetworkTypes: Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        >,
+    EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {

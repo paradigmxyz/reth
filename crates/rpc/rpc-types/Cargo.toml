@@ -25,6 +25,10 @@ alloy-rpc-types-txpool.workspace = true
 alloy-serde.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"], optional = true }
 
+# optimism
+op-alloy-rpc-types.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+
 # misc
 jsonrpsee-types = { workspace = true, optional = true }
 
@@ -41,6 +45,6 @@ jsonrpsee-types = [
     "dep:alloy-rpc-types-beacon",
     "dep:alloy-rpc-types-engine",
     "alloy-rpc-types/jsonrpsee-types",
-    "alloy-rpc-types-engine/jsonrpsee-types"
+    "alloy-rpc-types-engine/jsonrpsee-types",
 ]
 arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
