@@ -2,7 +2,7 @@
 //!
 //! Transaction wrapper that labels transaction with its origin.
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_rpc_types::{Transaction, TransactionInfo};
+use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 
 /// Represents from where a transaction was fetched.
@@ -77,7 +77,7 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
     }
 }
 
-impl From<TransactionSource> for Transaction {
+impl From<TransactionSource> for WithOtherFields<Transaction> {
     fn from(value: TransactionSource) -> Self {
         match value {
             TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),

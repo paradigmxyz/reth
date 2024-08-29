@@ -15,10 +15,10 @@ use reth_primitives::{
     U256,
 };
 /// Re-export for use in downstream arguments.
-pub use reth_rpc_types::engine::OptimismPayloadAttributes;
-use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
-    OptimismExecutionPayloadEnvelopeV4, PayloadId,
+pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
+use reth_rpc_types::{
+    engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId},
+    optimism::{OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4},
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,

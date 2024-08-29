@@ -33,7 +33,7 @@ impl BlockProvider for RpcBlockProvider {
 
         while let Some(block) = stream.next().await {
             let full_block = ws_provider
-                .get_block_by_hash(block.header.hash.unwrap(), BlockTransactionsKind::Full)
+                .get_block_by_hash(block.header.hash, BlockTransactionsKind::Full)
                 .await
                 .expect("failed to get block")
                 .expect("block not found");
