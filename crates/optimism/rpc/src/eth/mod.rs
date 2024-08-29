@@ -260,7 +260,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
+impl<N: NodeCore> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
