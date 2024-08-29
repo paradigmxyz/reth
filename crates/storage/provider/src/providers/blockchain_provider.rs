@@ -1493,13 +1493,11 @@ mod tests {
         let block_range = (database_blocks + in_memory_blocks - 1) as u64;
 
         let tx_start = match tx_count.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n,
+            Bound::Included(&n) | Bound::Excluded(&n) => n,
             Bound::Unbounded => u8::MIN,
         };
         let tx_end = match tx_count.end_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
+            Bound::Included(&n) | Bound::Excluded(&n) => n + 1,
             Bound::Unbounded => u8::MAX,
         };
 
