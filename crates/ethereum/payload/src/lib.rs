@@ -240,36 +240,10 @@ where
             requests_root,
         };
 
-        // Create an EVM instance
-        let mut evm = self.evm_config.evm(db);
-
-        let ResultAndState { result, .. } = match evm.transact() {
-            Ok(res) => res,
-            Err(err) => return Err(PayloadBuilderError::EvmExecutionError(err)),
-        };
-
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
-        let mut receipts = Vec::new();
 
-        let mut cumulative_gas_used = 0;
-
-        // Process transaction
-        for tx in sealed_block.clone().body {
-            let tx_gas_used = tx.gas_limit();
-            cumulative_gas_used += tx_gas_used;
-
-            #[allow(clippy::needless_update)]
-            receipts.push(Receipt {
-                tx_type: tx.transaction.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().to_vec(),
-                ..Default::default()
-            });
-        }
-        drop(evm);
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, receipts))
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, [].to_vec()))
     }
 
     fn on_missing_payload(

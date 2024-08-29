@@ -242,8 +242,8 @@ impl BuiltPayload for OptimismBuiltPayload {
         self.executed_block.clone()
     }
 
-    fn receipts(&self) -> Vec<Receipt> {
-        (self).receipts.clone()
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 
@@ -260,8 +260,8 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
         self.executed_block.clone()
     }
 
-    fn receipts(&self) -> Vec<Receipt> {
-        (self).receipts.clone()
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 

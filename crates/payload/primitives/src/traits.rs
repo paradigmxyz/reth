@@ -23,7 +23,7 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     fn fees(&self) -> U256;
 
     /// Returns the Receipts
-    fn receipts(&self) -> Vec<Receipt>;
+    fn receipts(&self) -> &[Receipt];
 
     /// Returns the entire execution data for the built block, if available.
     fn executed_block(&self) -> Option<ExecutedBlock> {

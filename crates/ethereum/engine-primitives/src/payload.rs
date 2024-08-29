@@ -87,8 +87,8 @@ impl BuiltPayload for EthBuiltPayload {
         self.fees
     }
 
-    fn receipts(&self) -> Vec<Receipt> {
-        self.receipts.clone()
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 
@@ -101,8 +101,8 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
         (**self).fees()
     }
 
-    fn receipts(&self) -> Vec<Receipt> {
-        (self).receipts.clone()
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 
