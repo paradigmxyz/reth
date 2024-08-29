@@ -24,12 +24,12 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: UnboundedSender<ExExEvent>,
-    /// Channel to receive [`ExExNotification`]s.
+    /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
     ///
     /// # Important
     ///
-    /// Once an [`ExExNotification`] is sent over the channel, it is considered delivered by the
-    /// node.
+    /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
+    /// considered delivered by the node.
     pub notifications: ExExNotificationsSubscriber,
 
     /// node components
