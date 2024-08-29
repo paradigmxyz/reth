@@ -117,13 +117,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// ```no_run
     /// use clap::Parser;
     /// use reth::cli::Cli;
+    /// use reth::args::utils::DefaultChainSpecParser;
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::<MyArgs>::parse()
+    /// Cli::<DefaultChainSpecParser, MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
