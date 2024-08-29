@@ -465,6 +465,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
+    use alloc::{boxed::Box, string::ToString, vec};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -479,11 +481,8 @@ mod tests {
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
+    use revm_primitives::{b256, fixed_bytes, Bytes, HashMap, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
-    use revm_primitives::HashMap;
-    #[cfg(not(feature = "std"))]
-    use alloc::{vec, boxed::Box, string::ToString};
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
