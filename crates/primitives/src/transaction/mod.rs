@@ -66,6 +66,9 @@ pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
+#[cfg(test)]
+use reth_codecs::Compact;
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -85,7 +88,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
     ///
@@ -135,6 +138,27 @@ pub enum Transaction {
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Transaction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut tx = match TxType::arbitrary(u)? {
+            TxType::Legacy => Self::Legacy(TxLegacy::arbitrary(u)?),
+            TxType::Eip2930 => Self::Eip2930(TxEip2930::arbitrary(u)?),
+            TxType::Eip1559 => Self::Eip1559(TxEip1559::arbitrary(u)?),
+            TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
+            TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
+            #[cfg(feature = "optimism")]
+            TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
+        };
+
+        if let Self::Legacy(tx) = &mut tx {
+            tx.gas_limit = (tx.gas_limit as u64).into();
+        };
+
+        Ok(tx)
+    }
 }
 
 // === impl Transaction ===
@@ -813,6 +837,7 @@ impl Encodable for Transaction {
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
@@ -1659,7 +1684,6 @@ mod tests {
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
-    use serde::{Deserialize, Serialize};
     use std::str::FromStr;
 
     #[test]
@@ -2073,73 +2097,5 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result, Err(RlpError::UnexpectedLength));
-    }
-
-    /// A [`Transaction`] wrapper used to performs proptest tests on it, while limiting alloy
-    /// TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
-    #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact))]
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    struct MockTransaction(Transaction);
-
-    impl<'a> arbitrary::Arbitrary<'a> for MockTransaction {
-        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-            let mut transaction = u.arbitrary::<Transaction>()?;
-
-            if let Transaction::Legacy(ref mut legacy) = transaction {
-                legacy.gas_limit = (legacy.gas_limit as u64).into();
-            }
-
-            Ok(Self(transaction))
-        }
-    }
-
-    #[cfg(feature = "reth-codec")]
-    impl Compact for MockTransaction {
-        fn to_compact<B>(&self, buf: &mut B) -> usize
-        where
-            B: bytes::BufMut + AsMut<[u8]>,
-        {
-            self.0.to_compact(buf)
-        }
-
-        fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-            let (transaction, buf) = Transaction::from_compact(buf, len);
-
-            (Self(transaction), buf)
-        }
-    }
-
-    /// A [`TransactionSignedNoHash`] wrapper used to performs proptest tests on it,
-    /// while limiting alloy TxLegacy gas_limit to u64::MAX in order to match TxLegacy Compact type.
-    #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact))]
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-    struct MockTransactionSignedNoHash(TransactionSignedNoHash);
-
-    impl<'a> arbitrary::Arbitrary<'a> for MockTransactionSignedNoHash {
-        fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-            let mut transaction_signed_no_hash = u.arbitrary::<TransactionSignedNoHash>()?;
-
-            if let Transaction::Legacy(ref mut legacy) = transaction_signed_no_hash.transaction {
-                legacy.gas_limit = (legacy.gas_limit as u64).into();
-            }
-
-            Ok(Self(transaction_signed_no_hash))
-        }
-    }
-
-    #[cfg(feature = "reth-codec")]
-    impl Compact for MockTransactionSignedNoHash {
-        fn to_compact<B>(&self, buf: &mut B) -> usize
-        where
-            B: bytes::BufMut + AsMut<[u8]>,
-        {
-            self.0.to_compact(buf)
-        }
-
-        fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-            let (transaction_signed_no_hash, buf) = TransactionSignedNoHash::from_compact(buf, len);
-
-            (Self(transaction_signed_no_hash), buf)
-        }
     }
 }
