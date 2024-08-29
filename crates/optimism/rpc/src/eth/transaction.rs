@@ -1,11 +1,11 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_primitives::{Bytes, B256};
-
+use reth_chainspec::ChainSpec;
 use reth_evm_optimism::RethL1BlockInfo;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeCore};
 use reth_primitives::TransactionSigned;
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, FromEthApiError,
@@ -100,9 +100,9 @@ impl OptimismTxMeta {
 
 impl<N> OpEthApi<N>
 where
-    Self: EthApiSpec + LoadTransaction,
+    Self: EthApiSpec,
     <Self as EthApiTypes>::Error: From<OpEthApiError>,
-    N: FullNodeComponents,
+    N: NodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
 {
     /// Builds [`OptimismTxMeta`] object using the provided [`TransactionSigned`], L1 block
     /// info and block timestamp. The [`L1BlockInfo`] is used to calculate the l1 fee and l1 data
@@ -122,10 +122,15 @@ where
             let envelope_buf = tx.envelope_encoded();
 
             let inner_l1_fee = l1_block_info
-                .l1_tx_data_fee(&self.chain_spec(), block_timestamp, &envelope_buf, tx.is_deposit())
+                .l1_tx_data_fee(
+                    &self.inner.provider().chain_spec(),
+                    block_timestamp,
+                    &envelope_buf,
+                    tx.is_deposit(),
+                )
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?;
             let inner_l1_data_gas = l1_block_info
-                .l1_data_gas(&self.chain_spec(), block_timestamp, &envelope_buf)
+                .l1_data_gas(&self.inner.provider().chain_spec(), block_timestamp, &envelope_buf)
                 .map_err(|_| OpEthApiError::L1BlockGasError)?;
             (
                 Some(inner_l1_fee.saturating_to::<u128>()),
