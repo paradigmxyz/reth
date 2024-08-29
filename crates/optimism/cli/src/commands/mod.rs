@@ -19,7 +19,7 @@ pub mod import_receipts;
 pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Start the node
     #[command(name = "node")]
-    Node(Box<node::NodeCommand<Ext, OpChainSpecParser>>),
+    Node(Box<node::NodeCommand<OpChainSpecParser, Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand<OpChainSpecParser>),

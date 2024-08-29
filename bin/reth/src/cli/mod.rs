@@ -34,10 +34,10 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs, C: ChainSpecParser = DefaultChainSpecParser> {
+pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Ext, C>,
+    command: Commands<C, Ext>,
 
     /// The chain this node is running.
     ///
@@ -88,7 +88,7 @@ impl Cli {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser<ChainSpec = ChainSpec>> Cli<Ext, C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -186,10 +186,10 @@ impl<Ext: clap::Args + fmt::Debug, C: ChainSpecParser<ChainSpec = ChainSpec>> Cl
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<Ext: clap::Args + fmt::Debug, C: ChainSpecParser> {
+pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
-    Node(Box<node::NodeCommand<Ext, C>>),
+    Node(Box<node::NodeCommand<C, Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand<C>),
@@ -254,7 +254,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<NoArgs>::command();
+        let reth = Cli::<DefaultChainSpecParser, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()
