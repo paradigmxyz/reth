@@ -56,9 +56,10 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
+#[derive(Clone)]
 pub struct OpEthApi<N: NodeCore> {
     inner: Arc<EthApiNodeBackend<N>>,
-    sequencer_client: parking_lot::RwLock<Option<SequencerClient>>,
+    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
 }
 
 impl<N> OpEthApi<N>
@@ -88,20 +89,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: parking_lot::RwLock::new(None) }
-    }
-}
-
-impl<N> Clone for OpEthApi<N>
-where
-    N: NodeCore,
-    Self: Send + Sync,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            sequencer_client: parking_lot::RwLock::new(self.sequencer_client.read().clone()),
-        }
+        Self { inner: Arc::new(inner), sequencer_client: Arc::new(parking_lot::RwLock::new(None)) }
     }
 }
 
