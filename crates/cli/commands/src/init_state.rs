@@ -2,6 +2,8 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
 use reth_db_api::database::Database;
 use reth_db_common::init::init_from_state_dump;
@@ -13,9 +15,9 @@ use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct InitStateCommand {
+pub struct InitStateCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// JSONL file with state dump.
     ///
@@ -38,7 +40,7 @@ pub struct InitStateCommand {
     state: PathBuf,
 }
 
-impl InitStateCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
     /// Execute the `init` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");

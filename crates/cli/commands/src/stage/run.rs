@@ -6,6 +6,7 @@ use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
@@ -49,9 +50,9 @@ use tracing::*;
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Enable Prometheus metrics.
     ///
@@ -99,7 +100,7 @@ pub struct Command {
     network: NetworkArgs,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where

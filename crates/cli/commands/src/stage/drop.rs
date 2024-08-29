@@ -2,6 +2,8 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{
@@ -15,14 +17,14 @@ use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     stage: StageEnum,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
