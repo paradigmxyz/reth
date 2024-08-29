@@ -1,7 +1,7 @@
 //! Loads and formats OP receipt RPC response.   
 
 use op_alloy_rpc_types::OptimismTransactionReceiptFields;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, OptimismHardforks};
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeCore};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
@@ -118,28 +118,25 @@ impl OpReceiptFieldsBuilder {
         l1_block_info: L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let envelope_buf = tx.envelope_encoded();
+        let timestamp = self.l1_block_timestamp;
 
         self.l1_fee = Some(
             l1_block_info
-                .l1_tx_data_fee(
-                    chain_spec,
-                    self.l1_block_timestamp,
-                    &tx.envelope_encoded(),
-                    tx.is_deposit(),
-                )
+                .l1_tx_data_fee(chain_spec, timestamp, &tx.envelope_encoded(), tx.is_deposit())
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?
                 .saturating_to(),
         );
 
         self.l1_data_gas = Some(
             l1_block_info
-                .l1_data_gas(chain_spec, self.l1_block_timestamp, &envelope_buf)
+                .l1_data_gas(chain_spec, timestamp, &envelope_buf)
                 .map_err(|_| OpEthApiError::L1BlockGasError)?
                 .saturating_add(l1_block_info.l1_fee_overhead.unwrap_or_default())
                 .saturating_to(),
         );
 
-        self.l1_fee_scalar = Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
+        self.l1_fee_scalar = (!chain_spec.hardforks.is_ecotone_active_at_timestamp(timestamp))
+            .then_some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
 
         self.l1_base_fee = Some(l1_block_info.l1_base_fee.saturating_to());
         self.l1_base_fee_scalar = Some(l1_block_info.l1_base_fee_scalar.saturating_to());
