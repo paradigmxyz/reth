@@ -919,18 +919,15 @@ where
                 FromOrchestrator::BackfillSyncStarted => {
                     debug!(target: "consensus::engine", "received backfill sync started event");
                     self.backfill_sync_state = BackfillSyncState::Active;
-                    Ok(())
                 }
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
-                    Ok(())
                 }
             },
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         self.state.tree_state.insert_executed(block);
-                        Ok(())
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -958,7 +955,6 @@ where
                                 {
                                     error!("Failed to send event: {err:?}");
                                 }
-                                Ok(())
                             }
                             BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
                                 let output = self.on_new_payload(payload, cancun_fields);
@@ -969,14 +965,12 @@ where
                                 })) {
                                     error!("Failed to send event: {err:?}");
                                 }
-                                Ok(())
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
                                 // the CL
                                 self.canonical_in_memory_state
                                     .on_transition_configuration_exchanged();
-                                Ok(())
                             }
                         }
                     }
@@ -986,9 +980,9 @@ where
                 if let Some(event) = self.on_downloaded(blocks)? {
                     self.on_tree_event(event);
                 }
-                Ok(())
             }
         }
+        Ok(())
     }
 
     /// Invoked if the backfill sync has finished to target.
