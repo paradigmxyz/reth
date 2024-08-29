@@ -243,14 +243,7 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, [].to_vec()))
-    }
-
-    fn on_missing_payload(
-        &self,
-        _args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
-    ) -> reth_basic_payload_builder::MissingPayloadBehaviour<Self::BuiltPayload> {
-        reth_basic_payload_builder::MissingPayloadBehaviour::RaceEmptyPayload
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, Vec::new()))
     }
 }
 
@@ -551,7 +544,7 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let receipts_pay: Vec<Receipt> = receipts.iter().flatten().cloned().collect();
+    let receipts_pay: Vec<Receipt> = receipts.into_iter();
     let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay);
 
     // extend the payload with the blob sidecars from the executed txs
