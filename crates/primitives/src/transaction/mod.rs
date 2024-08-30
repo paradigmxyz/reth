@@ -157,6 +157,10 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
             tx.gas_limit = (tx.gas_limit as u64).into();
         };
 
+        if let Self::Eip2930(tx) = &mut tx {
+            tx.gas_limit = (tx.gas_limit as u64).into();
+        };
+
         Ok(tx)
     }
 }
@@ -1335,7 +1339,7 @@ impl TransactionSigned {
         };
 
         let transaction = match tx_type {
-            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode(data)?),
+            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_fields(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
@@ -2097,5 +2101,38 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(result, Err(RlpError::UnexpectedLength));
+    }
+
+    #[test]
+    fn tototo() {
+        let tx = TransactionSigned {
+            hash: B256::from_str(
+                "0x029bc1fcae8ad9f887af3f37a9ebb223f1e535b009fc7ad7b053ba9b5ff666ae",
+            )
+            .unwrap(),
+            signature: Default::default(),
+            transaction: Transaction::Eip2930(alloy_consensus::TxEip2930 {
+                chain_id: 0,
+                nonce: 0,
+                gas_price: 0,
+                gas_limit: 0,
+                to: TxKind::Create,
+                value: U256::ZERO,
+                access_list: revm_primitives::AccessList::default(),
+                input: Bytes::default(),
+            }),
+        };
+
+        println!("{:?}", tx);
+
+        let mut buf = vec![];
+
+        tx.to_compact(&mut buf);
+
+        let res = alloy_consensus::TxEip2930::from_compact(&buf, 1000000);
+
+        println!("{:?}", buf);
+
+        println!("{:?}", res);
     }
 }
