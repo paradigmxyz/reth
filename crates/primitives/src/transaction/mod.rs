@@ -210,7 +210,7 @@ impl Transaction {
     pub fn tx_type(&self) -> TxType {
         match self {
             Self::Legacy(legacy_tx) => legacy_tx.tx_type(),
-            Self::Eip2930(access_list_tx) => TxType::from_alloy_tx_type(access_list_tx.tx_type()),
+            Self::Eip2930(access_list_tx) => access_list_tx.tx_type().into(),
             Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
             Self::Eip4844(blob_tx) => blob_tx.tx_type(),
             Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
