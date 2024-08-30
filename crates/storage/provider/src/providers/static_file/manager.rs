@@ -574,9 +574,9 @@ impl StaticFileProvider {
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
             if self.access.is_read_only() {
-                self.check_file_consistency(segment)?;
+                self.check_segment_consistency(segment)?;
             } else {
-                // Fetching the writter will attempt to heal any file level inconsistency.
+                // Fetching the writer will attempt to heal any file level inconsistency.
                 self.latest_writer(segment)?;
             }
 
@@ -660,8 +660,8 @@ impl StaticFileProvider {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
-    /// Checks consistency of the latest static file segment and throws an error if at fault.
-    pub fn check_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+    /// Checks consistency of the latest static file segment and throws an error if at fault. Read-only.
+    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
         if let Some(latest_block) = self.get_highest_static_file_block(segment) {
             let file_path =
                 self.directory().join(segment.filename(&find_fixed_range(latest_block)));
