@@ -1,70 +1,80 @@
-// use futures_util::StreamExt;
-// use reth_primitives::{BlockNumHash, SealedBlock};
-// use reth_provider::PersistenceProvider;
-// use std::{
-//     pin::Pin,
-//     task::{Context, Poll},
-// };
+use futures_util::StreamExt;
+use reth_blockchain_tree_api::BlockchainTreeEngine;
+use reth_engine_primitives::{EngineTypes, PayloadTypes};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::{BlockNumHash, SealedBlock};
+use reth_provider::{CanonChainTracker, ProviderFactory, StateProviderFactory};
+use reth_rpc_types::engine::PayloadAttributes;
+use reth_transaction_pool::TransactionPool;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+use reth_evm::execute::BlockExecutorProvider;
 
-// pub struct DevOrchestrator<Client, Pool, Executor, P, E>
-// where
-//     E: EngineTypes,
-// {
-//     mining_task: DevMiningTask<Client, Pool, Executor, E>,
-//     persistence: P,
-// }
+use crate::task::DevMiningTask;
 
-// impl<Client, Pool, Executor, P, E> DevOrchestrator<Client, Pool, Executor, P, E>
-// where
-//     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
-//     Pool: TransactionPool + Unpin + 'static,
-//     Executor: BlockExecutorProvider,
-//     P: PersistenceProvider,
-//     E: EngineTypes,
-// {
-//     pub fn new(
-//         client: Client,
-//         pool: Pool,
-//         executor: Executor,
-//         persistence: P,
-//         payload_builder: PayloadBuilderHandle<E>,
-//         tree: BlockchainTreeEngine,
-//     ) -> Self {
-//         let mining_task = DevMiningTask::new(client, pool, executor, payload_builder, tree);
-//         Self { mining_task, persistence }
-//     }
-// }
+pub struct DevOrchestrator<Client, Pool, Executor, P, E>
+where
+    E: EngineTypes,
+{
+    mining_task: DevMiningTask<Client, Pool, Executor, E>,
+    persistence: P,
+}
 
-// #[async_trait::async_trait]
-// impl<Client, Pool, Executor, P, E> Orchestrator for DevOrchestrator<Client, Pool, Executor, P, E>
-// where
-//     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
-//     Pool: TransactionPool + Unpin + 'static,
-//     Executor: BlockExecutorProvider,
-//     P: PersistenceProvider,
-//     E: EngineTypes,
-// {
-//     type Error = DevOrchestratorError;
+pub enum OrchestratorProgress {
+    Finished,
+    InProgress,
+    BlockAdded(BlockNumHash)
+}
 
-//     async fn orchestrate(&mut self) -> Result<OrchestratorProgress, Self::Error> {
-//         match self.mining_task.next().await {
-//             Some(Ok(executed_block)) => {
-//                 let block = executed_block.block().clone();
-//                 self.persistence.insert_block(block.clone(), None, None).await?;
 
-//                 // Update chain state
-//                 // This is simplified; you might need more complex logic here
-//                 self.persistence.set_canonical_head(block.num_hash())?;
+impl<Client, Pool, Executor, P, E> DevOrchestrator<Client, Pool, Executor, P, E>
+where
+    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    Executor: BlockExecutorProvider,
+    P: StateProviderFactory,
+    E: EngineTypes + PayloadTypes<PayloadBuilderAttributes = PayloadAttributes> ,
+    reth_primitives::Block: From<<E as PayloadTypes>::BuiltPayload>
+{
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        executor: Executor,
+        persistence: P,
+        payload_builder: PayloadBuilderHandle<E>,
+        tree:&'static dyn BlockchainTreeEngine,
+    ) -> Self {
+        let mining_task = DevMiningTask::new(client, pool, executor, payload_builder, tree);
+        Self { mining_task, persistence }
+    }
+}
 
-//                 Ok(OrchestratorProgress::BlockAdded(block.num_hash()))
-//             }
-//             Some(Err(e)) => Err(DevOrchestratorError::MiningError(e)),
-//             None => Ok(OrchestratorProgress::Finished),
-//         }
-//     }
 
-//     async fn shutdown(&mut self) -> Result<(), Self::Error> {
-//         // Implement shutdown logic
-//         Ok(())
-//     }
-// }
+impl<Client, Pool, Executor, P, E> DevOrchestrator<Client, Pool, Executor, P, E>
+where
+    Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    Executor: BlockExecutorProvider,
+    P: StateProviderFactory,
+    E: EngineTypes,
+{
+
+    async fn orchestrate(&mut self) -> Result<OrchestratorProgress, ()> {
+        // match self.mining_task.next().await {
+        //     // Some(Ok(executed_block)) => {
+        //     //     let block = executed_block.block().clone();
+     
+        //     // Some(Err(e)) => Err(e),
+        //     // None => Ok(OrchestratorProgress::Finished),
+        //     todo!()
+        // }
+        todo!()
+    }
+
+    async fn shutdown(&mut self) -> Result<(), ()> {
+        // Implement shutdown logic
+        todo!()
+    }
+}

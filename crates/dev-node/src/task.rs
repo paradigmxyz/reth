@@ -1,27 +1,18 @@
-use crate::{mode::MiningMode, Storage};
-use futures_util::{future::BoxFuture, FutureExt};
-use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_blockchain_tree_api::BlockchainTreeEngine;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineTypes, PayloadTypes};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::{Block, BlockNumber, IntoRecoveredTransaction, SealedBlockWithSenders};
-use reth_provider::{errors::provider, providers, CanonChainTracker, StateProviderFactory};
-use reth_rpc_types::{engine::{ForkchoiceState, PayloadAttributes}, BlockNumberOrTag};
-use reth_stages_api::PipelineEvent;
-use reth_tokio_util::EventStream;
-use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
+use reth_primitives::{Block, BlockNumber};
+use reth_provider::{CanonChainTracker, StateProviderFactory};
+use reth_rpc_types::engine:: PayloadAttributes;
+use reth_transaction_pool::TransactionPool;
 use std::{
-    collections::VecDeque,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tracing::{debug, error, instrument::WithSubscriber, span::Attributes, warn};
+use reth_payload_builder::PayloadBuilderHandle;
+
 
 pub struct DevMiningTask<Client, Pool, Executor, E: EngineTypes + Sized> {
     client: Client,
@@ -37,7 +28,8 @@ where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Executor: BlockExecutorProvider,
-    E: EngineTypes,
+    E: EngineTypes +  PayloadTypes<PayloadBuilderAttributes = PayloadAttributes> ,
+    Block: From<<E as PayloadTypes>::BuiltPayload>,
 {
     pub fn new(
         client: Client,
@@ -57,11 +49,24 @@ where
         let timestamp = origin.clone().unwrap().timestamp;
         let suggested_fee_recipient = origin.clone().unwrap().beneficiary;
         let prev_randao = origin.unwrap().hash();
-    
+        
 
-        let attributes =   //PayloadAttributes {parent_beacon_block_root, withdrawals, timestamp, suggested_fee_recipient, prev_randao};
-        // let pending_payload_id = self.payload_builder.send_new_payload(attributes);
-        todo!();
+        let attributes =   PayloadAttributes {
+          timestamp,
+          prev_randao,//wrong asf
+          suggested_fee_recipient,
+          withdrawals,
+          parent_beacon_block_root
+        };
+
+        let pending_payload_id = (self.payload_builder.send_new_payload(attributes).await.map_err(|_| ())?).unwrap();
+
+        let payload = self.payload_builder.best_payload(pending_payload_id).await.unwrap().unwrap();
+
+        let block = Block::from(payload);
+
+
+        todo!()
     }
 }
 
@@ -72,6 +77,7 @@ where
     Executor: BlockExecutorProvider,
     E: EngineTypes,
 {
+
     type Item = Result<ExecutedBlock, ()>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
