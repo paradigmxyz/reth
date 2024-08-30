@@ -227,10 +227,10 @@ impl Transaction {
     }
 
     /// Get the transaction's type
-    pub fn tx_type(&self) -> TxType {
+    pub const fn tx_type(&self) -> TxType {
         match self {
-            Self::Legacy(legacy_tx) => legacy_tx.tx_type(),
-            Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
+            Self::Legacy(_) => TxType::Legacy,
+            Self::Eip2930(_) => TxType::Eip2930,
             Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
             Self::Eip4844(blob_tx) => blob_tx.tx_type(),
             Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
@@ -1202,7 +1202,8 @@ impl TransactionSigned {
         match &self.transaction {
             Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
-            ),            Transaction::Eip2930(access_list_tx) => access_list_tx
+            ),
+            Transaction::Eip2930(access_list_tx) => access_list_tx
                 .encoded_len_with_signature(&self.signature.to_alloy_signature(), true),
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature(&self.signature)
@@ -1404,9 +1405,10 @@ impl TransactionSigned {
     pub fn length_without_header(&self) -> usize {
         // method computes the payload len without a RLP header
         match &self.transaction {
- Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
-            ),            Transaction::Eip2930(access_list_tx) => access_list_tx
+            ),
+            Transaction::Eip2930(access_list_tx) => access_list_tx
                 .encoded_len_with_signature(&self.signature.to_alloy_signature(), false),
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
