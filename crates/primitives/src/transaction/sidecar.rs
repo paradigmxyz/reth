@@ -3,7 +3,8 @@
 use crate::{
     keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
 };
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+use alloy_consensus::TxEip4844WithSidecar;
+use alloy_rlp::{Decodable, Error as RlpError, Header};
 use serde::{Deserialize, Serialize};
 
 #[doc(inline)]
@@ -111,37 +112,8 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        // First we construct both required list headers.
-        //
-        // The `transaction_payload_body` length is the length of the fields, plus the length of
-        // its list header.
-        let tx_header = Header {
-            list: true,
-            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
-        };
-
-        let tx_length = tx_header.length() + tx_header.payload_length;
-
-        // The payload length is the length of the `tranascation_payload_body` list, plus the
-        // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.sidecar.fields_len();
-
-        // First we use the payload len to construct the first list header
-        let blob_tx_header = Header { list: true, payload_length };
-
-        // Encode the blob tx header first
-        blob_tx_header.encode(out);
-
-        // Encode the inner tx list header, then its fields
-        tx_header.encode(out);
-        self.transaction
+        TxEip4844WithSidecar { tx: self.transaction.clone(), sidecar: self.sidecar.clone() }
             .encode_with_signature_fields(&self.signature.as_signature_with_parity(), out);
-
-        // Encode the signature
-        self.signature.encode(out);
-
-        // Encode the blobs, commitments, and proofs
-        self.sidecar.encode(out);
     }
 
     /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -312,6 +284,7 @@ mod tests {
     use super::*;
     use crate::{hex, kzg::Blob};
     use alloy_eips::eip4844::Bytes48;
+    use alloy_rlp::Encodable;
     use std::{fs, path::PathBuf, str::FromStr};
 
     #[test]
