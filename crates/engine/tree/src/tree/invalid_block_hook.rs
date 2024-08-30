@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
