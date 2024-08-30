@@ -67,7 +67,7 @@ where
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new<H: InvalidBlockHook + 'static>(
+    pub fn new(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
         chain_spec: Arc<ChainSpec>,
@@ -80,7 +80,7 @@ where
         pruner: Pruner<DB, ProviderFactory<DB>>,
         payload_builder: PayloadBuilderHandle<T>,
         tree_config: TreeConfig,
-        invalid_block_hook: H,
+        invalid_block_hook: Box<dyn InvalidBlockHook>,
     ) -> Self {
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
@@ -198,7 +198,7 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
-            NoopInvalidBlockHook,
+            Box::new(NoopInvalidBlockHook),
         );
     }
 }

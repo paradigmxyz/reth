@@ -566,8 +566,8 @@ where
     }
 
     /// Sets the bad block hook.
-    fn set_invalid_block_hook<H: InvalidBlockHook + 'static>(&mut self, invalid_block_hook: H) {
-        self.invalid_block_hook = Box::new(invalid_block_hook);
+    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
+        self.invalid_block_hook = invalid_block_hook;
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -576,7 +576,7 @@ where
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn_new<H: InvalidBlockHook + 'static>(
+    pub fn spawn_new(
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
@@ -585,7 +585,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
-        invalid_block_hook: H,
+        invalid_block_hook: Box<dyn InvalidBlockHook>,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
