@@ -316,8 +316,7 @@ impl PooledTransactionsElement {
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction
-                    .payload_len_with_signature_without_header(&signature.to_alloy_signature())
+                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), false)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding does not use a header, so we set `with_header` to false
@@ -528,7 +527,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.payload_len_with_signature(&signature.to_alloy_signature())
+                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true

@@ -233,7 +233,7 @@ impl Transaction {
             Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
             Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
             Self::Eip4844(blob_tx) => blob_tx.tx_type(),
-            Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
+            Self::Eip7702(_) => TxType::Eip7702,
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
         }
@@ -1209,7 +1209,7 @@ impl TransactionSigned {
             }
             Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
             Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature(&self.signature.to_alloy_signature())
+                set_code_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), true)
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
@@ -1416,8 +1416,9 @@ impl TransactionSigned {
             Transaction::Eip4844(blob_tx) => {
                 blob_tx.payload_len_with_signature_without_header(&self.signature)
             }
-            Transaction::Eip7702(set_code_tx) => set_code_tx
-                .payload_len_with_signature_without_header(&self.signature.to_alloy_signature()),
+            Transaction::Eip7702(set_code_tx) => {
+                set_code_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), false)
+            }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
         }
