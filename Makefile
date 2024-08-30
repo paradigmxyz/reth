@@ -32,8 +32,11 @@ EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
-# Features in reth/op-reth binary crate other than "ethereum" and "optimism"
-BIN_OTHER_FEATURES := asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs
+# Features in reth/op-reth binary crate other than mutually exclusive "ethereum" and "optimism"
+BIN_OTHER_FEATURES := asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs disable-lock
+
+# Features in reth/op-reth binary crate other than mutually exclusive "ethereum" and "optimism"
+BIN_OTHER_FEATURES := asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs disable-lock
 
 ##@ Help
 
