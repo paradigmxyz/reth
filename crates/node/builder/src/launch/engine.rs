@@ -217,7 +217,7 @@ where
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
                         reth_node_core::args::InvalidBlockHook::Opcode => {
-                            eyre::bail!("invalid block hook not implemented yet")
+                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -398,18 +398,5 @@ where
         };
 
         Ok(handle)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    fn implements_the_trait(_: Vec<Box<dyn reth_engine_tree::tree::InvalidBlockHook + 'static>>) {}
-
-    #[test]
-    fn implements_my_trait() {
-        reth_engine_tree::tree::ChainInvalidBlockHook(vec![Box::new(
-            reth_invalid_block_hooks::witness_invalid_block_hook,
-        )]);
-        implements_the_trait(vec![Box::new(reth_invalid_block_hooks::witness_invalid_block_hook)]);
     }
 }
