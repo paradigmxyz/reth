@@ -666,7 +666,7 @@ impl StaticFileProvider {
             let file_path =
                 self.directory().join(segment.filename(&find_fixed_range(latest_block)));
 
-            let jar = NippyJar::<SegmentHeader>::load(&self.directory().join(file_path))
+            let jar = NippyJar::<SegmentHeader>::load(&file_path)
                 .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
             NippyJarChecker::new(jar)
