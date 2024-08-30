@@ -10,7 +10,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{NoopInvalidBlockHook, TreeConfig},
+    tree::{ChainInvalidBlockHook, InvalidBlockHook, NoopInvalidBlockHook, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -203,11 +203,28 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         // TODO: implement methods which convert this value into an actual function
-        if let Some(ref hook_type) = ctx.node_config().debug.invalid_block_hook {
-            warn!(target: "reth::cli", ?hook_type, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
-        }
-
-        let invalid_block_hook = NoopInvalidBlockHook;
+        let invalid_block_hook: Box<dyn InvalidBlockHook> = if let Some(ref hook) =
+            ctx.node_config().debug.invalid_block_hook
+        {
+            warn!(target: "reth::cli", ?hook, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
+            Box::new(ChainInvalidBlockHook(
+                hook.to_selection()
+                    .into_iter()
+                    .map(|hook| match hook {
+                        reth_node_core::args::InvalidBlockHook::Witness => {
+                            Ok(Box::new(reth_invalid_block_hooks::witness_invalid_block_hook)
+                                as Box<dyn InvalidBlockHook>)
+                        }
+                        reth_node_core::args::InvalidBlockHook::PreState |
+                        reth_node_core::args::InvalidBlockHook::Opcode => {
+                            eyre::bail!("invalid block hook not implemented yet")
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))
+        } else {
+            Box::new(NoopInvalidBlockHook)
+        };
 
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
@@ -381,5 +398,18 @@ where
         };
 
         Ok(handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn implements_the_trait(_: Vec<Box<dyn reth_engine_tree::tree::InvalidBlockHook + 'static>>) {}
+
+    #[test]
+    fn implements_my_trait() {
+        reth_engine_tree::tree::ChainInvalidBlockHook(vec![Box::new(
+            reth_invalid_block_hooks::witness_invalid_block_hook,
+        )]);
+        implements_the_trait(vec![Box::new(reth_invalid_block_hooks::witness_invalid_block_hook)]);
     }
 }

@@ -62,7 +62,7 @@ mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
-pub use invalid_block_hook::{InvalidBlockHook, NoopInvalidBlockHook};
+pub use invalid_block_hook::{ChainInvalidBlockHook, InvalidBlockHook, NoopInvalidBlockHook};
 
 /// Keeps track of the state of the tree.
 ///
@@ -462,7 +462,6 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-#[derive(Debug)]
 pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
@@ -501,6 +500,27 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     metrics: EngineApiMetrics,
     /// A bad block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
+}
+
+impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTreeHandler<P, E, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineApiTreeHandler")
+            .field("provider", &self.provider)
+            .field("executor_provider", &self.executor_provider)
+            .field("consensus", &self.consensus)
+            .field("payload_validator", &self.payload_validator)
+            .field("state", &self.state)
+            .field("incoming_tx", &self.incoming_tx)
+            .field("persistence", &self.persistence)
+            .field("persistence_state", &self.persistence_state)
+            .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("payload_builder", &self.payload_builder)
+            .field("config", &self.config)
+            .field("metrics", &self.metrics)
+            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
+            .finish()
+    }
 }
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
@@ -546,8 +566,8 @@ where
     }
 
     /// Sets the bad block hook.
-    fn set_invalid_block_hook<H: InvalidBlockHook + 'static>(&mut self, invalid_block_hook: H) {
-        self.invalid_block_hook = Box::new(invalid_block_hook);
+    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
+        self.invalid_block_hook = invalid_block_hook;
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -556,7 +576,7 @@ where
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn_new<H: InvalidBlockHook + 'static>(
+    pub fn spawn_new(
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
@@ -565,7 +585,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
-        invalid_block_hook: H,
+        invalid_block_hook: Box<dyn InvalidBlockHook>,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();

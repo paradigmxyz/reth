@@ -1,11 +1,9 @@
-use std::fmt::Debug;
-
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
 /// A bad block hook.
-pub trait InvalidBlockHook: Debug + Send + Sync {
+pub trait InvalidBlockHook: Send + Sync {
     /// Invoked when a bad block is encountered.
     fn on_invalid_block(
         &self,
@@ -23,8 +21,7 @@ where
             SealedHeader,
             BlockExecutionOutput<Receipt>,
             Option<(TrieUpdates, B256)>,
-        ) + Debug
-        + Send
+        ) + Send
         + Sync,
 {
     fn on_invalid_block(
@@ -39,7 +36,6 @@ where
 }
 
 /// A no-op [`InvalidBlockHook`] that does nothing.
-#[derive(Debug)]
 pub struct NoopInvalidBlockHook;
 
 impl InvalidBlockHook for NoopInvalidBlockHook {
@@ -50,5 +46,26 @@ impl InvalidBlockHook for NoopInvalidBlockHook {
         _output: BlockExecutionOutput<Receipt>,
         _trie_updates: Option<(TrieUpdates, B256)>,
     ) {
+    }
+}
+
+pub struct ChainInvalidBlockHook(pub Vec<Box<dyn InvalidBlockHook>>);
+
+impl InvalidBlockHook for ChainInvalidBlockHook {
+    fn on_invalid_block(
+        &self,
+        block: SealedBlockWithSenders,
+        header: SealedHeader,
+        output: BlockExecutionOutput<Receipt>,
+        trie_updates: Option<(TrieUpdates, B256)>,
+    ) {
+        for hook in &self.0 {
+            hook.on_invalid_block(
+                block.clone(),
+                header.clone(),
+                output.clone(),
+                trie_updates.clone(),
+            );
+        }
     }
 }

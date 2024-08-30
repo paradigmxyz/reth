@@ -7240,6 +7240,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-invalid-block-hooks"
+version = "1.0.6"
+dependencies = [
+ "alloy-rlp",
+ "assert_matches",
+ "futures",
+ "metrics",
+ "rand 0.8.5",
+ "reth-beacon-consensus",
+ "reth-blockchain-tree",
+ "reth-blockchain-tree-api",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-engine-primitives",
+ "reth-errors",
+ "reth-ethereum-engine-primitives",
+ "reth-evm",
+ "reth-exex-types",
+ "reth-metrics",
+ "reth-network-p2p",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-payload-validator",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-prune-types",
+ "reth-revm",
+ "reth-rpc-types",
+ "reth-rpc-types-compat",
+ "reth-stages-api",
+ "reth-static-file",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-trie",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-ipc"
 version = "1.0.6"
 dependencies = [
@@ -7522,6 +7566,7 @@ dependencies = [
  "reth-engine-util",
  "reth-evm",
  "reth-exex",
+ "reth-invalid-block-hooks",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -7578,6 +7623,7 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-fs-util",
+ "reth-invalid-block-hooks",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",

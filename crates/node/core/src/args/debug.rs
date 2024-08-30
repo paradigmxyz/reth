@@ -135,6 +135,11 @@ impl InvalidBlockSelection {
     {
         selection.into_iter().map(TryInto::try_into).collect()
     }
+
+    /// Clones the set of configured [`InvalidBlockHook`].
+    pub fn to_selection(&self) -> HashSet<InvalidBlockHook> {
+        self.0.clone()
+    }
 }
 
 impl From<&[InvalidBlockHook]> for InvalidBlockSelection {
