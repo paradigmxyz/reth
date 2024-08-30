@@ -83,30 +83,30 @@ pub struct NetworkMetrics {
 pub struct SessionManagerMetrics {
     /// Number of errors related to incoming incorrect peer behaviour, such as invalid message
     /// code, size, encoding, etc.
-    pub(crate) total_incoming_eth_handshake_peer_errors: Counter,
+    pub(crate) incoming_eth_handshake_peer_error_total: Counter,
     /// Number of errors related to outgoing incorrect peer behaviour, such as invalid message
     /// code, size, encoding, etc.
-    pub(crate) total_outgoing_eth_handshake_peer_errors: Counter,
+    pub(crate) outgoing_eth_handshake_peer_error_total: Counter,
     /// Number of incoming timeout errors
-    pub(crate) total_incoming_eth_handshake_timeouts: Counter,
+    pub(crate) incoming_eth_handshake_timeout_total: Counter,
     /// Number of outgoing timeout errors
-    pub(crate) total_outgoing_eth_handshake_timeouts: Counter,
+    pub(crate) outgoing_eth_handshake_timeout_total: Counter,
     /// Number of incoming network id mismatch errors
-    pub(crate) total_incoming_eth_handshake_network_errors: Counter,
+    pub(crate) incoming_eth_handshake_network_error_total: Counter,
     /// Number of outgoing network id mismatch errors
-    pub(crate) total_outgoing_eth_handshake_network_errors: Counter,
+    pub(crate) outgoing_eth_handshake_network_error_total: Counter,
     /// Number of incoming protocol version mismatch errors
-    pub(crate) total_incoming_eth_handshake_version_errors: Counter,
+    pub(crate) incoming_eth_handshake_version_error_total: Counter,
     /// Number of outgoing protocol version mismatch errors
-    pub(crate) total_outgoing_eth_handshake_version_errors: Counter,
+    pub(crate) outgoing_eth_handshake_version_error_total: Counter,
     /// Number of incoming genesis block mismatch errors
-    pub(crate) total_incoming_eth_handshake_genesis_errors: Counter,
+    pub(crate) incoming_eth_handshake_genesis_error_total: Counter,
     /// Number of outgoing genesis block mismatch errors
-    pub(crate) total_outgoing_eth_handshake_genesis_errors: Counter,
+    pub(crate) outgoing_eth_handshake_genesis_error_total: Counter,
     /// Number of incoming fork id mismatch errors
-    pub(crate) total_incoming_eth_handshake_forkid_errors: Counter,
+    pub(crate) incoming_eth_handshake_forkid_error_total: Counter,
     /// Number of outgoing fork id mismatch errors
-    pub(crate) total_outgoing_eth_handshake_forkid_errors: Counter,
+    pub(crate) outgoing_eth_handshake_forkid_error_total: Counter,
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
     /// Number of dropped outgoing peer messages.

@@ -556,36 +556,33 @@ impl SessionManager {
                     Direction::Incoming => {
                         match error.as_ref().and_then(|e| e.as_eth_stream()) {
                             Some(EthStreamError::StreamTimeout) => {
-                                self.metrics.total_incoming_eth_handshake_timeouts.increment(1)
+                                self.metrics.incoming_eth_handshake_timeout_total.increment(1)
                             }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::InvalidFork(_),
                             )) => {
-                                self.metrics.total_incoming_eth_handshake_forkid_errors.increment(1)
+                                self.metrics.incoming_eth_handshake_forkid_error_total.increment(1)
                             }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedChain(_),
-                            )) => self
-                                .metrics
-                                .total_incoming_eth_handshake_network_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_network_error_total.increment(1)
+                            }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedProtocolVersion(_),
-                            )) => self
-                                .metrics
-                                .total_incoming_eth_handshake_version_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_version_error_total.increment(1)
+                            }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedGenesis(_),
-                            )) => self
-                                .metrics
-                                .total_incoming_eth_handshake_genesis_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.incoming_eth_handshake_genesis_error_total.increment(1)
+                            }
                             // Do nothing if not an EthStreamError
                             None => (),
                             // For all other errors we increment peer errors
                             // TODO: Determine a more granular approach for peer errors
-                            _ => self.metrics.total_incoming_eth_handshake_peer_errors.increment(1),
+                            _ => self.metrics.incoming_eth_handshake_peer_error_total.increment(1),
                         }
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
@@ -595,36 +592,33 @@ impl SessionManager {
                     Direction::Outgoing(peer_id) => {
                         match error.as_ref().and_then(|e| e.as_eth_stream()) {
                             Some(EthStreamError::StreamTimeout) => {
-                                self.metrics.total_outgoing_eth_handshake_timeouts.increment(1)
+                                self.metrics.outgoing_eth_handshake_timeout_total.increment(1)
                             }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::InvalidFork(_),
                             )) => {
-                                self.metrics.total_outgoing_eth_handshake_forkid_errors.increment(1)
+                                self.metrics.outgoing_eth_handshake_forkid_error_total.increment(1)
                             }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedChain(_),
-                            )) => self
-                                .metrics
-                                .total_outgoing_eth_handshake_network_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_network_error_total.increment(1)
+                            }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedProtocolVersion(_),
-                            )) => self
-                                .metrics
-                                .total_outgoing_eth_handshake_version_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_version_error_total.increment(1)
+                            }
                             Some(EthStreamError::EthHandshakeError(
                                 EthHandshakeError::MismatchedGenesis(_),
-                            )) => self
-                                .metrics
-                                .total_outgoing_eth_handshake_genesis_errors
-                                .increment(1),
+                            )) => {
+                                self.metrics.outgoing_eth_handshake_genesis_error_total.increment(1)
+                            }
                             // Do nothing if not an EthStreamError
                             None => (),
                             // For all other errors we increment peer errors
                             // TODO: Determine a more granular approach for peer errors
-                            _ => self.metrics.total_outgoing_eth_handshake_peer_errors.increment(1),
+                            _ => self.metrics.outgoing_eth_handshake_peer_error_total.increment(1),
                         }
                         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
                             remote_addr,
