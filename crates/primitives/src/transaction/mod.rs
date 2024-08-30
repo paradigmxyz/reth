@@ -521,7 +521,7 @@ impl Transaction {
                 )
             }
             Self::Eip2930(access_list_tx) => access_list_tx.encode_with_signature(
-                &signature.to_alloy_signature(),
+                &signature.as_signature_with_parity(),
                 out,
                 with_header,
             ),
@@ -1204,7 +1204,7 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
             Transaction::Eip2930(access_list_tx) => access_list_tx
-                .encoded_len_with_signature(&self.signature.to_alloy_signature(), true),
+                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), true),
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature(&self.signature)
             }
@@ -1409,7 +1409,7 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
             Transaction::Eip2930(access_list_tx) => access_list_tx
-                .encoded_len_with_signature(&self.signature.to_alloy_signature(), false),
+                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), false),
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
             }

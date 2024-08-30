@@ -162,16 +162,6 @@ impl Signature {
         core::mem::size_of::<Self>()
     }
 
-    /// Converts the signature to an alloy signature.
-    pub fn to_alloy_signature(&self) -> alloy_primitives::Signature {
-        alloy_primitives::Signature::from_rs_and_parity(
-            self.r,
-            self.s,
-            alloy_primitives::Parity::Parity(self.odd_y_parity),
-        )
-        .expect("failed to create alloy signature")
-    }
-
     /// Returns [Parity] value based on `chain_id` for legacy transaction signature.
     #[allow(clippy::missing_const_for_fn)]
     pub fn legacy_parity(&self, chain_id: Option<u64>) -> Parity {
@@ -196,6 +186,11 @@ impl Signature {
         chain_id: Option<u64>,
     ) -> SignatureWithParity {
         SignatureWithParity::new(self.r, self.s, self.legacy_parity(chain_id))
+    }
+
+    /// Convert the signature to a [`SignatureWithParity`].
+    pub(crate) fn as_signature_with_parity(&self) -> SignatureWithParity {
+        SignatureWithParity::new(self.r, self.s, self.odd_y_parity.into())
     }
 
     /// Returns the signature for the optimism deposit transactions, which don't include a

@@ -308,7 +308,7 @@ impl PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), false)
+                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
@@ -356,7 +356,7 @@ impl PooledTransactionsElement {
                     out,
                 ),
             Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.to_alloy_signature(), out, false)
+                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 transaction.encode_with_signature(signature, out, false)
@@ -490,7 +490,7 @@ impl Encodable for PooledTransactionsElement {
                 ),
             Self::Eip2930 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.to_alloy_signature(), out, true)
+                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // encodes with string header
@@ -519,7 +519,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), true)
+                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
