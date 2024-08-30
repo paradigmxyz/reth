@@ -226,6 +226,11 @@ Networking:
 
           [default: 131072]
 
+      --max-capacity-cache-pending-fetch <COUNT>
+          Max capacity of the cache for pending fetch requests.
+
+          [default: 25600]
+
       --retries <RETRIES>
           The number of retries per request
 

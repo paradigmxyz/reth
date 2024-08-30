@@ -218,6 +218,11 @@ Networking:
 
           [default: 131072]
 
+      --max-capacity-cache-pending-fetch <COUNT>
+          Max capacity of the cache for pending fetch requests.
+
+          [default: 25600]
+
 RPC:
       --http
           Enable the HTTP-RPC server

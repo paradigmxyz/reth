@@ -231,6 +231,11 @@ Networking:
 
           [default: 131072]
 
+      --max-capacity-cache-pending-fetch <COUNT>
+          Max capacity of the cache for pending fetch requests.
+
+          [default: 25600]
+
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 
