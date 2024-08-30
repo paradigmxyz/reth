@@ -1,4 +1,4 @@
-use crate::{BlockNumber, Compression, Filters, InclusionFilter};
+use crate::{BlockNumber, Compression, Filters};
 use alloy_primitives::TxNumber;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -46,21 +46,6 @@ impl StaticFileSegment {
         }
     }
 
-    /// Returns the default configuration of the segment.
-    pub const fn config(&self) -> SegmentConfig {
-        let default_config = SegmentConfig {
-            filters: Filters::WithFilters(
-                InclusionFilter::Cuckoo,
-                super::PerfectHashingFunction::Fmph,
-            ),
-            compression: Compression::Lz4,
-        };
-
-        match self {
-            Self::Headers | Self::Transactions | Self::Receipts => default_config,
-        }
-    }
-
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
@@ -86,9 +71,6 @@ impl StaticFileSegment {
         let prefix = self.filename(block_range);
 
         let filters_name = match filters {
-            Filters::WithFilters(inclusion_filter, phf) => {
-                format!("{}-{}", inclusion_filter.as_ref(), phf.as_ref())
-            }
             Filters::WithoutFilters => "none".to_string(),
         };
 
@@ -376,42 +358,6 @@ mod tests {
                 1_123_233..=11_223_233,
                 "static_file_transactions_1123233_11223233",
                 None,
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_cuckoo-fmph_lz4",
-                Some((
-                    Compression::Lz4,
-                    Filters::WithFilters(
-                        InclusionFilter::Cuckoo,
-                        crate::PerfectHashingFunction::Fmph,
-                    ),
-                )),
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_cuckoo-fmph_zstd",
-                Some((
-                    Compression::Zstd,
-                    Filters::WithFilters(
-                        InclusionFilter::Cuckoo,
-                        crate::PerfectHashingFunction::Fmph,
-                    ),
-                )),
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_cuckoo-fmph_zstd-dict",
-                Some((
-                    Compression::ZstdWithDictionary,
-                    Filters::WithFilters(
-                        InclusionFilter::Cuckoo,
-                        crate::PerfectHashingFunction::Fmph,
-                    ),
-                )),
             ),
         ];
 

@@ -14,7 +14,7 @@ mod segment;
 
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
-pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
+pub use filters::{Filters, InclusionFilter};
 pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
 /// Default static file block count.
