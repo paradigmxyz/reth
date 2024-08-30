@@ -199,6 +199,9 @@ Networking:
 
           [default: 320]
 
+      --max_capacity_cache_pending_fetch <COUNT>
+          Max capacity of the cache for pending fetch requests.
+
       --max-pending-imports <COUNT>
           Max number of transactions to import concurrently.
 
