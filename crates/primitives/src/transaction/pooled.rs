@@ -306,7 +306,7 @@ impl PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.payload_len_with_signature_without_header(signature)
+                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
@@ -511,7 +511,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.payload_len_with_signature(signature)
+                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
