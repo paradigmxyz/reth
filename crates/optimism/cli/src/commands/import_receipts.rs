@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_db_api::database::Database;
@@ -27,9 +29,9 @@ use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct ImportReceiptsOpCommand {
+pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -43,7 +45,7 @@ pub struct ImportReceiptsOpCommand {
     path: PathBuf,
 }
 
-impl ImportReceiptsOpCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -216,9 +218,6 @@ where
             debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
-            // we don't count this as decoded so the partial import check later does not error if
-            // this branch is executed
-            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to
