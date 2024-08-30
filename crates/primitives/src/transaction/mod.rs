@@ -143,25 +143,23 @@ pub enum Transaction {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Transaction {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut tx = match TxType::arbitrary(u)? {
-            TxType::Legacy => Self::Legacy(TxLegacy::arbitrary(u)?),
-            TxType::Eip2930 => Self::Eip2930(TxEip2930::arbitrary(u)?),
+        Ok(match TxType::arbitrary(u)? {
+            TxType::Legacy => {
+                let mut tx = TxLegacy::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Legacy(tx)
+            }
+            TxType::Eip2930 => {
+                let mut tx = TxEip2930::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip2930(tx)
+            }
             TxType::Eip1559 => Self::Eip1559(TxEip1559::arbitrary(u)?),
             TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
             TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
-        };
-
-        if let Self::Legacy(tx) = &mut tx {
-            tx.gas_limit = (tx.gas_limit as u64).into();
-        };
-
-        if let Self::Eip2930(tx) = &mut tx {
-            tx.gas_limit = (tx.gas_limit as u64).into();
-        };
-
-        Ok(tx)
+        })
     }
 }
 
