@@ -51,15 +51,15 @@ impl InvalidBlockHook for NoopInvalidBlockHook {
 }
 
 /// A chain of [`InvalidBlockHook`]s that are executed in order.
-pub struct ChainInvalidBlockHook(pub Vec<Box<dyn InvalidBlockHook>>);
+pub struct InvalidBlockHookChain(pub Vec<Box<dyn InvalidBlockHook>>);
 
-impl std::fmt::Debug for ChainInvalidBlockHook {
+impl std::fmt::Debug for InvalidBlockHookChain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChainInvalidBlockHook").field("len", &self.0.len()).finish()
+        f.debug_struct("InvalidBlockHookChain").field("len", &self.0.len()).finish()
     }
 }
 
-impl InvalidBlockHook for ChainInvalidBlockHook {
+impl InvalidBlockHook for InvalidBlockHookChain {
     fn on_invalid_block(
         &self,
         block: SealedBlockWithSenders,

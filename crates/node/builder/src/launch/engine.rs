@@ -10,7 +10,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{ChainInvalidBlockHook, InvalidBlockHook, NoopInvalidBlockHook, TreeConfig},
+    tree::{InvalidBlockHook, InvalidBlockHookChain, NoopInvalidBlockHook, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -207,7 +207,7 @@ where
             ctx.node_config().debug.invalid_block_hook
         {
             warn!(target: "reth::cli", ?hook, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
-            Box::new(ChainInvalidBlockHook(
+            Box::new(InvalidBlockHookChain(
                 hook.to_selection()
                     .into_iter()
                     .map(|hook| match hook {

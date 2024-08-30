@@ -62,7 +62,7 @@ mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
-pub use invalid_block_hook::{ChainInvalidBlockHook, InvalidBlockHook, NoopInvalidBlockHook};
+pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHookChain, NoopInvalidBlockHook};
 
 /// Keeps track of the state of the tree.
 ///
