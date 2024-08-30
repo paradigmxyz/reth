@@ -1,9 +1,11 @@
+use std::fmt::Debug;
+
 use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
 /// An invalid block hook.
-pub trait InvalidBlockHook: Send {
+pub trait InvalidBlockHook: Debug + Send + Sync {
     /// Invoked when an invalid block is encountered.
     fn on_invalid_block(
         &self,
@@ -21,7 +23,9 @@ where
             SealedHeader,
             BlockExecutionOutput<Receipt>,
             Option<(TrieUpdates, B256)>,
-        ) + Send,
+        ) + Debug
+        + Send
+        + Sync,
 {
     fn on_invalid_block(
         &self,
