@@ -202,6 +202,16 @@ impl Signature {
     pub const fn size(&self) -> usize {
         core::mem::size_of::<Self>()
     }
+
+    /// Converts the signature to an alloy signature.
+    pub fn to_alloy_signature(&self) -> alloy_primitives::Signature {
+        alloy_primitives::Signature::from_rs_and_parity(
+            self.r,
+            self.s,
+            alloy_primitives::Parity::Parity(self.odd_y_parity),
+        )
+        .expect("failed to create alloy signature")
+    }
 }
 
 impl From<alloy_primitives::Signature> for Signature {

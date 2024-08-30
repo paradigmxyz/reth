@@ -73,6 +73,11 @@ impl TxType {
             Self::Deposit => false,
         }
     }
+
+    /// Convert from alloy consensus [`alloy_consensus::TxType`] to [`TxType`].
+    pub fn from_alloy_tx_type(value: alloy_consensus::TxType) -> Self {
+        value.into()
+    }
 }
 
 impl From<TxType> for u8 {

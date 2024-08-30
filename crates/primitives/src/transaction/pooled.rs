@@ -7,6 +7,7 @@ use crate::{
     TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
     TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -351,7 +352,7 @@ impl PooledTransactionsElement {
                 transaction.encode_with_signature(signature, out)
             }
             Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out, false)
+                transaction.encode_with_signature(&signature.to_alloy_signature(), out, false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 transaction.encode_with_signature(signature, out, false)
@@ -483,7 +484,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(signature, out, true)
+                transaction.encode_with_signature(&signature.to_alloy_signature(), out, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // encodes with string header
