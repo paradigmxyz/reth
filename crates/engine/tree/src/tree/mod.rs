@@ -24,12 +24,12 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipt, Receipts, Requests,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockReader, ExecutionOutcome, ProviderError, StateProviderBox,
-    StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -40,7 +40,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Debug,
@@ -59,19 +59,11 @@ use tokio::sync::{
 use tracing::*;
 
 mod config;
+mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
-
-/// This exists only to share the hook definition across many function definitions easily
-pub type InvalidBlockHook = Box<
-    dyn Fn(
-            SealedBlockWithSenders,
-            SealedHeader,
-            BlockExecutionOutput<Receipt>,
-            Option<(TrieUpdates, B256)>,
-        ) + Send,
->;
+pub use invalid_block_hook::{InvalidBlockHook, NoopInvalidBlockHook};
 
 /// Keeps track of the state of the tree.
 ///
@@ -426,7 +418,7 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
     /// An invalid block hook
-    invalid_block_hook: InvalidBlockHook,
+    invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
@@ -467,13 +459,13 @@ where
             config,
             metrics: Default::default(),
             incoming_tx,
-            invalid_block_hook: Box::new(|_, _, _, _| {}),
+            invalid_block_hook: Box::new(NoopInvalidBlockHook),
         }
     }
 
     /// Sets the invalid block hook to be the given function
-    fn set_invalid_block_hook(&mut self, invalid_block_hook: InvalidBlockHook) {
-        self.invalid_block_hook = invalid_block_hook;
+    fn set_invalid_block_hook<H: InvalidBlockHook + 'static>(&mut self, invalid_block_hook: H) {
+        self.invalid_block_hook = Box::new(invalid_block_hook);
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -482,7 +474,7 @@ where
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn_new(
+    pub fn spawn_new<H: InvalidBlockHook + 'static>(
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
@@ -491,7 +483,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
-        invalid_block_hook: InvalidBlockHook,
+        invalid_block_hook: H,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -1768,7 +1760,7 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         ) {
             // call post-block hook
-            (self.invalid_block_hook)(block.seal_slow(), parent_block, output, None);
+            self.invalid_block_hook.on_invalid_block(block.seal_slow(), parent_block, output, None);
             return Err(err.into())
         }
 
@@ -1779,7 +1771,7 @@ where
             state_provider.hashed_state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
             // call post-block hook
-            (self.invalid_block_hook)(
+            self.invalid_block_hook.on_invalid_block(
                 block.clone().seal_slow(),
                 parent_block,
                 output,

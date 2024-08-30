@@ -67,7 +67,7 @@ where
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<H: InvalidBlockHook + 'static>(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
         chain_spec: Arc<ChainSpec>,
@@ -80,7 +80,7 @@ where
         pruner: Pruner<DB, ProviderFactory<DB>>,
         payload_builder: PayloadBuilderHandle<T>,
         tree_config: TreeConfig,
-        invalid_block_hook: InvalidBlockHook,
+        invalid_block_hook: H,
     ) -> Self {
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
@@ -143,7 +143,7 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_tree::test_utils::TestPipelineBuilder;
+    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
@@ -198,7 +198,7 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
-            Box::new(|_, _, _, _| {}),
+            NoopInvalidBlockHook,
         );
     }
 }

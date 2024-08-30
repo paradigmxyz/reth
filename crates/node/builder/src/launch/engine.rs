@@ -9,7 +9,7 @@ use reth_blockchain_tree::BlockchainTreeConfig;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
+    tree::{NoopInvalidBlockHook, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -201,7 +201,7 @@ where
             warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
         }
 
-        let bad_block_hook = Box::new(|_, _, _, _| {});
+        let bad_block_hook = NoopInvalidBlockHook;
 
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
