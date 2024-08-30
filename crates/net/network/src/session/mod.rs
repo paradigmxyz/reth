@@ -554,7 +554,7 @@ impl SessionManager {
                 self.remove_pending_session(&session_id);
                 match direction {
                     Direction::Incoming => {
-                        match error.as_ref().unwrap().as_eth_stream() {
+                        match error.as_ref().and_then(|e| e.as_eth_stream()) {
                             Some(EthStreamError::StreamTimeout) => {
                                 self.metrics.total_incoming_eth_handshake_timeouts.increment(1)
                             }
@@ -593,7 +593,7 @@ impl SessionManager {
                         })
                     }
                     Direction::Outgoing(peer_id) => {
-                        match error.as_ref().unwrap().as_eth_stream() {
+                        match error.as_ref().and_then(|e| e.as_eth_stream()) {
                             Some(EthStreamError::StreamTimeout) => {
                                 self.metrics.total_outgoing_eth_handshake_timeouts.increment(1)
                             }
