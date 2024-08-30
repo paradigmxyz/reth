@@ -4,11 +4,11 @@ use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
-    revm_primitives::BlockEnv, BlockHashOrNumber, BlockNumber, SealedBlockWithSenders, B256,
+    revm_primitives::BlockEnv, BlockNumber, Receipt, SealedBlockWithSenders, B256,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
-    StateProviderFactory,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -50,17 +50,28 @@ where
     }
 
     /// Returns the locally built pending block
-    async fn local_pending_block(&self) -> Result<Option<SealedBlockWithSenders>, Self::Error> {
+    async fn local_pending_block(
+        &self,
+    ) -> Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error> {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let (_, block_hash) = latest.split();
-        self.provider()
-            .sealed_block_with_senders(BlockHashOrNumber::from(block_hash), Default::default())
-            .map_err(Self::Error::from_eth_err)
+        let block = self
+            .provider()
+            .block_with_senders(latest.hash().into(), Default::default())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?
+            .seal(latest.hash());
+
+        let receipts = self
+            .provider()
+            .receipts_by_block(block.hash().into())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        Ok(Some((block, receipts)))
     }
 
     fn receipts_root(

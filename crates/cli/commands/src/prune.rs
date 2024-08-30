@@ -1,18 +1,20 @@
 //! Command that runs pruning without any limits.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;
 
 /// Prunes according to the configuration without any limits
 #[derive(Debug, Parser)]
-pub struct PruneCommand {
+pub struct PruneCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 }
 
-impl PruneCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> PruneCommand<C> {
     /// Execute the `prune` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;

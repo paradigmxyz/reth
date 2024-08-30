@@ -13,6 +13,7 @@
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
+    args::utils::DefaultChainSpecParser,
     builder::NodeHandle,
     cli::Cli,
     primitives::{Address, IntoRecoveredTransaction},
@@ -25,7 +26,7 @@ use reth::{
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<RethCliTxpoolExt>::parse()
+    Cli::<DefaultChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

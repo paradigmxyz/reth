@@ -2,17 +2,19 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::BlockHashReader;
 use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct InitCommand {
+pub struct InitCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 }
 
-impl InitCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitCommand<C> {
     /// Execute the `init` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");

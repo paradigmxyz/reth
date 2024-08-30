@@ -12,6 +12,7 @@ repository.workspace = true
 [dependencies]
 reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
+reth-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-config.workspace = true

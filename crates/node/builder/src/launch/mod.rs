@@ -32,7 +32,7 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -111,7 +111,9 @@ where
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<TransactionResponse = reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         > + AddDevSigners,
     >,
 {
@@ -198,6 +200,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine

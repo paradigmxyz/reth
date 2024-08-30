@@ -143,7 +143,7 @@ impl TransactionBuilder {
             TxLegacy {
                 chain_id: Some(self.chain_id),
                 nonce: self.nonce,
-                gas_limit: self.gas_limit,
+                gas_limit: self.gas_limit.into(),
                 gas_price: self.max_fee_per_gas,
                 to: self.to,
                 value: self.value,

@@ -8,7 +8,7 @@ use std::{
 
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, TxHash, B256};
+use reth_primitives::{BlockId, Receipt, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
     trace::{
@@ -77,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block> + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block, Receipt> + DebugApiClient + Sync,
 {
     type Provider = T;
 

@@ -5,7 +5,8 @@ use reth_primitives::{
     Address, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
-    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
+    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
+    optimism::OptimismPayloadAttributes,
     Withdrawal,
 };
 
