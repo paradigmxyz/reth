@@ -5,6 +5,7 @@ use crate::{
     B256, U256,
 };
 
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -206,12 +207,12 @@ impl Transaction {
     }
 
     /// Get the transaction's type
-    pub const fn tx_type(&self) -> TxType {
+    pub fn tx_type(&self) -> TxType {
         match self {
             Self::Legacy(legacy_tx) => legacy_tx.tx_type(),
             Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
             Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
-            Self::Eip4844(blob_tx) => blob_tx.tx_type(),
+            Self::Eip4844(blob_tx) => blob_tx.tx_type().into(),
             Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
@@ -276,8 +277,8 @@ impl Transaction {
             Self::Legacy(TxLegacy { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) |
             Self::Eip1559(TxEip1559 { gas_limit, .. }) |
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
             Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
         }
@@ -502,7 +503,9 @@ impl Transaction {
             Self::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.encode_with_signature(signature, out, with_header)
             }
-            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
+            Self::Eip4844(blob_tx) => {
+                blob_tx.encode_with_signature(&signature.to_alloy_signature(), out, with_header)
+            }
             Self::Eip7702(set_code_tx) => {
                 set_code_tx.encode_with_signature(signature, out, with_header)
             }
@@ -517,7 +520,7 @@ impl Transaction {
             Self::Legacy(tx) => tx.gas_limit = gas_limit,
             Self::Eip2930(tx) => tx.gas_limit = gas_limit,
             Self::Eip1559(tx) => tx.gas_limit = gas_limit,
-            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit as u128,
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_limit = gas_limit,
@@ -1310,7 +1313,7 @@ impl TransactionSigned {
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),

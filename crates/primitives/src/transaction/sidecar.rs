@@ -234,7 +234,7 @@ impl BlobTransaction {
         let inner_remaining_len = data.len();
 
         // inner transaction
-        let transaction = TxEip4844::decode_inner(data)?;
+        let transaction = TxEip4844::decode(data)?;
 
         // signature
         let signature = Signature::decode(data)?;
@@ -265,7 +265,7 @@ impl BlobTransaction {
         // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
         // signature for hashing without a header. We then hash the result.
         let mut buf = Vec::new();
-        transaction.encode_with_signature(&signature, &mut buf, false);
+        transaction.encode_with_signature(&signature.to_alloy_signature(), &mut buf, false);
         let hash = keccak256(&buf);
 
         // the outer header is for the entire transaction, so we check the length here
