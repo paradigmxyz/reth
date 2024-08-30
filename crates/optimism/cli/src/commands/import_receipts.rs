@@ -25,7 +25,7 @@ use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, error, info, trace};
 
-use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
+use crate::receipt_file_codec::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -259,7 +259,7 @@ mod test {
         io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
     };
 
-    use crate::file_codec_ovm_receipt::test::{
+    use crate::receipt_file_codec::test::{
         HACK_RECEIPT_ENCODED_BLOCK_1, HACK_RECEIPT_ENCODED_BLOCK_2, HACK_RECEIPT_ENCODED_BLOCK_3,
     };
 
