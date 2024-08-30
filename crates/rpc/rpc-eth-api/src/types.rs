@@ -20,7 +20,10 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     // todo: remove restriction `reth_rpc_types::Transaction`
-    type NetworkTypes: Network<TransactionResponse = WithOtherFields<Transaction>>;
+    type NetworkTypes: Network<
+        TransactionResponse = WithOtherFields<Transaction>,
+        HeaderResponse = reth_rpc_types::Header,
+    >;
 }
 
 impl EthApiTypes for () {
@@ -32,4 +35,4 @@ impl EthApiTypes for () {
 pub type RpcTransaction<T> = <T as Network>::TransactionResponse;
 
 /// Adapter for network specific block type.
-pub type RpcBlock<T> = Block<RpcTransaction<T>>;
+pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
