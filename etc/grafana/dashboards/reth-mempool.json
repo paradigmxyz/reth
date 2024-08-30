@@ -19,7 +19,7 @@
    "editable": true,
    "fiscalYearStartMonth": 0,
    "graphTooltip": 0,
-   "id": 7,
+   "id": 5,
    "links": [],
    "liveNow": false,
    "panels": [
@@ -41,7 +41,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -86,12 +86,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -109,7 +109,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -154,12 +154,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -177,7 +177,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -222,12 +222,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -245,7 +245,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -290,12 +290,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -313,7 +313,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -358,12 +358,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -381,7 +381,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -426,12 +426,12 @@
             "textMode": "name",
             "wideLayout": true
          },
-         "pluginVersion": "11.2.0",
+         "pluginVersion": "11.1.4",
          "targets": [
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "exemplar": false,
@@ -464,7 +464,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Tracks the entries, byte size, failed inserts and file deletes of the blob store",
          "fieldConfig": {
@@ -479,7 +479,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -546,7 +545,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -562,7 +561,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -579,7 +578,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -596,7 +595,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -617,7 +616,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Tracks a heuristic of the memory footprint of the various transaction pool sub-pools",
          "fieldConfig": {
@@ -632,7 +631,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -699,7 +697,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_basefee_pool_size_bytes{instance=~\"$instance\"}",
@@ -710,7 +708,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_pending_pool_size_bytes{instance=~\"$instance\"}",
@@ -722,7 +720,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_queued_pool_size_bytes{instance=~\"$instance\"}",
@@ -734,7 +732,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_blob_pool_size_bytes{instance=~\"$instance\"}",
@@ -749,7 +747,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Transaction pool maintenance metrics",
          "fieldConfig": {
@@ -764,7 +762,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -831,7 +828,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -847,7 +844,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -864,7 +861,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -881,7 +878,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -902,7 +899,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Tracks the number of transactions in the various transaction pool sub-pools",
          "fieldConfig": {
@@ -917,7 +914,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -983,7 +979,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_basefee_pool_transactions{instance=~\"$instance\"}",
@@ -994,7 +990,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_pending_pool_transactions{instance=~\"$instance\"}",
@@ -1006,7 +1002,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_queued_pool_transactions{instance=~\"$instance\"}",
@@ -1018,7 +1014,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_transaction_pool_blob_pool_transactions{instance=~\"$instance\"}",
@@ -1033,7 +1029,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Tracks the number of transactions per second that are inserted and removed from the transaction pool, as well as the number of invalid transactions per second.\n\nBad transactions are a subset of invalid transactions, these will never be successfully imported. The remaining invalid transactions have a chance of being imported, for example transactions with nonce gaps.\n\n",
          "fieldConfig": {
@@ -1048,7 +1044,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1128,7 +1123,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1143,7 +1138,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1159,7 +1154,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1175,7 +1170,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1196,7 +1191,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Number of transactions about to be imported into the pool.",
          "fieldConfig": {
@@ -1211,7 +1206,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1277,7 +1271,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_pending_pool_imports{instance=~\"$instance\"}",
@@ -1293,7 +1287,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Tracks the number of incoming transaction messages in the channel from the network to the transaction pool.\n\nMempool messages sent over this channel are `GetPooledTransactions` requests, `NewPooledTransactionHashes` announcements (gossip), and `Transactions` (gossip)\n\nTx - `NetworkManager`\n\\nRx - `TransactionsManager`",
          "fieldConfig": {
@@ -1308,7 +1302,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1400,7 +1393,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "rate(reth_network_pool_transactions_messages_sent_total{instance=~\"$instance\"}[$__rate_interval])",
@@ -1413,7 +1406,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "rate(reth_network_pool_transactions_messages_received_total{instance=~\"$instance\"}[$__rate_interval])",
@@ -1425,7 +1418,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "code",
                "expr": "reth_network_pool_transactions_messages_sent_total{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received_total{instance=~\"$instance\"}",
@@ -1441,7 +1434,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Egress RLPx capability traffic (default only `eth` capability)\n\nDropped - session channels are bounded, if there's no capacity, the message will be dropped.",
          "fieldConfig": {
@@ -1456,7 +1449,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1523,7 +1515,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1543,7 +1535,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "All Transactions metrics",
          "fieldConfig": {
@@ -1558,7 +1550,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1624,7 +1615,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1640,7 +1631,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1657,7 +1648,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1674,7 +1665,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1695,7 +1686,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Currently active outgoing GetPooledTransactions requests.",
          "fieldConfig": {
@@ -1710,7 +1701,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1776,7 +1766,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
@@ -1792,7 +1782,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Total number of times a transaction is sent/announced that is already in the local pool.\n\nThis reflects the redundancy in the mempool.",
          "fieldConfig": {
@@ -1807,7 +1797,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1874,7 +1863,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1891,7 +1880,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -1912,7 +1901,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "",
          "fieldConfig": {
@@ -1927,7 +1916,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -1993,7 +1981,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "code",
@@ -2009,7 +1997,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "code",
@@ -2026,7 +2014,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "code",
                "expr": "sum(reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}) + sum(reth_network_hashes_pending_fetch{instance=~\"$instance\"})",
@@ -2043,7 +2031,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Duration of one call to poll `TransactionsManager` future, and its nested function calls.\n\nNetwork Events - stream peer session updates from `NetworkManager`;\nTransaction Events - stream txns gossip from `NetworkManager`;\nPending Transactions - stream hashes of txns successfully inserted into pending set in `TransactionPool`;\nPending Pool Imports - flush txns to pool from `TransactionsManager`;\nFetch Events - stream fetch txn events (success case wraps a tx) from `TransactionFetcher`;\nFetch Pending Hashes - search for hashes announced by an idle peer in cache for hashes pending fetch;\n(Transactions Commands - stream commands from testnet to fetch/serve/propagate txns)\n",
          "fieldConfig": {
@@ -2058,7 +2046,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2125,7 +2112,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2142,7 +2129,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2159,7 +2146,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2177,7 +2164,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2194,7 +2181,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2211,7 +2198,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2228,7 +2215,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2245,7 +2232,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2266,7 +2253,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Frequency of a peer sending a transaction that has already been marked as seen by that peer. This could for example be the case if a transaction is sent/announced to the peer at the same time that the peer sends/announces the same transaction to us.\n\nThis reflects the latency in the mempool.",
          "fieldConfig": {
@@ -2281,7 +2268,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2348,7 +2334,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2365,7 +2351,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2386,7 +2372,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Durations of one call to poll `NetworkManager` future, and its nested function calls.\n\nNetwork Handle Message - stream network handle messages from `TransactionsManager`;\nSwarm Events - stream transaction gossip from `Swarm`",
          "fieldConfig": {
@@ -2401,7 +2387,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2468,7 +2453,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2485,7 +2470,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2502,7 +2487,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2523,7 +2508,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Duration of one call to `TransactionFetcher::on_fetch_pending_hashes`.\n\nFind Peer - find an idle fallback peer for a hash pending fetch.\n\nFill Request - fill `GetPooledTransactions` request, for the found peer, with more hashes from cache of hashes pending fetch. ",
          "fieldConfig": {
@@ -2538,7 +2523,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2605,7 +2589,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2622,7 +2606,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2643,7 +2627,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Frequency of transaction types seen in announcements",
          "fieldConfig": {
@@ -2658,7 +2642,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2725,7 +2708,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2742,7 +2725,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2759,7 +2742,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2776,7 +2759,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -2812,7 +2795,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "The number of tracked peers in the discovery modules (dnsdisc and discv4)",
          "fieldConfig": {
@@ -2827,7 +2810,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2893,7 +2875,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_tracked_peers{instance=~\"$instance\"}",
@@ -2908,7 +2890,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "The number of incoming and outgoing connections, as well as the number of peers we are currently connected to. Outgoing and incoming connections also count peers we are trying to connect to.",
          "fieldConfig": {
@@ -2923,7 +2905,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -2989,7 +2970,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_pending_outgoing_connections{instance=~\"$instance\"}",
@@ -3000,7 +2981,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_outgoing_connections{instance=~\"$instance\"}",
@@ -3011,7 +2992,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_total_pending_connections{instance=~\"$instance\"}",
@@ -3022,7 +3003,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_incoming_connections{instance=~\"$instance\"}",
@@ -3034,7 +3015,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_connected_peers{instance=~\"$instance\"}",
@@ -3050,7 +3031,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Internal errors in the P2P module. These are expected to happen from time to time. High error rates should not cause alarm if the node is peering otherwise.",
          "fieldConfig": {
@@ -3066,7 +3047,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -3134,7 +3114,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "rate(reth_p2pstream_disconnected_errors{instance=~\"$instance\"}[$__rate_interval])",
@@ -3145,7 +3125,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "rate(reth_network_pending_session_failures{instance=~\"$instance\"}[$__rate_interval])",
@@ -3157,7 +3137,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "rate(reth_network_invalid_messages_received_total{instance=~\"$instance\"}[$__rate_interval])",
@@ -3172,9 +3152,8 @@
       },
       {
          "datasource": {
-            "default": true,
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "fieldConfig": {
             "defaults": {
@@ -3190,40 +3169,7 @@
                },
                "mappings": []
             },
-            "overrides": [
-               {
-                  "__systemRef": "hideSeriesFrom",
-                  "matcher": {
-                     "id": "byNames",
-                     "options": {
-                        "mode": "exclude",
-                        "names": [
-                           "UselessPeer",
-                           "SubprotocolSpecific",
-                           "AlreadyConnected",
-                           "ClientQuitting",
-                           "NullNodeIdentity",
-                           "TCPSubsystemError",
-                           "IncompatibleP2PVersion",
-                           "ProtocolBreach",
-                           "TooManyPeers"
-                        ],
-                        "prefix": "All except:",
-                        "readOnly": true
-                     }
-                  },
-                  "properties": [
-                     {
-                        "id": "custom.hideFrom",
-                        "value": {
-                           "legend": false,
-                           "tooltip": false,
-                           "viz": true
-                        }
-                     }
-                  ]
-               }
-            ]
+            "overrides": []
          },
          "gridPos": {
             "h": 8,
@@ -3253,7 +3199,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_useless_peer{instance=~\"$instance\"}",
@@ -3264,7 +3210,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_subprotocol_specific{instance=~\"$instance\"}",
@@ -3276,7 +3222,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_already_connected{instance=~\"$instance\"}",
@@ -3288,7 +3234,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_client_quitting{instance=~\"$instance\"}",
@@ -3300,7 +3246,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_unexpected_identity{instance=~\"$instance\"}",
@@ -3312,7 +3258,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_disconnect_requested{instance=~\"$instance\"}",
@@ -3324,7 +3270,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_null_node_identity{instance=~\"$instance\"}",
@@ -3336,7 +3282,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_tcp_subsystem_error{instance=~\"$instance\"}",
@@ -3348,7 +3294,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_incompatible{instance=~\"$instance\"}",
@@ -3360,7 +3306,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_protocol_breach{instance=~\"$instance\"}",
@@ -3372,7 +3318,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_too_many_peers{instance=~\"$instance\"}",
@@ -3384,7 +3330,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3400,7 +3346,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3416,7 +3362,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3432,7 +3378,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3448,7 +3394,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3464,7 +3410,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3480,7 +3426,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3496,7 +3442,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3512,7 +3458,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3528,7 +3474,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3544,7 +3490,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3560,7 +3506,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "disableTextWrap": false,
                "editorMode": "builder",
@@ -3580,7 +3526,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
+            "uid": "edwfgevdigk5cf"
          },
          "description": "Number of successful outgoing dial attempts.",
          "fieldConfig": {
@@ -3595,7 +3541,6 @@
                   "axisLabel": "",
                   "axisPlacement": "auto",
                   "barAlignment": 0,
-                  "barWidthFactor": 0.6,
                   "drawStyle": "line",
                   "fillOpacity": 0,
                   "gradientMode": "none",
@@ -3661,7 +3606,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "PBFA97CFB590B2093"
+                  "uid": "edwfgevdigk5cf"
                },
                "editorMode": "builder",
                "expr": "reth_network_total_dial_successes{instance=~\"$instance\"}",
@@ -3682,13 +3627,13 @@
       "list": [
          {
             "current": {
-               "selected": true,
-               "text": "172.16.0.11:9001",
-               "value": "172.16.0.11:9001"
+               "selected": false,
+               "text": "localhost:9001",
+               "value": "localhost:9001"
             },
             "datasource": {
                "type": "prometheus",
-               "uid": "PBFA97CFB590B2093"
+               "uid": "edwfgevdigk5cf"
             },
             "definition": "query_result(reth_info)",
             "hide": 0,
