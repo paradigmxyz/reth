@@ -462,7 +462,6 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-#[derive(Debug)]
 pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
@@ -501,6 +500,27 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     metrics: EngineApiMetrics,
     /// A bad block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
+}
+
+impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTreeHandler<P, E, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineApiTreeHandler")
+            .field("provider", &self.provider)
+            .field("executor_provider", &self.executor_provider)
+            .field("consensus", &self.consensus)
+            .field("payload_validator", &self.payload_validator)
+            .field("state", &self.state)
+            .field("incoming_tx", &self.incoming_tx)
+            .field("persistence", &self.persistence)
+            .field("persistence_state", &self.persistence_state)
+            .field("backfill_sync_state", &self.backfill_sync_state)
+            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("payload_builder", &self.payload_builder)
+            .field("config", &self.config)
+            .field("metrics", &self.metrics)
+            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
+            .finish()
+    }
 }
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>

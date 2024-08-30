@@ -5,7 +5,7 @@ use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
 /// A bad block hook.
-pub trait InvalidBlockHook: Debug + Send + Sync {
+pub trait InvalidBlockHook: Send + Sync {
     /// Invoked when a bad block is encountered.
     fn on_invalid_block(
         &self,
@@ -23,8 +23,7 @@ where
             SealedHeader,
             BlockExecutionOutput<Receipt>,
             Option<(TrieUpdates, B256)>,
-        ) + Debug
-        + Send
+        ) + Send
         + Sync,
 {
     fn on_invalid_block(
