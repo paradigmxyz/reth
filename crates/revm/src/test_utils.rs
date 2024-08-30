@@ -4,6 +4,7 @@ use reth_primitives::{
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -71,11 +72,11 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         _nodes: TrieUpdates,
         _hashed_state: HashedPostState,
@@ -84,14 +85,14 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         _hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         _nodes: TrieUpdates,
         _hashed_state: HashedPostState,
@@ -99,8 +100,10 @@ impl StateRootProvider for StateProviderTest {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
+}
 
-    fn hashed_storage_root(
+impl StorageRootProvider for StateProviderTest {
+    fn storage_root(
         &self,
         _address: Address,
         _hashed_storage: HashedStorage,
@@ -110,7 +113,7 @@ impl StateRootProvider for StateProviderTest {
 }
 
 impl StateProofProvider for StateProviderTest {
-    fn hashed_proof(
+    fn proof(
         &self,
         _hashed_state: HashedPostState,
         _address: Address,

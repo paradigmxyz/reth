@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{fmt, io, marker::PhantomData};
 
 use futures::Future;
 use reth_primitives::{Receipt, Receipts};
@@ -7,7 +7,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
 use tracing::trace;
 
-use crate::file_client::{FileClientError, FromReader};
+use crate::{DecodedFileChunk, FileClientError};
 
 /// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
 /// order w.r.t. block number.
@@ -26,7 +26,7 @@ pub struct ReceiptFileClient<D> {
 /// Constructs a file client from a reader and decoder.
 pub trait FromReceiptReader<D> {
     /// Error returned by file client type.
-    type Error: From<std::io::Error>;
+    type Error: From<io::Error>;
 
     /// Returns a decoder instance
     fn decoder() -> D;
@@ -34,59 +34,40 @@ pub trait FromReceiptReader<D> {
     /// Returns a file client
     fn from_receipt_reader<B>(
         reader: B,
-        decoder: D,
         num_bytes: u64,
-    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
+        prev_chunk_highest_block: Option<u64>,
+    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         Self: Sized,
         B: AsyncReadExt + Unpin;
 }
 
-impl<D> FromReader for ReceiptFileClient<D>
-where
-    D: Decoder<Item = Option<ReceiptWithBlockNumber>, Error = FileClientError>
-        + std::fmt::Debug
-        + Default,
-{
-    type Error = D::Error;
-
-    fn from_reader<B>(
-        reader: B,
-        num_bytes: u64,
-    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
-    where
-        B: AsyncReadExt + Unpin,
-    {
-        Self::from_receipt_reader(reader, Self::decoder(), num_bytes)
-    }
-}
-
 impl<D> FromReceiptReader<D> for ReceiptFileClient<D>
 where
     D: Decoder<Item = Option<ReceiptWithBlockNumber>, Error = FileClientError>
-        + std::fmt::Debug
+        + fmt::Debug
         + Default,
 {
     type Error = D::Error;
 
     fn decoder() -> D {
-        Default::default()
+        D::default()
     }
 
     /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file. Caution! If
     /// first block has no transactions, it's assumed to be the genesis block.
     fn from_receipt_reader<B>(
         reader: B,
-        decoder: D,
         num_bytes: u64,
-    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
+        prev_chunk_highest_block: Option<u64>,
+    ) -> impl Future<Output = Result<DecodedFileChunk<Self>, Self::Error>>
     where
         B: AsyncReadExt + Unpin,
     {
         let mut receipts = Receipts::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, decoder, num_bytes as usize);
+        let mut stream = FramedRead::with_capacity(reader, Self::decoder(), num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
@@ -152,10 +133,16 @@ where
                                 block_number = num + receipts.len() as u64;
                             }
                             None => {
-                                // this is the first block and it's empty, assume it's the genesis
-                                // block
-                                first_block = Some(0);
-                                block_number = 0;
+                                // this is the first block and it's empty
+                                if let Some(highest_block) = prev_chunk_highest_block {
+                                    // this is a chunked read and this is not the first chunk
+                                    block_number = highest_block + 1;
+                                } else {
+                                    // this is not a chunked read or this is the first chunk. assume
+                                    // it's the genesis block
+                                    block_number = 0;
+                                }
+                                first_block = Some(block_number);
                             }
                         }
 
@@ -196,15 +183,16 @@ where
                 "Initialized receipt file client"
             );
 
-            Ok((
-                Self {
+            Ok(DecodedFileChunk {
+                file_client: Self {
                     receipts,
                     first_block: first_block.unwrap_or_default(),
                     total_receipts,
                     _marker: Default::default(),
                 },
                 remaining_bytes,
-            ))
+                highest_block: Some(block_number),
+            })
         }
     }
 }
@@ -220,16 +208,15 @@ pub struct ReceiptWithBlockNumber {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        file_client::{FileClientError, FromReader},
-        receipt_file_client::{ReceiptFileClient, ReceiptWithBlockNumber},
-    };
     use alloy_rlp::{Decodable, RlpDecodable};
     use reth_primitives::{
         hex, Address, Buf, Bytes, BytesMut, Log, LogData, Receipt, TxType, B256,
     };
     use reth_tracing::init_test_tracing;
     use tokio_util::codec::Decoder;
+
+    use super::{FromReceiptReader, ReceiptFileClient, ReceiptWithBlockNumber};
+    use crate::{DecodedFileChunk, FileClientError};
 
     #[derive(Debug, PartialEq, Eq, RlpDecodable)]
     struct MockReceipt {
@@ -394,14 +381,14 @@ mod test {
             .unwrap(),
         };
 
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
             cumulative_gas_used: 202819,
             ..Default::default()
         };
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
         receipt.logs = vec![log_1, log_2, log_3];
 
         ReceiptWithBlockNumber { receipt, number: 1 }
@@ -446,14 +433,14 @@ mod test {
             .unwrap(),
         };
 
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
             cumulative_gas_used: 116237,
             ..Default::default()
         };
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
         receipt.logs = vec![log_1, log_2];
 
         ReceiptWithBlockNumber { receipt, number: 2 }
@@ -498,14 +485,14 @@ mod test {
             .unwrap(),
         };
 
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
         let mut receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
             cumulative_gas_used: 116237,
             ..Default::default()
         };
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
         receipt.logs = vec![log_1, log_2];
 
         ReceiptWithBlockNumber { receipt, number: 3 }
@@ -578,12 +565,16 @@ mod test {
         let encoded_byte_len = encoded_receipts.len() as u64;
         let reader = &mut &encoded_receipts[..];
 
-        let (
-            ReceiptFileClient { receipts, first_block, total_receipts, _marker },
-            _remaining_bytes,
-        ) = ReceiptFileClient::<MockReceiptFileCodec>::from_reader(reader, encoded_byte_len)
-            .await
-            .unwrap();
+        let DecodedFileChunk {
+            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            ..
+        } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
+            reader,
+            encoded_byte_len,
+            None,
+        )
+        .await
+        .unwrap();
 
         // 2 non-empty receipt objects
         assert_eq!(2, total_receipts);
@@ -610,12 +601,16 @@ mod test {
         let encoded_byte_len = encoded_receipts.len() as u64;
         let reader = &mut &encoded_receipts[..];
 
-        let (
-            ReceiptFileClient { receipts, first_block, total_receipts, _marker },
-            _remaining_bytes,
-        ) = ReceiptFileClient::<MockReceiptFileCodec>::from_reader(reader, encoded_byte_len)
-            .await
-            .unwrap();
+        let DecodedFileChunk {
+            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            ..
+        } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
+            reader,
+            encoded_byte_len,
+            None,
+        )
+        .await
+        .unwrap();
 
         // 2 non-empty receipt objects
         assert_eq!(2, total_receipts);
@@ -643,12 +638,16 @@ mod test {
         let encoded_byte_len = encoded_receipts.len() as u64;
         let reader = &mut &encoded_receipts[..];
 
-        let (
-            ReceiptFileClient { receipts, first_block, total_receipts, _marker },
-            _remaining_bytes,
-        ) = ReceiptFileClient::<MockReceiptFileCodec>::from_reader(reader, encoded_byte_len)
-            .await
-            .unwrap();
+        let DecodedFileChunk {
+            file_client: ReceiptFileClient { receipts, first_block, total_receipts, .. },
+            ..
+        } = ReceiptFileClient::<MockReceiptFileCodec>::from_receipt_reader(
+            reader,
+            encoded_byte_len,
+            None,
+        )
+        .await
+        .unwrap();
 
         // 4 non-empty receipt objects
         assert_eq!(4, total_receipts);
