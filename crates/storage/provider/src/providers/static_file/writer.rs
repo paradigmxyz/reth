@@ -106,8 +106,8 @@ pub struct StaticFileProviderRW {
 impl StaticFileProviderRW {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
-    /// Before use, transaction based segments should ensure the block end range is the expected one,
-    /// and heal if not. For more check [`Self::ensure_end_range_consistency`].
+    /// Before use, transaction based segments should ensure the block end range is the expected
+    /// one, and heal if not. For more check [`Self::ensure_end_range_consistency`].
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
@@ -177,7 +177,7 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// If a file level healing happens happen, we need to update the end range on the
+    /// If a file level healing happens, we need to update the end range on the
     /// [`SegmentHeader`].
     ///
     /// However, for transaction based segments, the block end range has to be found and healed
