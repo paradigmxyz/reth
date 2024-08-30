@@ -198,7 +198,7 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
-            NoopInvalidBlockHook,
+            Box::new(NoopInvalidBlockHook),
         );
     }
 }
