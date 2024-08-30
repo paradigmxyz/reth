@@ -316,7 +316,7 @@ impl PooledTransactionsElement {
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), false)
+                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), false)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding does not use a header, so we set `with_header` to false
@@ -362,7 +362,7 @@ impl PooledTransactionsElement {
                 transaction.encode_with_signature(signature, out, false)
             }
             Self::Eip7702 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.to_alloy_signature(), out, false)
+                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, false)
             }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
@@ -498,7 +498,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.to_alloy_signature(), out, true)
+                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
@@ -527,7 +527,7 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.to_alloy_signature(), true)
+                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
