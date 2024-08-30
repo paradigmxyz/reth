@@ -36,6 +36,7 @@ where
 }
 
 /// A no-op [`InvalidBlockHook`] that does nothing.
+#[derive(Debug)]
 pub struct NoopInvalidBlockHook;
 
 impl InvalidBlockHook for NoopInvalidBlockHook {
@@ -49,7 +50,14 @@ impl InvalidBlockHook for NoopInvalidBlockHook {
     }
 }
 
+/// A chain of [`InvalidBlockHook`]s that are executed in order.
 pub struct ChainInvalidBlockHook(pub Vec<Box<dyn InvalidBlockHook>>);
+
+impl std::fmt::Debug for ChainInvalidBlockHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChainInvalidBlockHook").field("len", &self.0.len()).finish()
+    }
+}
 
 impl InvalidBlockHook for ChainInvalidBlockHook {
     fn on_invalid_block(
