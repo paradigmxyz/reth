@@ -85,10 +85,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                 // Freeze row count changed
                 self.jar.freeze_config()?;
             }
-            Ordering::Equal => {
-                // Checked above
-                unreachable!()
-            }
+            Ordering::Equal => {}
         }
 
         // last offset should match the data_file_len
@@ -130,10 +127,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                     }
                 }
             }
-            Ordering::Equal => {
-                // Checked above
-                unreachable!()
-            }
+            Ordering::Equal => {}
         }
 
         self.offsets_file().seek(SeekFrom::End(0))?;
