@@ -194,8 +194,10 @@ Networking:
 
           [default: 320]
 
-      --max_capacity_cache_pending_fetch <COUNT>
+      --max-capacity-cache-pending-fetch <COUNT>
           Max capacity of the cache for pending fetch requests.
+
+           Default is 25600 hashes (100 times the soft limit of hashes in a `GetPooledTransactions` request).
 
           [default: 25600]
 
