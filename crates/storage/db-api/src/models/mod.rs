@@ -303,7 +303,7 @@ mod tests {
     use super::*;
     use reth_primitives::{
         Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip1559, TxEip2930, TxEip4844,
-        TxLegacy, Withdrawals,
+        Withdrawals,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
@@ -346,7 +346,6 @@ mod tests {
         assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
         assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
         assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 
@@ -379,7 +378,6 @@ mod tests {
         assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
         assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
         assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }

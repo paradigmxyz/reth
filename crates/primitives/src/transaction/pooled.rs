@@ -302,7 +302,9 @@ impl PooledTransactionsElement {
         match self {
             Self::Legacy { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.payload_len_with_signature(signature)
+                transaction.encoded_len_with_signature(
+                    &signature.as_signature_with_eip155_parity(transaction.chain_id),
+                )
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
@@ -348,9 +350,11 @@ impl PooledTransactionsElement {
         // - EIP-4844: BlobTransaction::encode_with_type_inner
         // - EIP-7702: TxEip7702::encode_with_signature
         match self {
-            Self::Legacy { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out)
-            }
+            Self::Legacy { transaction, signature, .. } => transaction
+                .encode_with_signature_fields(
+                    &signature.as_signature_with_eip155_parity(transaction.chain_id),
+                    out,
+                ),
             Self::Eip2930 { transaction, signature, .. } => {
                 transaction.encode_with_signature(signature, out, false)
             }
@@ -479,9 +483,11 @@ impl Encodable for PooledTransactionsElement {
         // - EIP-4844: BlobTransaction::encode_with_type_inner
         // - EIP-7702: TxEip7702::encode_with_signature
         match self {
-            Self::Legacy { transaction, signature, .. } => {
-                transaction.encode_with_signature(signature, out)
-            }
+            Self::Legacy { transaction, signature, .. } => transaction
+                .encode_with_signature_fields(
+                    &signature.as_signature_with_eip155_parity(transaction.chain_id),
+                    out,
+                ),
             Self::Eip2930 { transaction, signature, .. } => {
                 // encodes with string header
                 transaction.encode_with_signature(signature, out, true)
@@ -507,7 +513,9 @@ impl Encodable for PooledTransactionsElement {
         match self {
             Self::Legacy { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.payload_len_with_signature(signature)
+                transaction.encoded_len_with_signature(
+                    &signature.as_signature_with_eip155_parity(transaction.chain_id),
+                )
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
