@@ -153,9 +153,15 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
             TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
         };
 
-        if let Self::Legacy(tx) = &mut tx {
-            tx.gas_limit = (tx.gas_limit as u64).into();
-        };
+        match &mut tx {
+            Self::Legacy(tx) => {
+                tx.gas_limit = (tx.gas_limit as u64).into();
+            }
+            Self::Eip1559(tx) => {
+                tx.gas_limit = (tx.gas_limit as u64).into();
+            }
+            _ => {}
+        }
 
         Ok(tx)
     }
