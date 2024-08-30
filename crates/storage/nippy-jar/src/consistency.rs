@@ -87,7 +87,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
             }
             Ordering::Equal => {
                 // Checked above
-                unimplemented!()
+                unreachable!()
             }
         }
 
@@ -132,7 +132,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
             }
             Ordering::Equal => {
                 // Checked above
-                unimplemented!()
+                unreachable!()
             }
         }
 
