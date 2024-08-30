@@ -55,9 +55,6 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
-        // Makes sure we don't have dangling data and offset files
-        jar.freeze_config()?;
-
         let mut writer = Self {
             jar,
             data_file: BufWriter::new(data_file),
