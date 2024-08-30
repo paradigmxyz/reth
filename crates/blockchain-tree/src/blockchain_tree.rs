@@ -1386,7 +1386,6 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_optimism_consensus::proof::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         keccak256,
