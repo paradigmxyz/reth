@@ -29,6 +29,7 @@ reth-consensus.workspace = true
 reth-rpc-types.workspace = true
 reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
+reth-trie.workspace = true
 
 # async
 futures-util.workspace = true

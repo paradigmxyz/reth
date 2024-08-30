@@ -51,10 +51,9 @@ where
                         tracing::warn!(target: "engine::stream::skip_fcu", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
                         let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
                         continue
-                    } else {
-                        *this.skipped = 0;
-                        Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                     }
+                    *this.skipped = 0;
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 next => next,
             };

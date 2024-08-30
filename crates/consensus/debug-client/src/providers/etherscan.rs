@@ -1,7 +1,7 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
 use reqwest::Client;
-use reth_node_core::rpc::types::RichBlock;
+use reth_node_core::rpc::types::Block;
 use reth_tracing::tracing::warn;
 use serde::Deserialize;
 use std::time::Duration;
@@ -31,10 +31,7 @@ impl EtherscanBlockProvider {
     /// Load block using Etherscan API. Note: only `BlockNumberOrTag::Latest`,
     /// `BlockNumberOrTag::Earliest`, `BlockNumberOrTag::Pending`, `BlockNumberOrTag::Number(u64)`
     /// are supported.
-    pub async fn load_block(
-        &self,
-        block_number_or_tag: BlockNumberOrTag,
-    ) -> eyre::Result<RichBlock> {
+    pub async fn load_block(&self, block_number_or_tag: BlockNumberOrTag) -> eyre::Result<Block> {
         let block: EtherscanBlockResponse = self
             .http_client
             .get(&self.base_url)
@@ -54,7 +51,7 @@ impl EtherscanBlockProvider {
 }
 
 impl BlockProvider for EtherscanBlockProvider {
-    async fn subscribe_blocks(&self, tx: mpsc::Sender<RichBlock>) {
+    async fn subscribe_blocks(&self, tx: mpsc::Sender<Block>) {
         let mut last_block_number: Option<u64> = None;
         let mut interval = interval(self.interval);
         loop {
@@ -66,7 +63,7 @@ impl BlockProvider for EtherscanBlockProvider {
                     continue
                 }
             };
-            let block_number = block.header.number.unwrap();
+            let block_number = block.header.number;
             if Some(block_number) == last_block_number {
                 continue;
             }
@@ -80,12 +77,12 @@ impl BlockProvider for EtherscanBlockProvider {
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<RichBlock> {
+    async fn get_block(&self, block_number: u64) -> eyre::Result<Block> {
         self.load_block(BlockNumberOrTag::Number(block_number)).await
     }
 }
 
 #[derive(Deserialize, Debug)]
 struct EtherscanBlockResponse {
-    result: RichBlock,
+    result: Block,
 }

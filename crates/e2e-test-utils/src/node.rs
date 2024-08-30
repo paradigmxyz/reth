@@ -17,6 +17,7 @@ use reth::{
 };
 use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypes};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use reth_rpc_types::WithOtherFields;
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
 
@@ -94,7 +95,7 @@ where
             From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
         AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
         <AddOns::EthApi as EthApiTypes>::NetworkTypes:
-            Network<TransactionResponse = alloy_rpc_types::Transaction>,
+            Network<TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>>,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

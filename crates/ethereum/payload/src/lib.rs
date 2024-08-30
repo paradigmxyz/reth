@@ -16,7 +16,9 @@ use reth_basic_payload_builder::{
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
+        post_block_consolidation_requests_contract_call,
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+        pre_block_blockhashes_contract_call,
     },
     ConfigureEvm,
 };
@@ -35,8 +37,9 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
@@ -112,7 +115,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -123,8 +125,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.timestamp,
             attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -137,13 +137,15 @@ where
         })?;
 
         // apply eip-2935 blockhashes update
-        apply_blockhashes_update(
+        pre_block_blockhashes_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            initialized_block_env.timestamp.to::<u64>(),
-            block_number,
+            &initialized_cfg,
+            &initialized_block_env,
             parent_block.hash(),
-        ).map_err(|err| {
+        )
+        .map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
             PayloadBuilderError::Internal(err.into())
         })?;
@@ -169,14 +171,17 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for empty payload"
-            );
-            err
-        })?;
+        let state_root = db
+            .database
+            .state_root(HashedPostState::from_bundle_state(&bundle_state.state))
+            .map_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+                err
+            })?;
 
         let mut excess_blob_gas = None;
         let mut blob_gas_used = None;
@@ -207,8 +212,15 @@ where
                     &initialized_block_env,
                 )
                 .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+                let consolidation_requests = post_block_consolidation_requests_contract_call(
+                    &self.evm_config,
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-                let requests = withdrawal_requests;
+                let requests = [withdrawal_requests, consolidation_requests].concat();
                 let requests_root = calculate_requests_root(&requests);
                 (Some(requests.into()), Some(requests_root))
             } else {
@@ -302,8 +314,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -316,14 +326,18 @@ where
     })?;
 
     // apply eip-2935 blockhashes update
-    apply_blockhashes_update(
+    pre_block_blockhashes_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
         parent_block.hash(),
     )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    .map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -452,8 +466,15 @@ where
             &initialized_block_env,
         )
         .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = post_block_consolidation_requests_contract_call(
+            &evm_config,
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
         (Some(requests.into()), Some(requests_root))
     } else {
@@ -480,7 +501,9 @@ where
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider
+            .db
+            .state_root(HashedPostState::from_bundle_state(&execution_outcome.state().state))?
     };
 
     // create the block header

@@ -88,10 +88,10 @@ pub trait PartiallyFilterMessage {
         let partially_valid_data = msg.dedup();
 
         (
-            if partially_valid_data.len() != original_len {
-                FilterOutcome::ReportPeer
-            } else {
+            if partially_valid_data.len() == original_len {
                 FilterOutcome::Ok
+            } else {
+                FilterOutcome::ReportPeer
             },
             partially_valid_data,
         )

@@ -125,7 +125,7 @@ impl BlockIndices {
 
     /// Get the [`SidechainId`] for the given block hash if it exists.
     pub(crate) fn get_side_chain_id(&self, block: &BlockHash) -> Option<SidechainId> {
-        self.blocks_to_chain.get(block).cloned()
+        self.blocks_to_chain.get(block).copied()
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare

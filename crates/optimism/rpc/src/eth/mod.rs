@@ -6,12 +6,13 @@ pub mod transaction;
 mod block;
 mod call;
 mod pending_block;
+pub mod rpc;
 
 use std::{fmt, sync::Arc};
 
+use crate::eth::rpc::SequencerClient;
 use alloy_primitives::U256;
-use derive_more::Deref;
-use op_alloy_network::Optimism;
+use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -56,10 +57,10 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone, Deref)]
+#[derive(Clone)]
 pub struct OpEthApi<N: FullNodeComponents> {
-    #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
+    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
 }
 
 impl<N: FullNodeComponents> OpEthApi<N> {
@@ -81,11 +82,10 @@ impl<N: FullNodeComponents> OpEthApi<N> {
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
             ctx.executor.clone(),
-            None,
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), sequencer_client: Arc::new(parking_lot::RwLock::new(None)) }
     }
 }
 
@@ -95,7 +95,7 @@ where
     N: FullNodeComponents,
 {
     type Error = OpEthApiError;
-    type NetworkTypes = Optimism;
+    type NetworkTypes = AnyNetwork;
 }
 
 impl<N> EthApiSpec for OpEthApi<N>

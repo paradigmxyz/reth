@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-cli.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-primitives.workspace = true
@@ -72,6 +73,7 @@ reth-engine-util.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-optimism-cli = { workspace = true, optional = true }
+reth-optimism-rpc.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

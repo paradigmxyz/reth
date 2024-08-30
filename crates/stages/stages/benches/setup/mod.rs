@@ -11,12 +11,9 @@ use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
 };
-use reth_testing_utils::{
-    generators,
-    generators::{
-        random_block_range, random_changeset_range, random_contract_account_range,
-        random_eoa_accounts,
-    },
+use reth_testing_utils::generators::{
+    self, random_block_range, random_changeset_range, random_contract_account_range,
+    random_eoa_accounts, BlockRangeParams,
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -116,8 +113,15 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         .into_iter()
         .collect();
 
-        let mut blocks =
-            random_block_range(&mut rng, 0..=num_blocks, B256::ZERO, txs_range, None, None);
+        let mut blocks = random_block_range(
+            &mut rng,
+            0..=num_blocks,
+            BlockRangeParams {
+                parent: Some(B256::ZERO),
+                tx_count: txs_range,
+                ..Default::default()
+            },
+        );
 
         let (transitions, start_state) = random_changeset_range(
             &mut rng,
