@@ -107,7 +107,7 @@ impl StaticFileProviderRW {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
-    /// one, and heal if not. For more check [`Self::ensure_end_range_consistency`].
+    /// one, and heal if not. For more check `Self::ensure_end_range_consistency`.
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
@@ -183,8 +183,8 @@ impl StaticFileProviderRW {
     /// However, for transaction based segments, the block end range has to be found and healed
     /// externally.
     ///
-    /// Check [`reth_nippy_jar::consistency::NippyJarChecker`] &
-    /// [`reth_nippy_jar::writer::NippyJarWriter`] for more on healing.
+    /// Check [`reth_nippy_jar::NippyJarChecker`] &
+    /// [`NippyJarWriter`] for more on healing.
     fn ensure_end_range_consistency(&mut self) -> ProviderResult<()> {
         // If we have lost rows (in this run or previous), we need to update the [SegmentHeader].
         let expected_rows = if self.user_header().segment().is_headers() {

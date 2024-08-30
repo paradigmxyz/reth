@@ -171,7 +171,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
     }
 }
 
-/// Strategy on encountering an inconsistent state when creating a [`NippyJarWriter`].
+/// Strategy on encountering an inconsistent state on [`NippyJarChecker`].
 #[derive(Debug, Copy, Clone)]
 enum ConsistencyFailStrategy {
     /// Writer should heal.
