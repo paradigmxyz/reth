@@ -7,7 +7,7 @@ use reth::{
 use reth_chainspec::{ChainSpecBuilder, TEVMTESTNET};
 use reth_e2e_test_utils::node::NodeTestContext;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Genesis, B256};
+use reth_primitives::{Genesis, B256, b256};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ use telos_consensus_client::config::AppConfig;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tracing::info;
+use reth_node_telos::{TelosArgs, TelosNode};
 
 struct TelosRethNodeHandle {
     execution_port: u16,
@@ -61,15 +62,10 @@ async fn start_ship() -> ContainerAsync<GenericImage> {
 }
 
 fn init_reth() -> eyre::Result<(NodeConfig, String)> {
-    // Chain spec with test allocs
-    let genesis: Genesis =
-        serde_json::from_str(include_str!("../../../ethereum/node/tests/assets/genesis.json"))
-            .unwrap();
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(TEVMTESTNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
+            .genesis(TEVMTESTNET.genesis.clone())
             .build(),
     );
 
@@ -94,9 +90,9 @@ async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain
         chain_endpoint: format!("http://localhost:{chain_port}"),
         batch_size: 5,
         block_delta: None,
-        prev_hash: B256::ZERO.to_string(),
+        prev_hash: "b25034033c9ca7a40e879ddcc29cf69071a22df06688b5fe8cc2d68b4e0528f9".to_string(),
         validate_hash: None,
-        start_block: 0,
+        start_block: 1,
         stop_block: Some(60),
     };
 
@@ -119,9 +115,17 @@ async fn testing_chain_sync() {
 
     reth_tracing::init_test_tracing();
 
+    let telos_args = TelosArgs {
+        telos_endpoint: None,
+        signer_account: None,
+        signer_permission: None,
+        signer_key: None,
+        gas_cache_seconds: None,
+    };
+
     let node_handle = NodeBuilder::new(node_config.clone())
         .testing_node(exec)
-        .node(EthereumNode::default())
+        .node(TelosNode::new(telos_args))
         .launch()
         .await
         .unwrap();
