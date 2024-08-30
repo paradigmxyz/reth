@@ -203,11 +203,11 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         // TODO: implement methods which convert this value into an actual function
-        if let Some(ref hook_type) = ctx.node_config().debug.bad_block_hook {
-            warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
+        if let Some(ref hook_type) = ctx.node_config().debug.invalid_block_hook {
+            warn!(target: "reth::cli", ?hook_type, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
         }
 
-        let bad_block_hook = NoopInvalidBlockHook;
+        let invalid_block_hook = NoopInvalidBlockHook;
 
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
@@ -223,7 +223,7 @@ where
             pruner,
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
-            bad_block_hook,
+            invalid_block_hook,
         );
 
         let event_sender = EventSender::default();

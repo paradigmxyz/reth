@@ -528,7 +528,7 @@ Debug:
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
-      --debug.bad-block-hook <BAD_BLOCK_HOOK>
+      --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
           Determines which type of bad block hook to install
 
           Example: `witness,prestate`

@@ -71,25 +71,25 @@ pub struct DebugArgs {
     /// Determines which type of bad block hook to install
     ///
     /// Example: `witness,prestate`
-    #[arg(long = "debug.bad-block-hook", help_heading = "Debug", value_parser = BadBlockSelectionValueParser::default())]
-    pub bad_block_hook: Option<BadBlockSelection>,
+    #[arg(long = "debug.invalid-block-hook", help_heading = "Debug", value_parser = InvalidBlockSelectionValueParser::default())]
+    pub invalid_block_hook: Option<InvalidBlockSelection>,
 }
 
 /// Describes the invalid block hooks that should be installed.
 ///
 /// # Example
 ///
-/// Create a [`BadBlockSelection`] from a selection.
+/// Create a [`InvalidBlockSelection`] from a selection.
 ///
 /// ```
-/// use reth_node_core::args::{BadBlockHook, BadBlockSelection};
-/// let config: BadBlockSelection = vec![BadBlockHook::Witness].into();
+/// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
+/// let config: InvalidBlockSelection = vec![InvalidBlockHook::Witness].into();
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BadBlockSelection(HashSet<BadBlockHook>);
+pub struct InvalidBlockSelection(HashSet<InvalidBlockHook>);
 
-impl BadBlockSelection {
-    /// Creates a new _unique_ [`BadBlockSelection`] from the given items.
+impl InvalidBlockSelection {
+    /// Creates a new _unique_ [`InvalidBlockSelection`] from the given items.
     ///
     /// # Note
     ///
@@ -97,74 +97,74 @@ impl BadBlockSelection {
     ///
     /// # Example
     ///
-    /// Create a selection from the [`BadBlockHook`] string identifiers
+    /// Create a selection from the [`InvalidBlockHook`] string identifiers
     ///
     /// ```
-    /// use reth_node_core::args::{BadBlockHook, BadBlockSelection};
+    /// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
     /// let selection = vec!["witness", "prestate", "opcode"];
-    /// let config = BadBlockSelection::try_from_selection(selection).unwrap();
+    /// let config = InvalidBlockSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(
     ///     config,
-    ///     BadBlockSelection::from([
-    ///         BadBlockHook::Witness,
-    ///         BadBlockHook::PreState,
-    ///         BadBlockHook::Opcode
+    ///     InvalidBlockSelection::from([
+    ///         InvalidBlockHook::Witness,
+    ///         InvalidBlockHook::PreState,
+    ///         InvalidBlockHook::Opcode
     ///     ])
     /// );
     /// ```
     ///
-    /// Create a unique selection from the [`BadBlockHook`] string identifiers
+    /// Create a unique selection from the [`InvalidBlockHook`] string identifiers
     ///
     /// ```
-    /// use reth_node_core::args::{BadBlockHook, BadBlockSelection};
+    /// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
     /// let selection = vec!["witness", "prestate", "opcode", "witness", "prestate"];
-    /// let config = BadBlockSelection::try_from_selection(selection).unwrap();
+    /// let config = InvalidBlockSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(
     ///     config,
-    ///     BadBlockSelection::from([
-    ///         BadBlockHook::Witness,
-    ///         BadBlockHook::PreState,
-    ///         BadBlockHook::Opcode
+    ///     InvalidBlockSelection::from([
+    ///         InvalidBlockHook::Witness,
+    ///         InvalidBlockHook::PreState,
+    ///         InvalidBlockHook::Opcode
     ///     ])
     /// );
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
         I: IntoIterator<Item = T>,
-        T: TryInto<BadBlockHook>,
+        T: TryInto<InvalidBlockHook>,
     {
         selection.into_iter().map(TryInto::try_into).collect()
     }
 }
 
-impl From<&[BadBlockHook]> for BadBlockSelection {
-    fn from(s: &[BadBlockHook]) -> Self {
+impl From<&[InvalidBlockHook]> for InvalidBlockSelection {
+    fn from(s: &[InvalidBlockHook]) -> Self {
         Self(s.iter().copied().collect())
     }
 }
 
-impl From<Vec<BadBlockHook>> for BadBlockSelection {
-    fn from(s: Vec<BadBlockHook>) -> Self {
+impl From<Vec<InvalidBlockHook>> for InvalidBlockSelection {
+    fn from(s: Vec<InvalidBlockHook>) -> Self {
         Self(s.into_iter().collect())
     }
 }
 
-impl<const N: usize> From<[BadBlockHook; N]> for BadBlockSelection {
-    fn from(s: [BadBlockHook; N]) -> Self {
+impl<const N: usize> From<[InvalidBlockHook; N]> for InvalidBlockSelection {
+    fn from(s: [InvalidBlockHook; N]) -> Self {
         Self(s.iter().copied().collect())
     }
 }
 
-impl FromIterator<BadBlockHook> for BadBlockSelection {
+impl FromIterator<InvalidBlockHook> for InvalidBlockSelection {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = BadBlockHook>,
+        I: IntoIterator<Item = InvalidBlockHook>,
     {
         Self(iter.into_iter().collect())
     }
 }
 
-impl FromStr for BadBlockSelection {
+impl FromStr for InvalidBlockSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -176,19 +176,19 @@ impl FromStr for BadBlockSelection {
     }
 }
 
-impl fmt::Display for BadBlockSelection {
+impl fmt::Display for InvalidBlockSelection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}]", self.0.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "))
     }
 }
 
-/// clap value parser for [`BadBlockSelection`].
+/// clap value parser for [`InvalidBlockSelection`].
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
-struct BadBlockSelectionValueParser;
+struct InvalidBlockSelectionValueParser;
 
-impl TypedValueParser for BadBlockSelectionValueParser {
-    type Value = BadBlockSelection;
+impl TypedValueParser for InvalidBlockSelectionValueParser {
+    type Value = InvalidBlockSelection;
 
     fn parse_ref(
         &self,
@@ -198,9 +198,9 @@ impl TypedValueParser for BadBlockSelectionValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        val.parse::<BadBlockSelection>().map_err(|err| {
+        val.parse::<InvalidBlockSelection>().map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = BadBlockHook::all_variant_names().to_vec().join(",");
+            let possible_values = InvalidBlockHook::all_variant_names().to_vec().join(",");
             let msg = format!(
                 "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
             );
@@ -209,7 +209,7 @@ impl TypedValueParser for BadBlockSelectionValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = BadBlockHook::all_variant_names().iter().map(PossibleValue::new);
+        let values = InvalidBlockHook::all_variant_names().iter().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }
@@ -229,7 +229,7 @@ impl TypedValueParser for BadBlockSelectionValueParser {
     EnumIter,
 )]
 #[strum(serialize_all = "kebab-case")]
-pub enum BadBlockHook {
+pub enum InvalidBlockHook {
     /// A witness value enum
     Witness,
     /// A prestate trace value enum
@@ -238,7 +238,7 @@ pub enum BadBlockHook {
     Opcode,
 }
 
-impl FromStr for BadBlockHook {
+impl FromStr for InvalidBlockHook {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -251,20 +251,20 @@ impl FromStr for BadBlockHook {
     }
 }
 
-impl TryFrom<&str> for BadBlockHook {
+impl TryFrom<&str> for InvalidBlockHook {
     type Error = ParseError;
     fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
         FromStr::from_str(s)
     }
 }
 
-impl fmt::Display for BadBlockHook {
+impl fmt::Display for InvalidBlockHook {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(self.as_ref())
     }
 }
 
-impl BadBlockHook {
+impl InvalidBlockHook {
     /// Returns all variant names of the enum
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
@@ -291,26 +291,29 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bad_block_args() {
+    fn test_parse_invalid_block_args() {
         let expected_args = DebugArgs {
-            bad_block_hook: Some(BadBlockSelection::from([BadBlockHook::Witness])),
+            invalid_block_hook: Some(InvalidBlockSelection::from([InvalidBlockHook::Witness])),
             ..Default::default()
         };
-        let args =
-            CommandParser::<DebugArgs>::parse_from(["reth", "--debug.bad-block-hook", "witness"])
-                .args;
+        let args = CommandParser::<DebugArgs>::parse_from([
+            "reth",
+            "--debug.invalid-block-hook",
+            "witness",
+        ])
+        .args;
         assert_eq!(args, expected_args);
 
         let expected_args = DebugArgs {
-            bad_block_hook: Some(BadBlockSelection::from([
-                BadBlockHook::Witness,
-                BadBlockHook::PreState,
+            invalid_block_hook: Some(InvalidBlockSelection::from([
+                InvalidBlockHook::Witness,
+                InvalidBlockHook::PreState,
             ])),
             ..Default::default()
         };
         let args = CommandParser::<DebugArgs>::parse_from([
             "reth",
-            "--debug.bad-block-hook",
+            "--debug.invalid-block-hook",
             "witness,prestate",
         ])
         .args;
@@ -318,7 +321,7 @@ mod tests {
 
         let args = CommandParser::<DebugArgs>::parse_from([
             "reth",
-            "--debug.bad-block-hook",
+            "--debug.invalid-block-hook",
             "witness,prestate,prestate",
         ])
         .args;
@@ -326,7 +329,7 @@ mod tests {
 
         let args = CommandParser::<DebugArgs>::parse_from([
             "reth",
-            "--debug.bad-block-hook",
+            "--debug.invalid-block-hook",
             "witness,witness,prestate",
         ])
         .args;
@@ -334,7 +337,7 @@ mod tests {
 
         let args = CommandParser::<DebugArgs>::parse_from([
             "reth",
-            "--debug.bad-block-hook",
+            "--debug.invalid-block-hook",
             "prestate,witness,prestate",
         ])
         .args;

@@ -499,7 +499,7 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
-    /// An invalid block hook.
+    /// A bad block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
@@ -545,7 +545,7 @@ where
         }
     }
 
-    /// Sets the invalid block hook to be the given function
+    /// Sets the bad block hook.
     fn set_invalid_block_hook<H: InvalidBlockHook + 'static>(&mut self, invalid_block_hook: H) {
         self.invalid_block_hook = Box::new(invalid_block_hook);
     }

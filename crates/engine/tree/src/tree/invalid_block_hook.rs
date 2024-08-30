@@ -4,9 +4,9 @@ use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
-/// An invalid block hook.
+/// A bad block hook.
 pub trait InvalidBlockHook: Debug + Send + Sync {
-    /// Invoked when an invalid block is encountered.
+    /// Invoked when a bad block is encountered.
     fn on_invalid_block(
         &self,
         block: SealedBlockWithSenders,

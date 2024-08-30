@@ -210,7 +210,7 @@ where
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        if let Some(ref hook_type) = ctx.node_config().debug.bad_block_hook {
+        if let Some(ref hook_type) = ctx.node_config().debug.invalid_block_hook {
             warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
         }
 

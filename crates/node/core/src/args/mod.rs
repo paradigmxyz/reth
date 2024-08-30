@@ -14,7 +14,7 @@ pub use rpc_state_cache::RpcStateCacheArgs;
 
 /// DebugArgs struct for debugging purposes
 mod debug;
-pub use debug::{BadBlockHook, BadBlockSelection, DebugArgs};
+pub use debug::{DebugArgs, InvalidBlockHook, InvalidBlockSelection};
 
 /// DatabaseArgs struct for configuring the database
 mod database;
