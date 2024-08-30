@@ -170,9 +170,9 @@ impl Signature {
             alloy_primitives::Parity::Parity(self.odd_y_parity),
         )
         .expect("failed to create alloy signature")
-  }
-      
-      /// Returns [Parity] value based on `chain_id` for legacy transaction signature.
+    }
+
+    /// Returns [Parity] value based on `chain_id` for legacy transaction signature.
     #[allow(clippy::missing_const_for_fn)]
     pub fn legacy_parity(&self, chain_id: Option<u64>) -> Parity {
         if let Some(chain_id) = chain_id {
