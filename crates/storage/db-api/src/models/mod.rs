@@ -343,7 +343,6 @@ mod tests {
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
         assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
