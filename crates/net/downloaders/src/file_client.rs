@@ -407,7 +407,6 @@ impl ChunkedFileReader {
     /// chunk to read.
     async fn read_next_chunk(&mut self) -> Result<Option<u64>, io::Error> {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
-            dbg!(self.chunk.is_empty());
             // eof
             return Ok(None)
         }

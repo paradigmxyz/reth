@@ -4,6 +4,7 @@ mod eip7702;
 mod genesis_account;
 mod log;
 mod request;
+mod transaction;
 mod trie;
 mod txkind;
 mod withdrawal;

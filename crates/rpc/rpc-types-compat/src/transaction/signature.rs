@@ -13,7 +13,7 @@ pub(crate) fn from_legacy_primitive_signature(
     Signature {
         r: signature.r,
         s: signature.s,
-        v: U256::from(signature.v(chain_id)),
+        v: U256::from(signature.legacy_parity(chain_id).to_u64()),
         y_parity: None,
     }
 }
