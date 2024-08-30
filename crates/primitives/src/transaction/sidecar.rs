@@ -134,7 +134,7 @@ impl BlobTransaction {
 
         // Encode the inner tx list header, then its fields
         tx_header.encode(out);
-        self.transaction.encode_fields(out);
+        self.transaction.encode_with_signature_fields(&self.signature.to_alloy_signature(), out);
 
         // Encode the signature
         self.signature.encode(out);
