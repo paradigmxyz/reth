@@ -134,7 +134,8 @@ impl BlobTransaction {
 
         // Encode the inner tx list header, then its fields
         tx_header.encode(out);
-        self.transaction.encode_with_signature_fields(&self.signature.to_alloy_signature(), out);
+        self.transaction
+            .encode_with_signature_fields(&self.signature.as_signature_with_parity(), out);
 
         // Encode the signature
         self.signature.encode(out);
@@ -265,7 +266,7 @@ impl BlobTransaction {
         // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
         // signature for hashing without a header. We then hash the result.
         let mut buf = Vec::new();
-        transaction.encode_with_signature(&signature.to_alloy_signature(), &mut buf, false);
+        transaction.encode_with_signature(&signature.as_signature_with_parity(), &mut buf, false);
         let hash = keccak256(&buf);
 
         // the outer header is for the entire transaction, so we check the length here

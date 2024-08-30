@@ -526,9 +526,11 @@ impl Transaction {
             Self::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.encode_with_signature(signature, out, with_header)
             }
-            Self::Eip4844(blob_tx) => {
-                blob_tx.encode_with_signature(&signature.to_alloy_signature(), out, with_header)
-            }
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(
+                &signature.as_signature_with_parity(),
+                out,
+                with_header,
+            ),
             Self::Eip7702(set_code_tx) => {
                 set_code_tx.encode_with_signature(signature, out, with_header)
             }
@@ -1210,7 +1212,7 @@ impl TransactionSigned {
                 dynamic_fee_tx.payload_len_with_signature(&self.signature)
             }
             Transaction::Eip4844(blob_tx) => {
-                blob_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), true)
+                blob_tx.encoded_len_with_signature(&self.signature.as_signature_with_parity(), true)
             }
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature(&self.signature)
@@ -1340,7 +1342,7 @@ impl TransactionSigned {
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_fields(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
@@ -1417,9 +1419,8 @@ impl TransactionSigned {
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
             }
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), false)
-            }
+            Transaction::Eip4844(blob_tx) => blob_tx
+                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), false),
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature_without_header(&self.signature)
             }
