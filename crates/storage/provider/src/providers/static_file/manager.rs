@@ -660,7 +660,8 @@ impl StaticFileProvider {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
-    /// Checks consistency of the latest static file segment and throws an error if at fault. Read-only.
+    /// Checks consistency of the latest static file segment and throws an error if at fault.
+    /// Read-only.
     pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
         if let Some(latest_block) = self.get_highest_static_file_block(segment) {
             let file_path =
