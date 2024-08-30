@@ -853,7 +853,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            // authorization_list,
+            authorization_list,
             ..
         } = request;
 
@@ -892,7 +892,7 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             // EIP-7702 fields
-            // authorization_list: TODO
+            authorization_list: authorization_list.map(Into::into),
             ..Default::default()
         };
 

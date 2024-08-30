@@ -1,3 +1,4 @@
+use crate::chainspec::OpChainSpecParser;
 use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
@@ -18,37 +19,37 @@ pub mod import_receipts;
 pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::NodeCommand<Ext>),
+    Node(Box<node::NodeCommand<OpChainSpecParser, Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(init_cmd::InitCommand),
+    Init(init_cmd::InitCommand<OpChainSpecParser>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand),
+    InitState(init_state::InitStateCommand<OpChainSpecParser>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[command(name = "import-op")]
-    ImportOp(ImportOpCommand),
+    ImportOp(ImportOpCommand<OpChainSpecParser>),
     /// This imports RLP encoded receipts from a file.
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(ImportReceiptsOpCommand),
+    ImportReceiptsOp(ImportReceiptsOpCommand<OpChainSpecParser>),
     /// Dumps genesis block JSON configuration to stdout.
-    DumpGenesis(dump_genesis::DumpGenesisCommand),
+    DumpGenesis(dump_genesis::DumpGenesisCommand<OpChainSpecParser>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command),
+    Db(db::Command<OpChainSpecParser>),
     /// Manipulate individual stages.
     #[command(name = "stage")]
-    Stage(stage::Command),
+    Stage(Box<stage::Command<OpChainSpecParser>>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command),
+    P2P(p2p::Command<OpChainSpecParser>),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
     /// Scripts for node recovery
     #[command(name = "recover")]
-    Recover(recover::Command),
+    Recover(recover::Command<OpChainSpecParser>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
-    Prune(prune::PruneCommand),
+    Prune(prune::PruneCommand<OpChainSpecParser>),
 }

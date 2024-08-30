@@ -18,14 +18,14 @@ pub mod commands;
 ///
 /// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
 ///
-/// Currently configured to use codec [`HackReceipt`](file_codec_ovm_receipt::HackReceipt) based on
+/// Currently configured to use codec [`HackReceipt`](receipt_file_codec::HackReceipt) based on
 /// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
 /// be replaced with regular encoding of receipts for export.
 ///
 /// NOTE: receipts can be exported using regular op-geth encoding for `Receipt` type, to fit
 /// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
 /// made for op-erigon's import needs).
-pub mod file_codec_ovm_receipt;
+pub mod receipt_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
@@ -60,7 +60,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
-        value_parser = OpChainSpecParser::default(),
+        value_parser = OpChainSpecParser::parser(),
         global = true,
     )]
     chain: Arc<ChainSpec>,

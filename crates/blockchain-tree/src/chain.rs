@@ -22,7 +22,7 @@ use reth_provider::{
     FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -232,7 +232,10 @@ impl AppendableChain {
                     .map(|(root, updates)| (root, Some(updates)))
                     .map_err(ProviderError::from)?
             } else {
-                (provider.state_root(initial_execution_outcome.state())?, None)
+                let hashed_state =
+                    HashedPostState::from_bundle_state(&initial_execution_outcome.state().state);
+                let state_root = provider.state_root(hashed_state)?;
+                (state_root, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(

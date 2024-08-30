@@ -522,6 +522,9 @@ Debug:
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
 
+      --debug.reorg-depth <REORG_DEPTH>
+          The reorg depth for chain reorgs
+
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 

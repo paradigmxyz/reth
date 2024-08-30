@@ -66,9 +66,14 @@ impl Compact for Bytecode {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let bytecode = &self.0.bytecode()[..];
+        let bytecode = match &self.0 {
+            RevmBytecode::LegacyRaw(bytes) => bytes,
+            RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
+            RevmBytecode::Eof(eof) => eof.raw(),
+            RevmBytecode::Eip7702(eip7702) => eip7702.raw(),
+        };
         buf.put_u32(bytecode.len() as u32);
-        buf.put_slice(bytecode);
+        buf.put_slice(bytecode.as_ref());
         let len = match &self.0 {
             RevmBytecode::LegacyRaw(_) => {
                 buf.put_u8(0);
@@ -82,10 +87,13 @@ impl Compact for Bytecode {
                 buf.put_slice(map);
                 1 + 8 + map.len()
             }
-            RevmBytecode::Eof(eof) => {
+            RevmBytecode::Eof(_) => {
                 buf.put_u8(3);
-                buf.put_slice(eof.raw().as_ref());
-                1 + eof.raw().as_ref().len()
+                1
+            }
+            RevmBytecode::Eip7702(_) => {
+                buf.put_u8(4);
+                1
             }
         };
         len + bytecode.len() + 4
@@ -109,8 +117,8 @@ impl Compact for Bytecode {
                     JumpTable::from_slice(buf),
                 )
             }),
-            3 => {
-                // EOF bytecode object will be decoded from the raw bytecode
+            3 | 4 => {
+                // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
             }
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
