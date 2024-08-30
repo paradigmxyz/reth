@@ -19,6 +19,9 @@ reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-peers.workspace = true
 
+# ethereum
+alloy-json-rpc.workspace = true
+
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 

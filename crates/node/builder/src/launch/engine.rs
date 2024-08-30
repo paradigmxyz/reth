@@ -6,6 +6,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineHandle,
 };
 use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -26,7 +27,7 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info, warn};
@@ -34,13 +35,11 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    components::NodeComponents,
     hooks::NodeHooks,
-    launch::{LaunchContext, LaunchNode},
     rpc::{launch_rpc_servers, EthApiBuilderProvider},
     setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, NodeAdapter, NodeBuilderWithComponents, NodeComponentsBuilder,
-    NodeHandle, NodeTypesAdapter,
+    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 
 /// The engine node launcher.
@@ -59,13 +58,19 @@ impl EngineNodeLauncher {
 
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
+        ChainSpec = ChainSpec,
+    >,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
-                    + FullEthApiServer
-                    + AddDevSigners,
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + AddDevSigners,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
@@ -147,6 +152,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine

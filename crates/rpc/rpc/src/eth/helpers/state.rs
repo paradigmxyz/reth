@@ -1,5 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
+use reth_chainspec::ChainSpec;
 use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
@@ -20,11 +21,11 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Send + Sync,
-    Provider: StateProviderFactory + ChainSpecProvider,
+    Provider: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
         self.inner.provider()
     }
 
@@ -72,7 +73,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         )
     }
@@ -98,7 +98,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         )
     }

@@ -57,3 +57,9 @@ pub use eth::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
 };
+
+/// Optimism specific rpc types.
+pub mod optimism {
+    pub use op_alloy_rpc_types::*;
+    pub use op_alloy_rpc_types_engine::*;
+}

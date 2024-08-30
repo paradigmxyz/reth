@@ -7,6 +7,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 tempfile.workspace = true
 reth-db-api.workspace = true

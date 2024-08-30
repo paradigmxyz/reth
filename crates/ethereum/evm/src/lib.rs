@@ -15,7 +15,6 @@ extern crate alloc;
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
-use reth_revm::{Database, EvmBuilder};
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 
 #[cfg(not(feature = "std"))]
@@ -110,13 +109,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
 
-    fn evm<DB: Database>(
-        &self,
-        db: DB,
-    ) -> reth_revm::Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        EvmBuilder::default().with_db(db).build()
-    }
-
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
@@ -210,9 +202,6 @@ mod tests {
 
         // Ensure that the logs database is empty
         assert!(evm.context.evm.inner.db.logs.is_empty());
-
-        // Ensure that there are no valid authorizations in the EVM context
-        assert!(evm.context.evm.inner.valid_authorizations.is_empty());
 
         // No Optimism
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::LATEST, ..Default::default() });
@@ -364,9 +353,6 @@ mod tests {
 
         // Ensure that the logs database is empty
         assert!(evm.context.evm.inner.db.logs.is_empty());
-
-        // Ensure that there are no valid authorizations in the EVM context
-        assert!(evm.context.evm.inner.valid_authorizations.is_empty());
 
         // No Optimism
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::LATEST, ..Default::default() });

@@ -1,5 +1,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_db::tables;
 use reth_db_api::{
@@ -13,12 +15,12 @@ use tracing::*;
 
 /// `reth recover storage-tries` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;

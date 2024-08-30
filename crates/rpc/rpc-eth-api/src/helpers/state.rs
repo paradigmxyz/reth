@@ -2,18 +2,17 @@
 //! RPC methods.
 
 use futures::Future;
+use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::db::BundleState;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{EthApiTypes, FromEthApiError};
@@ -121,7 +120,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
                 let proof = state
-                    .proof(&BundleState::default(), address, &storage_keys)
+                    .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
                 Ok(from_primitive_account_proof(proof))
             })
@@ -148,7 +147,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             // Provide a default `HashedStorage` value in order to
             // get the storage root hash of the current state.
             let storage_root = state
-                .hashed_storage_root(address, Default::default())
+                .storage_root(address, Default::default())
                 .map_err(Self::Error::from_eth_err)?;
 
             Ok(Some(Account { balance, nonce, code_hash, storage_root }))
@@ -163,7 +162,7 @@ pub trait LoadState: EthApiTypes {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
-    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider;
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>;
 
     /// Returns a handle for reading data from memory.
     ///
