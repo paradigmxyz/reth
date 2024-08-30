@@ -38,13 +38,200 @@ pub fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
-#[cfg(feature = "optimism")]
 #[cfg(test)]
 mod tests {
     use super::*;
     use reth_primitives::{bloom, hex_literal::hex, Log, TxType};
     use alloy_primitives::{b256, Address, LogData};
     use reth_chainspec::SEPOLIA;
+
+    #[test]
+    fn consecutive_reorgs() {
+        let signer = Address::random();
+        let initial_signer_balance = U256::from(10).pow(U256::from(18));
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(Genesis {
+                    alloc: BTreeMap::from([(
+                        signer,
+                        GenesisAccount { balance: initial_signer_balance, ..Default::default() },
+                    )]),
+                    ..MAINNET.genesis.clone()
+                })
+                .shanghai_activated()
+                .build(),
+        );
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let consensus = Arc::new(TestConsensus::default());
+        let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
+
+        {
+            let provider_rw = provider_factory.provider_rw().unwrap();
+            provider_rw
+                .insert_block(
+                    SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default())
+                        .try_seal_with_senders()
+                        .unwrap(),
+                )
+                .unwrap();
+            let account = Account { balance: initial_signer_balance, ..Default::default() };
+            provider_rw.tx_ref().put::<tables::PlainAccountState>(signer, account).unwrap();
+            provider_rw.tx_ref().put::<tables::HashedAccounts>(keccak256(signer), account).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * 21_000);
+        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+            TransactionSigned::from_transaction_and_signature(
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce,
+                    gas_limit: 21_000,
+                    to: Address::ZERO.into(),
+                    max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
+                    ..Default::default()
+                }),
+                Signature::default(),
+            )
+            .with_signer(signer)
+        };
+
+        let mock_block = |number: u64,
+                          parent: Option<B256>,
+                          body: Vec<TransactionSignedEcRecovered>,
+                          num_of_signer_txs: u64|
+         -> SealedBlockWithSenders {
+            let transactions_root = calculate_transaction_root(&body);
+            let receipts = body
+                .iter()
+                .enumerate()
+                .map(|(idx, tx)| {
+                    Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used: (idx as u64 + 1) * 21_000,
+                        ..Default::default()
+                    }
+                    .with_bloom()
+                })
+                .collect::<Vec<_>>();
+
+            let receipts_root = calculate_receipt_root(&receipts);
+            let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
+
+            SealedBlockWithSenders::new(
+                SealedBlock {
+                    header: Header {
+                        number,
+                        parent_hash: parent.unwrap_or_default(),
+                        gas_used: body.len() as u64 * 21_000,
+                        gas_limit: chain_spec.max_gas_limit,
+                        mix_hash: B256::random(),
+                        base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
+                        transactions_root,
+                        receipts_root,
+                        state_root: state_root_unhashed(HashMap::from([(
+                            signer,
+                            (
+                                AccountInfo {
+                                    balance: initial_signer_balance -
+                                        (single_tx_cost * U256::from(num_of_signer_txs)),
+                                    nonce: num_of_signer_txs,
+                                    ..Default::default()
+                                },
+                                EMPTY_ROOT_HASH,
+                            ),
+                        )])),
+                        ..Default::default()
+                    }
+                    .seal_slow(),
+                    body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
+                    ommers: Vec::new(),
+                    withdrawals: Some(Withdrawals::default()),
+                    requests: None,
+                },
+                body.iter().map(|tx| tx.signer()).collect(),
+            )
+            .unwrap()
+        };
+
+        let fork_block = mock_block(1, Some(chain_spec.genesis_hash()), Vec::from([mock_tx(0)]), 1);
+
+        let canonical_block_1 =
+            mock_block(2, Some(fork_block.hash()), Vec::from([mock_tx(1), mock_tx(2)]), 3);
+        let canonical_block_2 = mock_block(3, Some(canonical_block_1.hash()), Vec::new(), 3);
+        let canonical_block_3 =
+            mock_block(4, Some(canonical_block_2.hash()), Vec::from([mock_tx(3)]), 4);
+
+        let sidechain_block_1 = mock_block(2, Some(fork_block.hash()), Vec::from([mock_tx(1)]), 2);
+        let sidechain_block_2 =
+            mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
+
+        let mut tree = BlockchainTree::new(
+            TreeExternals::new(provider_factory, consensus, executor_provider),
+            BlockchainTreeConfig::default(),
+            PruneModes::default(),
+        )
+        .expect("failed to create tree");
+
+        tree.insert_block(fork_block.clone(), BlockValidationKind::Exhaustive).unwrap();
+
+        assert_eq!(
+            tree.make_canonical(fork_block.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: fork_block.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.make_canonical(canonical_block_1.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_2, BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(sidechain_block_1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        assert_eq!(
+            tree.make_canonical(sidechain_block_1.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: sidechain_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.make_canonical(canonical_block_1.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(sidechain_block_2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        assert_eq!(
+            tree.make_canonical(sidechain_block_2.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: sidechain_block_2.header.clone() }
+        );
+
+        assert_eq!(
+            tree.insert_block(canonical_block_3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        assert_eq!(
+            tree.make_canonical(canonical_block_3.hash()).unwrap(),
+            CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
+        );
+    }
 
     /// Tests that the receipt root is computed correctly for the regolith block.
     /// This was implemented due to a minor bug in op-geth and op-erigon where in
