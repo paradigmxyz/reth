@@ -1209,7 +1209,9 @@ impl TransactionSigned {
             Transaction::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.payload_len_with_signature(&self.signature)
             }
-            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip4844(blob_tx) => {
+                blob_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), true)
+            }
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature(&self.signature)
             }
@@ -1416,7 +1418,7 @@ impl TransactionSigned {
                 dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
             }
             Transaction::Eip4844(blob_tx) => {
-                blob_tx.payload_len_with_signature_without_header(&self.signature)
+                blob_tx.encoded_len_with_signature(&self.signature.to_alloy_signature(), false)
             }
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature_without_header(&self.signature)
@@ -1519,11 +1521,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
-
-        if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
-            tx_eip_4844.placeholder =
-                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]
