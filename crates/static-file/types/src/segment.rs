@@ -1,4 +1,4 @@
-use crate::{BlockNumber, Compression, Filters};
+use crate::{BlockNumber, Compression};
 use alloy_primitives::TxNumber;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -64,15 +64,12 @@ impl StaticFileSegment {
     /// Returns file name for the provided segment and range, alongside filters, compression.
     pub fn filename_with_configuration(
         &self,
-        filters: Filters,
         compression: Compression,
         block_range: &SegmentRangeInclusive,
     ) -> String {
         let prefix = self.filename(block_range);
 
-        let filters_name = match filters {
-            Filters::WithoutFilters => "none".to_string(),
-        };
+        let filters_name = "none".to_string();
 
         // ATTENTION: if changing the name format, be sure to reflect those changes in
         // [`Self::parse_filename`.]
@@ -288,8 +285,6 @@ impl SegmentHeader {
 /// Configuration used on the segment.
 #[derive(Debug, Clone, Copy)]
 pub struct SegmentConfig {
-    /// Inclusion filters used on the segment
-    pub filters: Filters,
     /// Compression used on the segment
     pub compression: Compression,
 }
@@ -351,27 +346,18 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None),
-            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300", None),
+            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30"),
+            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300"),
             (
                 StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
                 "static_file_transactions_1123233_11223233",
-                None,
             ),
         ];
 
-        for (segment, block_range, filename, configuration) in test_vectors {
+        for (segment, block_range, filename) in test_vectors {
             let block_range: SegmentRangeInclusive = block_range.into();
-            if let Some((compression, filters)) = configuration {
-                assert_eq!(
-                    segment.filename_with_configuration(filters, compression, &block_range,),
-                    filename
-                );
-            } else {
-                assert_eq!(segment.filename(&block_range), filename);
-            }
-
+            assert_eq!(segment.filename(&block_range), filename);
             assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
