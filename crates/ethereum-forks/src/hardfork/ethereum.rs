@@ -352,7 +352,7 @@ impl EthereumHardfork {
             (
                 Self::Paris,
                 ForkCondition::TTD {
-                    fork_block: None,
+                    fork_block: Some(15537394),
                     total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
                 },
             ),
