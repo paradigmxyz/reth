@@ -214,7 +214,7 @@ pub trait EthTransactions: LoadTransaction {
         }
     }
 
-    /// Find a transaction by sender and nonce
+    /// Find a transaction by sender's address and nonce.
     fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
@@ -262,29 +262,30 @@ pub trait EthTransactions: LoadTransaction {
             })
             .await?;
 
-            if let Some(block) = self.block_with_senders(num.into()).await? {
-                let block_hash = block.hash();
-                let block_number = block.number;
-                let base_fee_per_gas = block.base_fee_per_gas;
-                if let Some((index, tx)) = block
-                    .into_transactions_ecrecovered()
-                    .enumerate()
-                    .find(|(_index, tx)| tx.signer() == sender && tx.nonce() == nonce)
-                    .map(|(index, tx)| (index, tx))
-                {
-                    let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        base_fee: base_fee_per_gas.map(u128::from),
-                        index: Some(index as u64),
-                    };
-                    return Ok(Some(from_recovered_with_block_context(tx, tx_info)))
-                }
-            } else {
-                return Err(EthApiError::UnknownBlockNumber.into());
-            };
-            Ok(None)
+            self.block_with_senders(num.into())
+                .await?
+                .and_then(|block| {
+                    let block_hash = block.hash();
+                    let block_number = block.number;
+                    let base_fee_per_gas = block.base_fee_per_gas;
+
+                    block
+                        .into_transactions_ecrecovered()
+                        .enumerate()
+                        .find(|(_, tx)| tx.signer() == sender && tx.nonce() == nonce)
+                        .map(|(index, tx)| {
+                            let tx_info = TransactionInfo {
+                                hash: Some(tx.hash()),
+                                block_hash: Some(block_hash),
+                                block_number: Some(block_number),
+                                base_fee: base_fee_per_gas.map(u128::from),
+                                index: Some(index as u64),
+                            };
+                            from_recovered_with_block_context(tx, tx_info)
+                        })
+                })
+                .ok_or(EthApiError::UnknownBlockNumber.into())
+                .map(Some)
         }
     }
 
