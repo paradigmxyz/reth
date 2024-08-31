@@ -3,6 +3,7 @@
 use clap::Args;
 use reth_chainspec::ChainSpec;
 use reth_config::config::PruneConfig;
+use reth_primitives::BlockNumber;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 
 /// Parameters for pruning and full node
@@ -13,6 +14,68 @@ pub struct PruningArgs {
     /// This flag takes priority over pruning configuration in reth.toml.
     #[arg(long, default_value_t = false)]
     pub full: bool,
+
+    /// Minimum pruning interval measured in blocks.
+    #[arg(long, default_value_t = 5)]
+    pub block_interval: u64,
+
+    // Sender Recovery
+    /// Prunes all sender recovery data.
+    #[arg(long = "prune.senderrecovery.full", conflicts_with_all = &["prune.senderrecovery.distance", "prune.senderrecovery.before"])]
+    pub sender_recovery_full: bool,
+    /// Prune sender recovery data before the `head-N` block number. In other words, keep last N + 1 blocks.
+    #[arg(long = "prune.senderrecovery.distance", value_name = "BLOCKS", conflicts_with_all = &["prune.senderrecovery.full", "prune.senderrecovery.before"])]
+    pub sender_recovery_distance: Option<u64>,
+    /// Prune sender recovery data before the specified block number. The specified block number is not pruned.
+    #[arg(long = "prune.senderrecovery.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.senderrecovery.full", "prune.senderrecovery.distance"])]
+    pub sender_recovery_before: Option<BlockNumber>,
+
+    // Transaction Lookup
+    /// Prunes all transaction lookup data.
+    #[arg(long = "prune.transactionlookup.full", conflicts_with_all = &["prune.transactionlookup.distance", "prune.transactionlookup.before"])]
+    pub transaction_lookup_full: bool,
+    /// Prune transaction lookup data before the `head-N` block number. In other words, keep last N + 1 blocks.
+    #[arg(long = "prune.transactionlookup.distance", value_name = "BLOCKS", conflicts_with_all = &["prune.transactionlookup.full", "prune.transactionlookup.before"])]
+    pub transaction_lookup_distance: Option<u64>,
+    /// Prune transaction lookup data before the specified block number. The specified block number is not pruned.
+    #[arg(long = "prune.transactionlookup.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.transactionlookup.full", "prune.transactionlookup.distance"])]
+    pub transaction_lookup_before: Option<BlockNumber>,
+
+    // Receipts
+    /// Prunes all receipt data.
+    #[arg(long = "prune.receipts.full", conflicts_with_all = &["prune.receipts.distance", "prune.receipts.before"])]
+    pub receipts_full: bool,
+    /// Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks.
+    #[arg(long = "prune.receipts.distance", value_name = "BLOCKS", conflicts_with_all = &["prune.receipts.full", "prune.receipts.before"])]
+    pub receipts_distance: Option<u64>,
+    /// Prune receipts before the specified block number. The specified block number is not pruned.
+    #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.receipts.full", "prune.receipts.distance"])]
+    pub receipts_before: Option<BlockNumber>,
+
+    // Account History
+    /// Prunes all account history.
+    #[arg(long = "prune.accounthistory.full", conflicts_with_all = &["prune.accounthistory.distance", "prune.accounthistory.before"])]
+    pub account_history_full: bool,
+    /// Prune account before the `head-N` block number. In other words, keep last N + 1 blocks.
+    #[arg(long = "prune.accounthistory.distance", value_name = "BLOCKS", conflicts_with_all = &["prune.accounthistory.full", "prune.accounthistory.before"])]
+    pub account_history_distance: Option<u64>,
+    /// Prune account history before the specified block number. The specified block number is not pruned.
+    #[arg(long = "prune.accounthistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.accounthistory.full", "prune.accounthistory.distance"])]
+    pub account_history_before: Option<BlockNumber>,
+
+    // Storage History
+    /// Prunes all storage history data.
+    #[arg(long = "prune.storagehistory.full", conflicts_with_all = &["prune.storagehistory.distance", "prune.storagehistory.before"])]
+    pub storage_history_full: bool,
+    /// Prune storage history before the `head-N` block number. In other words, keep last N + 1 blocks.
+    #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["prune.storagehistory.full", "prune.storagehistory.before"])]
+    pub storage_history_distance: Option<u64>,
+    /// Prune storage history before the specified block number. The specified block number is not pruned.
+    #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.storagehistory.full", "prune.storagehistory.distance"])]
+    pub storage_history_before: Option<BlockNumber>,
+    
+    // Receipts Log Filter
+    // TODO (garwah): Add CLI arg to support specifying a receipt log filter. 
 }
 
 impl PruningArgs {
@@ -45,6 +108,65 @@ impl PruningArgs {
                 ),
             },
         })
+    }
+    fn sender_recovery_prune_mode(&self) -> Option<PruneMode> {
+        if self.sender_recovery_full {
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.sender_recovery_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.sender_recovery_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
+    }
+
+    fn transaction_lookup_prune_mode(&self) -> Option<PruneMode> {
+        if self.transaction_lookup_full {
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.transaction_lookup_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.transaction_lookup_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
+    }
+
+    fn receipts_prune_mode(&self) -> Option<PruneMode> {
+        if self.receipts_full {
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.receipts_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.receipts_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
+    }
+
+    fn account_history_prune_mode(&self) -> Option<PruneMode> {
+        if self.account_history_full {
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.account_history_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.account_history_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
+    }
+
+    fn storage_history_prune_mode(&self) -> Option<PruneMode> {
+        if self.storage_history_full {
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.storage_history_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.storage_history_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
     }
 }
 
