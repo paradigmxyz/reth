@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{
+    helpers::{transaction::get_transaction_by_sender_and_nonce, TraceExt},
+    EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+};
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
