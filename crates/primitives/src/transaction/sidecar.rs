@@ -25,12 +25,10 @@ use alloc::vec::Vec;
 pub struct BlobTransaction {
     /// The transaction hash.
     pub hash: TxHash,
-    /// The transaction payload.
-    pub transaction: TxEip4844,
     /// The transaction signature.
     pub signature: Signature,
-    /// The transaction's blob sidecar.
-    pub sidecar: BlobTransactionSidecar,
+    /// The transaction payload with the sidecar.
+    pub transaction: TxEip4844WithSidecar,
 }
 
 impl BlobTransaction {
@@ -44,7 +42,11 @@ impl BlobTransaction {
     ) -> Result<Self, (TransactionSigned, BlobTransactionSidecar)> {
         let TransactionSigned { transaction, signature, hash } = tx;
         match transaction {
-            Transaction::Eip4844(transaction) => Ok(Self { hash, transaction, signature, sidecar }),
+            Transaction::Eip4844(transaction) => Ok(Self {
+                hash,
+                transaction: TxEip4844WithSidecar { tx: transaction, sidecar },
+                signature,
+            }),
             transaction => {
                 let tx = TransactionSigned { transaction, signature, hash };
                 Err((tx, sidecar))
@@ -60,19 +62,19 @@ impl BlobTransaction {
         &self,
         proof_settings: &c_kzg::KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        self.transaction.validate_blob(&self.sidecar, proof_settings)
+        self.transaction.validate_blob(proof_settings)
     }
 
     /// Splits the [`BlobTransaction`] into its [`TransactionSigned`] and [`BlobTransactionSidecar`]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         let transaction = TransactionSigned {
-            transaction: Transaction::Eip4844(self.transaction),
+            transaction: Transaction::Eip4844(self.transaction.tx),
             hash: self.hash,
             signature: self.signature,
         };
 
-        (transaction, self.sidecar)
+        (transaction, self.transaction.sidecar)
     }
 
     /// Encodes the [`BlobTransaction`] fields as RLP, with a tx type. If `with_header` is `false`,
@@ -112,7 +114,7 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        TxEip4844WithSidecar { tx: self.transaction.clone(), sidecar: self.sidecar.clone() }
+        self.transaction
             .encode_with_signature_fields(&self.signature.as_signature_with_parity(), out);
     }
 
@@ -154,14 +156,14 @@ impl BlobTransaction {
         // its list header.
         let tx_header = Header {
             list: true,
-            payload_length: self.transaction.fields_len() + self.signature.payload_len(),
+            payload_length: self.transaction.tx.fields_len() + self.signature.payload_len(),
         };
 
         let tx_length = tx_header.length() + tx_header.payload_length;
 
         // The payload length is the length of the `tranascation_payload_body` list, plus the
         // length of the blobs, commitments, and proofs.
-        let payload_length = tx_length + self.sidecar.fields_len();
+        let payload_length = tx_length + self.transaction.sidecar.fields_len();
 
         // We use the calculated payload len to construct the first list header, which encompasses
         // everything in the tx - the length of the second, inner list header is part of
@@ -247,7 +249,7 @@ impl BlobTransaction {
             return Err(RlpError::UnexpectedLength)
         }
 
-        Ok(Self { transaction, hash, signature, sidecar })
+        Ok(Self { transaction: TxEip4844WithSidecar { tx: transaction, sidecar }, hash, signature })
     }
 }
 
