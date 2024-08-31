@@ -558,9 +558,19 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()
@@ -718,7 +728,7 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the encoded length of the transaction.
     fn encoded_length(&self) -> usize {
-        0
+        self.size()
     }
 
     /// Returns the chain ID associated with the transaction.
@@ -788,7 +798,7 @@ impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
                 sender,
                 nonce,
                 gas_price,
-                gas_limit,
+                gas_limit: gas_limit as u64,
                 to,
                 value,
                 input,
@@ -909,7 +919,15 @@ impl From<MockTransaction> for Transaction {
                 value,
                 input,
                 size: _,
-            } => Self::Legacy(TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input }),
+            } => Self::Legacy(TxLegacy {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit: gas_limit.into(),
+                to,
+                value,
+                input,
+            }),
             MockTransaction::Eip2930 {
                 chain_id,
                 hash: _,
@@ -1013,7 +1031,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     hash: tx_hash,
                     nonce: *nonce,
                     gas_price: *gas_price,
-                    gas_limit: *gas_limit,
+                    gas_limit: *gas_limit as u64,
                     to: *to,
                     value: *value,
                     input: input.clone(),

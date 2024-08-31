@@ -26,7 +26,6 @@ pub mod spec;
 pub mod state;
 pub mod trace;
 pub mod transaction;
-pub mod types;
 
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
@@ -38,7 +37,7 @@ pub use signer::{AddDevSigners, EthSigner};
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use trace::Trace;
-pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
+pub use transaction::{EthTransactions, LoadTransaction};
 
 use crate::EthApiTypes;
 

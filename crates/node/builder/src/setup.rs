@@ -1,5 +1,7 @@
 //! Helpers for setting up parts of the node.
 
+use std::sync::Arc;
+
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -18,7 +20,6 @@ use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, Stag
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
-use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network

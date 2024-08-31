@@ -1,10 +1,11 @@
+use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::helpers::TraceExt;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
     trace::{
@@ -14,14 +15,13 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, RichBlock,
+    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
-use std::future::Future;
 
 const API_LEVEL: u64 = 8;
 
@@ -36,11 +36,18 @@ impl<Eth> OtterscanApi<Eth> {
     pub const fn new(eth: Eth) -> Self {
         Self { eth }
     }
+}
 
+impl<Eth> OtterscanApi<Eth>
+where
+    Eth: EthApiTypes<
+        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+    >,
+{
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
-        block: Option<RichBlock>,
+        block: Option<RpcBlock<Eth::NetworkTypes>>,
         receipts: Option<Vec<AnyTransactionReceipt>>,
     ) -> RpcResult<BlockDetails> {
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -59,7 +66,16 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + TraceExt + 'static,
+    Eth: EthApiServer<
+            RpcTransaction<Eth::NetworkTypes>,
+            RpcBlock<Eth::NetworkTypes>,
+            RpcReceipt<Eth::NetworkTypes>,
+        > + EthApiTypes<
+            NetworkTypes: Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + TraceExt
+        + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
@@ -175,7 +191,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions> {
+    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number.into(), true);
         let receipts = self.eth.block_receipts(block_number.into());
@@ -193,7 +209,7 @@ where
         }
 
         // make sure the block is full
-        let BlockTransactions::Full(transactions) = &mut block.inner.transactions else {
+        let BlockTransactions::Full(transactions) = &mut block.transactions else {
             return Err(internal_rpc_err("block is not full"));
         };
 
@@ -233,7 +249,11 @@ where
                 OtsTransactionReceipt { receipt, timestamp }
             })
             .collect();
-        Ok(OtsBlockTransactions { fullblock: block.inner.into(), receipts })
+
+        // use `transaction_count` to indicate the paginate information
+        let mut block = OtsBlockTransactions { fullblock: block.into(), receipts };
+        block.fullblock.transaction_count = tx_len;
+        Ok(block)
     }
 
     /// Handler for `searchTransactionsBefore`
@@ -278,31 +298,35 @@ where
 
         // perform a binary search over the block range to find the block in which the sender's
         // nonce reached the requested nonce.
-        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
-            async move {
-                let mid_nonce =
-                    EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
-                        .await?
-                        .saturating_to::<u64>();
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.eth.block_number()?.saturating_to(),
+            |mid| {
+                async move {
+                    let mid_nonce =
+                        EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
+                            .await?
+                            .saturating_to::<u64>();
 
-                // The `transaction_count` returns the `nonce` after the transaction was
-                // executed, which is the state of the account after the block, and we need to find
-                // the transaction whose nonce is the pre-state, so need to compare with `nonce`(no
-                // equal).
-                Ok(mid_nonce > nonce)
-            }
-        })
+                    // The `transaction_count` returns the `nonce` after the transaction was
+                    // executed, which is the state of the account after the block, and we need to
+                    // find the transaction whose nonce is the pre-state, so
+                    // need to compare with `nonce`(no equal).
+                    Ok(mid_nonce > nonce)
+                }
+            },
+        )
         .await?;
 
         let Some(BlockTransactions::Full(transactions)) =
-            self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
+            self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
         else {
             return Err(EthApiError::UnknownBlockNumber.into());
         };
 
         Ok(transactions
             .into_iter()
-            .find(|tx| tx.from == sender && tx.nonce == nonce)
+            .find(|tx| *tx.from == *sender && tx.nonce == nonce)
             .map(|tx| tx.hash))
     }
 
@@ -312,11 +336,15 @@ where
             return Ok(None);
         }
 
-        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
-            Box::pin(
-                async move { Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty()) },
-            )
-        })
+        let num = binary_search::<_, _, ErrorObjectOwned>(
+            1,
+            self.eth.block_number()?.saturating_to(),
+            |mid| {
+                Box::pin(async move {
+                    Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty())
+                })
+            },
+        )
         .await?;
 
         let traces = self
@@ -359,67 +387,7 @@ where
 
         // A contract maybe created and then destroyed in multiple transactions, here we
         // return the first found transaction, this behavior is consistent with etherscan's
-        let found = traces.and_then(|traces| traces.first().cloned());
+        let found = traces.and_then(|traces| traces.first().copied());
         Ok(found)
-    }
-}
-
-/// Performs a binary search within a given block range to find the desired block number.
-///
-/// The binary search is performed by calling the provided asynchronous `check` closure on the
-/// blocks of the range. The closure should return a future representing the result of performing
-/// the desired logic at a given block. The future resolves to an `bool` where:
-/// - `true` indicates that the condition has been matched, but we can try to find a lower block to
-///   make the condition more matchable.
-/// - `false` indicates that the condition not matched, so the target is not present in the current
-///   block and should continue searching in a higher range.
-///
-/// Args:
-/// - `low`: The lower bound of the block range (inclusive).
-/// - `high`: The upper bound of the block range (inclusive).
-/// - `check`: A closure that performs the desired logic at a given block.
-async fn binary_search<F, Fut>(low: u64, high: u64, check: F) -> RpcResult<u64>
-where
-    F: Fn(u64) -> Fut,
-    Fut: Future<Output = RpcResult<bool>>,
-{
-    let mut low = low;
-    let mut high = high;
-    let mut num = high;
-
-    while low <= high {
-        let mid = (low + high) / 2;
-        if check(mid).await? {
-            high = mid - 1;
-            num = mid;
-        } else {
-            low = mid + 1
-        }
-    }
-
-    Ok(num)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_binary_search() {
-        // in the middle
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
-        assert_eq!(num, Ok(5));
-
-        // in the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 7) })).await;
-        assert_eq!(num, Ok(7));
-
-        // in the lower
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 1) })).await;
-        assert_eq!(num, Ok(1));
-
-        // high than the upper
-        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
-        assert_eq!(num, Ok(10));
     }
 }

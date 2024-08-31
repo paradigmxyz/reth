@@ -70,7 +70,9 @@ mod tests {
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
-    use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_receipt, BlockRangeParams,
+    };
     use std::{io::Write, sync::Arc};
 
     #[tokio::test]
@@ -94,7 +96,11 @@ mod tests {
         let mut head = block.hash();
         let mut rng = generators::rng();
         for block_number in 2..=tip {
-            let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
+            let nblock = random_block(
+                &mut rng,
+                block_number,
+                generators::BlockParams { parent: Some(head), ..Default::default() },
+            );
             head = nblock.hash();
             provider_rw.insert_historical_block(nblock.try_seal_with_senders().unwrap()).unwrap();
         }
@@ -253,7 +259,11 @@ mod tests {
         let genesis_hash = B256::ZERO;
         let tip = (num_blocks - 1) as u64;
 
-        let blocks = random_block_range(&mut rng, 0..=tip, genesis_hash, 2..3);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=tip,
+            BlockRangeParams { parent: Some(genesis_hash), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
         let mut receipts = Vec::new();

@@ -1,20 +1,21 @@
 //! Helpers for testing debug trace calls.
 
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, TxHash, B256};
+use reth_primitives::{BlockId, Receipt, TxHash, B256};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
     trace::{
         common::TraceResult,
         geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
     },
-    TransactionRequest,
-};
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
+    Block, Transaction, TransactionRequest,
 };
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
@@ -76,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block, Receipt> + DebugApiClient + Sync,
 {
     type Provider = T;
 

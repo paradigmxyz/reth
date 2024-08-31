@@ -5,6 +5,7 @@ use crate::{
     B256, U256,
 };
 
+use alloy_consensus::SignableTransaction;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -86,8 +87,8 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
     ///
@@ -137,6 +138,27 @@ pub enum Transaction {
     /// Optimism deposit transaction.
     #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Transaction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut tx = match TxType::arbitrary(u)? {
+            TxType::Legacy => Self::Legacy(TxLegacy::arbitrary(u)?),
+            TxType::Eip2930 => Self::Eip2930(TxEip2930::arbitrary(u)?),
+            TxType::Eip1559 => Self::Eip1559(TxEip1559::arbitrary(u)?),
+            TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
+            TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
+            #[cfg(feature = "optimism")]
+            TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
+        };
+
+        if let Self::Legacy(tx) = &mut tx {
+            tx.gas_limit = (tx.gas_limit as u64).into();
+        };
+
+        Ok(tx)
+    }
 }
 
 // === impl Transaction ===
@@ -207,7 +229,7 @@ impl Transaction {
     /// Get the transaction's type
     pub const fn tx_type(&self) -> TxType {
         match self {
-            Self::Legacy(legacy_tx) => legacy_tx.tx_type(),
+            Self::Legacy(_) => TxType::Legacy,
             Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
             Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
             Self::Eip4844(blob_tx) => blob_tx.tx_type(),
@@ -272,7 +294,7 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub const fn gas_limit(&self) -> u64 {
         match self {
-            Self::Legacy(TxLegacy { gas_limit, .. }) |
+            Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
             Self::Eip2930(TxEip2930 { gas_limit, .. }) |
             Self::Eip1559(TxEip1559 { gas_limit, .. }) |
             Self::Eip4844(TxEip4844 { gas_limit, .. }) |
@@ -334,7 +356,7 @@ impl Transaction {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip7702(_) => None,
             Self::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                Some(blob_versioned_hashes.to_vec())
+                Some(blob_versioned_hashes.clone())
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => None,
@@ -493,7 +515,10 @@ impl Transaction {
         match self {
             Self::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                legacy_tx.encode_with_signature(signature, out)
+                legacy_tx.encode_with_signature_fields(
+                    &signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+                    out,
+                )
             }
             Self::Eip2930(access_list_tx) => {
                 access_list_tx.encode_with_signature(signature, out, with_header)
@@ -513,7 +538,7 @@ impl Transaction {
     /// This sets the transaction's gas limit.
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
-            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip2930(tx) => tx.gas_limit = gas_limit,
             Self::Eip1559(tx) => tx.gas_limit = gas_limit,
             Self::Eip4844(tx) => tx.gas_limit = gas_limit,
@@ -810,8 +835,9 @@ impl Encodable for Transaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
@@ -1172,7 +1198,9 @@ impl TransactionSigned {
     /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+            ),
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature(&self.signature)
             }
@@ -1376,7 +1404,9 @@ impl TransactionSigned {
     pub fn length_without_header(&self) -> usize {
         // method computes the payload len without a RLP header
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
+            Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
+            ),
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature_without_header(&self.signature)
             }
@@ -1457,7 +1487,14 @@ impl Decodable for TransactionSigned {
         let remaining_len = buf.len();
 
         // if the transaction is encoded as a string then it is a typed transaction
-        if !header.list {
+        if header.list {
+            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
+
+            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
+            // buffer
+            *buf = original_encoding;
+            Ok(tx)
+        } else {
             let tx = Self::decode_enveloped_typed_transaction(buf)?;
 
             let bytes_consumed = remaining_len - buf.len();
@@ -1468,13 +1505,6 @@ impl Decodable for TransactionSigned {
                 return Err(RlpError::UnexpectedLength)
             }
 
-            Ok(tx)
-        } else {
-            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
-
-            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
-            // buffer
-            *buf = original_encoding;
             Ok(tx)
         }
     }
@@ -1491,7 +1521,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
             tx_eip_4844.placeholder =
-                if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]
@@ -1587,13 +1617,6 @@ pub trait IntoRecoveredTransaction {
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
-}
-
-impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone()
-    }
 }
 
 /// Generic wrapper with encoded Bytes, such as transaction data.
@@ -1775,7 +1798,7 @@ mod tests {
             chain_id: Some(4),
             nonce: 1u64,
             gas_price: 1000000000,
-            gas_limit: 100000u64,
+            gas_limit: 100000,
             to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(693361000000000u64),
             input: Default::default(),

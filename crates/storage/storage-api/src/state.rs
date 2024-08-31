@@ -1,4 +1,7 @@
-use super::{AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider};
+use super::{
+    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
+    StorageRootProvider,
+};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
@@ -13,7 +16,13 @@ pub type StateProviderBox = Box<dyn StateProvider>;
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
-    BlockHashReader + AccountReader + StateRootProvider + StateProofProvider + Send + Sync
+    BlockHashReader
+    + AccountReader
+    + StateRootProvider
+    + StorageRootProvider
+    + StateProofProvider
+    + Send
+    + Sync
 {
     /// Get storage of given account.
     fn storage(

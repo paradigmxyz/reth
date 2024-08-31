@@ -20,13 +20,19 @@ reth-trie-common.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 reth-chainspec = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true }
+reth-optimism-chainspec = { workspace = true, optional = true }
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
+alloy-serde = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
+
+# optimism
+op-alloy-rpc-types = { workspace = true, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
@@ -99,8 +105,9 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
+    "dep:reth-optimism-chainspec",
 ]
-alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde", "dep:op-alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
@@ -111,4 +118,3 @@ harness = false
 name = "validate_blob_tx"
 required-features = ["arbitrary", "c-kzg"]
 harness = false
-

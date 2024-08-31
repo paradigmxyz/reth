@@ -97,7 +97,7 @@ mod tests {
         PruneSegment, SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_testing_utils::{generators, generators::random_block_range};
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
 
     #[test]
@@ -105,7 +105,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 1..=100, B256::ZERO, 2..3);
+        let blocks = random_block_range(
+            &mut rng,
+            1..=100,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let transactions = blocks.iter().flat_map(|block| &block.body).collect::<Vec<_>>();
