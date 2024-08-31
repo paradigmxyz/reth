@@ -236,12 +236,11 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             // Check if the sender is a contract
-            if LoadState::get_code(self, sender, None).await?.len() > 0 {
+            if self.get_code(sender, None).await?.len() > 0 {
                 return Ok(None);
             }
 
-            let highest =
-                LoadState::transaction_count(self, sender, None).await?.saturating_to::<u64>();
+            let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
 
             // If the nonce is higher or equal to the highest nonce, the transaction is pending or
             // not exists.
@@ -256,15 +255,14 @@ pub trait EthTransactions: LoadTransaction {
             // Perform a binary search over the block range to find the block in which the sender's
             // nonce reached the requested nonce.
             let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
-                let mid_nonce = LoadState::transaction_count(self, sender, Some(mid.into()))
-                    .await?
-                    .saturating_to::<u64>();
+                let mid_nonce =
+                    self.transaction_count(sender, Some(mid.into())).await?.saturating_to::<u64>();
 
                 Ok(mid_nonce > nonce)
             })
             .await?;
 
-            if let Some(block) = LoadBlock::block_with_senders(self, num.into()).await? {
+            if let Some(block) = self.block_with_senders(num.into()).await? {
                 let block_hash = block.hash();
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
