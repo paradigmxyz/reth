@@ -333,7 +333,8 @@ where
         let block = self
             .eth
             .block_with_senders(block_id)
-            .await?
+            .await
+            .map_err(Into::into)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let BlockWithSenders { block: Block { ref header, body, .. }, senders } = block.unseal();
