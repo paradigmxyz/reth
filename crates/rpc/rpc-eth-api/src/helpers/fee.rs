@@ -82,7 +82,7 @@ pub trait EthFees: LoadFee {
                 block_count = block_count.saturating_sub(1);
             }
 
-            let Some(end_block) = LoadFee::provider(self)
+            let end_block = LoadFee::provider(self)
                 .block_number_for_id(newest_block.into())
                 .map_err(Self::Error::from_eth_err)?
                 .ok_or(EthApiError::HeaderNotFound(newest_block.into()))?;

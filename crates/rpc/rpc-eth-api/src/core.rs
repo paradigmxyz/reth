@@ -5,7 +5,8 @@ use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, types::ErrorObjectOwned};
 use reth_primitives::{
-    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    transaction::AccessListResult, Address, Block, BlockId, BlockNumberOrTag, BlockWithSenders,
+    Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -13,9 +14,10 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockOverrides, BlockTransactions, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
+    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
+    Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
+use reth_rpc_types_compat::transaction::from_block_parts;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use tracing::trace;
 
@@ -604,11 +606,14 @@ where
         )
         .await?;
 
-        let BlockTransactions::Full(transactions) = self
-            .block_by_number(num.into(), true)
+        let block_id = num.into();
+        let block = self
+            .block_with_senders(block_id)
             .await?
-            .map(|block| block.transactions)
-            .ok_or(EthApiError::HeaderNotFound(num.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let BlockWithSenders { block: Block { ref header, body, .. }, senders } = block.unseal();
+        let transactions = from_block_parts(None, header, body, senders);
 
         Ok(transactions.into_iter().find(|tx| *tx.from == *sender && tx.nonce == nonce))
     }

@@ -25,13 +25,14 @@ pub trait LoadReceipt: EthApiTypes + Send + Sync {
         receipt: Receipt,
     ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send {
         async move {
+            let hash = meta.block_hash;
             // get all receipts for the block
             let all_receipts = self
                 .cache()
-                .get_receipts(meta.block_hash)
+                .get_receipts(hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(meta.block_hash))?;
+                .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
             Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
         }

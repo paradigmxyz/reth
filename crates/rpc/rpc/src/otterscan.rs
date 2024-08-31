@@ -1,6 +1,7 @@
 use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -171,11 +172,11 @@ where
         let block = self
             .eth
             .block_by_number(block_number.into(), true)
-            .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
+            .map_err(EthApiError::HeaderNotFound(block_number.into()))?;
         let receipts = self
             .eth
             .block_receipts(block_number.into())
-            .ok_or(EthApiError::ReceiptsNotFound(block_number.into()))?;
+            .map_err(EthApiError::ReceiptsNotFound(block_number.into()))?;
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -185,11 +186,11 @@ where
         let block = self
             .eth
             .block_by_hash(block_hash, true)
-            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+            .map_err(EthApiError::HeaderNotFound(block_hash.into()))?;
         let receipts = self
             .eth
             .block_receipts(block_hash.into())
-            .ok_or(EthApiError::ReceiptsNotFound(block_hash.into()))?;
+            .map_err(EthApiError::ReceiptsNotFound(block_hash.into()))?;
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -383,7 +384,7 @@ where
                             ) if contract == address => Some(ContractCreator {
                                 hash: tx_trace
                                     .transaction_hash
-                                    .ok_or_else(|| EthApiError::TransactionNotFound)?,
+                                    .ok_or(EthApiError::TransactionNotFound)?,
                                 creator,
                             }),
                             _ => None,

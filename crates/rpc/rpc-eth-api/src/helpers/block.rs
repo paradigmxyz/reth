@@ -40,10 +40,7 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let block = match self.block_with_senders(block_id).await? {
-                Some(block) => block,
-                None => return Ok(None),
-            };
+            let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
             let total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)

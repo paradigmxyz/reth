@@ -165,7 +165,7 @@ where
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered()
-                            .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                            .ok_or(EthApiError::InvalidTransactionSignature)
                             .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?
@@ -175,7 +175,7 @@ where
                     .into_iter()
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
-                            .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                            .ok_or(EthApiError::InvalidTransactionSignature)
                             .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?
@@ -195,14 +195,14 @@ where
             .provider
             .block_hash_for_id(block_id)
             .map_err(Eth::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_hash.into()),
             self.inner.eth_api.block_with_senders(block_id),
         )?;
 
-        let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
+        let block = block.ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
         // we need to get the state of the parent block because we're replaying this block on top of
         // its parent block's state
         let state_at = block.parent_hash;
@@ -468,7 +468,7 @@ where
         )?;
 
         let opts = opts.unwrap_or_default();
-        let block = block.ok_or_else(|| EthApiError::HeaderNotFound(block_number.into()))?;
+        let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
         let gas_limit = self.inner.eth_api.call_gas_limit();
 
@@ -572,7 +572,7 @@ where
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
         )?;
-        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let block = maybe_block.ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let this = self.clone();
 
@@ -825,7 +825,7 @@ where
             .provider
             .block_by_id(block_id)
             .to_rpc_result()?
-            .ok_or_else(|| EthApiError::HeaderNotFound(block_id.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
         let mut res = Vec::new();
         block.encode(&mut res);
         Ok(res.into())

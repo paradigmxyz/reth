@@ -1,6 +1,6 @@
 //! Additional helpers for converting errors.
 
-use std::fmt::{self, Write};
+use std::fmt;
 
 use jsonrpsee_core::RpcResult;
 use reth_primitives::BlockId;
@@ -151,8 +151,8 @@ pub fn rpc_err(
 
 /// Formats a [`BlockId`] into an error message.
 // todo: impl Display for `alloy_eips::eip1898::BlockId`
-pub fn format_block_id(error: &mut String, id: BlockId) -> Result<(), fmt::Error> {
-    let arg = match id {
+pub fn block_id_to_str(id: BlockId) -> String {
+    match id {
         BlockId::Hash(h) => {
             if h.require_canonical == Some(true) {
                 format!("canonical hash {}", h.block_hash)
@@ -164,8 +164,7 @@ pub fn format_block_id(error: &mut String, id: BlockId) -> Result<(), fmt::Error
             BlockNumberOrTag::Number(n) => format!("number {}", n),
             _ => format!("{}", n),
         },
-    };
-    write!(error, "{}", arg)
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, BlockId, Bytes};
 use reth_rpc_server_types::result::{
-    format_block_id, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
+    block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
@@ -168,19 +168,19 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
-                EthRpcErrorCode::ResourceNotFound.code(),
-                format_block_id(format!("{}: ", error), id),
-            ),
-            EthApiError::HeaderRangeNotFound(start_id, end_id) => {
-                let msg = format_block_id(format!("{}: start block: ", error), start_id);
-                let msg = format_block_id(format!("{}, end block: ", msg), end_id);
-
-                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), msg)
+            EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
+                rpc_error_with_code(
+                    EthRpcErrorCode::ResourceNotFound.code(),
+                    format!("{error}: {}", block_id_to_str(id)),
+                )
             }
-            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
+            EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
                 EthRpcErrorCode::ResourceNotFound.code(),
-                format_block_id(format!("{}: ", error), id),
+                format!(
+                    "{error}: start block: {}, end block: {}",
+                    block_id_to_str(start_id),
+                    block_id_to_str(end_id),
+                ),
             ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
