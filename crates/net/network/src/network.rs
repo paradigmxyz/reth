@@ -9,6 +9,7 @@ use std::{
 use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
+use reth_discv5::Discv5;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -61,6 +62,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
+        discv5: Option<Discv5>,
         event_sender: EventSender<NetworkEvent>,
     ) -> Self {
         let inner = NetworkInner {
@@ -76,6 +78,7 @@ impl NetworkHandle {
             chain_id,
             tx_gossip_disabled,
             discv4,
+            discv5,
             event_sender,
         };
         Self { inner: Arc::new(inner) }
@@ -209,6 +212,8 @@ impl PeersInfo for NetworkHandle {
     fn local_node_record(&self) -> NodeRecord {
         if let Some(discv4) = &self.inner.discv4 {
             discv4.node_record()
+        } else if let Some(discv5) = &self.inner.discv5 {
+            discv5.node_record()
         } else {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
@@ -422,6 +427,8 @@ struct NetworkInner {
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
+    /// The instance of the discv5 service
+    discv5: Option<Discv5>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
 }
