@@ -146,6 +146,7 @@ pub struct NetworkArgs {
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 
     /// Set local IP address to docker container's LAN IP address.
+    #[cfg(not(target_os = "windows"))]
     #[arg(long, conflicts_with = "addr")]
     pub docker: bool,
 }
@@ -153,6 +154,7 @@ pub struct NetworkArgs {
 impl NetworkArgs {
     /// Returns the resolved IP address.
     pub fn resolved_addr(&self) -> IpAddr {
+        #[cfg(not(target_os = "windows"))]
         if self.docker {
             return resolve_docker_ip()
                 .expect("should read container IFs")
