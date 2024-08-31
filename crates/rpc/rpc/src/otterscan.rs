@@ -1,9 +1,10 @@
 use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
-use futures::TryFutureExt;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256, U256};
+use reth_primitives::{
+    Address, Block, BlockId, BlockNumberOrTag, BlockWithSenders, TxHash, B256, U256,
+};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
@@ -18,6 +19,7 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
+use reth_rpc_types_compat::transaction::from_block_parts;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -169,30 +171,27 @@ where
 
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
-        let block = self
-            .eth
-            .block_by_number(block_number.into(), true)
-            .map_err(EthApiError::HeaderNotFound(block_number.into()))?;
-        let receipts = self
-            .eth
-            .block_receipts(block_number.into())
-            .map_err(EthApiError::ReceiptsNotFound(block_number.into()))?;
+        let block_id = block_number.into();
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
-        let block = self
-            .eth
-            .block_by_hash(block_hash, true)
-            .map_err(EthApiError::HeaderNotFound(block_hash.into()))?;
-        let receipts = self
-            .eth
-            .block_receipts(block_hash.into())
-            .map_err(EthApiError::ReceiptsNotFound(block_hash.into()))?;
+        let block = self.eth.block_by_hash(block_hash, true);
+        let block_id = block_hash.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockTransactions`
@@ -202,13 +201,15 @@ where
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
+        let block_id = block_number.into();
         // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
-        let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let mut receipts = receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?;
 
         // check if the number of transactions matches the number of receipts
         let tx_len = block.transactions.len();
@@ -328,11 +329,15 @@ where
         )
         .await?;
 
-        let Some(BlockTransactions::Full(transactions)) =
-            self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::HeaderNotFound(num.into()));
-        };
+        let block_id = num.into();
+        let block = self
+            .eth
+            .block_with_senders(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+
+        let BlockWithSenders { block: Block { ref header, body, .. }, senders } = block.unseal();
+        let transactions = from_block_parts(None, header, body, senders);
 
         Ok(transactions
             .into_iter()
