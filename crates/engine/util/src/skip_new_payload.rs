@@ -28,10 +28,10 @@ impl<S> EngineSkipNewPayload<S> {
     }
 }
 
-impl<Engine, S> Stream for EngineSkipNewPayload<S>
+impl<S, Engine> Stream for EngineSkipNewPayload<S>
 where
-    Engine: EngineTypes,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
+    Engine: EngineTypes,
 {
     type Item = S::Item;
 
@@ -45,7 +45,7 @@ where
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
                         tracing::warn!(
-                            target: "engine::intercept",
+                            target: "engine::stream::skip_new_payload",
                             block_number = payload.block_number(),
                             block_hash = %payload.block_hash(),
                             ?cancun_fields,
@@ -54,10 +54,9 @@ where
                         );
                         let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
                         continue
-                    } else {
-                        *this.skipped = 0;
-                        Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
                     }
+                    *this.skipped = 0;
+                    Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
                 }
                 next => next,
             };

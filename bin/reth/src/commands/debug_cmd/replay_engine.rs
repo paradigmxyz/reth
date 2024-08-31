@@ -6,6 +6,8 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -14,7 +16,7 @@ use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_fs_util as fs;
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -34,9 +36,9 @@ use tracing::*;
 /// This script will read stored engine API messages and replay them by the timestamp.
 /// It does not require
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -50,7 +52,7 @@ pub struct Command {
     interval: u64,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network(
         &self,
         config: &Config,

@@ -3,6 +3,8 @@ use crate::{args::NetworkArgs, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -11,13 +13,13 @@ use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    writer::StorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
+    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -31,9 +33,9 @@ use tracing::*;
 
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -51,7 +53,7 @@ pub struct Command {
     skip_node_depth: Option<usize>,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network(
         &self,
         config: &Config,
@@ -153,7 +155,7 @@ impl Command {
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let execution_outcome = executor.finalize();
 
-            let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
             storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(

@@ -1,16 +1,17 @@
-use std::sync::Arc;
-
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
-use reth_evm::ConfigureEvmEnv;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm::{
+    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    ConfigureEvmEnv,
+};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -26,17 +27,20 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
+    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::CacheDB,
+    db::{states::bundle_state::BundleRetention, CacheDB},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+    StateBuilder,
 };
 use revm_inspectors::tracing::{
-    js::{JsInspector, TransactionContext},
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
+use revm_primitives::{keccak256, HashMap};
+use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -67,7 +71,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
@@ -386,6 +390,11 @@ where
                         return Ok(frame)
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
@@ -400,7 +409,8 @@ where
                             let db = db.0;
 
                             let mut inspector =
-                                JsInspector::new(code, config).map_err(Eth::Error::from_eth_err)?;
+                                revm_inspectors::tracing::js::JsInspector::new(code, config)
+                                    .map_err(Eth::Error::from_eth_err)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
                             inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
@@ -550,6 +560,110 @@ where
             .await
     }
 
+    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    pub async fn debug_execution_witness(
+        &self,
+        block_id: BlockNumberOrTag,
+    ) -> Result<HashMap<B256, Bytes>, Eth::Error> {
+        let ((cfg, block_env, _), maybe_block) = futures::try_join!(
+            self.inner.eth_api.evm_env_at(block_id.into()),
+            self.inner.eth_api.block_with_senders(block_id.into()),
+        )?;
+        let block = maybe_block.ok_or(EthApiError::UnknownBlockNumber)?;
+
+        let this = self.clone();
+
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
+                let evm_config = Call::evm_config(this.eth_api()).clone();
+                let mut db = StateBuilder::new()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bundle_update()
+                    .build();
+
+                pre_block_beacon_root_contract_call(
+                    &mut db,
+                    &evm_config,
+                    &this.inner.provider.chain_spec(),
+                    &cfg,
+                    &block_env,
+                    block.parent_beacon_block_root,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                // apply eip-2935 blockhashes update
+                pre_block_blockhashes_contract_call(
+                    &mut db,
+                    &evm_config,
+                    &this.inner.provider.chain_spec(),
+                    &cfg,
+                    &block_env,
+                    block.parent_hash,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                // Re-execute all of the transactions in the block to load all touched accounts into
+                // the cache DB.
+                for tx in block.into_transactions_ecrecovered() {
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(
+                            cfg.cfg_env.clone(),
+                            block_env.clone(),
+                            evm_config.tx_env(&tx),
+                        ),
+                        handler_cfg: cfg.handler_cfg,
+                    };
+
+                    let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
+
+                // Merge all state transitions
+                db.merge_transitions(BundleRetention::Reverts);
+
+                // Take the bundle state
+                let bundle_state = db.take_bundle();
+
+                // Grab all account proofs for the data accessed during block execution.
+                //
+                // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
+                // referenced accounts + storage slots.
+                let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+                for (address, account) in db.cache.accounts {
+                    let hashed_address = keccak256(address);
+                    hashed_state.accounts.insert(
+                        hashed_address,
+                        account.account.as_ref().map(|a| a.info.clone().into()),
+                    );
+
+                    let storage = hashed_state
+                        .storages
+                        .entry(hashed_address)
+                        .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
+
+                    if let Some(account) = account.account {
+                        for (slot, value) in account.storage {
+                            let hashed_slot = keccak256(B256::from(slot));
+                            storage.storage.insert(hashed_slot, value);
+                        }
+                    }
+                }
+
+                // Generate an execution witness for the aggregated state of accessed accounts.
+                // Destruct the cache database to retrieve the state provider.
+                let state_provider = db.database.into_inner();
+                let witness = state_provider
+                    .witness(HashedPostState::default(), hashed_state)
+                    .map_err(Into::into)?;
+                Ok(witness)
+            })
+            .await
+    }
+
     /// Executes the configured transaction with the environment on the given database.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
@@ -562,7 +676,8 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        transaction_context: Option<TransactionContext>,
+        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
+        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -628,14 +743,20 @@ where
                         return Ok((frame.into(), res.state))
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-                    let mut inspector = JsInspector::with_transaction_context(
-                        code,
-                        config,
-                        transaction_context.unwrap_or_default(),
-                    )
-                    .map_err(Eth::Error::from_eth_err)?;
+                    let mut inspector =
+                        revm_inspectors::tracing::js::JsInspector::with_transaction_context(
+                            code,
+                            config,
+                            transaction_context.unwrap_or_default(),
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
@@ -668,7 +789,7 @@ impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
@@ -745,7 +866,7 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
+    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -804,6 +925,15 @@ where
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
+    }
+
+    /// Handler for `debug_executionWitness`
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<HashMap<B256, Bytes>> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`

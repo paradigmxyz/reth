@@ -45,16 +45,8 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
                 let block = block_res.unwrap().unwrap();
-                let block = match block.header.hash {
-                    Some(block_hash) => {
-                        // we can reuse the hash in the response
-                        Block::try_from(block).unwrap().seal(block_hash)
-                    }
-                    None => {
-                        // we don't have the hash, so let's just hash it
-                        Block::try_from(block).unwrap().seal_slow()
-                    }
-                };
+                let block_hash = block.header.hash;
+                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
 
                 next_block += 1;
                 sender.send(block).await.unwrap();
@@ -71,7 +63,8 @@ impl Command {
 
             let versioned_hashes: Vec<B256> =
                 block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload(block);
+            let parent_beacon_block_root = block.parent_beacon_block_root;
+            let payload = block_to_payload(block);
 
             let block_number = payload.block_number();
 

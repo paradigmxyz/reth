@@ -1,13 +1,16 @@
 //! Support for launching execution extensions.
 
-use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
+use std::{fmt, fmt::Debug};
+
 use futures::future;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
-use std::{fmt, fmt::Debug};
+use tracing::Instrument;
+
+use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 
 /// Can launch execution extensions.
 pub struct ExExLauncher<Node: FullNodeComponents> {
@@ -41,7 +44,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         }
 
         let mut exex_handles = Vec::with_capacity(extensions.len());
-        let mut exexs = Vec::with_capacity(extensions.len());
+        let mut exexes = Vec::with_capacity(extensions.len());
 
         for (id, exex) in extensions {
             // create a new exex handle
@@ -59,26 +62,29 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             };
 
             let executor = components.task_executor().clone();
-            exexs.push(async move {
+            exexes.push(async move {
                 debug!(target: "reth::cli", id, "spawning exex");
                 let span = reth_tracing::tracing::info_span!("exex", id);
-                let _enter = span.enter();
 
                 // init the exex
-                let exex = exex.launch(context).await.unwrap();
+                let exex = exex.launch(context).instrument(span.clone()).await.unwrap();
 
                 // spawn it as a crit task
-                executor.spawn_critical("exex", async move {
-                    info!(target: "reth::cli", "ExEx started");
-                    match exex.await {
-                        Ok(_) => panic!("ExEx {id} finished. ExExes should run indefinitely"),
-                        Err(err) => panic!("ExEx {id} crashed: {err}"),
+                executor.spawn_critical(
+                    "exex",
+                    async move {
+                        info!(target: "reth::cli", "ExEx started");
+                        match exex.await {
+                            Ok(_) => panic!("ExEx {id} finished. ExExes should run indefinitely"),
+                            Err(err) => panic!("ExEx {id} crashed: {err}"),
+                        }
                     }
-                });
+                    .instrument(span),
+                );
             });
         }
 
-        future::join_all(exexs).await;
+        future::join_all(exexes).await;
 
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");

@@ -67,12 +67,16 @@ impl AccountHashingStage {
         use reth_provider::providers::StaticFileWriter;
         use reth_testing_utils::{
             generators,
-            generators::{random_block_range, random_eoa_accounts},
+            generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
         };
 
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
+        let blocks = random_block_range(
+            &mut rng,
+            opts.blocks.clone(),
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: opts.txs, ..Default::default() },
+        );
 
         for block in blocks {
             provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();

@@ -17,12 +17,11 @@ reth-config.workspace = true
 reth-evm.workspace = true
 reth-exex-types.workspace = true
 reth-metrics.workspace = true
-reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-provider.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
@@ -48,6 +47,7 @@ reth-evm-ethereum.workspace = true
 reth-node-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 
 secp256k1.workspace = true
 

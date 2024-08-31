@@ -1,6 +1,12 @@
 //! clap [Args](clap::Args) for network related arguments.
 
-use crate::version::P2P_CLIENT_VERSION;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    ops::Not,
+    path::PathBuf,
+    sync::Arc,
+};
+
 use clap::Args;
 use reth_chainspec::ChainSpec;
 use reth_config::Config;
@@ -12,6 +18,15 @@ use reth_discv5::{
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
+        constants::{
+            tx_fetcher::{
+                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+                DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+            },
+            tx_manager::{
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            },
+        },
         TransactionFetcherConfig, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
@@ -20,12 +35,8 @@ use reth_network::{
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    ops::Not,
-    path::PathBuf,
-    sync::Arc,
-};
+
+use crate::version::P2P_CLIENT_VERSION;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -96,6 +107,24 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
+    /// Max concurrent `GetPooledTransactions` requests.
+    #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
+    pub max_concurrent_tx_requests: u32,
+
+    /// Max concurrent `GetPooledTransactions` requests per peer.
+    #[arg(long = "max-tx-reqs-peer", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER, verbatim_doc_comment)]
+    pub max_concurrent_tx_requests_per_peer: u8,
+
+    /// Max number of seen transactions to remember per peer.
+    ///
+    /// Default is 320 transaction hashes.
+    #[arg(long = "max-seen-tx-history", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER, verbatim_doc_comment)]
+    pub max_seen_tx_history: u32,
+
+    #[arg(long = "max-pending-imports", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, verbatim_doc_comment)]
+    /// Max number of transactions to import concurrently.
+    pub max_pending_pool_imports: usize,
+
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
     /// Spec'd at 2MiB.
@@ -118,6 +147,13 @@ pub struct NetworkArgs {
 }
 
 impl NetworkArgs {
+    /// Returns the resolved bootnodes if any are provided.
+    pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.bootnodes.clone().map(|bootnodes| {
+            bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
+        })
+    }
+
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
     /// values in this option struct.
     ///
@@ -137,14 +173,7 @@ impl NetworkArgs {
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = self
-            .bootnodes
-            .clone()
-            .map(|bootnodes| {
-                bootnodes
-                    .into_iter()
-                    .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
-                    .collect()
-            })
+            .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
@@ -158,9 +187,12 @@ impl NetworkArgs {
         // Configure transactions manager
         let transactions_manager_config = TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::new(
+                self.max_concurrent_tx_requests,
+                self.max_concurrent_tx_requests_per_peer,
                 self.soft_limit_byte_size_pooled_transactions_response,
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
+            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
         };
 
         // Configure basic network stack
@@ -258,9 +290,13 @@ impl Default for NetworkArgs {
             port: DEFAULT_DISCOVERY_PORT,
             max_outbound_peers: None,
             max_inbound_peers: None,
+            max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+            max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+            max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         }
     }
 }

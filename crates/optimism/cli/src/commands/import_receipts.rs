@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_db_api::database::Database;
@@ -16,7 +18,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    writer::StorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
     StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;
@@ -27,9 +29,9 @@ use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct ImportReceiptsOpCommand {
+pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -43,7 +45,7 @@ pub struct ImportReceiptsOpCommand {
     path: PathBuf,
 }
 
-impl ImportReceiptsOpCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -184,7 +186,7 @@ where
     let static_file_provider = provider_factory.static_file_provider();
 
     while let Some(file_client) =
-        reader.next_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
     {
         // create a new file client from chunk read from file
         let ReceiptFileClient {
@@ -216,13 +218,10 @@ where
             debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
-            // we don't count this as decoded so the partial import check later does not error if
-            // this branch is executed
-            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to
-        // `StorageWriter::append_receipts_from_blocks`, so we just use a default empty
+        // `UnifiedStorageWriter::append_receipts_from_blocks`, so we just use a default empty
         // `BundleState`.
         let execution_outcome =
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
@@ -231,14 +230,13 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        let mut storage_writer = StorageWriter::new(Some(&provider), Some(static_file_producer));
+        let mut storage_writer = UnifiedStorageWriter::from(&provider, static_file_producer);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
-    provider.commit()?;
     // as static files works in file ranges, internally it will be committing when creating the
     // next file range already, so we only need to call explicitly at the end.
-    static_file_provider.commit()?;
+    UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

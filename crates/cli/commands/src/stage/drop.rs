@@ -2,6 +2,8 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{
@@ -9,20 +11,20 @@ use reth_db_common::{
     DbTool,
 };
 use reth_node_core::args::StageEnum;
-use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
 use reth_stages::StageId;
 use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     stage: StageEnum,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
@@ -174,8 +176,7 @@ impl Command {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        static_file_provider.commit()?;
-        provider_rw.commit()?;
+        UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
         Ok(())
     }

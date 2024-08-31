@@ -1,46 +1,78 @@
-//! Loads and formats OP transaction RPC response.  
+//! Loads and formats OP transaction RPC response.
 
-use std::sync::Arc;
+use alloy_primitives::{Bytes, B256};
 
 use reth_evm_optimism::RethL1BlockInfo;
+use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSigned;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction},
-    EthApiTypes, RawTransactionForwarder,
+    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    EthApiTypes, FromEthApiError,
 };
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use revm::L1BlockInfo;
 
-use crate::{OpEthApi, OpEthApiError};
+use crate::{eth::rpc::SequencerClient, OpEthApi, OpEthApiError};
 
-impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
+impl<N> EthTransactions for OpEthApi<N>
+where
+    Self: LoadTransaction,
+    N: FullNodeComponents,
+{
     fn provider(&self) -> impl BlockReaderIdExt {
-        EthTransactions::provider(&self.inner)
-    }
-
-    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
+        self.inner.provider()
     }
 
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
+        let recovered = recover_raw_transaction(tx.clone())?;
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // On optimism, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
+        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                });
+        }
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self
+            .pool()
+            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .await
+            .map_err(Self::Error::from_eth_err)?;
+
+        Ok(hash)
+    }
 }
 
-impl<Eth: LoadTransaction> LoadTransaction for OpEthApi<Eth> {
-    type Pool = Eth::Pool;
+impl<N> LoadTransaction for OpEthApi<N>
+where
+    Self: SpawnBlocking,
+    N: FullNodeComponents,
+{
+    type Pool = N::Pool;
 
     fn provider(&self) -> impl TransactionsProvider {
-        LoadTransaction::provider(&self.inner)
+        self.inner.provider()
     }
 
     fn cache(&self) -> &EthStateCache {
-        LoadTransaction::cache(&self.inner)
+        self.inner.cache()
     }
 
     fn pool(&self) -> &Self::Pool {
-        LoadTransaction::pool(&self.inner)
+        self.inner.pool()
     }
 }
 
@@ -66,9 +98,11 @@ impl OptimismTxMeta {
     }
 }
 
-impl<Eth> OpEthApi<Eth>
+impl<N> OpEthApi<N>
 where
-    Eth: EthApiSpec + LoadTransaction,
+    Self: EthApiSpec + LoadTransaction,
+    <Self as EthApiTypes>::Error: From<OpEthApiError>,
+    N: FullNodeComponents,
 {
     /// Builds [`OptimismTxMeta`] object using the provided [`TransactionSigned`], L1 block
     /// info and block timestamp. The [`L1BlockInfo`] is used to calculate the l1 fee and l1 data
@@ -82,28 +116,38 @@ where
     ) -> Result<OptimismTxMeta, <Self as EthApiTypes>::Error> {
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
-        let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
+        let (l1_fee, l1_data_gas) = if tx.is_deposit() {
+            (None, None)
+        } else {
             let envelope_buf = tx.envelope_encoded();
 
             let inner_l1_fee = l1_block_info
-                .l1_tx_data_fee(
-                    &self.inner.chain_spec(),
-                    block_timestamp,
-                    &envelope_buf,
-                    tx.is_deposit(),
-                )
+                .l1_tx_data_fee(&self.chain_spec(), block_timestamp, &envelope_buf, tx.is_deposit())
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?;
             let inner_l1_data_gas = l1_block_info
-                .l1_data_gas(&self.inner.chain_spec(), block_timestamp, &envelope_buf)
+                .l1_data_gas(&self.chain_spec(), block_timestamp, &envelope_buf)
                 .map_err(|_| OpEthApiError::L1BlockGasError)?;
             (
                 Some(inner_l1_fee.saturating_to::<u128>()),
                 Some(inner_l1_data_gas.saturating_to::<u128>()),
             )
-        } else {
-            (None, None)
         };
 
         Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+    }
+}
+
+impl<N> OpEthApi<N>
+where
+    N: FullNodeComponents,
+{
+    /// Sets a `SequencerClient` for `eth_sendRawTransaction` to forward transactions to.
+    pub fn set_sequencer_client(&self, sequencer_client: SequencerClient) {
+        *self.sequencer_client.write() = Some(sequencer_client);
+    }
+
+    /// Returns the `SequencerClient` if one is set.
+    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
+        self.sequencer_client.read().clone()
     }
 }

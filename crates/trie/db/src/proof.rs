@@ -1,12 +1,8 @@
+use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_primitives::{Address, B256};
-use reth_trie::{
-    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
-    proof::Proof,
-    trie_cursor::DatabaseTrieCursorFactory,
-    HashedPostState,
-};
+use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, proof::Proof, HashedPostState};
 use reth_trie_common::AccountProof;
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.

@@ -75,6 +75,7 @@ pub fn state_root_unsorted<A: Into<TrieAccount>>(
 }
 
 /// Calculates the root hash of the state represented as MPT.
+///
 /// Corresponds to [geth's `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
 ///
 /// # Panics

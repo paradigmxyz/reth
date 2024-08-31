@@ -32,10 +32,10 @@ impl<S> EngineSkipFcu<S> {
     }
 }
 
-impl<Engine, S> Stream for EngineSkipFcu<S>
+impl<S, Engine> Stream for EngineSkipFcu<S>
 where
-    Engine: EngineTypes,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
+    Engine: EngineTypes,
 {
     type Item = S::Item;
 
@@ -48,13 +48,12 @@ where
                 Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
-                        tracing::warn!(target: "engine::intercept", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
+                        tracing::warn!(target: "engine::stream::skip_fcu", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
                         let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
                         continue
-                    } else {
-                        *this.skipped = 0;
-                        Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                     }
+                    *this.skipped = 0;
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
                 }
                 next => next,
             };

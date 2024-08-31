@@ -5,6 +5,15 @@ use alloy_primitives::B256;
 use alloy_trie::{hash_builder::HashBuilderValue, BranchNodeCompact, TrieMask};
 use bytes::{Buf, BufMut};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
+/// Identifier for [`HashBuilderValue::Hash`]
+const HASH_BUILDER_TYPE_HASH: u8 = 0;
+
+/// Identifier for [`HashBuilderValue::Bytes`]
+const HASH_BUILDER_TYPE_BYTES: u8 = 1;
+
 impl Compact for HashBuilderValue {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
@@ -12,11 +21,11 @@ impl Compact for HashBuilderValue {
     {
         match self {
             Self::Hash(hash) => {
-                buf.put_u8(0);
+                buf.put_u8(HASH_BUILDER_TYPE_HASH);
                 1 + hash.to_compact(buf)
             }
             Self::Bytes(bytes) => {
-                buf.put_u8(1);
+                buf.put_u8(HASH_BUILDER_TYPE_BYTES);
                 1 + bytes.to_compact(buf)
             }
         }
@@ -28,11 +37,11 @@ impl Compact for HashBuilderValue {
     // database.
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         match buf.get_u8() {
-            0 => {
+            HASH_BUILDER_TYPE_HASH => {
                 let (hash, buf) = B256::from_compact(buf, 32);
                 (Self::Hash(hash), buf)
             }
-            1 => {
+            HASH_BUILDER_TYPE_BYTES => {
                 let (bytes, buf) = Vec::from_compact(buf, 0);
                 (Self::Bytes(bytes), buf)
             }

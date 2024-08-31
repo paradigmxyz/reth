@@ -7,8 +7,8 @@ use reth_db_api::{
 };
 use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
-    writer::StorageWriter, DatabaseProviderRW, HeaderProvider, ProviderError,
-    StageCheckpointReader, StageCheckpointWriter, StatsReader,
+    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
+    StageCheckpointWriter, StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
@@ -218,8 +218,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })?;
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
-                    let writer = StorageWriter::new(Some(provider), None);
-                    writer.write_trie_updates(&updates)?;
+                    provider.write_trie_updates(&updates)?;
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
@@ -239,8 +238,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
-                    let writer = StorageWriter::new(Some(provider), None);
-                    writer.write_trie_updates(&updates)?;
+                    provider.write_trie_updates(&updates)?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -255,8 +253,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
-            let writer = StorageWriter::new(Some(provider), None);
-            writer.write_trie_updates(&updates)?;
+
+            provider.write_trie_updates(&updates)?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -318,7 +316,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         // Unwind trie only if there are transitions
-        if !range.is_empty() {
+        if range.is_empty() {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
+        } else {
             let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -329,12 +329,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
-            let writer = StorageWriter::new(Some(provider), None);
-            writer.write_trie_updates(&updates)?;
+            provider.write_trie_updates(&updates)?;
 
             // TODO(alexey): update entities checkpoint
-        } else {
-            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
@@ -373,11 +370,9 @@ mod tests {
     use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{
-            random_block, random_block_range, random_changeset_range, random_contract_account_range,
-        },
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_changeset_range,
+        random_contract_account_range, BlockParams, BlockRangeParams,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
@@ -502,8 +497,11 @@ mod tests {
                 preblocks.append(&mut random_block_range(
                     &mut rng,
                     0..=stage_progress - 1,
-                    B256::ZERO,
-                    0..1,
+                    BlockRangeParams {
+                        parent: Some(B256::ZERO),
+                        tx_count: 0..1,
+                        ..Default::default()
+                    },
                 ));
                 self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
@@ -520,9 +518,7 @@ mod tests {
             let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
                 stage_progress,
-                preblocks.last().map(|b| b.hash()),
-                Some(0),
-                None,
+                BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             );
             let mut header = header.unseal();
 
@@ -537,7 +533,11 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
+            blocks.extend(random_block_range(
+                &mut rng,
+                start..=end,
+                BlockRangeParams { parent: Some(head_hash), tx_count: 0..3, ..Default::default() },
+            ));
             let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
@@ -637,7 +637,7 @@ mod tests {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();
-                            if storage_entry.map(|v| v.key == hashed_slot).unwrap_or_default() {
+                            if storage_entry.is_some_and(|v| v.key == hashed_slot) {
                                 storage_cursor.delete_current().unwrap();
                             }
 

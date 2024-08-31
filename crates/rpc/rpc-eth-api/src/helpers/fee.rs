@@ -1,6 +1,7 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
 use futures::Future;
+use reth_chainspec::ChainSpec;
 use reth_primitives::U256;
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
@@ -50,7 +51,7 @@ pub trait EthFees: LoadFee {
     fn fee_history(
         &self,
         mut block_count: u64,
-        newest_block: BlockNumberOrTag,
+        mut newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> impl Future<Output = Result<FeeHistory, Self::Error>> + Send {
         async move {
@@ -72,6 +73,13 @@ pub trait EthFees: LoadFee {
                     "Sanitizing fee history block count"
                 );
                 block_count = max_fee_history
+            }
+
+            if newest_block.is_pending() {
+                // cap the target block since we don't have fee history for the pending block
+                newest_block = BlockNumberOrTag::Latest;
+                // account for missing pending block
+                block_count = block_count.saturating_sub(1);
             }
 
             let Some(end_block) = LoadFee::provider(self)
@@ -221,7 +229,7 @@ pub trait EthFees: LoadFee {
         // Calculate the index in the precomputed rewards array
         let index = (clamped_percentile / (1.0 / resolution as f64)).round() as usize;
         // Fetch the reward from the FeeHistoryEntry
-        entry.rewards.get(index).cloned().unwrap_or_default()
+        entry.rewards.get(index).copied().unwrap_or_default()
     }
 }
 
@@ -232,7 +240,9 @@ pub trait LoadFee: LoadBlock {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider;
+    fn provider(
+        &self,
+    ) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider<ChainSpec = ChainSpec>;
 
     /// Returns a handle for reading data from memory.
     ///

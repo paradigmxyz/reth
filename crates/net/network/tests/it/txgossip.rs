@@ -1,13 +1,14 @@
 //! Testing gossiping of transactions.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use rand::thread_rng;
-use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEvents};
+use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
 use reth_network_api::PeersInfo;
 use reth_primitives::{TransactionSigned, TxLegacy, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::sync::Arc;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
@@ -71,10 +72,10 @@ async fn test_4844_tx_gossip_penalization() {
     // peer 0 will be penalised for sending txs[0] over gossip
     let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];
 
-    txs.iter().for_each(|tx| {
+    for tx in &txs {
         let sender = tx.sender();
         provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
-    });
+    }
 
     let signed_txs: Vec<Arc<TransactionSigned>> =
         txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_signed())).collect();

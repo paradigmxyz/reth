@@ -25,7 +25,6 @@ use reth_stages_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 
-// TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
 /// The body stage downloads block bodies for all block headers stored locally in storage.
@@ -182,8 +181,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
             // Increment block on static file header.
             if block_number > 0 {
-                let appended_block_number = static_file_producer
-                    .increment_block(StaticFileSegment::Transactions, block_number)?;
+                let appended_block_number = static_file_producer.increment_block(block_number)?;
 
                 if appended_block_number != block_number {
                     // This scenario indicates a critical error in the logic of adding new
@@ -642,9 +640,8 @@ mod tests {
             StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
-        use reth_testing_utils::{
-            generators,
-            generators::{random_block_range, random_signed_tx},
+        use reth_testing_utils::generators::{
+            self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
             collections::{HashMap, VecDeque},
@@ -721,7 +718,15 @@ mod tests {
                 let mut rng = generators::rng();
 
                 // Static files do not support gaps in headers, so we need to generate 0 to end
-                let blocks = random_block_range(&mut rng, 0..=end, GENESIS_HASH, 0..2);
+                let blocks = random_block_range(
+                    &mut rng,
+                    0..=end,
+                    BlockRangeParams {
+                        parent: Some(GENESIS_HASH),
+                        tx_count: 0..2,
+                        ..Default::default()
+                    },
+                );
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data

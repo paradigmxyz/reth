@@ -1,11 +1,13 @@
 #![allow(unreachable_pub)]
 //! Tests for eth related requests
 
+use std::sync::Arc;
+
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
-    NetworkEvents,
+    BlockDownloaderProvider, NetworkEventListenerProvider,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::{
@@ -17,7 +19,6 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::test_utils::MockEthProvider;
-use std::sync::Arc;
 
 /// Returns a new [`TransactionSigned`] with some random parameters
 pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {

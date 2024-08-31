@@ -8,7 +8,6 @@
 use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
-use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     node_config::NodeConfig,
@@ -92,6 +91,7 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
     type Primitives = T::Primitives;
     type Engine = T::Engine;
+    type ChainSpec = T::ChainSpec;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
@@ -103,6 +103,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
+    type Network = C::Network;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -120,7 +121,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         &self.provider
     }
 
-    fn network(&self) -> &NetworkHandle {
+    fn network(&self) -> &Self::Network {
         self.components.network()
     }
 
@@ -273,9 +274,12 @@ impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer
+                    + AddDevSigners,
+    >,
 {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>

@@ -4,6 +4,7 @@ use reth_payload_builder::{Events, PayloadBuilderHandle, PayloadId};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations
+#[derive(Debug)]
 pub struct PayloadTestContext<E: EngineTypes> {
     pub payload_event_stream: BroadcastStream<Events<E>>,
     payload_builder: PayloadBuilderHandle<E>,

@@ -5,7 +5,7 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    writer::StorageWriter,
+    writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -48,11 +48,10 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    trie_cursor::DatabaseStorageTrieCursor,
     updates::{StorageTrieUpdates, TrieUpdates},
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::DatabaseStateRoot;
+use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -260,9 +259,8 @@ where
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
-        } else {
-            return Ok(list.iter().collect::<Vec<_>>())
         }
+        return Ok(list.iter().collect::<Vec<_>>())
     }
 
     Ok(Vec::new())
@@ -647,10 +645,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1293,10 +1291,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1592,9 +1590,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
             if done {
                 break true
-            } else {
-                deleted_entries += 1;
             }
+            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
@@ -2003,6 +2000,10 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         Ok(None)
     }
 
+    /// Returns the ommers for the block with matching id from the database.
+    ///
+    /// If the block is not found, this returns `None`.
+    /// If the block exists, but doesn't contain ommers, this returns `None`.
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
@@ -2764,6 +2765,45 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
 
         Ok(())
     }
+
+    fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        // Write hashed account updates.
+        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+            if let Some(account) = account {
+                hashed_accounts_cursor.upsert(hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.delete_current()?;
+            }
+        }
+
+        // Write hashed storage changes.
+        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+        let mut hashed_storage_cursor =
+            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, storage) in sorted_storages {
+            if storage.is_wiped() && hashed_storage_cursor.seek_exact(*hashed_address)?.is_some() {
+                hashed_storage_cursor.delete_current_duplicates()?;
+            }
+
+            for (hashed_slot, value) in storage.storage_slots_sorted() {
+                let entry = StorageEntry { key: hashed_slot, value };
+                if let Some(db_entry) =
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
+                {
+                    if db_entry.key == entry.key {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+                }
+
+                if !entry.value.is_zero() {
+                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx> TrieWriter for DatabaseProvider<TX> {
@@ -3189,7 +3229,7 @@ impl<TX: DbTx> BlockExecutionReader for DatabaseProvider<TX> {
     }
 }
 
-impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
+impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3367,7 +3407,7 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
     }
 }
 
-impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
+impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3532,6 +3572,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         Ok(block_indices)
     }
 
+    /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
@@ -3561,15 +3602,13 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         // Must be written after blocks because of the receipt lookup.
         // TODO: should _these_ be moved to storagewriter? seems like storagewriter should be
         // _above_ db provider
-        let mut storage_writer = StorageWriter::new(Some(self), None);
+        let mut storage_writer = UnifiedStorageWriter::from_database(self);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
-        {
-            storage_writer.write_hashed_state(&hashed_state)?;
-            self.write_trie_updates(&trie_updates)?;
-        }
+        self.write_hashed_state(&hashed_state)?;
+        self.write_trie_updates(&trie_updates)?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         self.update_history_indices(first_number..=last_block_number)?;
@@ -3626,7 +3665,7 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
-    fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
         let mut finalized_blocks = self
             .tx
             .cursor_read::<tables::ChainState>()?
@@ -3634,10 +3673,8 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
             .take(1)
             .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
 
-        let last_finalized_block_number = finalized_blocks
-            .pop_first()
-            .unwrap_or((tables::ChainStateKey::LastFinalizedBlock, 0_u64));
-        Ok(last_finalized_block_number.1)
+        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
+        Ok(last_finalized_block_number)
     }
 }
 

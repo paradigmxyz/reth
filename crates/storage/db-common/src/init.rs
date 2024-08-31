@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    writer::StorageWriter,
+    writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
     ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
@@ -124,8 +124,16 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
         provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
-    provider_rw.commit()?;
-    static_file_provider.commit()?;
+    // Static file segments start empty, so we need to initialize the genesis block.
+    let segment = StaticFileSegment::Receipts;
+    static_file_provider.latest_writer(segment)?.increment_block(0)?;
+
+    let segment = StaticFileSegment::Transactions;
+    static_file_provider.latest_writer(segment)?.increment_block(0)?;
+
+    // `commit_unwind`` will first commit the DB and then the static file provider, which is
+    // necessary on `init_genesis`.
+    UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
     Ok(hash)
 }
@@ -203,7 +211,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    let mut storage_writer = StorageWriter::new(Some(provider), None);
+    let mut storage_writer = UnifiedStorageWriter::from_database(provider);
     storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
@@ -217,8 +225,7 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts =
-        alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
+    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
     trace!(target: "reth::cli", "Inserted account hashes");
@@ -329,7 +336,12 @@ pub fn init_from_state_dump<DB: Database>(
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
-    if computed_state_root != expected_state_root {
+    if computed_state_root == expected_state_root {
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
+    } else {
         error!(target: "reth::cli",
             ?computed_state_root,
             ?expected_state_root,
@@ -337,11 +349,6 @@ pub fn init_from_state_dump<DB: Database>(
         );
 
         Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
-    } else {
-        info!(target: "reth::cli",
-            ?computed_state_root,
-            "Computed state root matches state root in state dump"
-        );
     }
 
     // insert sync stages for stages that require state

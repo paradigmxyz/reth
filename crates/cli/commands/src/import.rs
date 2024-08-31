@@ -4,6 +4,7 @@ use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;
@@ -34,9 +35,9 @@ use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
-pub struct ImportCommand {
+pub struct ImportCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Disables stages that require state.
     #[arg(long, verbatim_doc_comment)]
@@ -54,7 +55,7 @@ pub struct ImportCommand {
     path: PathBuf,
 }
 
-impl ImportCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
     /// Execute `import` command
     pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
     where
@@ -114,12 +115,7 @@ impl ImportCommand {
 
             let latest_block_number =
                 provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-            tokio::spawn(reth_node_events::node::handle_events(
-                None,
-                latest_block_number,
-                events,
-                provider_factory.db_ref().clone(),
-            ));
+            tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
 
             // Run pipeline
             info!(target: "reth::cli", "Starting sync pipeline");
@@ -233,12 +229,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::SUPPORTED_CHAINS;
+    use reth_node_core::args::utils::{DefaultChainSpecParser, SUPPORTED_CHAINS};
 
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
-            let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
+            let args: ImportCommand<DefaultChainSpecParser> =
+                ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
                 chain.parse::<reth_chainspec::Chain>(),

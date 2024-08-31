@@ -1,24 +1,36 @@
 //! Loads OP pending block for a RPC response.   
 
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_primitives::{revm_primitives::BlockEnv, BlockNumber, B256};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
+use reth_node_api::FullNodeComponents;
+use reth_primitives::{
+    revm_primitives::BlockEnv, BlockNumber, Receipt, SealedBlockWithSenders, B256,
 };
-use reth_rpc_eth_api::helpers::LoadPendingBlock;
-use reth_rpc_eth_types::PendingBlock;
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
+    ReceiptProvider, StateProviderFactory,
+};
+use reth_rpc_eth_api::{
+    helpers::{LoadPendingBlock, SpawnBlocking},
+    FromEthApiError,
+};
+use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::TransactionPool;
 
 use crate::OpEthApi;
 
-impl<Eth> LoadPendingBlock for OpEthApi<Eth>
+impl<N> LoadPendingBlock for OpEthApi<N>
 where
-    Eth: LoadPendingBlock,
+    Self: SpawnBlocking,
+    N: FullNodeComponents,
 {
     #[inline]
     fn provider(
         &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
+    ) -> impl BlockReaderIdExt
+           + EvmEnvProvider
+           + ChainSpecProvider<ChainSpec = ChainSpec>
+           + StateProviderFactory {
         self.inner.provider()
     }
 
@@ -35,6 +47,31 @@ where
     #[inline]
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
+    }
+
+    /// Returns the locally built pending block
+    async fn local_pending_block(
+        &self,
+    ) -> Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error> {
+        // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
+        let latest = self
+            .provider()
+            .latest_header()
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let block = self
+            .provider()
+            .block_with_senders(latest.hash().into(), Default::default())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?
+            .seal(latest.hash());
+
+        let receipts = self
+            .provider()
+            .receipts_by_block(block.hash().into())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        Ok(Some((block, receipts)))
     }
 
     fn receipts_root(

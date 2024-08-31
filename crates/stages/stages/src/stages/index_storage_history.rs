@@ -164,9 +164,9 @@ mod tests {
     };
     use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
     use reth_provider::providers::StaticFileWriter;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_contract_account_range},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_changeset_range, random_contract_account_range,
+        BlockRangeParams,
     };
     use std::collections::BTreeMap;
 
@@ -560,7 +560,11 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
+            let blocks = random_block_range(
+                &mut rng,
+                start..=end,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+            );
 
             let (changesets, _) = random_changeset_range(
                 &mut rng,
@@ -624,7 +628,7 @@ mod tests {
                         .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
-                    chunks.into_iter().for_each(|list| {
+                    for list in chunks {
                         result.insert(
                             StorageShardedKey::new(
                                 partial_key.0,
@@ -634,7 +638,7 @@ mod tests {
                             ),
                             list,
                         );
-                    });
+                    }
 
                     if let Some(last_list) = last_chunk {
                         result.insert(

@@ -9,6 +9,7 @@ use alloy_trie::{
     EMPTY_ROOT_HASH,
 };
 use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
@@ -17,7 +18,7 @@ pub struct MultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: BTreeMap<Nibbles, Bytes>,
     /// Storage trie multiproofs.
-    pub storage_multiproofs: HashMap<B256, StorageMultiProof>,
+    pub storages: HashMap<B256, StorageMultiProof>,
 }
 
 impl MultiProof {
@@ -58,7 +59,7 @@ impl MultiProof {
         };
 
         // Retrieve proofs for requested storage slots.
-        let storage_multiproof = self.storage_multiproofs.get(&hashed_address);
+        let storage_multiproof = self.storages.get(&hashed_address);
         let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
@@ -119,7 +120,8 @@ impl StorageMultiProof {
 }
 
 /// The merkle proof with the relevant account info.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -132,6 +134,12 @@ pub struct AccountProof {
     pub storage_root: B256,
     /// Array of storage proofs as requested.
     pub storage_proofs: Vec<StorageProof>,
+}
+
+impl Default for AccountProof {
+    fn default() -> Self {
+        Self::new(Address::default())
+    }
 }
 
 impl AccountProof {
@@ -168,7 +176,7 @@ impl AccountProof {
 }
 
 /// The merkle proof of the storage entry.
-#[derive(PartialEq, Eq, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub struct StorageProof {
     /// The raw storage key.
     pub key: B256,

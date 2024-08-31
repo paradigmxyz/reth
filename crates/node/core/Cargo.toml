@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-cli.workspace = true
 reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -38,6 +39,7 @@ reth-network-peers.workspace = true
 reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-optimism-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-genesis.workspace = true
@@ -51,6 +53,8 @@ humantime.workspace = true
 const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
+toml.workspace = true
+serde.workspace = true
 
 # io
 dirs-next = "2.0.0"
@@ -77,6 +81,7 @@ futures.workspace = true
 # test vectors generation
 proptest.workspace = true
 tokio.workspace = true
+tempfile.workspace = true
 
 [features]
 optimism = [
@@ -84,6 +89,7 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
+    "dep:reth-optimism-chainspec",
 ]
 # Features for vergen to generate correct env vars
 jemalloc = []

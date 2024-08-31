@@ -2,7 +2,7 @@
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
-pub use alloy_eips::eip2930::{AccessList, AccessListItem};
+pub use alloy_eips::eip2930::{AccessList, AccessListItem, AccessListResult};
 
 #[cfg(test)]
 mod tests {
@@ -11,12 +11,11 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{reth_codec, Compact};
+    use reth_codecs::{add_arbitrary_tests, Compact};
     use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// AccessList type natively
-    #[reth_codec(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -28,7 +27,10 @@ mod tests {
         RlpEncodableWrapper,
         Serialize,
         Deserialize,
+        Compact,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(compact, rlp)]
     struct RethAccessList(Vec<RethAccessListItem>);
 
     impl PartialEq<AccessList> for RethAccessList {
@@ -38,7 +40,6 @@ mod tests {
     }
 
     // This
-    #[reth_codec(rlp)]
     #[derive(
         Clone,
         Debug,
@@ -50,7 +51,10 @@ mod tests {
         RlpEncodable,
         Serialize,
         Deserialize,
+        Compact,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(compact, rlp)]
     #[serde(rename_all = "camelCase")]
     struct RethAccessListItem {
         /// Account address that would be loaded at the start of execution

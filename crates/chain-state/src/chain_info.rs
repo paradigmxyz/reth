@@ -17,10 +17,12 @@ pub struct ChainInfoTracker {
 }
 
 impl ChainInfoTracker {
-    /// Create a new chain info container for the given canonical head.
-    pub fn new(head: SealedHeader) -> Self {
-        let (finalized_block, _) = watch::channel(None);
+    /// Create a new chain info container for the given canonical head and finalized header if it
+    /// exists.
+    pub fn new(head: SealedHeader, finalized: Option<SealedHeader>) -> Self {
+        let (finalized_block, _) = watch::channel(finalized);
         let (safe_block, _) = watch::channel(None);
+
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
@@ -86,14 +88,12 @@ impl ChainInfoTracker {
     }
 
     /// Returns the safe header of the chain.
-    #[allow(dead_code)]
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
         let h = self.inner.safe_block.borrow();
         h.as_ref().map(|h| h.num_hash())
     }
 
     /// Returns the finalized header of the chain.
-    #[allow(dead_code)]
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
         let h = self.inner.finalized_block.borrow();
         h.as_ref().map(|h| h.num_hash())
@@ -120,6 +120,16 @@ impl ChainInfoTracker {
         self.inner.finalized_block.send_modify(|h| {
             let _ = h.replace(header);
         });
+    }
+
+    /// Subscribe to the finalized block.
+    pub fn subscribe_finalized_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.finalized_block.subscribe()
+    }
+
+    /// Subscribe to the safe block.
+    pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader>> {
+        self.inner.safe_block.subscribe()
     }
 }
 

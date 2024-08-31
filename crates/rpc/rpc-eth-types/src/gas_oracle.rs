@@ -5,8 +5,8 @@ use std::fmt::{self, Debug, Formatter};
 
 use derive_more::{Deref, DerefMut, From, Into};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
-use reth_provider::BlockReaderIdExt;
 use reth_rpc_server_types::constants;
+use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -176,13 +176,13 @@ where
         }
 
         // sort results then take the configured percentile result
-        let mut price = if !results.is_empty() {
+        let mut price = if results.is_empty() {
+            inner.last_price.price
+        } else {
             results.sort_unstable();
             *results.get((results.len() - 1) * self.oracle_config.percentile as usize / 100).expect(
                 "gas price index is a percent of nonzero array length, so a value always exists",
             )
-        } else {
-            inner.last_price.price
         };
 
         // constrain to the max price

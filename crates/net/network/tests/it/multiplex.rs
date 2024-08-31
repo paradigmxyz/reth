@@ -1,7 +1,12 @@
 #![allow(unreachable_pub)]
 //! Testing gossiping of transactions.
 
-use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
 use futures::{Stream, StreamExt};
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
@@ -13,18 +18,15 @@ use reth_network::{
 use reth_network_api::{Direction, PeerId};
 use reth_primitives::BytesMut;
 use reth_provider::test_utils::MockEthProvider;
-use std::{
-    net::SocketAddr,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
 
 /// A simple Rlpx subprotocol that sends pings and pongs
 mod proto {
     use super::*;
-    use reth_eth_wire::capability::Capability;
+    use reth_eth_wire::Capability;
     use reth_primitives::{Buf, BufMut};
 
     #[repr(u8)]

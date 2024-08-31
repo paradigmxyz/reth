@@ -1,11 +1,7 @@
 //! Helper types that can be used by launchers.
 
-use crate::{
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
-};
-use backon::{ConstantBuilder, Retryable};
+use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
+
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -38,20 +34,25 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    CanonStateNotificationSender, FullProvider, ProviderFactory, StaticFileProviderFactory,
-    TreeViewer,
+    BlockHashReader, CanonStateNotificationSender, FullProvider, ProviderFactory, ProviderResult,
+    StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget};
+use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, StageId};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
     oneshot, watch,
+};
+
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::OnComponentInitializedHook,
+    BuilderContext, NodeAdapter,
 };
 
 /// Allows to set a tree viewer for a configured blockchain provider.
@@ -116,7 +117,7 @@ impl LaunchContext {
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
-        let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
+        let mut toml_config = reth_config::Config::from_path(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
@@ -168,9 +169,10 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
+        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system.
+        // If the system has less than 2 cores, it will use 1 core.
         let num_threads =
-            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(2));
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(1));
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("reth-rayon-{i}"))
@@ -238,17 +240,11 @@ impl LaunchContextWith<WithConfigs> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
 
-            // resolve trusted peers if they use a domain instead of dns
-            let resolved = futures::future::try_join_all(
-            self.attachment.config.network.trusted_peers.iter().map(|peer| async move {
-                let backoff = ConstantBuilder::default()
-                    .with_max_times(self.attachment.config.network.dns_retries);
-                (move || { peer.resolve() })
-                    .retry(&backoff)
-                    .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                    .await
-            })).await?;
-            self.attachment.toml_config.peers.trusted_nodes.extend(resolved);
+            self.attachment
+                .toml_config
+                .peers
+                .trusted_nodes
+                .extend(self.attachment.config.network.trusted_peers.clone());
         }
         Ok(self)
     }
@@ -573,7 +569,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where
         T: FullNodeTypes,
-        T::Provider: FullProvider<DB>,
+        T::Provider: FullProvider<DB, T::ChainSpec>,
         F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
@@ -602,8 +598,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -722,8 +717,7 @@ where
 impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -763,6 +757,67 @@ where
     /// Returns a reference to the blockchain provider.
     pub const fn blockchain_db(&self) -> &T::Provider {
         &self.right().blockchain_db
+    }
+
+    /// Returns the initial backfill to sync to at launch.
+    ///
+    /// This returns the configured `debug.tip` if set, otherwise it will check if backfill was
+    /// previously interrupted and returns the block hash of the last checkpoint, see also
+    /// [`Self::check_pipeline_consistency`]
+    pub fn initial_backfill_target(&self) -> ProviderResult<Option<B256>> {
+        let mut initial_target = self.node_config().debug.tip;
+
+        if initial_target.is_none() {
+            initial_target = self.check_pipeline_consistency()?;
+        }
+
+        Ok(initial_target)
+    }
+
+    /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
+    /// than the checkpoint of the first stage).
+    ///
+    /// This will return the pipeline target if:
+    ///  * the pipeline was interrupted during its previous run
+    ///  * a new stage was added
+    ///  * stage data was dropped manually through `reth stage drop ...`
+    ///
+    /// # Returns
+    ///
+    /// A target block hash if the pipeline is inconsistent, otherwise `None`.
+    pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // If no target was provided, check if the stages are congruent - check if the
+        // checkpoint of the last stage matches the checkpoint of the first.
+        let first_stage_checkpoint = self
+            .blockchain_db()
+            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .unwrap_or_default()
+            .block_number;
+
+        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
+        // against it.
+        for stage_id in StageId::ALL.iter().skip(1) {
+            let stage_checkpoint = self
+                .blockchain_db()
+                .get_stage_checkpoint(*stage_id)?
+                .unwrap_or_default()
+                .block_number;
+
+            // If the checkpoint of any stage is less than the checkpoint of the first stage,
+            // retrieve and return the block hash of the latest header and use it as the target.
+            if stage_checkpoint < first_stage_checkpoint {
+                debug!(
+                    target: "consensus::engine",
+                    first_stage_checkpoint,
+                    inconsistent_stage_id = %stage_id,
+                    inconsistent_stage_checkpoint = stage_checkpoint,
+                    "Pipeline sync progress is inconsistent"
+                );
+                return self.blockchain_db().block_hash(first_stage_checkpoint)
+            }
+        }
+
+        Ok(None)
     }
 
     /// Returns the configured `Consensus`.
@@ -860,8 +915,7 @@ pub struct WithMeteredProvider<DB> {
 pub struct WithMeteredProviders<DB, T>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
 {
     db_provider_container: WithMeteredProvider<DB>,
     blockchain_db: T::Provider,
@@ -877,8 +931,7 @@ where
 pub struct WithComponents<DB, T, CB>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<DB>,
@@ -917,12 +970,8 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(
-                reth_config.prune.as_ref().map(|p| p.block_interval),
-                node_config.prune_config().map(|p| p.block_interval)
-            );
+            let loaded_config = Config::from_path(config_path).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
             assert_eq!(reth_config, loaded_config);
         })
     }

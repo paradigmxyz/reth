@@ -17,12 +17,8 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> AddDevSigners
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
-    }
-
     fn with_dev_accounts(&self) {
-        *self.signers().write() = DevSigner::random_signers(20)
+        *self.inner.signers().write() = DevSigner::random_signers(20)
     }
 }
 

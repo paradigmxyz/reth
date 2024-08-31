@@ -45,7 +45,7 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
-  no-std:
+  wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -57,8 +57,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Run no_std checks
-        run: .github/assets/check_no_std.sh
+      - uses: dcarbone/install-jq-action@v2
+      - name: Run Wasm checks
+        run: .github/assets/check_wasm.sh
 
   crate-checks:
     runs-on: ubuntu-latest
@@ -87,7 +88,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.79" # MSRV
+          toolchain: "1.80" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -130,7 +131,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.79" # MSRV
+          toolchain: "1.80" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -169,6 +170,23 @@ jobs:
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
+  # Checks that selected rates can compile with power set of features
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - run: make check-features
+        env:
+          RUSTFLAGS: -D warnings
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
@@ -176,6 +194,7 @@ jobs:
     needs:
       - clippy-binaries
       - clippy
+      - wasm
       - crate-checks
       - docs
       - fmt
@@ -183,6 +202,7 @@ jobs:
       - codespell
       - grafana
       - no-test-deps
+      - features
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

@@ -169,6 +169,28 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --max-tx-reqs <COUNT>
+          Max concurrent `GetPooledTransactions` requests.
+
+          [default: 130]
+
+      --max-tx-reqs-peer <COUNT>
+          Max concurrent `GetPooledTransactions` requests per peer.
+
+          [default: 1]
+
+      --max-seen-tx-history <COUNT>
+          Max number of seen transactions to remember per peer.
+
+          Default is 320 transaction hashes.
+
+          [default: 320]
+
+      --max-pending-imports <COUNT>
+          Max number of transactions to import concurrently.
+
+          [default: 4096]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
@@ -208,7 +230,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -232,7 +254,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -430,6 +452,21 @@ TxPool:
       --txpool.no-local-transactions-propagation
           Flag to toggle local transaction propagation
 
+      --txpool.additional-validation-tasks <ADDITIONAL_VALIDATION_TASKS>
+          Number of additional transaction validation tasks to spawn
+
+          [default: 1]
+
+      --txpool.max-pending-txns <PENDING_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of pending transactions from the network to buffer
+
+          [default: 2048]
+
+      --txpool.max-new-txns <NEW_TX_LISTENER_BUFFER_SIZE>
+          Maximum number of new transactions to buffer
+
+          [default: 1024]
+
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
@@ -441,8 +478,10 @@ Builder:
 
           [default: 30000000]
 
-      --builder.interval <SECONDS>
-          The interval at which the job should build a new payload after the last (in seconds)
+      --builder.interval <DURATION>
+          The interval at which the job should build a new payload after the last.
+
+          Interval is specified in seconds or in milliseconds if the value ends with `ms`: * `50ms` -> 50 milliseconds * `1` -> 1 second
 
           [default: 1]
 
@@ -479,6 +518,12 @@ Debug:
 
       --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
           If provided, the engine will skip `n` consecutive new payloads
+
+      --debug.reorg-frequency <REORG_FREQUENCY>
+          If provided, the chain will be reorged at specified frequency
+
+      --debug.reorg-depth <REORG_DEPTH>
+          The reorg depth for chain reorgs
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
@@ -524,6 +569,10 @@ Dev testnet:
 Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
+
+Engine:
+      --engine.experimental
+          Enable the engine2 experimental features on reth binary
 
 Logging:
       --log.stdout.format <FORMAT>

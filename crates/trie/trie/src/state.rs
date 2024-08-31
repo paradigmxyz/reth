@@ -4,15 +4,12 @@ use crate::{
 };
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::{tables, DatabaseError};
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress},
-    transaction::DbTx,
+use reth_primitives::{keccak256, Account, Address, B256, U256};
+use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
+use std::{
+    borrow::Cow,
+    collections::{hash_map, HashMap, HashSet},
 };
-use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
-use revm::db::BundleAccount;
-use std::collections::{hash_map, HashMap, HashSet};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -35,11 +32,9 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = keccak256(address);
                 let hashed_account = account.info.clone().map(Into::into);
-                let hashed_storage = HashedStorage::from_iter(
-                    account.status.was_destroyed(),
-                    account.storage.iter().map(|(key, value)| {
-                        (keccak256(B256::new(key.to_be_bytes())), value.present_value)
-                    }),
+                let hashed_storage = HashedStorage::from_plain_storage(
+                    account.status,
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
                 (hashed_address, (hashed_account, hashed_storage))
             })
@@ -54,50 +49,36 @@ impl HashedPostState {
         Self { accounts, storages }
     }
 
-    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
-    /// block up to the current tip and aggregates them into hashed state in reverse.
-    pub fn from_reverts<TX: DbTx>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
-        // Iterate over account changesets and record value before first occurring account change.
-        let mut accounts = HashMap::<Address, Option<Account>>::default();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(from..)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
-            if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
-                entry.insert(info);
-            }
+    /// Initialize [`HashedPostState`] from cached state.
+    /// Hashes all changed accounts and storage entries that are currently stored in cache.
+    pub fn from_cache_state<'a>(
+        state: impl IntoParallelIterator<Item = (&'a Address, &'a CacheAccount)>,
+    ) -> Self {
+        let hashed = state
+            .into_par_iter()
+            .map(|(address, account)| {
+                let hashed_address = keccak256(address);
+                let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
+                let hashed_storage = HashedStorage::from_plain_storage(
+                    account.status,
+                    account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
+                );
+                (hashed_address, (hashed_account, hashed_storage))
+            })
+            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+
+        let mut accounts = HashMap::with_capacity(hashed.len());
+        let mut storages = HashMap::with_capacity(hashed.len());
+        for (address, (account, storage)) in hashed {
+            accounts.insert(address, account);
+            storages.insert(address, storage);
         }
+        Self { accounts, storages }
+    }
 
-        // Iterate over storage changesets and record value before first occurring storage change.
-        let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in
-            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
-        {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
-            let account_storage = storages.entry(address).or_default();
-            if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
-                entry.insert(storage.value);
-            }
-        }
-
-        let hashed_accounts = HashMap::from_iter(
-            accounts.into_iter().map(|(address, info)| (keccak256(address), info)),
-        );
-
-        let hashed_storages = HashMap::from_iter(storages.into_iter().map(|(address, storage)| {
-            (
-                keccak256(address),
-                HashedStorage::from_iter(
-                    // The `wiped` flag indicates only whether previous storage entries
-                    // should be looked up in db or not. For reverts it's a noop since all
-                    // wiped changes had been written as storage reverts.
-                    false,
-                    storage.into_iter().map(|(slot, value)| (keccak256(slot), value)),
-                ),
-            )
-        }));
-
-        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
+    /// Construct [`HashedPostState`] from a single [`HashedStorage`].
+    pub fn from_hashed_storage(hashed_address: B256, storage: HashedStorage) -> Self {
+        Self { accounts: HashMap::default(), storages: HashMap::from([(hashed_address, storage)]) }
     }
 
     /// Set account entries on hashed state.
@@ -121,17 +102,42 @@ impl HashedPostState {
     /// Extend this hashed post state with contents of another.
     /// Entries in the second hashed post state take precedence.
     pub fn extend(&mut self, other: Self) {
-        for (hashed_address, account) in other.accounts {
-            self.accounts.insert(hashed_address, account);
-        }
+        self.extend_inner(Cow::Owned(other));
+    }
 
-        for (hashed_address, storage) in other.storages {
+    /// Extend this hashed post state with contents of another.
+    /// Entries in the second hashed post state take precedence.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_inner(Cow::Borrowed(other));
+    }
+
+    fn extend_inner(&mut self, other: Cow<'_, Self>) {
+        self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+
+        self.storages.reserve(other.storages.len());
+        match other {
+            Cow::Borrowed(other) => {
+                self.extend_storages(other.storages.iter().map(|(k, v)| (*k, Cow::Borrowed(v))))
+            }
+            Cow::Owned(other) => {
+                self.extend_storages(other.storages.into_iter().map(|(k, v)| (k, Cow::Owned(v))))
+            }
+        }
+    }
+
+    fn extend_storages<'a>(
+        &mut self,
+        storages: impl IntoIterator<Item = (B256, Cow<'a, HashedStorage>)>,
+    ) {
+        for (hashed_address, storage) in storages {
             match self.storages.entry(hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
-                    entry.insert(storage);
+                    entry.insert(storage.into_owned());
                 }
                 hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().extend(storage);
+                    entry.get_mut().extend(&storage);
                 }
             }
         }
@@ -179,12 +185,7 @@ impl HashedPostState {
         let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
         for (hashed_address, hashed_storage) in &self.storages {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-            let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
-            for hashed_slot in hashed_storage.storage.keys() {
-                prefix_set.insert(Nibbles::unpack(hashed_slot));
-            }
-            storage_prefix_sets.insert(*hashed_address, prefix_set);
+            storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
@@ -192,7 +193,7 @@ impl HashedPostState {
 }
 
 /// Representation of in-memory hashed storage.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Default)]
 pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
@@ -211,16 +212,38 @@ impl HashedStorage {
         Self { wiped, storage: HashMap::from_iter(iter) }
     }
 
+    /// Create new hashed storage from account status and plain storage.
+    pub fn from_plain_storage<'a>(
+        status: AccountStatus,
+        storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
+    ) -> Self {
+        Self::from_iter(
+            status.was_destroyed(),
+            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+        )
+    }
+
+    /// Construct [`PrefixSetMut`] from hashed storage.
+    pub fn construct_prefix_set(&self) -> PrefixSetMut {
+        if self.wiped {
+            PrefixSetMut::all()
+        } else {
+            let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
+            for hashed_slot in self.storage.keys() {
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
+            }
+            prefix_set
+        }
+    }
+
     /// Extend hashed storage with contents of other.
     /// The entries in second hashed storage take precedence.
-    pub fn extend(&mut self, other: Self) {
+    pub fn extend(&mut self, other: &Self) {
         if other.wiped {
             self.wiped = true;
             self.storage.clear();
         }
-        for (hashed_slot, value) in other.storage {
-            self.storage.insert(hashed_slot, value);
-        }
+        self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
     /// Converts hashed storage into [`HashedStorageSorted`].
@@ -250,6 +273,14 @@ pub struct HashedPostStateSorted {
 }
 
 impl HashedPostStateSorted {
+    /// Create new instance of [`HashedPostStateSorted`]
+    pub const fn new(
+        accounts: HashedAccountsSorted,
+        storages: HashMap<B256, HashedStorageSorted>,
+    ) -> Self {
+        Self { accounts, storages }
+    }
+
     /// Returns reference to hashed accounts.
     pub const fn accounts(&self) -> &HashedAccountsSorted {
         &self.accounts

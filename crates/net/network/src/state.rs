@@ -1,25 +1,5 @@
 //! Keeps track of the state of the network.
 
-use crate::{
-    cache::LruCache,
-    discovery::{Discovery, DiscoveryEvent},
-    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
-    manager::DiscoveredEvent,
-    message::{
-        BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
-        PeerResponseResult,
-    },
-    peers::{PeerAction, PeerAddr, PeersManager},
-    FetchClient,
-};
-use rand::seq::SliceRandom;
-
-use reth_eth_wire::{
-    capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
-};
-use reth_network_api::PeerKind;
-use reth_network_peers::PeerId;
-use reth_primitives::{ForkId, B256};
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -31,8 +11,24 @@ use std::{
     },
     task::{Context, Poll},
 };
+
+use rand::seq::SliceRandom;
+use reth_eth_wire::{BlockHashNumber, Capabilities, DisconnectReason, NewBlockHashes, Status};
+use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
+use reth_network_peers::PeerId;
+use reth_network_types::{PeerAddr, PeerKind};
+use reth_primitives::{ForkId, B256};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
+
+use crate::{
+    cache::LruCache,
+    discovery::Discovery,
+    fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
+    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
+    peers::{PeerAction, PeersManager},
+    FetchClient,
+};
 
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
@@ -300,6 +296,11 @@ impl NetworkState {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
+    /// Connects a peer and its address with the given kind
+    pub(crate) fn add_and_connect(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
+        self.peers_manager.add_and_connect_kind(peer_id, kind, addr, None)
+    }
+
     /// Removes a peer and its address with the given kind from the peerset.
     pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
@@ -441,7 +442,7 @@ impl NetworkState {
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
-                            if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
+                            if res.err().is_some_and(|err| err.is_channel_closed()) {
                                 debug!(
                                     target: "net",
                                     ?id,
@@ -544,28 +545,27 @@ pub(crate) enum StateAction {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        discovery::Discovery,
-        fetch::StateFetcher,
-        message::PeerRequestSender,
-        peers::PeersManager,
-        state::{BlockNumReader, NetworkState},
-        PeerRequest,
-    };
-    use reth_eth_wire::{
-        capability::{Capabilities, Capability},
-        BlockBodies, EthVersion,
-    };
-    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_peers::PeerId;
-    use reth_primitives::{BlockBody, Header, B256};
-    use reth_provider::test_utils::NoopProvider;
     use std::{
         future::poll_fn,
         sync::{atomic::AtomicU64, Arc},
     };
+
+    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthVersion};
+    use reth_network_api::PeerRequestSender;
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_peers::PeerId;
+    use reth_primitives::{BlockBody, Header, B256};
+    use reth_provider::test_utils::NoopProvider;
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+
+    use crate::{
+        discovery::Discovery,
+        fetch::StateFetcher,
+        peers::PeersManager,
+        state::{BlockNumReader, NetworkState},
+        PeerRequest,
+    };
 
     /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState {

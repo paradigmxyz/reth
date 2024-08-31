@@ -1,11 +1,13 @@
 //! Configuration files.
 
+use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -29,6 +31,31 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load a [`Config`] from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = Self::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
+    }
+
     /// Returns the [`PeersConfig`] for the node.
     ///
     /// If a peers file is provided, the basic nodes from the file are added to the configuration.
@@ -48,9 +75,14 @@ impl Config {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
-            ))
+            ));
         }
-        confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+
+        std::fs::write(
+            path,
+            toml::to_string(self)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        )
     }
 
     /// Sets the pruning configuration.
@@ -383,7 +415,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Config, EXTENSION};
-    use std::time::Duration;
+    use reth_network_peers::TrustedPeer;
+    use std::{path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -394,11 +427,91 @@ mod tests {
         temp_dir.close().unwrap()
     }
 
+    /// Run a test function with a temporary config path as fixture.
+    fn with_config_path(test_fn: fn(&Path)) {
+        // Create a temporary directory for the config file
+        let config_dir = tempfile::tempdir().expect("creating test fixture failed");
+        // Create the config file path
+        let config_path =
+            config_dir.path().join("example-app").join("example-config").with_extension("toml");
+        // Run the test function with the config path
+        test_fn(&config_path);
+        config_dir.close().expect("removing test fixture failed");
+    }
+
+    #[test]
+    fn test_load_path_works() {
+        with_config_path(|path| {
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+        })
+    }
+
+    #[test]
+    fn test_load_path_reads_existing_config() {
+        with_config_path(|path| {
+            let config = Config::default();
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write the config to the file
+            std::fs::write(path, toml::to_string(&config).unwrap())
+                .expect("Failed to write config");
+
+            // Load the config from the file and compare it
+            let loaded = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, loaded);
+        })
+    }
+
+    #[test]
+    fn test_load_path_fails_on_invalid_toml() {
+        with_config_path(|path| {
+            let invalid_toml = "invalid toml data";
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write invalid TOML data to the file
+            std::fs::write(path, invalid_toml).expect("Failed to write invalid TOML");
+
+            // Attempt to load the config should fail
+            let result = Config::from_path(path);
+            assert!(result.is_err());
+        })
+    }
+
+    #[test]
+    fn test_load_path_creates_directory_if_not_exists() {
+        with_config_path(|path| {
+            // Ensure the directory does not exist
+            let parent = path.parent().unwrap();
+            assert!(!parent.exists());
+
+            // Load the configuration, which should create the directory and a default config file
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+
+            // The directory and file should now exist
+            assert!(parent.exists());
+            assert!(path.exists());
+        });
+    }
+
     #[test]
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).expect("Failed to store config");
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
         })
     }
 
@@ -414,9 +527,18 @@ mod tests {
     fn test_load_config() {
         with_tempdir("config-load-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -426,9 +548,18 @@ mod tests {
         with_tempdir("config-load-test", |config_path| {
             let mut config = Config::default();
             config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -735,6 +866,33 @@ nanos = 0
         let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
     }
 
+    // ensures prune config deserialization is backwards compatible
+    #[test]
+    fn test_backwards_compatibility_prune_full() {
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { distance = 16384 }
+#";
+        let _conf: Config = toml::from_str(s).unwrap();
+
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = 'full'
+#";
+        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
+        assert!(err.contains("invalid value: string \"full\""), "{}", err);
+    }
+
     #[test]
     fn test_conf_trust_nodes_only() {
         let trusted_nodes_only = r"#
@@ -750,5 +908,29 @@ connect_trusted_nodes_only = true
 #";
         let conf: Config = toml::from_str(trusted_nodes_only).unwrap();
         assert!(conf.peers.trusted_nodes_only);
+    }
+
+    #[test]
+    fn test_can_support_dns_in_trusted_nodes() {
+        let reth_toml = r#"
+    [peers]
+    trusted_nodes = [
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303"
+    ]
+    "#;
+
+        let conf: Config = toml::from_str(reth_toml).unwrap();
+        assert_eq!(conf.peers.trusted_nodes.len(), 2);
+
+        let expected_enodes = vec![
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+    ];
+
+        for enode in expected_enodes {
+            let node = TrustedPeer::from_str(enode).unwrap();
+            assert!(conf.peers.trusted_nodes.contains(&node));
+        }
     }
 }

@@ -195,7 +195,7 @@ pub enum HandlerEvent<T> {
     BackfillAction(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
-    // Fatal error
+    /// Fatal error
     FatalError,
 }
 

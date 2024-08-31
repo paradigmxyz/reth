@@ -227,9 +227,8 @@ mod tests {
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_eoa_account, random_log, random_receipt},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_eoa_account, random_log, random_receipt, BlockRangeParams,
     };
     use std::collections::BTreeMap;
 
@@ -242,9 +241,21 @@ mod tests {
 
         let tip = 20000;
         let blocks = [
-            random_block_range(&mut rng, 0..=100, B256::ZERO, 1..5),
-            random_block_range(&mut rng, (100 + 1)..=(tip - 100), B256::ZERO, 0..1),
-            random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
+            random_block_range(
+                &mut rng,
+                0..=100,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..5, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                (100 + 1)..=(tip - 100),
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                (tip - 100 + 1)..=tip,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..5, ..Default::default() },
+            ),
         ]
         .concat();
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");

@@ -4,6 +4,8 @@ use crate::{args::NetworkArgs, utils::get_single_header};
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -16,9 +18,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkEvents, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
@@ -37,9 +39,9 @@ use tracing::*;
 
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -54,7 +56,7 @@ pub struct Command {
     pub interval: u64,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn build_pipeline<DB, Client>(
         &self,
         config: &Config,
@@ -66,7 +68,7 @@ impl Command {
     ) -> eyre::Result<Pipeline<DB>>
     where
         DB: Database + Unpin + Clone + 'static,
-        Client: HeadersClient + BodiesClient + Clone + 'static,
+        Client: BlockClient + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
@@ -208,7 +210,6 @@ impl Command {
                 Some(Box::new(network)),
                 latest_block_number,
                 events,
-                provider_factory.db_ref().clone(),
             ),
         );
 

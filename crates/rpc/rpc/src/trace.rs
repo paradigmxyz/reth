@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
@@ -24,7 +24,7 @@ use reth_rpc_types::{
         parity::*,
         tracerequest::TraceCallRequest,
     },
-    BlockError, BlockOverrides, Index, TransactionRequest,
+    BlockOverrides, Index, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -75,7 +75,11 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
+    Provider: BlockReader
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
@@ -277,44 +281,18 @@ where
         // fetch all blocks in that range
         let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_eth_err)?;
 
-        // find relevant blocks to trace
-        let mut target_blocks = Vec::new();
+        // trace all blocks
+        let mut block_traces = Vec::with_capacity(blocks.len());
         for block in &blocks {
-            let mut transaction_indices = HashSet::new();
-            let mut highest_matching_index = 0;
-            for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx
-                    .recover_signer_unchecked()
-                    .ok_or(BlockError::InvalidSignature)
-                    .map_err(Eth::Error::from_eth_err)?;
-                let to = tx.to();
-                if matcher.matches(from, to) {
-                    let idx = tx_idx as u64;
-                    transaction_indices.insert(idx);
-                    highest_matching_index = idx;
-                }
-            }
-            if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices, highest_matching_index));
-            }
-        }
-
-        // trace all relevant blocks
-        let mut block_traces = Vec::with_capacity(target_blocks.len());
-        for (num, indices, highest_idx) in target_blocks {
+            let matcher = matcher.clone();
             let traces = self.inner.eth_api.trace_block_until(
-                num.into(),
-                Some(highest_idx),
+                block.number.into(),
+                None,
                 TracingInspectorConfig::default_parity(),
                 move |tx_info, inspector, _, _, _| {
-                    if let Some(idx) = tx_info.index {
-                        if !indices.contains(&idx) {
-                            // only record traces for relevant transactions
-                            return Ok(None)
-                        }
-                    }
-                    let traces =
+                    let mut traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    traces.retain(|trace| matcher.matches(&trace.trace));
                     Ok(Some(traces))
                 },
             );
@@ -331,11 +309,10 @@ where
         // add reward traces for all blocks
         for block in &blocks {
             if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
-                all_traces.extend(self.extract_reward_traces(
-                    &block.header,
-                    &block.ommers,
-                    base_block_reward,
-                ));
+                let mut traces =
+                    self.extract_reward_traces(&block.header, &block.ommers, base_block_reward);
+                traces.retain(|trace| matcher.matches(&trace.trace));
+                all_traces.extend(traces);
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order
@@ -574,7 +551,11 @@ where
 #[async_trait]
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
-    Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
+    Provider: BlockReader
+        + StateProviderFactory
+        + EvmEnvProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + 'static,
     Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.

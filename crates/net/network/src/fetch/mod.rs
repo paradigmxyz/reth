@@ -1,16 +1,9 @@
 //! Fetch data from the network.
 
-use crate::{message::BlockRequest, peers::PeersHandle};
-use futures::StreamExt;
-use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_network_api::ReputationChangeKind;
-use reth_network_p2p::{
-    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
-    headers::client::HeadersRequest,
-    priority::Priority,
-};
-use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, Header, B256};
+mod client;
+
+pub use client::FetchClient;
+
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -19,11 +12,22 @@ use std::{
     },
     task::{Context, Poll},
 };
+
+use futures::StreamExt;
+use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
+use reth_network_api::test_utils::PeersHandle;
+use reth_network_p2p::{
+    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
+    headers::client::HeadersRequest,
+    priority::Priority,
+};
+use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
+use reth_primitives::{BlockBody, Header, B256};
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-mod client;
-pub use client::FetchClient;
+use crate::message::BlockRequest;
 
 /// Manages data fetching operations.
 ///
@@ -262,10 +266,8 @@ impl StateFetcher {
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
 
-        let is_likely_bad_response = resp
-            .as_ref()
-            .map(|r| res.is_likely_bad_headers_response(&r.request))
-            .unwrap_or_default();
+        let is_likely_bad_response =
+            resp.as_ref().is_some_and(|r| res.is_likely_bad_headers_response(&r.request));
 
         if let Some(resp) = resp {
             // delegate the response

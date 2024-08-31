@@ -16,10 +16,10 @@ use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     transaction::TryFromRecoveredTransactionError,
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-    TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType,
-    B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    PooledTransactionsElementEcRecovered, Signature, Transaction, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy,
+    TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
@@ -558,6 +558,24 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
+    type Consensus = TransactionSignedEcRecovered;
+
+    type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
+
+    fn from_pooled(pooled: Self::Pooled) -> Self {
+        pooled.into()
+    }
+
     fn hash(&self) -> &TxHash {
         match self {
             Self::Legacy { hash, .. } |
@@ -710,7 +728,7 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the encoded length of the transaction.
     fn encoded_length(&self) -> usize {
-        0
+        self.size()
     }
 
     /// Returns the chain ID associated with the transaction.
@@ -755,12 +773,10 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFromRecoveredTransaction for MockTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
@@ -782,7 +798,7 @@ impl TryFromRecoveredTransaction for MockTransaction {
                 sender,
                 nonce,
                 gas_price,
-                gas_limit,
+                gas_limit: gas_limit as u64,
                 to,
                 value,
                 input,
@@ -869,26 +885,23 @@ impl TryFromRecoveredTransaction for MockTransaction {
     }
 }
 
-impl FromRecoveredPooledTransaction for MockTransaction {
-    fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        TryFromRecoveredTransaction::try_from_recovered_transaction(
-            tx.into_ecrecovered_transaction(),
+impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
+    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+        tx.into_ecrecovered_transaction().try_into().expect(
+            "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
-        .expect("Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction")
     }
 }
 
-impl IntoRecoveredTransaction for MockTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        let tx = self.clone().into();
-
+impl From<MockTransaction> for TransactionSignedEcRecovered {
+    fn from(tx: MockTransaction) -> Self {
         let signed_tx = TransactionSigned {
-            hash: *self.hash(),
+            hash: *tx.hash(),
             signature: Signature::default(),
-            transaction: tx,
+            transaction: tx.clone().into(),
         };
 
-        TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
+        Self::from_signed_transaction(signed_tx, tx.sender())
     }
 }
 
@@ -906,7 +919,15 @@ impl From<MockTransaction> for Transaction {
                 value,
                 input,
                 size: _,
-            } => Self::Legacy(TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input }),
+            } => Self::Legacy(TxLegacy {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit: gas_limit.into(),
+                to,
+                value,
+                input,
+            }),
             MockTransaction::Eip2930 {
                 chain_id,
                 hash: _,
@@ -1010,7 +1031,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     hash: tx_hash,
                     nonce: *nonce,
                     gas_price: *gas_price,
-                    gas_limit: *gas_limit,
+                    gas_limit: *gas_limit as u64,
                     to: *to,
                     value: *value,
                     input: input.clone(),

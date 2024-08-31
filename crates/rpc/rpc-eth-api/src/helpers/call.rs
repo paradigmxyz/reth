@@ -1,6 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
+use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
@@ -8,6 +9,7 @@ use reth_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
     },
+    transaction::AccessListResult,
     Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
@@ -25,15 +27,13 @@ use reth_rpc_server_types::constants::gas_oracle::{
     CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
 };
 use reth_rpc_types::{
+    simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
-    TransactionRequest,
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
-
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
@@ -48,6 +48,18 @@ pub trait EthCall: Call + LoadPendingBlock {
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         Call::estimate_gas_at(self, request, at, state_override)
+    }
+
+    /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
+    /// The transactions are packed into individual blocks. Overrides can be provided.
+    ///
+    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
+    fn simulate_v1(
+        &self,
+        _opts: SimBlock,
+        _block_number: Option<BlockId>,
+    ) -> impl Future<Output = Result<Vec<SimulatedBlock>, Self::Error>> + Send {
+        async move { Err(EthApiError::Unsupported("eth_simulateV1 is not supported.").into()) }
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -179,13 +191,13 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`], or latest block.
     fn create_access_list_at(
         &self,
         request: TransactionRequest,
         block_number: Option<BlockId>,
-    ) -> impl Future<Output = Result<AccessListWithGasUsed, Self::Error>> + Send
+    ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
     {
@@ -200,7 +212,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         }
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
@@ -208,7 +220,7 @@ pub trait EthCall: Call + LoadPendingBlock {
         block: BlockEnv,
         at: BlockId,
         mut request: TransactionRequest,
-    ) -> Result<AccessListWithGasUsed, Self::Error>
+    ) -> Result<AccessListResult, Self::Error>
     where
         Self: Trace,
     {
@@ -246,31 +258,41 @@ pub trait EthCall: Call + LoadPendingBlock {
 
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
-        match result.result {
-            ExecutionResult::Halt { reason, .. } => Err(match reason {
-                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
-                halt => RpcInvalidTransactionError::EvmHalt(halt),
-            }),
-            ExecutionResult::Revert { output, .. } => {
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
-            }
-            ExecutionResult::Success { .. } => Ok(()),
-        }
-        .map_err(Self::Error::from_eth_err)?;
-
+        let (result, mut env) = self.inspect(&mut db, env, &mut inspector)?;
         let access_list = inspector.into_access_list();
+        env.tx.access_list = access_list.to_vec();
+        match result.result {
+            ExecutionResult::Halt { reason, gas_used } => {
+                let error =
+                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            }
+            ExecutionResult::Revert { output, gas_used } => {
+                let error = Some(RevertError::new(output).to_string());
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            }
+            ExecutionResult::Success { .. } => {}
+        };
 
-        let cfg_with_spec_id =
-            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
+        // transact again to get the exact gas used
+        let (result, env) = self.transact(&mut db, env)?;
+        let res = match result.result {
+            ExecutionResult::Halt { reason, gas_used } => {
+                let error =
+                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Revert { output, gas_used } => {
+                let error = Some(RevertError::new(output).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Success { gas_used, .. } => {
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
+            }
+        };
 
-        // calculate the gas used using the access list
-        request.access_list = Some(access_list.clone());
-        let gas_used =
-            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
-
-        Ok(AccessListWithGasUsed { access_list, gas_used })
+        Ok(res)
     }
 }
 
@@ -506,12 +528,20 @@ pub trait Call: LoadState + SpawnBlocking {
 
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search
+    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search.
+    ///
+    /// ## EVM settings
+    ///
+    /// This modifies certain EVM settings to mirror geth's `SkipAccountChecks` when transacting requests, see also: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L145-L148>:
+    ///
+    ///  - `disable_eip3607` is set to `true`
+    ///  - `disable_base_fee` is set to `true`
+    ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,
-        request: TransactionRequest,
+        mut request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
     ) -> Result<U256, Self::Error>
@@ -522,10 +552,13 @@ pub trait Call: LoadState + SpawnBlocking {
         // See <https://github.com/paradigmxyz/reth/issues/1959>
         cfg.disable_eip3607 = true;
 
-        // The basefee should be ignored for eth_createAccessList
+        // The basefee should be ignored for eth_estimateGas and similar
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         cfg.disable_base_fee = true;
+
+        // set nonce to None so that the correct nonce is chosen by the EVM
+        request.nonce = None;
 
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.gas;
@@ -820,7 +853,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            // authorization_list,
+            authorization_list,
             ..
         } = request;
 
@@ -859,7 +892,7 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             // EIP-7702 fields
-            // authorization_list: TODO
+            authorization_list: authorization_list.map(Into::into),
             ..Default::default()
         };
 
@@ -884,16 +917,21 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// Does not commit any changes to the underlying database.
     ///
-    /// EVM settings:
-    ///  - `disable_block_gas_limit` is set to `true`
+    /// ## EVM settings
+    ///
+    /// This modifies certain EVM settings to mirror geth's `SkipAccountChecks` when transacting requests, see also: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L145-L148>:
+    ///
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// Additionally, the block gas limit so that higher tx gas limits can be used in `eth_call`.
+    ///  - `disable_block_gas_limit` is set to `true`
     fn prepare_call_env<DB>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
         mut block: BlockEnv,
-        request: TransactionRequest,
+        mut request: TransactionRequest,
         gas_limit: u64,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
@@ -915,6 +953,9 @@ pub trait Call: LoadState + SpawnBlocking {
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         cfg.disable_base_fee = true;
 
+        // set nonce to None so that the correct nonce is chosen by the EVM
+        request.nonce = None;
+
         // apply block overrides, we need to apply them first so that they take effect when we we
         // create the evm env via `build_call_evm_env`, e.g. basefee
         if let Some(mut block_overrides) = overrides.block {
@@ -928,8 +969,6 @@ pub trait Call: LoadState + SpawnBlocking {
 
         let request_gas = request.gas;
         let mut env = self.build_call_evm_env(cfg, block, request)?;
-        // set nonce to None so that the next nonce is used when transacting the call
-        env.tx.nonce = None;
 
         // apply state overrides
         if let Some(state_overrides) = overrides.state {

@@ -1,10 +1,13 @@
+use alloy_network::Network;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
+use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcTransaction};
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
+    SyncStatus, TransactionRequest, WithOtherFields,
 };
 use tracing_futures::Instrument;
 
@@ -30,10 +33,16 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 }
 
 #[async_trait::async_trait]
-impl<Eth, EthFilter> EngineEthApiServer for EngineEthApi<Eth, EthFilter>
+impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
+    for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer,
-    EthFilter: EthFilterApiServer,
+    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
+        + EthApiTypes<
+            NetworkTypes: Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        >,
+    EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
@@ -76,7 +85,11 @@ where
     }
 
     /// Handler for: `eth_getBlockByHash`
-    async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<RichBlock>> {
+    async fn block_by_hash(
+        &self,
+        hash: B256,
+        full: bool,
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_hash(hash, full).instrument(engine_span!()).await
     }
 
@@ -85,7 +98,7 @@ where
         &self,
         number: BlockNumberOrTag,
         full: bool,
-    ) -> Result<Option<RichBlock>> {
+    ) -> Result<Option<RpcBlock<Eth::NetworkTypes>>> {
         self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
@@ -97,5 +110,15 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
         self.eth_filter.logs(filter).instrument(engine_span!()).await
+    }
+
+    /// Handler for `eth_getProof`
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> Result<EIP1186AccountProofResponse> {
+        self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 }

@@ -7,6 +7,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
@@ -16,7 +17,7 @@ use std::{
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
-/// Advances the chain based on incoming requests.
+/// A [`ChainHandler`] that advances the chain based on incoming requests (CL engine API).
 ///
 /// This is a general purpose request handler with network access.
 /// This type listens for incoming messages and processes them via the configured request handler.
@@ -39,26 +40,33 @@ pub struct EngineHandler<T, S, D> {
     ///
     /// This type is responsible for processing incoming requests.
     handler: T,
-    /// Receiver for incoming requests that need to be processed.
+    /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: S,
     /// A downloader to download blocks on demand.
     downloader: D,
 }
 
 impl<T, S, D> EngineHandler<T, S, D> {
-    /// Creates a new [`EngineHandler`] with the given handler and downloader.
+    /// Creates a new [`EngineHandler`] with the given handler and downloader and incoming stream of
+    /// requests.
     pub const fn new(handler: T, downloader: D, incoming_requests: S) -> Self
     where
         T: EngineRequestHandler,
     {
         Self { handler, incoming_requests, downloader }
     }
+
+    /// Returns a mutable reference to the request handler.
+    pub fn handler_mut(&mut self) -> &mut T {
+        &mut self.handler
+    }
 }
 
 impl<T, S, D> ChainHandler for EngineHandler<T, S, D>
 where
     T: EngineRequestHandler,
-    S: Stream<Item = T::Request> + Send + Sync + Unpin + 'static,
+    S: Stream + Send + Sync + Unpin + 'static,
+    <S as Stream>::Item: Into<T::Request>,
     D: BlockDownloader,
 {
     type Event = T::Event;
@@ -97,7 +105,7 @@ where
             // pop the next incoming request
             if let Poll::Ready(Some(req)) = self.incoming_requests.poll_next_unpin(cx) {
                 // and delegate the request to the handler
-                self.handler.on_event(FromEngine::Request(req));
+                self.handler.on_event(FromEngine::Request(req.into()));
                 // skip downloading in this iteration to allow the handler to process the request
                 continue
             }
@@ -123,7 +131,7 @@ where
 /// type via [`EngineRequestHandler::on_event`]. This type is responsible for processing the
 /// incoming requests and advancing the chain and emit events when it is polled.
 pub trait EngineRequestHandler: Send + Sync {
-    /// Even type this handler can emit
+    /// Event type this handler can emit
     type Event: Send;
     /// The request type this handler can process.
     type Request;
@@ -155,31 +163,29 @@ pub trait EngineRequestHandler: Send + Sync {
 /// In case required blocks are missing, the handler will request them from the network, by emitting
 /// a download request upstream.
 #[derive(Debug)]
-pub struct EngineApiRequestHandler<T: EngineTypes> {
+pub struct EngineApiRequestHandler<Request> {
     /// channel to send messages to the tree to execute the payload.
-    to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
+    to_tree: Sender<FromEngine<Request>>,
     /// channel to receive messages from the tree.
     from_tree: UnboundedReceiver<EngineApiEvent>,
 }
 
-impl<T> EngineApiRequestHandler<T>
-where
-    T: EngineTypes,
-{
+impl<Request> EngineApiRequestHandler<Request> {
+    /// Creates a new `EngineApiRequestHandler`.
     pub const fn new(
-        to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
+        to_tree: Sender<FromEngine<Request>>,
         from_tree: UnboundedReceiver<EngineApiEvent>,
     ) -> Self {
         Self { to_tree, from_tree }
     }
 }
 
-impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
+impl<Request> EngineRequestHandler for EngineApiRequestHandler<Request>
 where
-    T: EngineTypes,
+    Request: Send,
 {
     type Event = BeaconConsensusEngineEvent;
-    type Request = BeaconEngineMessage<T>;
+    type Request = Request;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
         // delegate to the tree
@@ -201,6 +207,36 @@ where
             EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
         };
         Poll::Ready(ev)
+    }
+}
+
+/// The type for specifying the kind of engine api
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineApiKind {
+    /// The chain contains Ethereum configuration.
+    Ethereum,
+    /// The chain contains Optimism configuration.
+    OpStack,
+}
+
+/// The request variants that the engine API handler can receive.
+#[derive(Debug)]
+pub enum EngineApiRequest<T: EngineTypes> {
+    /// A request received from the consensus engine.
+    Beacon(BeaconEngineMessage<T>),
+    /// Request to insert an already executed block, e.g. via payload building.
+    InsertExecutedBlock(ExecutedBlock),
+}
+
+impl<T: EngineTypes> From<BeaconEngineMessage<T>> for EngineApiRequest<T> {
+    fn from(msg: BeaconEngineMessage<T>) -> Self {
+        Self::Beacon(msg)
+    }
+}
+
+impl<T: EngineTypes> From<EngineApiRequest<T>> for FromEngine<EngineApiRequest<T>> {
+    fn from(req: EngineApiRequest<T>) -> Self {
+        Self::Request(req)
     }
 }
 
@@ -229,11 +265,12 @@ impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
     }
 }
 
+/// Events received from the engine.
 #[derive(Debug)]
 pub enum FromEngine<Req> {
     /// Event from the top level orchestrator.
     Event(FromOrchestrator),
-    /// Request from the engine
+    /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
     DownloadedBlocks(Vec<SealedBlockWithSenders>),

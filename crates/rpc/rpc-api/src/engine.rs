@@ -3,6 +3,7 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
+use alloy_json_rpc::RpcObject;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
@@ -13,7 +14,8 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, SyncStatus,
+    TransactionRequest,
 };
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
@@ -218,7 +220,7 @@ pub trait EngineApi<Engine: EngineTypes> {
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EngineEthApi {
+pub trait EngineEthApi<B: RpcObject> {
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
     fn syncing(&self) -> RpcResult<SyncStatus>;
@@ -247,15 +249,11 @@ pub trait EngineEthApi {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<B>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
-    async fn block_by_number(
-        &self,
-        number: BlockNumberOrTag,
-        full: bool,
-    ) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_number(&self, number: BlockNumberOrTag, full: bool) -> RpcResult<Option<B>>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
@@ -264,4 +262,14 @@ pub trait EngineEthApi {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns the account and storage values of the specified account including the Merkle-proof.
+    /// This call can be used to verify that the data you are pulling from is not tampered with.
+    #[method(name = "getProof")]
+    async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<EIP1186AccountProofResponse>;
 }

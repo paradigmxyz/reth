@@ -13,7 +13,7 @@ BUILD_PATH = "target"
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?=
+    FEATURES ?= asm-keccak
 else
     FEATURES ?= jemalloc asm-keccak
 endif
@@ -61,6 +61,10 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
+.PHONY: build-debug
+build-debug: ## Build the reth binary into `target/debug` directory.
+	cargo build --bin reth --features "$(FEATURES)"
+
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
@@ -82,15 +86,12 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
-# For aarch64, disable asm-keccak optimizations and set the page size for
-# jemalloc. When cross compiling, we must compile jemalloc with a large page
-# size, otherwise it will use the current system's page size which may not work
+# For aarch64, set the page size for jemalloc.
+# When cross compiling, we must compile jemalloc with a large page size,
+# otherwise it will use the current system's page size which may not work
 # on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
 # pages. See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
-
-op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
 op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows
@@ -303,9 +304,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build ## Update book cli documentation.
+update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
+	@./book/cli/update.sh $(BUILD_PATH)/debug/reth
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
@@ -470,3 +471,11 @@ pr:
 	make lint && \
 	make update-book-cli && \
 	make test
+
+check-features:
+	cargo hack check \
+		--package reth-codecs \
+		--package reth-primitives-traits \
+		--package reth-primitives \
+		--package reth-rpc-types \
+		--feature-powerset

@@ -89,6 +89,11 @@ pub mod dirs {
     pub use reth_node_core::dirs::*;
 }
 
+/// Re-exported from `reth_chainspec`
+pub mod chainspec {
+    pub use reth_chainspec::*;
+}
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;
@@ -126,7 +131,9 @@ pub mod tasks {
 /// Re-exported from `reth_network`.
 pub mod network {
     pub use reth_network::*;
-    pub use reth_network_api::{noop, reputation, NetworkInfo, PeerKind, Peers, PeersInfo};
+    pub use reth_network_api::{
+        noop, test_utils::PeersHandleProvider, NetworkInfo, Peers, PeersInfo,
+    };
 }
 
 /// Re-exported from `reth_transaction_pool`.

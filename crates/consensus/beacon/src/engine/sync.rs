@@ -8,9 +8,8 @@ use futures::FutureExt;
 use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    headers::client::HeadersClient,
+    BlockClient,
 };
 use reth_primitives::{BlockNumber, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
@@ -35,7 +34,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<DB, Client>
 where
     DB: Database,
-    Client: HeadersClient + BodiesClient,
+    Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -65,7 +64,7 @@ where
 impl<DB, Client> EngineSyncController<DB, Client>
 where
     DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -219,8 +218,7 @@ where
     ///
     /// Note: this is mainly for debugging purposes.
     pub(crate) fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
-        let has_reached_max_block =
-            self.max_block.map(|target| progress >= target).unwrap_or_default();
+        let has_reached_max_block = self.max_block.is_some_and(|target| progress >= target);
         if has_reached_max_block {
             trace!(
                 target: "consensus::engine::sync",
@@ -523,7 +521,7 @@ mod tests {
         ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
         where
             DB: Database + 'static,
-            Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+            Client: BlockClient + 'static,
         {
             let client = self
                 .client

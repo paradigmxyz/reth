@@ -1,5 +1,11 @@
 //! Helpers for testing debug trace calls.
 
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, TxHash, B256};
@@ -9,12 +15,7 @@ use reth_rpc_types::{
         common::TraceResult,
         geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
     },
-    TransactionRequest,
-};
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
+    Block, Transaction, TransactionRequest,
 };
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
@@ -76,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block> + DebugApiClient + Sync,
 {
     type Provider = T;
 
@@ -104,7 +105,7 @@ where
             BlockId::Number(tag) => self.block_by_number(tag, false).await,
         }?
         .ok_or_else(|| RpcError::Custom("block not found".to_string()))?;
-        let hashes = block.transactions.hashes().map(|tx| (*tx, opts.clone())).collect::<Vec<_>>();
+        let hashes = block.transactions.hashes().map(|tx| (tx, opts.clone())).collect::<Vec<_>>();
         let stream = futures::stream::iter(hashes.into_iter().map(move |(tx, opts)| async move {
             match self.debug_trace_transaction_json(tx, opts).await {
                 Ok(result) => Ok((result, tx)),

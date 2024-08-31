@@ -67,7 +67,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
-        value_parser = OpChainSpecParser::default(),
+        value_parser = OpChainSpecParser::parser(),
         global = true,
     )]
     chain: Arc<ChainSpec>,
