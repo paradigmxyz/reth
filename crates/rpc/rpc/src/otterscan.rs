@@ -2,11 +2,12 @@ use alloy_network::Network;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{
-    Address, Block, BlockId, BlockNumberOrTag, BlockWithSenders, TxHash, B256, U256,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{
+    helpers::{EthTransactions, TraceExt},
+    EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+};
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
@@ -19,7 +20,6 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
-use reth_rpc_types_compat::transaction::from_block_parts;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -75,6 +75,7 @@ where
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
             >,
         > + TraceExt
+        + EthTransactions
         + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
@@ -84,7 +85,7 @@ where
 
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool> {
-        self.eth.get_code(address, block_id).await.map(|code| !code.is_empty())
+        EthApiServer::get_code(&self.eth, address, block_id).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -293,56 +294,11 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Option<TxHash>> {
-        // Check if the sender is a contract
-        if self.has_code(sender, None).await? {
-            return Ok(None)
-        }
-
-        let highest =
-            EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
-
-        // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-        // exists.
-        if nonce >= highest {
-            return Ok(None)
-        }
-
-        // perform a binary search over the block range to find the block in which the sender's
-        // nonce reached the requested nonce.
-        let num = binary_search::<_, _, ErrorObjectOwned>(
-            1,
-            self.eth.block_number()?.saturating_to(),
-            |mid| {
-                async move {
-                    let mid_nonce =
-                        EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
-                            .await?
-                            .saturating_to::<u64>();
-
-                    // The `transaction_count` returns the `nonce` after the transaction was
-                    // executed, which is the state of the account after the block, and we need to
-                    // find the transaction whose nonce is the pre-state, so
-                    // need to compare with `nonce`(no equal).
-                    Ok(mid_nonce > nonce)
-                }
-            },
-        )
-        .await?;
-
-        let block_id = num.into();
-        let block = self
+        Ok(self
             .eth
-            .block_with_senders(block_id)
+            .get_transaction_by_sender_and_nonce(sender, nonce, false)
             .await
             .map_err(Into::into)?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
-
-        let BlockWithSenders { block: Block { ref header, body, .. }, senders } = block.unseal();
-        let transactions = from_block_parts(None, header, body, senders);
-
-        Ok(transactions
-            .into_iter()
-            .find(|tx| *tx.from == *sender && tx.nonce == nonce)
             .map(|tx| tx.hash))
     }
 
@@ -357,7 +313,9 @@ where
             self.eth.block_number()?.saturating_to(),
             |mid| {
                 Box::pin(async move {
-                    Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty())
+                    Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
+                        .await?
+                        .is_empty())
                 })
             },
         )
