@@ -26,14 +26,14 @@ use std::{
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
+/// The docker LAN interface.
+pub const DOCKER_LAN_IF: &str = "eth0";
+
 /// URLs to `GET` the external IP address.
 ///
 /// Taken from: <https://stackoverflow.com/questions/3253701/get-public-external-ip-address>
 const EXTERNAL_IP_APIS: &[&str] =
     &["http://ipinfo.io/ip", "http://icanhazip.com", "http://ifconfig.me"];
-
-/// The docker LAN interface.
-const DOCKER_LAN_IF: &str = "eth0";
 
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
@@ -193,7 +193,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
         #[cfg(not(target_os = "windows"))]
-        NatResolver::Docker => os_interface_addr(DOCKER_LAN_IF).ok().flatten(),
+        NatResolver::Docker => resolve_docker_ip(DOCKER_LAN_IF).ok(),
         NatResolver::None => None,
     }
 }
@@ -214,16 +214,33 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     text.trim().parse().ok()
 }
 
-/// Reads LAN IP of docker container.
-#[cfg(not(target_os = "windows"))]
-pub fn resolve_docker_ip() -> io::Result<Option<IpAddr>> {
-    os_interface_addr(DOCKER_LAN_IF)
+/// Errors resolving Docker IP.
+#[derive(Debug, thiserror::Error)]
+pub enum DockerError {
+    /// Error reading OS interfaces.
+    #[error("failed to read OS interfaces: {0}")]
+    Io(io::Error),
+    /// No interface found with given name.
+    #[error("interface not found: {0}, found other interfaces: {1:?}")]
+    IFNotFound(String, Vec<String>),
 }
 
 /// Reads IP of OS interface with given name, if exists.
 #[cfg(not(target_os = "windows"))]
-pub fn os_interface_addr(if_name: &str) -> io::Result<Option<IpAddr>> {
-    if_addrs::get_if_addrs().map(|ifs| ifs.into_iter().find(|i| i.name == if_name).map(|i| i.ip()))
+pub fn resolve_docker_ip(if_name: &str) -> Result<IpAddr, DockerError> {
+    match if_addrs::get_if_addrs() {
+        Ok(ifs) => {
+            let ip = ifs.iter().find(|i| i.name == if_name).map(|i| i.ip());
+            match ip {
+                Some(ip) => Ok(ip),
+                None => {
+                    let ifs = ifs.into_iter().map(|i| i.name.as_str().into()).collect();
+                    Err(DockerError::IFNotFound(if_name.into(), ifs))
+                }
+            }
+        }
+        Err(err) => Err(DockerError::Io(err)),
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +283,6 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     fn read_docker_if_addr() {
         const LOCALHOST_IF: &str = "lo0";
-        assert_eq!(os_interface_addr(LOCALHOST_IF).unwrap(), "127.0.0.1".parse().ok())
+        assert_eq!(resolve_docker_ip(LOCALHOST_IF).unwrap(), Ipv4Addr::LOCALHOST);
     }
 }

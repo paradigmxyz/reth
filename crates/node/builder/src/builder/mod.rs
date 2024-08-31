@@ -638,7 +638,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 self.config().chain.clone(),
                 secret_key,
                 default_peers_path,
-            )
+            )?
             .with_task_executor(Box::new(self.executor.clone()))
             .set_head(self.head);
 

@@ -164,7 +164,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                             provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
-                        )
+                        )?
                         .build(provider_factory.clone())
                         .start_network()
                         .await?;
@@ -214,7 +214,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                             provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
-                        )
+                        )?
                         .build(provider_factory.clone())
                         .start_network()
                         .await?;

@@ -15,7 +15,7 @@ use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
-use reth_net_nat::{resolve_docker_ip, NatResolver};
+use reth_net_nat::{resolve_docker_ip, NatResolver, DOCKER_LAN_IF};
 use reth_network::{
     transactions::{
         constants::{
@@ -145,22 +145,26 @@ pub struct NetworkArgs {
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 
-    /// Set local IP address to docker container's LAN IP address.
-    #[cfg(not(target_os = "windows"))]
-    #[arg(long, conflicts_with = "addr")]
-    pub docker: bool,
+    /// Name of docker non-host interface used to communicate with peers.
+    ///
+    /// If flags is set, but no
+    /// value is passed, the default interface `eth0` is tried.
+    #[arg(long = "docker-if", conflicts_with = "addr")]
+    pub docker: Option<String>,
 }
 
 impl NetworkArgs {
     /// Returns the resolved IP address.
-    pub fn resolved_addr(&self) -> IpAddr {
+    pub fn resolved_addr(&self) -> eyre::Result<IpAddr> {
         #[cfg(not(target_os = "windows"))]
-        if self.docker {
-            return resolve_docker_ip()
-                .expect("should read container IFs")
-                .expect("IF should exists")
+        if let Some(ref if_name) = self.docker {
+            if if_name.is_empty() {
+                return Ok(resolve_docker_ip(DOCKER_LAN_IF)?)
+            }
+            return Ok(resolve_docker_ip(if_name)?)
         }
-        self.addr
+
+        Ok(self.addr)
     }
 
     /// Returns the resolved bootnodes if any are provided.
@@ -187,8 +191,8 @@ impl NetworkArgs {
         chain_spec: Arc<ChainSpec>,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-    ) -> NetworkConfigBuilder {
-        let addr = self.resolved_addr();
+    ) -> eyre::Result<NetworkConfigBuilder> {
+        let addr = self.resolved_addr()?;
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -213,7 +217,7 @@ impl NetworkArgs {
         };
 
         // Configure basic network stack
-        NetworkConfigBuilder::new(secret_key)
+        Ok(NetworkConfigBuilder::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             ))
@@ -247,7 +251,7 @@ impl NetworkArgs {
                 self.discovery.addr,
                 // set discovery port based on instance number
                 self.discovery.port,
-            ))
+            )))
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -314,7 +318,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-            docker: false,
+            docker: None,
         }
     }
 }
