@@ -4,71 +4,26 @@ use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 use serde::{Deserialize, Serialize};
 
-/// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
+/// [EIP-1559 Transaction](https://eips.ethereum.org/EIPS/eip-1559)
+///
+/// This is a helper type to use derive on it instead of manually managing `bitfield`.
+///
+/// By deriving `Compact` here, any future changes or enhancements to the `Compact` derive
+/// will automatically apply to this type.
+///
+/// Notice: Make sure this struct is 1:1 with [`alloy_consensus::transaction::TxEip1559`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Compact, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]
 pub(crate) struct TxEip1559 {
-    /// Added as EIP-155: Simple replay attack protection
     chain_id: ChainId,
-
-    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     nonce: u64,
-
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
     gas_limit: u64,
-
-    /// A scalar value equal to the maximum
-    /// amount of gas that should be used in executing
-    /// this transaction. This is paid up-front, before any
-    /// computation is done and may not be increased
-    /// later; formally Tg.
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    ///
-    /// This is also known as `GasFeeCap`
     max_fee_per_gas: u128,
-
-    /// Max Priority fee that transaction is paying
-    ///
-    /// As ethereum circulation is around 120mil eth as of 2022 that is around
-    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
-    /// 340282366920938463463374607431768211455
-    ///
-    /// This is also known as `GasTipCap`
     max_priority_fee_per_gas: u128,
-
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
     to: TxKind,
-
-    /// A scalar value equal to the number of Wei to
-    /// be transferred to the message call’s recipient or,
-    /// in the case of contract creation, as an endowment
-    /// to the newly created account; formally Tv.
     value: U256,
-
-    /// The accessList specifies a list of addresses and storage keys;
-    /// these addresses and storage keys are added into the `accessed_addresses`
-    /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
-    /// A gas cost is charged, though at a discount relative to the cost of
-    /// accessing outside the list.
     access_list: AccessList,
-
-    /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
-    /// [`TxKind::Call`].
-    ///
-    /// Input as init code, or if `to` is [`TxKind::Create`]: An unlimited size byte array
-    /// specifying the EVM-code for the account initialisation procedure `CREATE`
-    ///
-    /// Input as data, or if `to` is [`TxKind::Call`]: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
     input: Bytes,
 }
 
