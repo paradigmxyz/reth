@@ -178,7 +178,7 @@ where
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = EthApiServer::block_receipts(&self.eth, block_number.into());
+        let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -186,7 +186,7 @@ where
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_hash(block_hash, true);
-        let receipts = EthApiServer::block_receipts(&self.eth, block_hash.into());
+        let receipts = self.eth.block_receipts(block_hash.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(block, receipts)
     }
@@ -200,7 +200,7 @@ where
     ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = EthApiServer::block_receipts(&self.eth, block_number.into());
+        let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
