@@ -231,8 +231,6 @@ Networking:
 
           If flags is set, but no value is passed, the default interface `eth0` is tried.
 
-          [default: 25600]
-
       --to <TO>
           The maximum block height
 
