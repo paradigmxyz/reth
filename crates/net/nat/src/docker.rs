@@ -44,7 +44,11 @@ mod tests {
 
     #[test]
     fn read_docker_if_addr() {
-        const LOCALHOST_IF: &str = "lo0";
-        assert_eq!(resolve_docker_ip(LOCALHOST_IF).unwrap(), Ipv4Addr::LOCALHOST);
+        const LOCALHOST_IF: [&str; 2] = ["lo0", "lo"];
+
+        let ip = resolve_docker_ip(LOCALHOST_IF[0])
+            .unwrap_or_else(|_| resolve_docker_ip(LOCALHOST_IF[1]).unwrap());
+
+        assert_eq!(ip, Ipv4Addr::LOCALHOST);
     }
 }
