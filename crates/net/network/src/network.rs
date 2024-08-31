@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -8,7 +8,7 @@ use std::{
 
 use enr::Enr;
 use parking_lot::Mutex;
-use reth_discv4::{Discv4, NatResolver};
+use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_network_api::{
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -62,7 +62,6 @@ impl NetworkHandle {
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
         event_sender: EventSender<NetworkEvent>,
-        nat: Option<NatResolver>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -78,7 +77,6 @@ impl NetworkHandle {
             tx_gossip_disabled,
             discv4,
             event_sender,
-            nat,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -215,15 +213,7 @@ impl PeersInfo for NetworkHandle {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
 
-            let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| match nat {
-                NatResolver::ExternalIp(ip) => Some(ip),
-                _ => None,
-            });
-
-            // if able to resolve external ip, use it instead
-            if let Some(ip) = external_ip {
-                socket_addr.set_ip(ip)
-            } else if socket_addr.ip().is_unspecified() {
+            if socket_addr.ip().is_unspecified() {
                 // zero address is invalid
                 if socket_addr.ip().is_ipv4() {
                     socket_addr.set_ip(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
@@ -434,8 +424,6 @@ struct NetworkInner {
     discv4: Option<Discv4>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent>,
-    /// The NAT resolver
-    nat: Option<NatResolver>,
 }
 
 /// Provides access to modify the network's additional protocol handlers.

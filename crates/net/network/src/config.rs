@@ -81,8 +81,6 @@ pub struct NetworkConfig<C> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-    /// The NAT resolver for external IP
-    pub nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfig ===
@@ -190,8 +188,6 @@ pub struct NetworkConfigBuilder {
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
-    /// The NAT resolver for external IP
-    nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -224,7 +220,6 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled: false,
             block_import: None,
             transactions_manager_config: Default::default(),
-            nat: None,
         }
     }
 
@@ -360,7 +355,6 @@ impl NetworkConfigBuilder {
         self.discovery_v4_builder
             .get_or_insert_with(Discv4Config::builder)
             .external_ip_resolver(Some(resolver));
-        self.nat = Some(resolver);
         self
     }
 
@@ -500,7 +494,6 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled,
             block_import,
             transactions_manager_config,
-            nat,
         } = self;
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
@@ -564,7 +557,6 @@ impl NetworkConfigBuilder {
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,
-            nat,
         }
     }
 }

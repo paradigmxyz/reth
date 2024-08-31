@@ -190,7 +190,6 @@ impl NetworkManager {
             extra_protocols,
             tx_gossip_disabled,
             transactions_manager_config: _,
-            nat,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -268,7 +267,6 @@ impl NetworkManager {
             tx_gossip_disabled,
             discv4,
             event_sender.clone(),
-            nat,
         );
 
         Ok(Self {
