@@ -46,6 +46,11 @@ impl StaticFileSegment {
         }
     }
 
+    /// Returns the default configuration of the segment.
+    pub const fn config(&self) -> SegmentConfig {
+        SegmentConfig { compression: Compression::Lz4 }
+    }
+
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
@@ -346,18 +351,45 @@ mod tests {
     #[test]
     fn test_filename() {
         let test_vectors = [
-            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30"),
-            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300"),
+            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None),
+            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300", None),
             (
                 StaticFileSegment::Transactions,
                 1_123_233..=11_223_233,
                 "static_file_transactions_1123233_11223233",
+                None,
+            ),
+            (
+                StaticFileSegment::Headers,
+                2..=30,
+                "static_file_headers_2_30_none_lz4",
+                Some(Compression::Lz4),
+            ),
+            (
+                StaticFileSegment::Headers,
+                2..=30,
+                "static_file_headers_2_30_none_zstd",
+                Some(Compression::Zstd),
+            ),
+            (
+                StaticFileSegment::Headers,
+                2..=30,
+                "static_file_headers_2_30_none_zstd-dict",
+                Some(Compression::ZstdWithDictionary),
             ),
         ];
 
-        for (segment, block_range, filename) in test_vectors {
+        for (segment, block_range, filename, compression) in test_vectors {
             let block_range: SegmentRangeInclusive = block_range.into();
-            assert_eq!(segment.filename(&block_range), filename);
+            if let Some(compression) = compression {
+                assert_eq!(
+                    segment.filename_with_configuration(compression, &block_range),
+                    filename
+                );
+            } else {
+                assert_eq!(segment.filename(&block_range), filename);
+            }
+
             assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
         }
 
