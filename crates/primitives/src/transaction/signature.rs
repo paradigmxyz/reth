@@ -188,9 +188,10 @@ impl Signature {
         SignatureWithParity::new(self.r, self.s, self.legacy_parity(chain_id))
     }
 
-    /// Convert the signature to a [`SignatureWithParity`].
-    pub(crate) fn as_signature_with_parity(&self) -> SignatureWithParity {
-        SignatureWithParity::new(self.r, self.s, self.odd_y_parity.into())
+    /// Returns a signature with a boolean parity flag. This is useful when we want to encode
+    /// the `v` value as 0 or 1.
+    pub(crate) const fn as_signature_with_boolean_parity(&self) -> SignatureWithParity {
+        SignatureWithParity::new(self.r, self.s, Parity::Parity(self.odd_y_parity))
     }
 
     /// Returns the signature for the optimism deposit transactions, which don't include a

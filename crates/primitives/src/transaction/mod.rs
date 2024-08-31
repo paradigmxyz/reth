@@ -154,7 +154,11 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip2930(tx)
             }
-            TxType::Eip1559 => Self::Eip1559(TxEip1559::arbitrary(u)?),
+          TxType::Eip1559 => {
+                let mut tx = TxEip1559::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip1559(tx)
+            }
             TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
             TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
             #[cfg(feature = "optimism")]
@@ -233,7 +237,7 @@ impl Transaction {
         match self {
             Self::Legacy(_) => TxType::Legacy,
             Self::Eip2930(_) => TxType::Eip2930,
-            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
+            Self::Eip1559(_) => TxType::Eip1559,
             Self::Eip4844(blob_tx) => blob_tx.tx_type(),
             Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
             #[cfg(feature = "optimism")]
@@ -297,7 +301,7 @@ impl Transaction {
     pub const fn gas_limit(&self) -> u64 {
         match self {
             Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Self::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit as u64,
             Self::Eip4844(TxEip4844 { gas_limit, .. }) |
             Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
             Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
@@ -527,9 +531,11 @@ impl Transaction {
                 out,
                 with_header,
             ),
-            Self::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
-            }
+            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
             Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
             Self::Eip7702(set_code_tx) => {
                 set_code_tx.encode_with_signature(signature, out, with_header)
@@ -544,7 +550,7 @@ impl Transaction {
         match self {
             Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip2930(tx) => tx.gas_limit = gas_limit as u128,
-            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip4844(tx) => tx.gas_limit = gas_limit,
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
             #[cfg(feature = "optimism")]
@@ -1207,9 +1213,10 @@ impl TransactionSigned {
             ),
             Transaction::Eip2930(access_list_tx) => access_list_tx
                 .encoded_len_with_signature(&self.signature.as_signature_with_parity(), true),
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature(&self.signature)
-            }
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature(&self.signature)
@@ -1338,7 +1345,7 @@ impl TransactionSigned {
 
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_fields(data)?),
-            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
+            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_fields(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
             #[cfg(feature = "optimism")]
@@ -1412,9 +1419,10 @@ impl TransactionSigned {
             ),
             Transaction::Eip2930(access_list_tx) => access_list_tx
                 .encoded_len_with_signature(&self.signature.as_signature_with_parity(), false),
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
-            }
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             Transaction::Eip4844(blob_tx) => {
                 blob_tx.payload_len_with_signature_without_header(&self.signature)
             }
