@@ -1,4 +1,4 @@
-use crate::Compact;
+use crate::{Compact, CompactPlaceholder};
 use alloy_consensus::transaction::TxEip4844 as AlloyTxEip4844;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
@@ -25,6 +25,7 @@ struct TxEip4844 {
     gas_limit: u64,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
+    placeholder: Option<CompactPlaceholder>,
     to: Address,
     value: U256,
     access_list: AccessList,
@@ -44,6 +45,7 @@ impl Compact for AlloyTxEip4844 {
             gas_limit: self.gas_limit as u64,
             max_fee_per_gas: self.max_fee_per_gas,
             max_priority_fee_per_gas: self.max_priority_fee_per_gas,
+            placeholder: Some(()),
             to: self.to,
             value: self.value,
             access_list: self.access_list.clone(),
