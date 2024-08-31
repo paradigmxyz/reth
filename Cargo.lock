@@ -6343,7 +6343,6 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-network",
- "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
  "reth-prune-types",

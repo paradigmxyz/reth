@@ -1,10 +1,8 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
-use reth_primitives::{
-    ReceiptWithBloom,B256,
-};
-use reth_trie_common::root:: ordered_trie_root_with_encoder;
-use reth_chainspec:: {ChainSpec, OptimismHardfork};
+use reth_chainspec::{ChainSpec, OptimismHardfork};
+use reth_primitives::{ReceiptWithBloom, B256};
+use reth_trie_common::root::ordered_trie_root_with_encoder;
 
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root_optimism(
@@ -18,8 +16,7 @@ pub fn calculate_receipt_root_optimism(
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
     if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) &&
-        !chain_spec
-            .is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp)
+        !chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -41,9 +38,9 @@ pub fn calculate_receipt_root_optimism(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{bloom, hex_literal::hex, Log, TxType};
     use alloy_primitives::{b256, Address, LogData};
     use reth_chainspec::SEPOLIA;
+    use reth_primitives::{bloom, hex_literal::hex, Log, TxType};
 
     #[test]
     fn consecutive_reorgs() {

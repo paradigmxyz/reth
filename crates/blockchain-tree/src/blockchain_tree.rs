@@ -1386,14 +1386,10 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    #[cfg(not(feature = "optimism"))]
-    use reth_primitives::proofs::calculate_receipt_root;
-    #[cfg(feature = "optimism")]
-    use reth_optimism_consensus::proof::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         keccak256,
-        proofs::calculate_transaction_root,
+        proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, Address, Header, Signature, Transaction, TransactionSigned,
         TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
@@ -1527,6 +1523,8 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
+    // OP copy of test is in reth_optimism_consensus::proofs::tests::consecutive_reorgs
     fn consecutive_reorgs() {
         let signer = Address::random();
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
@@ -1598,11 +1596,8 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            #[cfg(not(feature = "optimism"))]
+            // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
-
-            #[cfg(feature = "optimism")]
-            let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
                 SealedBlock {

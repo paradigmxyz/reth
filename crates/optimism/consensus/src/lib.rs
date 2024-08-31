@@ -22,8 +22,8 @@ use reth_primitives::{
 };
 use std::{sync::Arc, time::SystemTime};
 
-mod validation;
 mod proof;
+mod validation;
 pub use validation::validate_block_post_execution;
 
 /// Optimism consensus implementation.
