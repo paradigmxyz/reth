@@ -325,6 +325,8 @@ mod tests {
                     None,
                     Some((number == non_empty_block_number) as u8),
                     None,
+                    None,
+                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -363,8 +365,14 @@ mod tests {
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
 
         // Manually seed once with full input range
-        let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
+        let seed = random_block_range(
+            &mut rng,
+            stage_progress + 1..=previous_stage,
+            B256::ZERO,
+            0..4,
+            None,
+            None,
+        ); // set tx count range high enough to hit the threshold
         runner
             .db
             .insert_blocks(seed.iter(), StorageKind::Static)
@@ -434,7 +442,7 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
+        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10, None, None);
         db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -547,7 +555,8 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2);
+            let blocks =
+                random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2, None, None);
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }

@@ -1,7 +1,7 @@
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
@@ -10,7 +10,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
@@ -34,8 +34,7 @@ use revm::{
     StateBuilder,
 };
 use revm_inspectors::tracing::{
-    js::{JsInspector, TransactionContext},
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
 use revm_primitives::{keccak256, HashMap};
 use std::sync::Arc;
@@ -69,7 +68,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
@@ -388,6 +387,11 @@ where
                         return Ok(frame)
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
@@ -402,7 +406,8 @@ where
                             let db = db.0;
 
                             let mut inspector =
-                                JsInspector::new(code, config).map_err(Eth::Error::from_eth_err)?;
+                                revm_inspectors::tracing::js::JsInspector::new(code, config)
+                                    .map_err(Eth::Error::from_eth_err)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
                             inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
@@ -589,16 +594,24 @@ where
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 
+                // apply eip-2935 blockhashes update
+                apply_blockhashes_update(
+                    &mut db,
+                    &this.inner.provider.chain_spec(),
+                    block.timestamp,
+                    block.number,
+                    block.parent_hash,
+                )
+                .map_err(|err| EthApiError::Internal(err.into()))?;
+
                 // Re-execute all of the transactions in the block to load all touched accounts into
                 // the cache DB.
-                for tx in block.raw_transactions() {
-                    let tx_envelope = TransactionSignedEcRecovered::decode(&mut tx.as_ref())
-                        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+                for tx in block.into_transactions_ecrecovered() {
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
                             cfg.cfg_env.clone(),
                             block_env.clone(),
-                            evm_config.tx_env(&tx_envelope),
+                            evm_config.tx_env(&tx),
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
@@ -661,7 +674,8 @@ where
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
-        transaction_context: Option<TransactionContext>,
+        #[cfg(not(feature = "js-tracer"))] _transaction_context: Option<TransactionContext>,
+        #[cfg(feature = "js-tracer")] transaction_context: Option<TransactionContext>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
@@ -727,14 +741,20 @@ where
                         return Ok((frame.into(), res.state))
                     }
                 },
+                #[cfg(not(feature = "js-tracer"))]
+                GethDebugTracerType::JsTracer(_) => {
+                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
+                }
+                #[cfg(feature = "js-tracer")]
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
-                    let mut inspector = JsInspector::with_transaction_context(
-                        code,
-                        config,
-                        transaction_context.unwrap_or_default(),
-                    )
-                    .map_err(Eth::Error::from_eth_err)?;
+                    let mut inspector =
+                        revm_inspectors::tracing::js::JsInspector::with_transaction_context(
+                            code,
+                            config,
+                            transaction_context.unwrap_or_default(),
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
@@ -767,7 +787,7 @@ impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt
         + HeaderProvider
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec = ChainSpec>
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,

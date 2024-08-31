@@ -342,7 +342,8 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3);
+            let blocks =
+                random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3, None, None);
 
             self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
 

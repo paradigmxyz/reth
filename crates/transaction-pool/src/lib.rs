@@ -108,7 +108,7 @@
 //! ```
 //! use futures_util::Stream;
 //! use reth_chain_state::CanonStateNotification;
-//! use reth_chainspec::{MAINNET, ChainSpecProvider};
+//! use reth_chainspec::{MAINNET, ChainSpecProvider, ChainSpec};
 //! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
@@ -118,7 +118,7 @@
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
 //!
 //!  async fn t<C, St>(client: C, stream: St)
-//!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+//!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
@@ -522,6 +522,14 @@ where
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
+    }
+
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.get_pending_transactions_by_origin(origin)
     }
 }
 

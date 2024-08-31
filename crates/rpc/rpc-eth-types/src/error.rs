@@ -16,8 +16,6 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-#[cfg(feature = "js-tracer")]
-use revm_inspectors::tracing::js::JsInspectorError;
 use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
@@ -194,10 +192,12 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 }
 
 #[cfg(feature = "js-tracer")]
-impl From<JsInspectorError> for EthApiError {
-    fn from(error: JsInspectorError) -> Self {
+impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
+    fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
         match error {
-            err @ JsInspectorError::JsError(_) => Self::InternalJsTracerError(err.to_string()),
+            err @ revm_inspectors::tracing::js::JsInspectorError::JsError(_) => {
+                Self::InternalJsTracerError(err.to_string())
+            }
             err => Self::InvalidParams(err.to_string()),
         }
     }

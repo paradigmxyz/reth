@@ -187,7 +187,7 @@ impl OptimismHardfork {
                 Self::Canyon => Some(1704992401),
                 Self::Ecotone => Some(1710374401),
                 Self::Fjord => Some(1720627201),
-                _ => None,
+                Self::Granite => Some(1726070401),
             },
         )
     }
@@ -219,6 +219,7 @@ impl OptimismHardfork {
             (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
+            (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
         ])
     }
 
@@ -311,6 +312,7 @@ impl OptimismHardfork {
             (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
+            (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
         ])
     }
 }

@@ -36,6 +36,7 @@ impl TrieUpdates {
 
     /// Extends the trie updates.
     pub fn extend(&mut self, other: Self) {
+        self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
         self.account_nodes.extend(ExcludeEmptyFromPair::from_iter(other.account_nodes));
         self.removed_nodes.extend(ExcludeEmpty::from_iter(other.removed_nodes));
         for (hashed_address, storage_trie) in other.storage_tries {
@@ -152,7 +153,12 @@ impl StorageTrieUpdates {
 
     /// Extends storage trie updates.
     pub fn extend(&mut self, other: Self) {
+        if other.is_deleted {
+            self.storage_nodes.clear();
+            self.removed_nodes.clear();
+        }
         self.is_deleted |= other.is_deleted;
+        self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
         self.storage_nodes.extend(ExcludeEmptyFromPair::from_iter(other.storage_nodes));
         self.removed_nodes.extend(ExcludeEmpty::from_iter(other.removed_nodes));
     }

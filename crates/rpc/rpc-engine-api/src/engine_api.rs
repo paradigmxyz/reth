@@ -1030,8 +1030,14 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 10);
-            let blocks =
-                random_block_range(&mut rng, start..=start + count - 1, B256::default(), 0..2);
+            let blocks = random_block_range(
+                &mut rng,
+                start..=start + count - 1,
+                B256::default(),
+                0..2,
+                None,
+                None,
+            );
             handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
 
             let expected = blocks
@@ -1050,8 +1056,14 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let (start, count) = (1, 100);
-            let blocks =
-                random_block_range(&mut rng, start..=start + count - 1, B256::default(), 0..2);
+            let blocks = random_block_range(
+                &mut rng,
+                start..=start + count - 1,
+                B256::default(),
+                0..2,
+                None,
+                None,
+            );
 
             // Insert only blocks in ranges 1-25 and 50-75
             let first_missing_range = 26..=50;
@@ -1143,9 +1155,9 @@ mod tests {
 
             let terminal_block_number = 1000;
             let consensus_terminal_block =
-                random_block(&mut rng, terminal_block_number, None, None, None);
+                random_block(&mut rng, terminal_block_number, None, None, None, None, None);
             let execution_terminal_block =
-                random_block(&mut rng, terminal_block_number, None, None, None);
+                random_block(&mut rng, terminal_block_number, None, None, None, None, None);
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle
@@ -1186,8 +1198,15 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let terminal_block_number = 1000;
-            let terminal_block =
-                random_block(&mut generators::rng(), terminal_block_number, None, None, None);
+            let terminal_block = random_block(
+                &mut generators::rng(),
+                terminal_block_number,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
 
             let transition_config = TransitionConfiguration {
                 terminal_total_difficulty: handle
