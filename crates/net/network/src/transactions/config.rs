@@ -47,9 +47,10 @@ pub struct TransactionFetcherConfig {
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-    /// Max capacity of the cache for transactions didn't fit into a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) yet, or weren't returned
-    /// upon requests to peers.
+    /// Max capacity of the cache of transaction hashes, for transactions that weren't yet fetched.
+    /// A transaction is pending fetch if its hash didn't fit into a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) yet, or it wasn't returned
+    /// upon request to peers.
     pub max_capacity_cache_txns_pending_fetch: u32,
 }
 
