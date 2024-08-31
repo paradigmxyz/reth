@@ -12,7 +12,8 @@ exclude.workspace = true
 reth-node-builder.workspace = true
 reth-cli-util.workspace = true
 reth-optimism-cli.workspace = true
-reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-optimism-rpc.workspace = true
 reth-node-optimism.workspace = true
 
 clap = { workspace = true, features = ["derive", "env"] }
@@ -22,11 +23,6 @@ tikv-jemallocator = { workspace = true, optional = true }
 
 [lints]
 workspace = true
-
-[[bin]]
-name = "op-reth"
-path = "src/main.rs"
-
 
 [features]
 default = ["jemalloc"]
@@ -40,3 +36,7 @@ optimism = [
     "reth-optimism-cli/optimism",
     "reth-node-optimism/optimism",
 ]
+
+[[bin]]
+name = "op-reth"
+path = "src/main.rs"

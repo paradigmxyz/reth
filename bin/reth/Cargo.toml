@@ -53,13 +53,11 @@ reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-static-file.workspace = true
-reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
-reth-db-common.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
@@ -67,9 +65,6 @@ reth-node-metrics.workspace = true
 reth-consensus.workspace = true
 reth-engine-util.workspace = true
 reth-prune.workspace = true
-reth-stages-api.workspace = true
-reth-optimism-cli = { workspace = true, optional = true }
-reth-optimism-rpc.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -78,13 +73,7 @@ alloy-rlp.workspace = true
 tracing.workspace = true
 
 # io
-fdlimit.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-toml = { workspace = true, features = ["display"] }
-
-# metrics
-metrics-process.workspace = true
 
 # async
 tokio = { workspace = true, features = [
@@ -99,20 +88,15 @@ futures.workspace = true
 aquamarine.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
-tempfile.workspace = true
 backon.workspace = true
 similar-asserts.workspace = true
-itertools.workspace = true
-
-# p2p
-discv5.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
-libc = "0.2"
 
 [dev-dependencies]
 reth-discv4.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]
