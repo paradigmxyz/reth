@@ -82,7 +82,12 @@ impl PayloadJob for TestPayloadJob {
     type BuiltPayload = EthBuiltPayload;
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
+        Ok(EthBuiltPayload::new(
+            self.attr.payload_id(),
+            Block::default().seal_slow(),
+            U256::ZERO,
+            Vec::new(),
+        ))
     }
 
     fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {
