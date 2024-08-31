@@ -308,7 +308,10 @@ impl PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), false)
+                transaction.encoded_len_with_signature(
+                    &signature.as_signature_with_boolean_parity(),
+                    false,
+                )
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
@@ -358,9 +361,11 @@ impl PooledTransactionsElement {
                     &signature.as_signature_with_eip155_parity(transaction.chain_id),
                     out,
                 ),
-            Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, false)
-            }
+            Self::Eip2930 { transaction, signature, .. } => transaction.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                false,
+            ),
             Self::Eip1559 { transaction, signature, .. } => transaction.encode_with_signature(
                 &signature.as_signature_with_boolean_parity(),
                 out,
@@ -495,7 +500,11 @@ impl Encodable for PooledTransactionsElement {
                 ),
             Self::Eip2930 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.as_signature_with_parity(), out, true)
+                transaction.encode_with_signature(
+                    &signature.as_signature_with_boolean_parity(),
+                    out,
+                    true,
+                )
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // encodes with string header
@@ -528,7 +537,8 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.as_signature_with_parity(), true)
+                transaction
+                    .encoded_len_with_signature(&signature.as_signature_with_boolean_parity(), true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header

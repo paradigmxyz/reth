@@ -154,7 +154,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip2930(tx)
             }
-          TxType::Eip1559 => {
+            TxType::Eip1559 => {
                 let mut tx = TxEip1559::arbitrary(u)?;
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip1559(tx)
@@ -527,7 +527,7 @@ impl Transaction {
                 )
             }
             Self::Eip2930(access_list_tx) => access_list_tx.encode_with_signature(
-                &signature.as_signature_with_parity(),
+                &signature.as_signature_with_boolean_parity(),
                 out,
                 with_header,
             ),
@@ -549,7 +549,7 @@ impl Transaction {
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
             Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip2930(tx) => tx.gas_limit = gas_limit as u128,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip4844(tx) => tx.gas_limit = gas_limit,
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
@@ -1211,8 +1211,10 @@ impl TransactionSigned {
             Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
-            Transaction::Eip2930(access_list_tx) => access_list_tx
-                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), true),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_boolean_parity(),
                 true,
@@ -1417,8 +1419,10 @@ impl TransactionSigned {
             Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
-            Transaction::Eip2930(access_list_tx) => access_list_tx
-                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), false),
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_boolean_parity(),
                 false,
