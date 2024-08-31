@@ -221,10 +221,17 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
       --docker-if <DOCKER>
           Name of docker non-host interface used to communicate with peers.
 
           If flags is set, but no value is passed, the default interface `eth0` is tried.
+
+          [default: 25600]
 
       --to <TO>
           The maximum block height
