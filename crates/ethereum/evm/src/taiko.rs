@@ -6,6 +6,21 @@ use std::str::FromStr;
 use lazy_static::lazy_static;
 use anyhow::{bail, Context, Result, ensure, anyhow};
 
+#[derive(Clone, Debug, Default)]
+/// Base fee configuration
+pub struct ProtocolBaseFeeConfig {
+    /// BaseFeeConfig::adjustmentQuotient
+    pub adjustment_quotient: u8,
+    /// BaseFeeConfig::sharingPctg
+    pub sharing_pctg: u8,
+    /// BaseFeeConfig::gasIssuancePerSecond
+    pub gas_issuance_per_second: u32,
+    /// BaseFeeConfig::minGasExcess
+    pub min_gas_excess: u64,
+    /// BaseFeeConfig::maxGasIssuancePerBlock
+    pub max_gas_issuance_per_block: u32,
+}
+
 /// Data required to validate a Taiko Block
 #[derive(Clone, Debug, Default)]
 pub struct TaikoData {
@@ -16,11 +31,7 @@ pub struct TaikoData {
     /// L2 contract
     pub l2_contract: Address,
     /// base fee sharing ratio
-    pub basefee_ratio: u8,
-    /// base fee adjustment quotient
-    pub basefee_adj_quotient: u8,
-    /// gas issuance per second
-    pub gas_issue_per_sec: u32,
+    pub base_fee_config: ProtocolBaseFeeConfig,
 }
 
 /// Anchor tx gas limit
@@ -87,12 +98,29 @@ sol! {
         external
     {}
 
+    /// Base fee configuration
+    struct BaseFeeConfig {
+        /// adjustmentQuotient for eip1559
+        uint8 adjustmentQuotient;
+        /// sharingPctg for fee sharing
+        uint8 sharingPctg;
+        /// gasIssuancePerSecond for eip1559
+        uint32 gasIssuancePerSecond;
+        /// minGasExcess for eip1559
+        uint64 minGasExcess;
+        /// maxGasIssuancePerBlock for eip1559
+        uint32 maxGasIssuancePerBlock;
+    }
+
     function anchorV2(
+        /// The anchor L1 block
         uint64 _anchorBlockId,
+        /// The anchor block state root
         bytes32 _anchorStateRoot,
+        /// The parent gas used
         uint32 _parentGasUsed,
-        uint32 _gasIssuancePerSecond,
-        uint8 _basefeeAdjustmentQuotient
+        /// The base fee configuration
+        BaseFeeConfig calldata _baseFeeConfig
     )
         external
         nonReentrant
@@ -169,6 +197,7 @@ pub fn check_anchor_tx(tx: &TransactionSigned, from: &Address, block: &Block, ta
     Ok(())
 }
 
+/// Decode anchor tx data for ontake fork, using anchorV2
 pub fn decode_anchor_ontake(bytes: &[u8]) -> Result<anchorV2Call> {
     anchorV2Call::abi_decode(bytes, true).map_err(|e| anyhow!(e))
 }
@@ -202,14 +231,6 @@ pub fn check_anchor_tx_ontake(
         "anchor transaction gas mismatch"
     );
 
-    /*
-        uint64 _anchorBlockId,
-        bytes32 _anchorStateRoot,
-        uint32 _parentGasUsed,
-        uint32 _gasIssuancePerSecond,
-        uint8 _basefeeAdjustmentQuotient
-    */
-
     // Okay now let's decode the anchor tx to verify the inputs
     let anchor_call = decode_anchor_ontake(&anchor.input)?;
     ensure!(
@@ -227,13 +248,27 @@ pub fn check_anchor_tx_ontake(
         "parentGasUsed mismatch"
     );
     ensure!(
-        anchor_call._gasIssuancePerSecond == taiko_data.gas_issue_per_sec,
+        anchor_call._baseFeeConfig.gasIssuancePerSecond
+            == taiko_data.base_fee_config.gas_issuance_per_second,
         "gas issuance per second mismatch"
     );
     ensure!(
-        anchor_call._basefeeAdjustmentQuotient == taiko_data.basefee_adj_quotient,
+        anchor_call._baseFeeConfig.adjustmentQuotient
+            == taiko_data.base_fee_config.adjustment_quotient,
         "basefee adjustment quotient mismatch"
     );
-
+    ensure!(
+        anchor_call._baseFeeConfig.sharingPctg == taiko_data.base_fee_config.sharing_pctg,
+        "basefee ratio mismatch"
+    );
+    ensure!(
+        anchor_call._baseFeeConfig.minGasExcess == taiko_data.base_fee_config.min_gas_excess,
+        "min gas excess mismatch"
+    );
+    ensure!(
+        anchor_call._baseFeeConfig.maxGasIssuancePerBlock
+            == taiko_data.base_fee_config.max_gas_issuance_per_block,
+        "max gas issuance per block mismatch"
+    );
     Ok(())
 }
