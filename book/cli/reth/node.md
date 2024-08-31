@@ -443,11 +443,6 @@ TxPool:
 
           [default: 131072]
 
-      --docker-if <DOCKER>
-          Name of docker non-host interface used to communicate with peers.
-
-          If flags is set, but no value is passed, the default interface `eth0` is tried.
-
       --txpool.max-cached-entries <MAX_CACHED_ENTRIES>
           The maximum number of blobs to keep in the in memory blob cache
 
