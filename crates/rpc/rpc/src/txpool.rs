@@ -4,7 +4,7 @@ use reth_primitives::{Address, TransactionSignedEcRecovered};
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
-    Transaction,
+    Transaction, WithOtherFields,
 };
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
 use std::collections::BTreeMap;
@@ -30,11 +30,11 @@ impl<Pool> TxPoolApi<Pool>
 where
     Pool: TransactionPool + 'static,
 {
-    fn content(&self) -> TxpoolContent {
+    fn content(&self) -> TxpoolContent<WithOtherFields<Transaction>> {
         #[inline]
         fn insert<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
             tx: &T,
-            content: &mut BTreeMap<Address, BTreeMap<String, Transaction>>,
+            content: &mut BTreeMap<Address, BTreeMap<String, WithOtherFields<Transaction>>>,
         ) {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
@@ -118,7 +118,10 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_contentFrom) for more details
     /// Handler for `txpool_contentFrom`
-    async fn txpool_content_from(&self, from: Address) -> Result<TxpoolContentFrom> {
+    async fn txpool_content_from(
+        &self,
+        from: Address,
+    ) -> Result<TxpoolContentFrom<WithOtherFields<Transaction>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }
@@ -128,7 +131,7 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> Result<TxpoolContent> {
+    async fn txpool_content(&self) -> Result<TxpoolContent<WithOtherFields<Transaction>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }

@@ -1,8 +1,7 @@
 use alloy_genesis::Genesis;
-use clap::{builder::TypedValueParser, error::Result, Arg, Command};
 use reth_chainspec::{ChainSpec, DEV, HOLESKY, MAINNET, SEPOLIA};
 use reth_cli::chainspec::ChainSpecParser;
-use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 
 /// Clap value parser for [`ChainSpec`]s.
 ///
@@ -41,39 +40,12 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
 pub struct EthChainSpecParser;
 
 impl ChainSpecParser for EthChainSpecParser {
+    type ChainSpec = ChainSpec;
+
     const SUPPORTED_CHAINS: &'static [&'static str] = &["mainnet", "sepolia", "holesky", "dev"];
 
     fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>> {
         chain_value_parser(s)
-    }
-}
-
-impl TypedValueParser for EthChainSpecParser {
-    type Value = Arc<ChainSpec>;
-
-    fn parse_ref(
-        &self,
-        _cmd: &Command,
-        arg: Option<&Arg>,
-        value: &OsStr,
-    ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <Self as ChainSpecParser>::parse(val).map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = Self::SUPPORTED_CHAINS.join(",");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-        })
-    }
-
-    fn possible_values(
-        &self,
-    ) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
-        let values = Self::SUPPORTED_CHAINS.iter().map(clap::builder::PossibleValue::new);
-        Some(Box::new(values))
     }
 }
 

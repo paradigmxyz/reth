@@ -16,6 +16,7 @@ use reth_basic_payload_builder::{
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
+        post_block_consolidation_requests_contract_call,
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
         pre_block_blockhashes_contract_call,
     },
@@ -38,6 +39,7 @@ use reth_primitives::{
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
@@ -170,14 +172,17 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for empty payload"
-            );
-            err
-        })?;
+        let state_root = db
+            .database
+            .state_root(HashedPostState::from_bundle_state(&bundle_state.state))
+            .map_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+                err
+            })?;
 
         let mut excess_blob_gas = None;
         let mut blob_gas_used = None;
@@ -208,8 +213,15 @@ where
                     &initialized_block_env,
                 )
                 .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+                let consolidation_requests = post_block_consolidation_requests_contract_call(
+                    &self.evm_config,
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-                let requests = withdrawal_requests;
+                let requests = [withdrawal_requests, consolidation_requests].concat();
                 let requests_root = calculate_requests_root(&requests);
                 (Some(requests.into()), Some(requests_root))
             } else {
@@ -455,8 +467,15 @@ where
             &initialized_block_env,
         )
         .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = post_block_consolidation_requests_contract_call(
+            &evm_config,
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
         (Some(requests.into()), Some(requests_root))
     } else {
@@ -483,7 +502,9 @@ where
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider
+            .db
+            .state_root(HashedPostState::from_bundle_state(&execution_outcome.state().state))?
     };
 
     // create the block header

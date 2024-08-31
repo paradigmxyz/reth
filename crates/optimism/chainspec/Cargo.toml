@@ -26,6 +26,7 @@ serde_json.workspace = true
 
 # misc
 once_cell.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
@@ -35,4 +36,3 @@ op-alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 std = []
-optimism = []
