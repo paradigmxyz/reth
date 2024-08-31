@@ -313,4 +313,5 @@ Display:
 
   -q, --quiet
           Silence all log output
+
 ```
