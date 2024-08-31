@@ -15,6 +15,7 @@
 use std::{
     fmt,
     future::{poll_fn, Future},
+    io,
     net::{AddrParseError, IpAddr},
     pin::Pin,
     str::FromStr,
@@ -31,6 +32,9 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 const EXTERNAL_IP_APIS: &[&str] =
     &["http://ipinfo.io/ip", "http://icanhazip.com", "http://ifconfig.me"];
 
+/// The docker LAN interface.
+const DOCKER_LAN_IF: &str = "eth0";
+
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
@@ -44,6 +48,9 @@ pub enum NatResolver {
     PublicIp,
     /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
+    /// Obtain the docker interface IP.
+    #[cfg(not(target_os = "windows"))]
+    Docker,
     /// Resolve nothing
     None,
 }
@@ -62,6 +69,8 @@ impl fmt::Display for NatResolver {
             Self::Upnp => f.write_str("upnp"),
             Self::PublicIp => f.write_str("publicip"),
             Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
+            #[cfg(not(target_os = "windows"))]
+            Self::Docker => f.write_str("docker"),
             Self::None => f.write_str("none"),
         }
     }
@@ -87,6 +96,8 @@ impl FromStr for NatResolver {
             "upnp" => Self::Upnp,
             "none" => Self::None,
             "publicip" | "public-ip" => Self::PublicIp,
+            #[cfg(not(target_os = "windows"))]
+            "docker" => Self::Docker,
             s => {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
@@ -181,6 +192,8 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
+        #[cfg(not(target_os = "windows"))]
+        NatResolver::Docker => os_interface_addr(DOCKER_LAN_IF).ok().flatten(),
         NatResolver::None => None,
     }
 }
@@ -199,6 +212,12 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
+}
+
+/// Reads IP of OS interface with given name, if exists.
+#[cfg(not(target_os = "windows"))]
+pub fn os_interface_addr(if_name: &str) -> io::Result<Option<IpAddr>> {
+    if_addrs::get_if_addrs().map(|ifs| ifs.into_iter().find(|i| i.name == if_name).map(|i| i.ip()))
 }
 
 #[cfg(test)]
@@ -235,5 +254,12 @@ mod tests {
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
         assert_eq!(ip.to_string().as_str(), s);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn read_docker_if_addr() {
+        const LOCALHOST_IF: &str = "lo0";
+        assert_eq!(os_interface_addr(LOCALHOST_IF).unwrap(), "127.0.0.1".parse().ok())
     }
 }
