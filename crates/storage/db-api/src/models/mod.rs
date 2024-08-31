@@ -302,7 +302,7 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 mod tests {
     use super::*;
     use reth_primitives::{
-        Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip2930, TxEip4844, Withdrawals,
+        Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip4844, Withdrawals,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
