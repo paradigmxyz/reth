@@ -82,7 +82,7 @@ pub struct NetworkConfig<C> {
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
-    pub nat: Option<NatResolver>
+    pub nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfig ===
@@ -191,7 +191,7 @@ pub struct NetworkConfigBuilder {
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
-    nat: Option<NatResolver>
+    nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -224,7 +224,7 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled: false,
             block_import: None,
             transactions_manager_config: Default::default(),
-            nat: None
+            nat: None,
         }
     }
 
@@ -564,7 +564,7 @@ impl NetworkConfigBuilder {
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,
-            nat
+            nat,
         }
     }
 }

@@ -268,7 +268,7 @@ impl NetworkManager {
             tx_gossip_disabled,
             discv4,
             event_sender.clone(),
-            nat
+            nat,
         );
 
         Ok(Self {
