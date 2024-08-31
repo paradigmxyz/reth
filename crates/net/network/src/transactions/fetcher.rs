@@ -134,7 +134,8 @@ impl TransactionFetcher {
             .metrics
             .capacity_inflight_requests
             .increment(tx_fetcher.info.max_inflight_requests as u64);
-        tx_fetcher.info.max_capacity_cache_pending_fetch = config.max_capacity_cache_pending_fetch;
+        tx_fetcher.info.max_capacity_cache_txns_pending_fetch =
+            config.max_capacity_cache_txns_pending_fetch;
 
         tx_fetcher
     }
@@ -1292,8 +1293,9 @@ pub struct TransactionFetcherInfo {
     /// Soft limit for the byte size of a [`PooledTransactions`] response, upon assembling the
     /// response. Spec'd at 2 MiB, but can be adjusted for research purpose.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
-    /// Max capacity of the cache for pending fetch requests.
-    pub max_capacity_cache_pending_fetch: u32,
+    /// Max capacity of the cache for transactions didn't fit into a
+    /// [`GetPooledTransactionRequest`] yet, or weren't returned upon requests to peers.
+    pub max_capacity_cache_txns_pending_fetch: u32,
 }
 
 impl TransactionFetcherInfo {
@@ -1302,13 +1304,13 @@ impl TransactionFetcherInfo {
         max_inflight_requests: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,
-        max_capacity_cache_pending_fetch: u32,
+        max_capacity_cache_txns_pending_fetch: u32,
     ) -> Self {
         Self {
             max_inflight_requests,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             soft_limit_byte_size_pooled_transactions_response,
-            max_capacity_cache_pending_fetch,
+            max_capacity_cache_txns_pending_fetch,
         }
     }
 }

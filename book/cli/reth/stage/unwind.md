@@ -226,7 +226,7 @@ Networking:
 
           [default: 131072]
 
-      --max-capacity-cache-pending-fetch <COUNT>
+      --max-tx-pending-fetch <COUNT>
           Max capacity of the cache for pending fetch requests.
 
           [default: 25600]
