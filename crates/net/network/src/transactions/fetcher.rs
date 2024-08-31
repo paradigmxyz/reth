@@ -1294,7 +1294,7 @@ pub struct TransactionFetcherInfo {
     /// response. Spec'd at 2 MiB, but can be adjusted for research purpose.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
     /// Max capacity of the cache for transactions didn't fit into a
-    /// [`GetPooledTransactionRequest`] yet, or weren't returned upon requests to peers.
+    /// GetPooledTransactionRequest yet, or weren't returned upon requests to peers.
     pub max_capacity_cache_txns_pending_fetch: u32,
 }
 

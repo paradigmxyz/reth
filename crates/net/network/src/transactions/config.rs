@@ -48,7 +48,7 @@ pub struct TransactionFetcherConfig {
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
     /// Max capacity of the cache for transactions didn't fit into a
-    /// [`GetPooledTransactionRequest`] yet, or weren't returned upon requests to peers.
+    /// GetPooledTransactionRequest yet, or weren't returned upon requests to peers.
     pub max_capacity_cache_txns_pending_fetch: u32,
 }
 
