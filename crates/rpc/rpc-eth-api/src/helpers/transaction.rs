@@ -214,6 +214,82 @@ pub trait EthTransactions: LoadTransaction {
         }
     }
 
+    /// Find a transaction by sender and nonce
+    fn get_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+        include_pending: bool,
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self: LoadBlock + LoadState,
+    {
+        async move {
+            // Check the pool first
+            if include_pending {
+                if let Some(tx) =
+                    LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                {
+                    let transaction = tx.transaction.clone().into_consensus();
+                    return Ok(Some(from_recovered(transaction)));
+                }
+            }
+
+            // Check if the sender is a contract
+            if LoadState::get_code(self, sender, None).await?.len() > 0 {
+                return Ok(None);
+            }
+
+            let highest =
+                LoadState::transaction_count(self, sender, None).await?.saturating_to::<u64>();
+
+            // If the nonce is higher or equal to the highest nonce, the transaction is pending or
+            // not exists.
+            if nonce >= highest {
+                return Ok(None);
+            }
+
+            let Ok(high) = LoadBlock::provider(self).best_block_number() else {
+                return Err(EthApiError::UnknownBlockNumber.into());
+            };
+
+            // Perform a binary search over the block range to find the block in which the sender's
+            // nonce reached the requested nonce.
+            let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
+                let mid_nonce = LoadState::transaction_count(self, sender, Some(mid.into()))
+                    .await?
+                    .saturating_to::<u64>();
+
+                Ok(mid_nonce > nonce)
+            })
+            .await?;
+
+            if let Some(block) = LoadBlock::block_with_senders(self, num.into()).await? {
+                let block_hash = block.hash();
+                let block_number = block.number;
+                let base_fee_per_gas = block.base_fee_per_gas;
+                if let Some((index, tx)) = block
+                    .into_transactions_ecrecovered()
+                    .enumerate()
+                    .find(|(_index, tx)| tx.signer() == sender && tx.nonce() == nonce)
+                    .map(|(index, tx)| (index, tx))
+                {
+                    let tx_info = TransactionInfo {
+                        hash: Some(tx.hash()),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        base_fee: base_fee_per_gas.map(u128::from),
+                        index: Some(index as u64),
+                    };
+                    return Ok(Some(from_recovered_with_block_context(tx, tx_info)))
+                }
+            } else {
+                return Err(EthApiError::UnknownBlockNumber.into());
+            };
+            Ok(None)
+        }
+    }
+
     /// Get transaction, as raw bytes, by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
@@ -644,75 +720,4 @@ pub trait LoadTransaction: SpawnBlocking {
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
     }
-}
-
-/// Find a transaction by sender and nonce
-pub async fn get_transaction_by_sender_and_nonce<Eth>(
-    eth: &Eth,
-    sender: Address,
-    nonce: u64,
-    include_pending: bool,
-) -> Result<Option<RpcTransaction<Eth::NetworkTypes>>, Eth::Error>
-where
-    Eth: LoadBlock + LoadState,
-{
-    // Check the pool first
-    if include_pending {
-        if let Some(tx) = LoadState::pool(eth).get_transaction_by_sender_and_nonce(sender, nonce) {
-            let transaction = tx.transaction.clone().into_consensus();
-            return Ok(Some(from_recovered(transaction)));
-        }
-    }
-
-    // Check if the sender is a contract
-    if LoadState::get_code(eth, sender, None).await?.len() > 0 {
-        return Ok(None);
-    }
-
-    let highest = LoadState::transaction_count(eth, sender, None).await?.saturating_to::<u64>();
-
-    // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-    // exists.
-    if nonce >= highest {
-        return Ok(None);
-    }
-
-    let Ok(high) = LoadBlock::provider(eth).best_block_number() else {
-        return Err(EthApiError::UnknownBlockNumber.into());
-    };
-
-    // perform a binary search over the block range to find the block in which the sender's
-    // nonce reached the requested nonce.
-    let num = binary_search::<_, _, Eth::Error>(1, high, |mid| async move {
-        let mid_nonce = LoadState::transaction_count(eth, sender, Some(mid.into()))
-            .await?
-            .saturating_to::<u64>();
-
-        Ok(mid_nonce > nonce)
-    })
-    .await?;
-
-    if let Some(block) = LoadBlock::block_with_senders(eth, num.into()).await? {
-        let block_hash = block.hash();
-        let block_number = block.number;
-        let base_fee_per_gas = block.base_fee_per_gas;
-        if let Some((index, tx)) = block
-            .into_transactions_ecrecovered()
-            .enumerate()
-            .find(|(_index, tx)| tx.signer() == sender && tx.nonce() == nonce)
-            .map(|(index, tx)| (index, tx))
-        {
-            let tx_info = TransactionInfo {
-                hash: Some(tx.hash()),
-                block_hash: Some(block_hash),
-                block_number: Some(block_number),
-                base_fee: base_fee_per_gas.map(u128::from),
-                index: Some(index as u64),
-            };
-            return Ok(Some(from_recovered_with_block_context(tx, tx_info)))
-        }
-    } else {
-        return Err(EthApiError::UnknownBlockNumber.into());
-    };
-    Ok(None)
 }

@@ -18,10 +18,7 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::{
-    helpers::{
-        transaction::get_transaction_by_sender_and_nonce, EthApiSpec, EthBlocks, EthCall, EthFees,
-        EthState, EthTransactions, FullEthApi,
-    },
+    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
     RpcBlock, RpcReceipt, RpcTransaction,
 };
 
@@ -561,7 +558,8 @@ where
         nonce: U64,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
-        Ok(get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true).await?)
+        Ok(EthTransactions::get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true)
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`

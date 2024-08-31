@@ -5,7 +5,7 @@ use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
-    helpers::{transaction::get_transaction_by_sender_and_nonce, TraceExt},
+    helpers::{EthTransactions, TraceExt},
     EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
@@ -78,6 +78,7 @@ where
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
             >,
         > + TraceExt
+        + EthTransactions
         + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
@@ -287,7 +288,9 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Option<TxHash>> {
-        Ok(get_transaction_by_sender_and_nonce(&self.eth, sender, nonce, false)
+        Ok(self
+            .eth
+            .get_transaction_by_sender_and_nonce(sender, nonce, false)
             .await
             .map_err(|e| e.into())?
             .map(|tx| tx.hash))
