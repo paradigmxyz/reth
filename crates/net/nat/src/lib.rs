@@ -214,6 +214,12 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     text.trim().parse().ok()
 }
 
+/// Reads LAN IP of docker container.
+#[cfg(not(target_os = "windows"))]
+pub fn resolve_docker_ip() -> io::Result<Option<IpAddr>> {
+    os_interface_addr(DOCKER_LAN_IF)
+}
+
 /// Reads IP of OS interface with given name, if exists.
 #[cfg(not(target_os = "windows"))]
 pub fn os_interface_addr(if_name: &str) -> io::Result<Option<IpAddr>> {

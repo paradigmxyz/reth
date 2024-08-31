@@ -15,7 +15,7 @@ use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
-use reth_net_nat::NatResolver;
+use reth_net_nat::{resolve_docker_ip, NatResolver};
 use reth_network::{
     transactions::{
         constants::{
@@ -144,9 +144,23 @@ pub struct NetworkArgs {
     /// Default is 128 KiB.
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+
+    /// Set local IP address to docker container's LAN IP address.
+    #[arg(long, conflicts_with = "addr")]
+    pub docker: bool,
 }
 
 impl NetworkArgs {
+    /// Returns the resolved IP address.
+    pub fn resolved_addr(&self) -> IpAddr {
+        if self.docker {
+            return resolve_docker_ip()
+                .expect("should read container IFs")
+                .expect("IF should exists")
+        }
+        self.addr
+    }
+
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes.clone().map(|bootnodes| {
@@ -172,6 +186,7 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
+        let addr = self.resolved_addr();
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -219,11 +234,11 @@ impl NetworkArgs {
             })
             // apply discovery settings
             .apply(|builder| {
-                let rlpx_socket = (self.addr, self.port).into();
+                let rlpx_socket = (addr, self.port).into();
                 self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
             .listener_addr(SocketAddr::new(
-                self.addr, // set discovery port based on instance number
+                addr, // set discovery port based on instance number
                 self.port,
             ))
             .discovery_addr(SocketAddr::new(
@@ -297,6 +312,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response_on_pack_request: DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+            docker: false,
         }
     }
 }
