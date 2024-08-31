@@ -8,7 +8,8 @@ use reth_rpc_types::{engine::PayloadError, BlockNumberOrTag};
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
-    /// Converts the error of the [Result] to an [`RpcResult`] via the `Err` [Display] impl.
+    /// Converts result to [`RpcResult`] by converting error variant to
+    /// [`jsonrpsee_types::error::ErrorObject`]
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
         Err: fmt::Display,

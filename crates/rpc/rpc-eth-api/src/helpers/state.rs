@@ -115,7 +115,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let _permit = self
                 .acquire_owned()
                 .await
-                .map_err(|err| EthApiError::Internal(RethError::other(err)))?;
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
