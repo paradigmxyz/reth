@@ -12,10 +12,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod docker;
+
+pub use docker::{DockerError, DOCKER_LAN_IF};
+
 use std::{
     fmt,
     future::{poll_fn, Future},
-    io,
     net::{AddrParseError, IpAddr},
     pin::Pin,
     str::FromStr,
@@ -25,9 +28,6 @@ use std::{
 
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-
-/// The docker LAN interface.
-pub const DOCKER_LAN_IF: &str = "eth0";
 
 /// URLs to `GET` the external IP address.
 ///
@@ -48,9 +48,6 @@ pub enum NatResolver {
     PublicIp,
     /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
-    /// Obtain the docker interface IP.
-    #[cfg(not(target_os = "windows"))]
-    Docker,
     /// Resolve nothing
     None,
 }
@@ -69,8 +66,6 @@ impl fmt::Display for NatResolver {
             Self::Upnp => f.write_str("upnp"),
             Self::PublicIp => f.write_str("publicip"),
             Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
-            #[cfg(not(target_os = "windows"))]
-            Self::Docker => f.write_str("docker"),
             Self::None => f.write_str("none"),
         }
     }
@@ -96,8 +91,6 @@ impl FromStr for NatResolver {
             "upnp" => Self::Upnp,
             "none" => Self::None,
             "publicip" | "public-ip" => Self::PublicIp,
-            #[cfg(not(target_os = "windows"))]
-            "docker" => Self::Docker,
             s => {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
@@ -192,8 +185,6 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
-        #[cfg(not(target_os = "windows"))]
-        NatResolver::Docker => resolve_docker_ip(DOCKER_LAN_IF).ok(),
         NatResolver::None => None,
     }
 }
@@ -212,35 +203,6 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
-}
-
-/// Errors resolving Docker IP.
-#[derive(Debug, thiserror::Error)]
-pub enum DockerError {
-    /// Error reading OS interfaces.
-    #[error("failed to read OS interfaces: {0}")]
-    Io(io::Error),
-    /// No interface found with given name.
-    #[error("interface not found: {0}, found other interfaces: {1:?}")]
-    IFNotFound(String, Vec<String>),
-}
-
-/// Reads IP of OS interface with given name, if exists.
-#[cfg(not(target_os = "windows"))]
-pub fn resolve_docker_ip(if_name: &str) -> Result<IpAddr, DockerError> {
-    match if_addrs::get_if_addrs() {
-        Ok(ifs) => {
-            let ip = ifs.iter().find(|i| i.name == if_name).map(|i| i.ip());
-            match ip {
-                Some(ip) => Ok(ip),
-                None => {
-                    let ifs = ifs.into_iter().map(|i| i.name.as_str().into()).collect();
-                    Err(DockerError::IFNotFound(if_name.into(), ifs))
-                }
-            }
-        }
-        Err(err) => Err(DockerError::Io(err)),
-    }
 }
 
 #[cfg(test)]
@@ -277,12 +239,5 @@ mod tests {
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
         assert_eq!(ip.to_string().as_str(), s);
-    }
-
-    #[test]
-    #[cfg(not(target_os = "windows"))]
-    fn read_docker_if_addr() {
-        const LOCALHOST_IF: &str = "lo0";
-        assert_eq!(resolve_docker_ip(LOCALHOST_IF).unwrap(), Ipv4Addr::LOCALHOST);
     }
 }

@@ -15,7 +15,7 @@ use reth_discv5::{
     discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
-use reth_net_nat::{resolve_docker_ip, NatResolver, DOCKER_LAN_IF};
+use reth_net_nat::{NatResolver, DOCKER_LAN_IF};
 use reth_network::{
     transactions::{
         constants::{
@@ -159,9 +159,9 @@ impl NetworkArgs {
         #[cfg(not(target_os = "windows"))]
         if let Some(ref if_name) = self.docker {
             if if_name.is_empty() {
-                return Ok(resolve_docker_ip(DOCKER_LAN_IF)?)
+                return Ok(reth_net_nat::docker::resolve_docker_ip(DOCKER_LAN_IF)?)
             }
-            return Ok(resolve_docker_ip(if_name)?)
+            return Ok(reth_net_nat::docker::resolve_docker_ip(if_name)?)
         }
 
         Ok(self.addr)
