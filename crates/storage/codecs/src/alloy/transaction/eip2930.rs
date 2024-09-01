@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct TxEip2930 {
+pub(crate) struct TxEip2930 {
     chain_id: ChainId,
     nonce: u64,
     gas_price: u128,
