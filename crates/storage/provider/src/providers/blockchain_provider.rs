@@ -130,19 +130,20 @@ where
     /// - `fetch_db_range`: Retrieves a range of items from the database.
     /// - `map_block_state_item`: Maps a block number to an item in memory. Stops fetching if `None`
     ///   is returned.
-    fn fetch_db_mem_range<T, F, G, P>(
+    fn fetch_db_mem_range<T, F, G, P, H>(
         &self,
         range: impl RangeBounds<BlockNumber>,
         fetch_db_range: F,
         map_block_state_item: G,
+        get_head_hash: H,
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
         F: FnOnce(RangeInclusive<BlockNumber>, &mut P) -> ProviderResult<Vec<T>>,
         G: Fn(BlockNumber, &mut P) -> Option<T>,
+        H: Fn(u64) -> Option<BlockHash>,
         P: FnMut(&T) -> bool,
     {
-
         let (start, end) = self.convert_range_bounds(range, || {
             self.canonical_in_memory_state.get_canonical_block_number()
         });
@@ -159,17 +160,29 @@ where
             range.nth(items.len() - 1);
         }
 
-        // Fetch the remaining items from the in-memory state
-        for num in range {
-            // TODO: there might be an update between loop iterations, we
-            // need to handle that situation.
-            if let Some(item) = map_block_state_item(num, &mut predicate) {
-                items.push(item);
-            } else {
-                break;
-            }
-        }
+        // Initial head hash
+        let mut initial_range_head_hash = get_head_hash(range.end().clone());
 
+        loop {
+            // Fetch the remaining items from the in-memory state
+            for num in range.clone() {
+                // TODO: there might be an update between loop iterations, we
+                // need to handle that situation.
+                if let Some(item) = map_block_state_item(num, &mut predicate) {
+                    items.push(item);
+                } else {
+                    break;
+                }
+            }
+
+            let current_range_head_hash = get_head_hash(range.end().clone());
+            if current_range_head_hash != initial_range_head_hash {
+                items.clear();
+                initial_range_head_hash = current_range_head_hash;
+                continue;
+            }
+            break;
+        }
         Ok(items)
     }
 
@@ -340,6 +353,11 @@ where
                     .state_by_number(num)
                     .map(|block_state| block_state.block().block().header.header().clone())
             },
+            |end| {
+                self.canonical_in_memory_state
+                    .state_by_number(end)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
+            },
             |_| true,
         )
     }
@@ -364,6 +382,11 @@ where
                     .state_by_number(num)
                     .map(|block_state| block_state.block().block().header.clone())
             },
+            |end| {
+                self.canonical_in_memory_state
+                    .state_by_number(end)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
+            },
             |_| true,
         )
     }
@@ -381,6 +404,11 @@ where
                     .state_by_number(num)
                     .map(|block_state| block_state.block().block().header.clone())
                     .filter(|header| predicate(header))
+            },
+            |end| {
+                self.canonical_in_memory_state
+                    .state_by_number(end)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
             },
             predicate,
         )
@@ -410,6 +438,11 @@ where
             |num, _| {
                 self.canonical_in_memory_state
                     .state_by_number(num)
+                    .map(|block_state| block_state.hash())
+            },
+            |end| {
+                self.canonical_in_memory_state
+                    .state_by_number(end)
                     .map(|block_state| block_state.hash())
             },
             |_| true,
@@ -620,6 +653,11 @@ where
                     .state_by_number(num)
                     .map(|block_state| block_state.block().block().clone().unseal())
             },
+            |end| {
+                self.canonical_in_memory_state
+                    .state_by_number(end)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
+            },
             |_| true,
         )
     }
@@ -638,6 +676,11 @@ where
                     BlockWithSenders { block: block.unseal(), senders }
                 })
             },
+            |num| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
+            },
             |_| true,
         )
     }
@@ -655,6 +698,11 @@ where
                     let senders = block_state.block().senders().clone();
                     SealedBlockWithSenders { block, senders }
                 })
+            },
+            |num| {
+                self.canonical_in_memory_state
+                    .state_by_number(num)
+                    .map(|block_state| block_state.block().block().header.hash().clone())
             },
             |_| true,
         )

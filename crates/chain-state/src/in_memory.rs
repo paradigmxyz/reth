@@ -16,7 +16,6 @@ use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::RangeInclusive,
     sync::Arc,
     time::Instant,
 };
@@ -330,21 +329,6 @@ impl CanonicalInMemoryState {
             });
         }
         self.inner.in_memory_state.update_metrics();
-    }
-
-    /// Returns in-memory block headers given a range.
-    pub fn range_lookup(&self, range: RangeInclusive<u64>) -> Vec<Header> {
-        let mut headers = Vec::new();
-
-        for num in range {
-            if let Some(block_state) = self.state_by_number(num) {
-                headers.push(block_state.block().block().header.header().clone());
-            } else {
-                break;
-            }
-        }
-
-        headers
     }
 
     /// Returns in memory state corresponding the given hash.
