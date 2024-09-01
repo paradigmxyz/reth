@@ -1,5 +1,7 @@
 //! Main node command for launching a node
+use crate::ascii_art::ASCII_ART;
 use clap::{value_parser, Args, Parser};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
@@ -198,12 +200,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
             node_config = node_config.with_unused_ports();
         }
 
+        // Prints random ascii art to stdout every 5 minutes
         if h4ck3r_m0d3 {
             ctx.task_executor.spawn_with_signal(|_| async move {
-                let mut interval = interval(Duration::from_secs(60));
+                let mut interval = interval(Duration::from_secs(60 * 5));
+                let mut small_rng = SmallRng::from_entropy();
                 loop {
                     interval.tick().await;
-                    println!("sup");
+                    println!("{}", ASCII_ART[small_rng.gen_range(0..ASCII_ART.len())]);
                 }
             });
         }
