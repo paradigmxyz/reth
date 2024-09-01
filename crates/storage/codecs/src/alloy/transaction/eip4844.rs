@@ -25,6 +25,9 @@ pub(crate) struct TxEip4844 {
     gas_limit: u64,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
+    /// TODO(debt): this should be removed if we break the DB.
+    /// Makes sure that the Compact bitflag struct has one bit after the above field:
+    /// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
     placeholder: Option<CompactPlaceholder>,
     to: Address,
     value: U256,
