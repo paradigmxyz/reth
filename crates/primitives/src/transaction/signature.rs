@@ -191,6 +191,8 @@ impl Signature {
     /// Convert the signature to a [`SignatureWithParity`].
     pub(crate) fn as_signature_with_parity(&self) -> SignatureWithParity {
         SignatureWithParity::new(self.r, self.s, self.odd_y_parity.into())
+  }
+
     }
 
     /// Returns the signature for the optimism deposit transactions, which don't include a
