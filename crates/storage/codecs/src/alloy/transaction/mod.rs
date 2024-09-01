@@ -1,6 +1,6 @@
 mod eip1559;
-mod eip4844;
 mod eip2930;
+mod eip4844;
 mod legacy;
 
 #[cfg(test)]
@@ -12,7 +12,7 @@ mod tests {
     // this check is to ensure we do not inadvertently add too many fields to a struct which would
     // expand the flags field and break backwards compatibility
 
-    use super::{eip1559::TxEip1559, eip2930::TxEip2930, legacy::TxLegacy,eip4844::TxEip4844,};
+    use super::{eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, legacy::TxLegacy};
 
     #[test]
     fn test_ensure_backwards_compatibility() {

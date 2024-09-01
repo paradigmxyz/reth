@@ -301,9 +301,7 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        Account, Header, Receipt, ReceiptWithBloom, SealedHeader,  Withdrawals,
-    };
+    use reth_primitives::{Account, Header, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,

@@ -149,11 +149,12 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Legacy(tx)
             }
-TxType::Eip2930 => {
+            TxType::Eip2930 => {
                 let mut tx = TxEip2930::arbitrary(u)?;
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip2930(tx)
-            }            TxType::Eip1559 => {
+            }
+            TxType::Eip1559 => {
                 let mut tx = TxEip1559::arbitrary(u)?;
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip1559(tx)
