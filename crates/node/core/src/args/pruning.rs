@@ -1,9 +1,10 @@
 //! Pruning and full node arguments
 
+use std::collections::BTreeMap;
 use clap::Args;
 use reth_chainspec::ChainSpec;
 use reth_config::config::PruneConfig;
-use reth_primitives::BlockNumber;
+use reth_primitives::{Address, BlockNumber};
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 
 /// Parameters for pruning and full node
@@ -73,9 +74,12 @@ pub struct PruningArgs {
     /// Prune storage history before the specified block number. The specified block number is not pruned.
     #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["prune.storagehistory.full", "prune.storagehistory.distance"])]
     pub storage_history_before: Option<BlockNumber>,
-    
+
     // Receipts Log Filter
-    // TODO (garwah): Add CLI arg to support specifying a receipt log filter. 
+    /// Configure receipts log filter. Format: <address>:<prune_mode>[,<address>:<prune_mode>...]
+    /// Where <prune_mode> can be 'full', 'distance:<blocks>', or 'before:<block_number>'
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_delimiter = ',')]
+    pub receipts_log_filter: Vec<String>,
 }
 
 impl PruningArgs {
@@ -167,6 +171,34 @@ impl PruningArgs {
         } else {
             None
         }
+    }
+
+    fn parse_receipts_log_filter(&self) -> Result<ReceiptsLogPruneConfig, String> {
+        let mut config = BTreeMap::new();
+        // Each filter is provided in the form <address:<prunemode>
+        for filter in &self.receipts_log_filter {
+            let parts: Vec<&str> = filter.split(':').collect();
+            if parts.len() < 2 {
+                return Err(format!("Invalid filter format: {}", filter));
+            }
+            let address = parts[0].parse::<Address>().map_err(|e| format!("Invalid address: {}", e))?;
+            let prune_mode = match parts[1] {
+                "full" => PruneMode::Full,
+                s if s.starts_with("distance:") => {
+                    let distance = s.strip_prefix("distance:").unwrap().parse::<u64>()
+                        .map_err(|e| format!("Invalid block distance: {}", e))?;
+                    PruneMode::Distance(distance)
+                },
+                s if s.starts_with("before:") => {
+                    let block_number = s.strip_prefix("before:").unwrap().parse::<BlockNumber>()
+                        .map_err(|e| format!("Invalid block number: {}", e))?;
+                    PruneMode::Before(block_number)
+                },
+                _ => return Err(format!("Invalid prune mode: {}", parts[1])),
+            };
+            config.insert(address, prune_mode);
+        }
+        Ok(ReceiptsLogPruneConfig(config))
     }
 }
 
