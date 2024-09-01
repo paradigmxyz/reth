@@ -121,7 +121,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
-            blockchain_db.clone(),
+            blockchain_db.clone(), 
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
