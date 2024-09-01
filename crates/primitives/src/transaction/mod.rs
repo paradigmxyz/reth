@@ -551,7 +551,7 @@ impl Transaction {
                 with_header,
             ),
             Self::Eip7702(set_code_tx) => set_code_tx.encode_with_signature(
-                &signature.as_signature_with_parity(),
+                &signature.as_signature_with_boolean_parity(),
                 out,
                 with_header,
             ),
@@ -1238,8 +1238,10 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 true,
             ),
-           Transaction::Eip7702(set_code_tx) => set_code_tx
-                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), true),
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
         }
@@ -1448,8 +1450,10 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 false,
             ),
-          Transaction::Eip7702(set_code_tx) => set_code_tx
-                .encoded_len_with_signature(&self.signature.as_signature_with_parity(), false),
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
         }

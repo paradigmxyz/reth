@@ -1,6 +1,5 @@
 mod access_list;
 mod authorization_list;
-mod eip7702;
 mod genesis_account;
 mod log;
 mod request;

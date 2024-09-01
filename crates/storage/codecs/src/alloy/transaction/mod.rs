@@ -1,6 +1,7 @@
 mod eip1559;
 mod eip2930;
 mod eip4844;
+mod eip7702;
 mod legacy;
 
 #[cfg(test)]
