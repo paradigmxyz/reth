@@ -233,7 +233,7 @@ impl Transaction {
     }
 
     /// Get the transaction's type
-    pub fn tx_type(&self) -> TxType {
+    pub const fn tx_type(&self) -> TxType {
         match self {
             Self::Legacy(_) => TxType::Legacy,
             Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
