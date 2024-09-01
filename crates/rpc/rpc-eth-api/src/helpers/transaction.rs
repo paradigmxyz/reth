@@ -7,9 +7,10 @@ use reth_primitives::{
     Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
     TxHash, TxKind, B256, U256,
 };
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
-    utils::recover_raw_transaction, EthApiError, EthStateCache, SignError, TransactionSource,
+    utils::{binary_search, recover_raw_transaction},
+    EthApiError, EthStateCache, SignError, TransactionSource,
 };
 use reth_rpc_types::{
     transaction::{
@@ -18,13 +19,14 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
+use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
 
 use super::{
-    Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking,
+    Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
+    SpawnBlocking,
 };
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -209,6 +211,81 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             Ok(None)
+        }
+    }
+
+    /// Find a transaction by sender's address and nonce.
+    fn get_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+        include_pending: bool,
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self: LoadBlock + LoadState,
+    {
+        async move {
+            // Check the pool first
+            if include_pending {
+                if let Some(tx) =
+                    LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                {
+                    let transaction = tx.transaction.clone().into_consensus();
+                    return Ok(Some(from_recovered(transaction)));
+                }
+            }
+
+            // Check if the sender is a contract
+            if self.get_code(sender, None).await?.len() > 0 {
+                return Ok(None);
+            }
+
+            let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
+
+            // If the nonce is higher or equal to the highest nonce, the transaction is pending or
+            // not exists.
+            if nonce >= highest {
+                return Ok(None);
+            }
+
+            let Ok(high) = LoadBlock::provider(self).best_block_number() else {
+                return Err(EthApiError::UnknownBlockNumber.into());
+            };
+
+            // Perform a binary search over the block range to find the block in which the sender's
+            // nonce reached the requested nonce.
+            let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
+                let mid_nonce =
+                    self.transaction_count(sender, Some(mid.into())).await?.saturating_to::<u64>();
+
+                Ok(mid_nonce > nonce)
+            })
+            .await?;
+
+            self.block_with_senders(num.into())
+                .await?
+                .and_then(|block| {
+                    let block_hash = block.hash();
+                    let block_number = block.number;
+                    let base_fee_per_gas = block.base_fee_per_gas;
+
+                    block
+                        .into_transactions_ecrecovered()
+                        .enumerate()
+                        .find(|(_, tx)| tx.signer() == sender && tx.nonce() == nonce)
+                        .map(|(index, tx)| {
+                            let tx_info = TransactionInfo {
+                                hash: Some(tx.hash()),
+                                block_hash: Some(block_hash),
+                                block_number: Some(block_number),
+                                base_fee: base_fee_per_gas.map(u128::from),
+                                index: Some(index as u64),
+                            };
+                            from_recovered_with_block_context(tx, tx_info)
+                        })
+                })
+                .ok_or(EthApiError::UnknownBlockNumber.into())
+                .map(Some)
         }
     }
 
