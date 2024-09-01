@@ -7,7 +7,7 @@ use crate::{
     TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
     TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
-use alloy_consensus::SignableTransaction;
+use alloy_consensus::{SignableTransaction, TxEip4844WithSidecar};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
@@ -102,7 +102,11 @@ impl PooledTransactionsElement {
             // If the transaction is an EIP-4844 transaction...
             TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash } => {
                 // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
-                Self::BlobTransaction(BlobTransaction { transaction: tx, signature, hash, sidecar })
+                Self::BlobTransaction(BlobTransaction {
+                    signature,
+                    hash,
+                    transaction: TxEip4844WithSidecar { tx, sidecar },
+                })
             }
             // If the transaction is not EIP-4844, return an error with the original
             // transaction.
@@ -151,7 +155,7 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.nonce,
             Self::Eip1559 { transaction, .. } => transaction.nonce,
             Self::Eip7702 { transaction, .. } => transaction.nonce,
-            Self::BlobTransaction(blob_tx) => blob_tx.transaction.nonce,
+            Self::BlobTransaction(blob_tx) => blob_tx.transaction.tx.nonce,
         }
     }
 
@@ -416,7 +420,7 @@ impl PooledTransactionsElement {
     /// Returns the [`TxEip4844`] variant if the transaction is an EIP-4844 transaction.
     pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
-            Self::BlobTransaction(tx) => Some(&tx.transaction),
+            Self::BlobTransaction(tx) => Some(&tx.transaction.tx),
             _ => None,
         }
     }
@@ -445,7 +449,7 @@ impl PooledTransactionsElement {
     /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
     pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
-            Self::BlobTransaction(tx) => Some(tx.transaction.max_fee_per_blob_gas),
+            Self::BlobTransaction(tx) => Some(tx.transaction.tx.max_fee_per_blob_gas),
             _ => None,
         }
     }
@@ -459,7 +463,7 @@ impl PooledTransactionsElement {
             Self::Legacy { .. } | Self::Eip2930 { .. } => None,
             Self::Eip1559 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
             Self::Eip7702 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
-            Self::BlobTransaction(tx) => Some(tx.transaction.max_priority_fee_per_gas),
+            Self::BlobTransaction(tx) => Some(tx.transaction.tx.max_priority_fee_per_gas),
         }
     }
 
@@ -472,7 +476,7 @@ impl PooledTransactionsElement {
             Self::Eip2930 { transaction, .. } => transaction.gas_price,
             Self::Eip1559 { transaction, .. } => transaction.max_fee_per_gas,
             Self::Eip7702 { transaction, .. } => transaction.max_fee_per_gas,
-            Self::BlobTransaction(tx) => tx.transaction.max_fee_per_gas,
+            Self::BlobTransaction(tx) => tx.transaction.tx.max_fee_per_gas,
         }
     }
 }
@@ -691,7 +695,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         match Self::try_from(tx_signed) {
             Ok(Self::BlobTransaction(mut tx)) => {
                 // Successfully converted to a BlobTransaction, now generate a sidecar.
-                tx.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
+                tx.transaction.sidecar = crate::BlobTransactionSidecar::arbitrary(u)?;
                 Ok(Self::BlobTransaction(tx))
             }
             Ok(tx) => Ok(tx), // Successfully converted, but not a BlobTransaction.
