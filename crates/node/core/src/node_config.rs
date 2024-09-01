@@ -127,6 +127,9 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// Enable h4ck3r-m0d3
+    pub h4ck3r_m0d3: bool,
 }
 
 impl NodeConfig {
@@ -144,6 +147,12 @@ impl NodeConfig {
     pub const fn dev(mut self) -> Self {
         self.dev.dev = true;
         self.network.discovery.disable_discovery = true;
+        self
+    }
+
+    /// Sets --h4ck3r-m0d3 for the node.
+    pub const fn h4ck3r_m0d3(mut self) -> Self {
+        self.h4ck3r_m0d3 = true;
         self
     }
 
@@ -314,7 +323,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number);
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
@@ -337,7 +346,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return tip_header
+                    return tip_header;
                 }
                 Err(error) => {
                     fetch_failures += 1;
@@ -413,6 +422,7 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            h4ck3r_m0d3: false,
         }
     }
 }

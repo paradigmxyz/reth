@@ -1,5 +1,4 @@
 //! Main node command for launching a node
-
 use clap::{value_parser, Args, Parser};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -17,7 +16,10 @@ use reth_node_core::{
     version,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration,
+};
+use tokio::time::interval;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -111,6 +113,10 @@ pub struct NodeCommand<
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
+
+    /// Enable h4ck3r-m0d3
+    #[arg(long, default_value_t = false, required = false, hide = true)]
+    pub h4ck3r_m0d3: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> NodeCommand<C> {
@@ -157,6 +163,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
             dev,
             pruning,
             ext,
+            h4ck3r_m0d3,
         } = self;
 
         // set up node config
@@ -174,6 +181,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
             db,
             dev,
             pruning,
+            h4ck3r_m0d3,
         };
 
         // Register the prometheus recorder before creating the database,
@@ -188,6 +196,16 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> No
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
+        }
+
+        if h4ck3r_m0d3 {
+            ctx.task_executor.spawn_with_signal(|_| async move {
+                let mut interval = interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    println!("sup");
+                }
+            });
         }
 
         let builder = NodeBuilder::new(node_config)
