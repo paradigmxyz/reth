@@ -5,7 +5,7 @@ use reth_primitives::{ReceiptWithBloom, B256};
 use reth_trie_common::root::ordered_trie_root_with_encoder;
 
 /// Calculates the receipt root for a header.
-pub fn calculate_receipt_root_optimism(
+pub(crate) fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
     chain_spec: &ChainSpec,
     timestamp: u64,
