@@ -1,4 +1,5 @@
 mod eip1559;
+mod eip4844;
 mod legacy;
 
 #[cfg(test)]
@@ -10,10 +11,11 @@ mod tests {
     // this check is to ensure we do not inadvertently add too many fields to a struct which would
     // expand the flags field and break backwards compatibility
 
-    use super::{eip1559::TxEip1559, legacy::TxLegacy};
+    use super::{eip1559::TxEip1559, eip4844::TxEip4844, legacy::TxLegacy};
 
     #[test]
     fn test_ensure_backwards_compatibility() {
+        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
         assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
         assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
     }
