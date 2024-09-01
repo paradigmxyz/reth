@@ -2112,37 +2112,4 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result, Err(RlpError::UnexpectedLength));
     }
-
-    #[test]
-    fn tototo() {
-        let tx = TransactionSigned {
-            hash: B256::from_str(
-                "0x029bc1fcae8ad9f887af3f37a9ebb223f1e535b009fc7ad7b053ba9b5ff666ae",
-            )
-            .unwrap(),
-            signature: Default::default(),
-            transaction: Transaction::Eip2930(alloy_consensus::TxEip2930 {
-                chain_id: 0,
-                nonce: 0,
-                gas_price: 0,
-                gas_limit: 0,
-                to: TxKind::Create,
-                value: U256::ZERO,
-                access_list: revm_primitives::AccessList::default(),
-                input: Bytes::default(),
-            }),
-        };
-
-        println!("{:?}", tx);
-
-        let mut buf = vec![];
-
-        tx.to_compact(&mut buf);
-
-        let res = alloy_consensus::TxEip2930::from_compact(&buf, 1000000);
-
-        println!("{:?}", buf);
-
-        println!("{:?}", res);
-    }
 }
