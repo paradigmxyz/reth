@@ -47,6 +47,7 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
+rand.workspace = true
 ahash = "0.8"
 human_bytes = "0.4.1"
 eyre.workspace = true
