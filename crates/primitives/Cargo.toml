@@ -100,7 +100,7 @@ arbitrary = [
     "reth-codec",
 ]
 secp256k1 = ["dep:secp256k1"]
-c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "alloy-consensus/kzg"]
 optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",

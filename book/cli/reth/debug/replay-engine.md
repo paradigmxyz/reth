@@ -221,6 +221,11 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
       --engine-api-store <PATH>
           The path to read engine API messages from
 

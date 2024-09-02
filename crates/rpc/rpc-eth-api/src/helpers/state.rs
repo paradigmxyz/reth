@@ -42,14 +42,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)?
-                .account_code(address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default()
-                .original_bytes())
-        })
+        LoadState::get_code(self, address, block_id)
     }
 
     /// Returns balance of given account, at given blocknumber.
@@ -293,6 +286,25 @@ pub trait LoadState: EthApiTypes {
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default(),
             ))
+        })
+    }
+
+    /// Returns code of given account, at the given identifier.
+    fn get_code(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            Ok(this
+                .state_at_block_id_or_latest(block_id)?
+                .account_code(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default()
+                .original_bytes())
         })
     }
 }
