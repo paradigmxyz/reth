@@ -1,6 +1,6 @@
 //! Loads and formats OP receipt RPC response.   
 
-use op_alloy_rpc_types::OptimismTransactionReceiptFields;
+use op_alloy_rpc_types::{receipt::L1BlockInfo, OptimismTransactionReceiptFields};
 use reth_chainspec::{ChainSpec, OptimismHardforks};
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeCore};
@@ -12,7 +12,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::AnyTransactionReceipt;
-use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
 
@@ -63,7 +62,7 @@ where
     pub fn build_op_receipt_meta(
         &self,
         tx: &TransactionSigned,
-        l1_block_info: L1BlockInfo,
+        l1_block_info: revm::L1BlockInfo,
         receipt: &Receipt,
     ) -> Result<OptimismTransactionReceiptFields, OpEthApiError> {
         Ok(OpReceiptFieldsBuilder::default()
@@ -110,12 +109,12 @@ impl OpReceiptFieldsBuilder {
         Self { l1_block_timestamp: block_timestamp, ..Default::default() }
     }
 
-    /// Applies [`L1BlockInfo`].
+    /// Applies [`L1BlockInfo`](revm::L1BlockInfo).
     pub fn l1_block_info(
         mut self,
         chain_spec: &ChainSpec,
         tx: &TransactionSigned,
-        l1_block_info: L1BlockInfo,
+        l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let envelope_buf = tx.envelope_encoded();
         let timestamp = self.l1_block_timestamp;
@@ -175,15 +174,17 @@ impl OpReceiptFieldsBuilder {
         } = self;
 
         OptimismTransactionReceiptFields {
-            l1_gas_price,
-            l1_gas_used,
-            l1_fee,
-            l1_fee_scalar,
+            l1_block_info: L1BlockInfo {
+                l1_gas_price,
+                l1_gas_used,
+                l1_fee,
+                l1_fee_scalar,
+                l1_base_fee_scalar,
+                l1_blob_base_fee,
+                l1_blob_base_fee_scalar,
+            },
             deposit_nonce,
             deposit_receipt_version,
-            l1_base_fee_scalar,
-            l1_blob_base_fee,
-            l1_blob_base_fee_scalar,
         }
     }
 }
@@ -210,16 +211,19 @@ mod test {
     /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
     const L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056: OptimismTransactionReceiptFields =
         OptimismTransactionReceiptFields {
-            l1_gas_price: Some(1055991687),
-            l1_gas_used: Some(4471),
-            l1_fee: Some(24681034813),
-            l1_fee_scalar: None,
+            l1_block_info: L1BlockInfo {
+                l1_gas_price: Some(1055991687), // since bedrock l1 base fee
+                l1_gas_used: Some(4471),
+                l1_fee: Some(24681034813),
+                l1_fee_scalar: None,
+                l1_base_fee_scalar: Some(0), /* todo: what was it for tx 0x10..41 in block
+                                              * mainnet
+                                              * 124665056? */
+                l1_blob_base_fee: None,
+                l1_blob_base_fee_scalar: None,
+            },
             deposit_nonce: None,
             deposit_receipt_version: None,
-            l1_base_fee_scalar: Some(0), /* todo: what was it for tx 0x10..41 in block mainnet
-                                          * 124665056? */
-            l1_blob_base_fee: None,
-            l1_blob_base_fee_scalar: None,
         };
 
     #[test]
@@ -244,33 +248,36 @@ mod test {
             .expect("should parse revm l1 info")
             .build();
 
-        let OptimismTransactionReceiptFields {
+        let L1BlockInfo {
             l1_gas_price,
             l1_gas_used,
             l1_fee,
             l1_fee_scalar,
             l1_base_fee_scalar,
             ..
-        } = receipt_meta;
+        } = receipt_meta.l1_block_info;
 
         assert_eq!(
-            l1_gas_price, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_gas_price,
+            l1_gas_price,
+            L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_gas_price,
             "incorrect l1 base fee (former gas price)"
         );
         assert_eq!(
-            l1_gas_used, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_gas_used,
+            l1_gas_used, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_gas_used,
             "incorrect l1 gas used"
         );
         assert_eq!(
-            l1_fee, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_fee,
+            l1_fee, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_fee,
             "incorrect l1 fee"
         );
         assert_eq!(
-            l1_fee_scalar, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_fee_scalar,
+            l1_fee_scalar,
+            L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_fee_scalar,
             "incorrect l1 fee scalar"
         );
         assert_eq!(
-            l1_base_fee_scalar, L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_base_fee_scalar,
+            l1_base_fee_scalar,
+            L1_META_TX_1_EXEC_TX_OP_MAINNET_BLOCK_124665056.l1_block_info.l1_base_fee_scalar,
             "incorrect l1 base fee scalar"
         );
 

@@ -430,6 +430,7 @@ alloy-rpc-types = { version = "0.3.0", features = [
 alloy-rpc-types-admin = { version = "0.3.0", default-features = false }
 alloy-rpc-types-anvil = { version = "0.3.0", default-features = false }
 alloy-rpc-types-beacon = { version = "0.3.0", default-features = false }
+alloy-rpc-types-debug = { version = "0.3.0", default-features = false }
 alloy-rpc-types-engine = { version = "0.3.0", default-features = false }
 alloy-rpc-types-eth = { version = "0.3.0", default-features = false }
 alloy-rpc-types-mev = { version = "0.3.0", default-features = false }
@@ -446,7 +447,7 @@ alloy-transport-ipc = { version = "0.3.0", default-features = false }
 alloy-transport-ws = { version = "0.3.0", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.2"
+op-alloy-rpc-types = "0.2.5"
 op-alloy-rpc-types-engine = "0.2"
 op-alloy-network = "0.2"
 

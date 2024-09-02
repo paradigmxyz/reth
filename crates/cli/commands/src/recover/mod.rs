@@ -1,25 +1,27 @@
 //! `reth recover` command.
 
 use clap::{Parser, Subcommand};
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 
 mod storage_tries;
 
 /// `reth recover` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(subcommand)]
-    command: Subcommands,
+    command: Subcommands<C>,
 }
 
 /// `reth recover` subcommands
 #[derive(Subcommand, Debug)]
-pub enum Subcommands {
+pub enum Subcommands<C: ChainSpecParser> {
     /// Recover the node by deleting dangling storage tries.
-    StorageTries(storage_tries::Command),
+    StorageTries(storage_tries::Command<C>),
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `recover` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         match self.command {
