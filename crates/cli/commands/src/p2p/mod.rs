@@ -11,7 +11,7 @@ use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
-    args::{utils::chain_help, DatabaseArgs, DatadirArgs, NetworkArgs},
+    args::{DatabaseArgs, DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
 use reth_primitives::BlockHashOrNumber;
@@ -31,7 +31,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = C::help_messge(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser()
     )]

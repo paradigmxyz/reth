@@ -1,7 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{utils::chain_help, LogArgs},
+    args::LogArgs,
     commands::debug_cmd,
     version::{LONG_VERSION, SHORT_VERSION},
 };
@@ -45,7 +45,7 @@ pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fm
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = C::help_messge(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser(),
         global = true,

@@ -43,7 +43,7 @@ use reth_db::DatabaseEnv;
 use reth_evm_optimism::OpExecutorProvider;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{utils::chain_help, LogArgs},
+    args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_tracing::FileWorkerGuard;
@@ -65,7 +65,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = OpChainSpecParser::help_messge(),
         default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
         value_parser = OpChainSpecParser::parser(),
         global = true,
