@@ -791,7 +791,11 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer<reth_rpc_types::Transaction, reth_rpc_types::Block>,
+        EthApi: EthApiServer<
+            reth_rpc_types::Transaction,
+            reth_rpc_types::Block,
+            reth_rpc_types::AnyTransactionReceipt,
+        >,
     {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -808,7 +812,9 @@ where
         EthApi: EthApiServer<
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-            > + TraceExt,
+                reth_rpc_types::AnyTransactionReceipt,
+            > + TraceExt
+            + EthTransactions,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -911,7 +917,9 @@ where
         EthApi: EthApiServer<
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-            > + TraceExt,
+                reth_rpc_types::AnyTransactionReceipt,
+            > + TraceExt
+            + EthTransactions,
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)

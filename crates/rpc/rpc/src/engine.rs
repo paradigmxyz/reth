@@ -4,7 +4,7 @@ use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcTransaction};
+use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
     SyncStatus, TransactionRequest, WithOtherFields,
@@ -36,8 +36,11 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
     for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
-        + EthApiTypes<
+    Eth: EthApiServer<
+            RpcTransaction<Eth::NetworkTypes>,
+            RpcBlock<Eth::NetworkTypes>,
+            RpcReceipt<Eth::NetworkTypes>,
+        > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
             >,

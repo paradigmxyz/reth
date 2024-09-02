@@ -224,13 +224,25 @@ impl TreeState {
     ///
     /// Canonical blocks below the upper bound will still be removed.
     ///
-    /// NOTE: This assumes that the `finalized_num` is below or equal to the `upper_bound`
+    /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
+    /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the
+    /// same behavior as if the `finalized_num` were `Some(upper_bound)`.
     pub(crate) fn remove_until(
         &mut self,
         upper_bound: BlockNumber,
         finalized_num: Option<BlockNumber>,
     ) {
-        debug_assert!(Some(upper_bound) >= finalized_num);
+        debug!(target: "engine", ?upper_bound, ?finalized_num, "Removing blocks from the tree");
+
+        // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
+        // that the only blocks removed, are canonical blocks less than the upper bound
+        // finalized_num.take_if(|finalized| *finalized > upper_bound);
+        let finalized_num = finalized_num.map(|finalized| {
+            let new_finalized_num = finalized.min(upper_bound);
+            debug!(target: "engine", ?new_finalized_num, "Adjusted upper bound");
+            new_finalized_num
+        });
+
         // We want to do two things:
         // * remove canonical blocks that are persisted
         // * remove forks whose root are below the finalized block
@@ -1280,6 +1292,7 @@ where
         let target_number =
             canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
 
+        debug!(target: "engine", ?last_persisted_number, ?canonical_head_number, ?target_number, ?current_hash, "Returning canonical blocks to persist");
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             if block.block.number <= last_persisted_number {
                 break;

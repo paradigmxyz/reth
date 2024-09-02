@@ -60,9 +60,9 @@ pub fn op_receipt_fields(
         op_fields.deposit_receipt_version = receipt.deposit_receipt_version;
     } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
         // always present
-        op_fields.l1_fee = optimism_tx_meta.l1_fee;
-        op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
-        op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
+        op_fields.l1_block_info.l1_fee = optimism_tx_meta.l1_fee;
+        op_fields.l1_block_info.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
+        op_fields.l1_block_info.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
             dg.saturating_add(
                 l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>(),
             )
@@ -72,16 +72,18 @@ pub fn op_receipt_fields(
         // None if ecotone is active
         if l1_block_info.l1_fee_overhead.is_some() {
             // only pre Ecotone
-            op_fields.l1_fee_scalar =
+            op_fields.l1_block_info.l1_fee_scalar =
                 Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
         } else {
             // base fee scalar is enabled post Ecotone
-            op_fields.l1_base_fee_scalar = Some(l1_block_info.l1_base_fee_scalar.saturating_to());
+            op_fields.l1_block_info.l1_base_fee_scalar =
+                Some(l1_block_info.l1_base_fee_scalar.saturating_to());
         }
 
         // 4844 post Ecotone
-        op_fields.l1_blob_base_fee = l1_block_info.l1_blob_base_fee.map(|v| v.saturating_to());
-        op_fields.l1_blob_base_fee_scalar =
+        op_fields.l1_block_info.l1_blob_base_fee =
+            l1_block_info.l1_blob_base_fee.map(|v| v.saturating_to());
+        op_fields.l1_block_info.l1_blob_base_fee_scalar =
             l1_block_info.l1_blob_base_fee_scalar.map(|v| v.saturating_to());
     }
 
