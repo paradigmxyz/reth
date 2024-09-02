@@ -55,4 +55,9 @@ pub trait ChainSpecParser: Clone + Send + Sync + 'static {
     fn parser() -> impl TypedValueParser<Value = Arc<Self::ChainSpec>> {
         Parser(std::marker::PhantomData::<Self>)
     }
+
+    /// Produces a help message for the chain spec argument.
+    fn help_messge() -> String {
+        format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", Self::SUPPORTED_CHAINS.join(", "))
+    }
 }
