@@ -21,7 +21,7 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypesWithEngine};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -58,7 +58,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ## Order
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
-/// example) and then proceeds to configure the core static types of the node: [`NodeTypes`], these
+/// example) and then proceeds to configure the core static types of the node: [`NodeTypesWithEngine`], these
 /// include the node's primitive types and the node's engine types.
 ///
 /// Next all stateful components of the node are configured, these include all the
@@ -125,10 +125,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// ## Internals
 ///
-/// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that all
+/// The node builder is fully type safe, it uses the [`NodeTypesWithEngine`] trait to enforce that all
 /// components are configured with the correct types. However the database types and with that the
 /// provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
+/// process, hence the database type is not part of the [`NodeTypesWithEngine`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the
 /// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
@@ -208,7 +208,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     {
         self.with_types_and_provider()
     }
@@ -218,7 +218,7 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
         P: FullProvider<DB, T::ChainSpec>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
@@ -266,7 +266,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -276,7 +276,7 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
         P: FullProvider<DB, T::ChainSpec>,
     {
         WithLaunchContext {
@@ -475,7 +475,7 @@ where
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypes<ChainSpec = ChainSpec>,
+    T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: NodeAddOns<
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
