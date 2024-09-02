@@ -202,7 +202,6 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
-        // TODO: implement methods which convert this value into an actual function
         let invalid_block_hook: Box<dyn InvalidBlockHook> = if let Some(ref hook) =
             ctx.node_config().debug.invalid_block_hook
         {
@@ -212,7 +211,7 @@ where
                     .into_iter()
                     .map(|hook| match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {
-                            Ok(Box::new(reth_invalid_block_hooks::witness_invalid_block_hook)
+                            Ok(Box::new(reth_invalid_block_hooks::witness)
                                 as Box<dyn InvalidBlockHook>)
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
