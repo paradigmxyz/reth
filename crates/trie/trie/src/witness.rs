@@ -128,12 +128,13 @@ where
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
+                let target = (hashed_address, Vec::from([B256::from_slice(&padded_key)]));
                 let mut proof = Proof::new(
                     self.trie_cursor_factory.clone(),
                     self.hashed_cursor_factory.clone(),
                 )
                 .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_targets(HashMap::from([(B256::from_slice(&padded_key), Vec::new())]))
+                .with_targets(HashMap::from([target]))
                 .storage_multiproof(hashed_address)?;
 
                 // The subtree only contains the proof for a single target.
