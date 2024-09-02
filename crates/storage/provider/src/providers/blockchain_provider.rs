@@ -1444,7 +1444,8 @@ mod tests {
     use crate::{
         providers::BlockchainProvider2,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        BlockWriter, CanonChainTracker, StaticFileWriter,
+        writer::UnifiedStorageWriter,
+        BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
     use itertools::Itertools;
     use rand::Rng;
@@ -1547,21 +1548,26 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let provider_rw = factory.provider_rw()?;
 
-        // Insert blocks and receipts into the database
+        // Insert blocks into the database
         for block in &database_blocks {
             provider_rw.insert_historical_block(
                 block.clone().seal_with_senders().expect("failed to seal block with senders"),
             )?;
-
-            // Insert the receipts into the database using the writer from the provider_rw
-            let mut writer =
-                provider_rw.static_file_provider().latest_writer(StaticFileSegment::Receipts)?;
-            let block_number = block.number as usize;
-            for receipt in receipts.get(block_number).unwrap() {
-                writer.append_receipt(block.number, receipt)?;
-            }
         }
-        provider_rw.commit()?;
+
+        // Insert receipts into the static files
+        UnifiedStorageWriter::new(
+            &provider_rw,
+            Some(factory.static_file_provider().latest_writer(StaticFileSegment::Receipts)?),
+        )
+        .append_receipts_from_blocks(
+            // The initial block number is required 
+            database_blocks.first().map(|b| b.number).unwrap_or_default(),
+            receipts.iter().map(|vec| vec.clone().into_iter().map(Some).collect::<Vec<_>>()),
+        )?;
+
+        // Commit to both storages: database and static files
+        UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
 
         let provider = BlockchainProvider2::new(factory)?;
 
