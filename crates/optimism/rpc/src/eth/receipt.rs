@@ -1,6 +1,6 @@
 //! Loads and formats OP receipt RPC response.   
 
-use op_alloy_rpc_types::OptimismTransactionReceiptFields;
+use op_alloy_rpc_types::{receipt::L1BlockInfo, OptimismTransactionReceiptFields};
 use reth_chainspec::{ChainSpec, OptimismHardforks};
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeCore};
@@ -12,7 +12,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::AnyTransactionReceipt;
-use revm::L1BlockInfo;
 
 use crate::{OpEthApi, OpEthApiError};
 
@@ -63,7 +62,7 @@ where
     pub fn build_op_receipt_meta(
         &self,
         tx: &TransactionSigned,
-        l1_block_info: L1BlockInfo,
+        l1_block_info: revm::L1BlockInfo,
         receipt: &Receipt,
     ) -> Result<OptimismTransactionReceiptFields, OpEthApiError> {
         Ok(OpReceiptFieldsBuilder::default()
@@ -110,12 +109,12 @@ impl OpReceiptFieldsBuilder {
         Self { l1_block_timestamp: block_timestamp, ..Default::default() }
     }
 
-    /// Applies [`L1BlockInfo`].
+    /// Applies [`L1BlockInfo`](revm::L1BlockInfo).
     pub fn l1_block_info(
         mut self,
         chain_spec: &ChainSpec,
         tx: &TransactionSigned,
-        l1_block_info: L1BlockInfo,
+        l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let envelope_buf = tx.envelope_encoded();
         let timestamp = self.l1_block_timestamp;
@@ -175,15 +174,17 @@ impl OpReceiptFieldsBuilder {
         } = self;
 
         OptimismTransactionReceiptFields {
-            l1_gas_price: l1_base_fee,
-            l1_gas_used,
-            l1_fee,
-            l1_fee_scalar,
+            l1_block_info: L1BlockInfo {
+                l1_gas_price: l1_base_fee,
+                l1_gas_used,
+                l1_fee,
+                l1_fee_scalar,
+                l1_base_fee_scalar,
+                l1_blob_base_fee,
+                l1_blob_base_fee_scalar,
+            },
             deposit_nonce,
             deposit_receipt_version,
-            l1_base_fee_scalar,
-            l1_blob_base_fee,
-            l1_blob_base_fee_scalar,
         }
     }
 }

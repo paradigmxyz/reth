@@ -264,6 +264,11 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
