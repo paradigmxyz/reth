@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::{helpers::TraceExt, EthApiTypes, RpcBlock, RpcTransaction};
+use reth_rpc_eth_api::{
+    helpers::{EthTransactions, TraceExt},
+    EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+};
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
@@ -15,7 +18,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, Rich,
+    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -40,7 +43,9 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>,
+    Eth: EthApiTypes<
+        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+    >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
@@ -57,20 +62,23 @@ where
             .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
-        Ok(BlockDetails::new(
-            Rich { inner: block, extra_info: Default::default() },
-            Default::default(),
-            U256::from(total_fees),
-        ))
+        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
     }
 }
 
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
-        + EthApiTypes<NetworkTypes: Network<TransactionResponse = reth_rpc_types::Transaction>>
-        + TraceExt
+    Eth: EthApiServer<
+            RpcTransaction<Eth::NetworkTypes>,
+            RpcBlock<Eth::NetworkTypes>,
+            RpcReceipt<Eth::NetworkTypes>,
+        > + EthApiTypes<
+            NetworkTypes: Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + TraceExt
+        + EthTransactions
         + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
@@ -80,7 +88,9 @@ where
 
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
-        self.eth.get_code(address, block_number.map(Into::into)).await.map(|code| !code.is_empty())
+        EthApiServer::get_code(&self.eth, address, block_number.map(Into::into))
+            .await
+            .map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -187,7 +197,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions> {
+    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_number.into(), true);
         let receipts = self.eth.block_receipts(block_number.into());
@@ -278,51 +288,11 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Option<TxHash>> {
-        // Check if the sender is a contract
-        if self.has_code(sender, None).await? {
-            return Ok(None)
-        }
-
-        let highest =
-            EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
-
-        // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
-        // exists.
-        if nonce >= highest {
-            return Ok(None)
-        }
-
-        // perform a binary search over the block range to find the block in which the sender's
-        // nonce reached the requested nonce.
-        let num = binary_search::<_, _, ErrorObjectOwned>(
-            1,
-            self.eth.block_number()?.saturating_to(),
-            |mid| {
-                async move {
-                    let mid_nonce =
-                        EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
-                            .await?
-                            .saturating_to::<u64>();
-
-                    // The `transaction_count` returns the `nonce` after the transaction was
-                    // executed, which is the state of the account after the block, and we need to
-                    // find the transaction whose nonce is the pre-state, so
-                    // need to compare with `nonce`(no equal).
-                    Ok(mid_nonce > nonce)
-                }
-            },
-        )
-        .await?;
-
-        let Some(BlockTransactions::Full(transactions)) =
-            self.eth.block_by_number(num.into(), true).await?.map(|block| block.transactions)
-        else {
-            return Err(EthApiError::UnknownBlockNumber.into());
-        };
-
-        Ok(transactions
-            .into_iter()
-            .find(|tx| *tx.from == *sender && tx.nonce == nonce)
+        Ok(self
+            .eth
+            .get_transaction_by_sender_and_nonce(sender, nonce, false)
+            .await
+            .map_err(|e| e.into())?
             .map(|tx| tx.hash))
     }
 
@@ -337,7 +307,9 @@ where
             self.eth.block_number()?.saturating_to(),
             |mid| {
                 Box::pin(async move {
-                    Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty())
+                    Ok(!EthApiServer::get_code(&self.eth, address, Some(mid.into()))
+                        .await?
+                        .is_empty())
                 })
             },
         )

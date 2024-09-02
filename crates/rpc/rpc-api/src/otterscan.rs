@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Header,
+    Header, Transaction, WithOtherFields,
 };
 
 /// Otterscan rpc interface.
@@ -61,7 +61,7 @@ pub trait Otterscan {
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions>;
+    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsBefore")]

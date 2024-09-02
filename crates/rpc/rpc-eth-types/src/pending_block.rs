@@ -5,10 +5,12 @@
 use std::time::Instant;
 
 use derive_more::Constructor;
-use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
+use reth_primitives::{
+    BlockId, BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader, B256,
+};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
-/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
+/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
 pub struct PendingBlockEnv {
     /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
@@ -79,11 +81,13 @@ impl PendingBlockEnvOrigin {
     }
 }
 
-/// In memory pending block for `pending` tag
+/// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
 pub struct PendingBlock {
-    /// The cached pending block
-    pub block: SealedBlockWithSenders,
-    /// Timestamp when the pending block is considered outdated
+    /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
+    /// The locally built pending block.
+    pub block: SealedBlockWithSenders,
+    /// The receipts for the pending block
+    pub receipts: Vec<Receipt>,
 }

@@ -10,6 +10,8 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
@@ -46,9 +48,9 @@ use tracing::*;
 /// This debug routine requires that the node is positioned at the block before the target.
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
@@ -77,7 +79,7 @@ pub struct Command {
     blobs_bundle_path: Option<PathBuf>,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
@@ -224,7 +226,7 @@ impl Command {
             #[cfg(feature = "optimism")]
             reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
-                reth_rpc_types::engine::OptimismPayloadAttributes {
+                reth_rpc_types::optimism::OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
                     transactions: None,
                     no_tx_pool: None,

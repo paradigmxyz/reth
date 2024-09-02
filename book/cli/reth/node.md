@@ -213,6 +213,11 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -521,6 +526,9 @@ Debug:
 
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
+
+      --debug.reorg-depth <REORG_DEPTH>
+          The reorg depth for chain reorgs
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location

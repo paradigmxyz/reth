@@ -54,6 +54,10 @@ pub struct DebugArgs {
     #[arg(long = "debug.reorg-frequency", help_heading = "Debug")]
     pub reorg_frequency: Option<usize>,
 
+    /// The reorg depth for chain reorgs.
+    #[arg(long = "debug.reorg-depth", requires = "reorg_frequency", help_heading = "Debug")]
+    pub reorg_depth: Option<usize>,
+
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.
