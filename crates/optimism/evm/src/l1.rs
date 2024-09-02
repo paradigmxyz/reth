@@ -117,14 +117,29 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
         })
     }
 
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or_else(|| {
-        OptimismBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee scalar".to_string(),
-        }
-    })?;
-    let l1_base_fee_scalar = U256::try_from_be_slice(&data[12..16]).ok_or_else(|| {
+    // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
+    //
+    // data layout assumed for Ecotone:
+    // offset type varname
+    // 0     <selector>
+    // 4     uint32 _basefeeScalar (start offset in this scope)
+    // 8     uint32 _blobBaseFeeScalar
+    // 12    uint64 _sequenceNumber,
+    // 20    uint64 _timestamp,
+    // 28    uint64 _l1BlockNumber
+    // 36    uint256 _basefee,
+    // 68    uint256 _blobBaseFee,
+    // 100   bytes32 _hash,
+    // 132   bytes32 _batcherHash,
+
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 base fee scalar".to_string(),
+        }
+    })?;
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or_else(|| {
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee scalar".to_string(),
         }
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
