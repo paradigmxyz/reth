@@ -35,7 +35,9 @@ use crate::{ConfigureEvm, FullNodeTypes};
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<NodeTypesWithEngine: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
+pub trait NodeComponents<NodeTypesWithEngine: FullNodeTypes>:
+    Clone + Unpin + Send + Sync + 'static
+{
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 
