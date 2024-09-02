@@ -42,11 +42,20 @@ telos = [
     "reth-chainspec/telos",
     "reth-basic-payload-builder/telos",
     "reth-payload-builder/telos",
+    "reth-node-builder/telos",
     "reth-provider/telos",
     "reth-rpc/telos",
     "reth-stages/telos",
     "reth-transaction-pool/telos",
     "reth-primitives/telos",
+    "reth-chainspec/telos",
+    "reth-basic-payload-builder/telos",
+    "reth-payload-builder/telos",
+    "reth-provider/telos",
+    "reth-rpc/telos",
+    "reth-transaction-pool/telos",
+    "reth-primitives/telos",
+    "reth-stages/telos",
 ]
 
 [dev-dependencies]
@@ -56,4 +65,5 @@ reth-e2e-test-utils.workspace = true
 eyre.workspace = true
 
 telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", branch = "master" }
+#telos-consensus-client = { path = "../../../../telos-consensus-client" }
 testcontainers = "0.21.1"

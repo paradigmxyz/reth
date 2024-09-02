@@ -88,3 +88,4 @@ tempfile.workspace = true
 [features]
 default = []
 test-utils = ["reth-db/test-utils"]
+telos = ["reth-blockchain-tree/telos"]
