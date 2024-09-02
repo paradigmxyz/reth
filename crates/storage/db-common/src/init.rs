@@ -8,8 +8,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    revm_primitives::Bytecode, Account, Address, Receipts, StaticFileSegment, StorageEntry, B256,
-    U256,
+    Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
     errors::provider::ProviderResult,
@@ -167,8 +166,9 @@ pub fn insert_state<'a, 'b, DB: Database>(
                     contracts.insert(hash, bytecode);
                     Some(hash)
                 }
-                Err(e) => {
-                    return Err(e);
+                Err(err) => {
+                    error!(%address, %err, "Failed to decode genesis bytecode.");
+                    return Err(DatabaseError::Other(err.to_string()).into());
                 }
             }
         } else {
