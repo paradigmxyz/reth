@@ -72,6 +72,7 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo hack check --workspace --exclude op-reth
+      - run: cargo check -p op-reth --features "optimism"
 
   msrv:
     name: MSRV / ${{ matrix.network }}
