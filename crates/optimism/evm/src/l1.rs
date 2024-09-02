@@ -43,13 +43,20 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
         })
     }
 
+    parse_l1_info(l1_info_tx_data)
+}
+
+/// Parses the input of the first transaction in the L2 block, into [`L1BlockInfo`].
+///
+/// Returns an error if data is incorrect length.
+pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
-    if l1_info_tx_data[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
-        parse_l1_info_tx_ecotone(l1_info_tx_data[4..].as_ref())
+    if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
+        parse_l1_info_tx_ecotone(input[4..].as_ref())
     } else {
-        parse_l1_info_tx_bedrock(l1_info_tx_data[4..].as_ref())
+        parse_l1_info_tx_bedrock(input[4..].as_ref())
     }
 }
 
