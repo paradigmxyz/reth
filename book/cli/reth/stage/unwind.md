@@ -226,6 +226,11 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 

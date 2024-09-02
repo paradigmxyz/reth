@@ -4,6 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_db_api::database::Database;
@@ -23,13 +25,13 @@ use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, error, info, trace};
 
-use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
+use crate::receipt_file_codec::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct ImportReceiptsOpCommand {
+pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -43,7 +45,7 @@ pub struct ImportReceiptsOpCommand {
     path: PathBuf,
 }
 
-impl ImportReceiptsOpCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -184,7 +186,7 @@ where
     let static_file_provider = provider_factory.static_file_provider();
 
     while let Some(file_client) =
-        reader.next_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
     {
         // create a new file client from chunk read from file
         let ReceiptFileClient {
@@ -216,9 +218,6 @@ where
             debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
-            // we don't count this as decoded so the partial import check later does not error if
-            // this branch is executed
-            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to
@@ -260,7 +259,7 @@ mod test {
         io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
     };
 
-    use crate::file_codec_ovm_receipt::test::{
+    use crate::receipt_file_codec::test::{
         HACK_RECEIPT_ENCODED_BLOCK_1, HACK_RECEIPT_ENCODED_BLOCK_2, HACK_RECEIPT_ENCODED_BLOCK_3,
     };
 

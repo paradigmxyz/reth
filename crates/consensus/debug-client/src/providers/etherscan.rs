@@ -63,7 +63,7 @@ impl BlockProvider for EtherscanBlockProvider {
                     continue
                 }
             };
-            let block_number = block.header.number.unwrap();
+            let block_number = block.header.number;
             if Some(block_number) == last_block_number {
                 continue;
             }

@@ -223,9 +223,6 @@ mod tests {
         // Ensure that the logs database is empty
         assert!(evm.context.evm.inner.db.logs.is_empty());
 
-        // Ensure that there are no valid authorizations in the EVM context
-        assert!(evm.context.evm.inner.valid_authorizations.is_empty());
-
         // Optimism in handler
         assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true });
 
@@ -371,9 +368,6 @@ mod tests {
 
         // Ensure that the logs database is empty
         assert!(evm.context.evm.inner.db.logs.is_empty());
-
-        // Ensure that there are no valid authorizations in the EVM context
-        assert!(evm.context.evm.inner.valid_authorizations.is_empty());
 
         // Default spec ID
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
