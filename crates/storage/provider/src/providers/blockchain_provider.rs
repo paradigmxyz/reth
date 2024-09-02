@@ -1561,7 +1561,7 @@ mod tests {
             Some(factory.static_file_provider().latest_writer(StaticFileSegment::Receipts)?),
         )
         .append_receipts_from_blocks(
-            // The initial block number is required 
+            // The initial block number is required
             database_blocks.first().map(|b| b.number).unwrap_or_default(),
             receipts.iter().map(|vec| vec.clone().into_iter().map(Some).collect::<Vec<_>>()),
         )?;
@@ -3055,7 +3055,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3064,12 +3064,18 @@ mod tests {
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
 
+        assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
+        assert!(!provider
+            .receipts_by_number_or_tag(database_block.number.into())?
+            .unwrap()
+            .is_empty());
+
         assert_eq!(
-            provider.receipts_by_block_id(block_number.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_number.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_block_id(block_hash.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_hash.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
 
@@ -3077,11 +3083,11 @@ mod tests {
         let block_hash = in_memory_block.header.hash();
 
         assert_eq!(
-            provider.receipts_by_block_id(block_number.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_number.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_block_id(block_hash.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_hash.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
 
@@ -3095,7 +3101,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3105,20 +3111,26 @@ mod tests {
         let safe_block = in_memory_blocks.get(in_memory_block_count - 2).unwrap().clone();
         let finalized_block = in_memory_blocks.get(in_memory_block_count - 3).unwrap().clone();
 
+        assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
+        assert!(!provider
+            .receipts_by_number_or_tag(database_block.number.into())?
+            .unwrap()
+            .is_empty());
+
         assert_eq!(
-            provider.receipts_by_number_or_tag(database_block.number.into())?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(database_block.number.into())?.unwrap(),
             receipts.get(database_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap(),
             receipts.get(canonical_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Safe)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Safe)?.unwrap(),
             receipts.get(safe_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Finalized)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Finalized)?.unwrap(),
             receipts.get(finalized_block.number as usize).unwrap().clone()
         );
 
