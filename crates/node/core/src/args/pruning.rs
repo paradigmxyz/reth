@@ -1,12 +1,12 @@
 //! Pruning and full node arguments
 
+use crate::args::error::ReceiptsLogError;
 use clap::Args;
 use reth_chainspec::ChainSpec;
 use reth_config::config::PruneConfig;
 use reth_primitives::{Address, BlockNumber};
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
-use crate::args::error::ReceiptsLogError;
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -24,10 +24,12 @@ pub struct PruningArgs {
     /// Prunes all sender recovery data.
     #[arg(long = "prune.senderrecovery.full", conflicts_with_all = &["sender_recovery_distance", "sender_recovery_before"])]
     pub sender_recovery_full: bool,
-    /// Prune sender recovery data before the `head-N` block number. In other words, keep last N + 1 blocks.
+    /// Prune sender recovery data before the `head-N` block number. In other words, keep last N +
+    /// 1 blocks.
     #[arg(long = "prune.senderrecovery.distance", value_name = "BLOCKS", conflicts_with_all = &["sender_recovery_full", "sender_recovery_before"])]
     pub sender_recovery_distance: Option<u64>,
-    /// Prune sender recovery data before the specified block number. The specified block number is not pruned.
+    /// Prune sender recovery data before the specified block number. The specified block number is
+    /// not pruned.
     #[arg(long = "prune.senderrecovery.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["sender_recovery_full", "sender_recovery_distance"])]
     pub sender_recovery_before: Option<BlockNumber>,
 
@@ -35,10 +37,12 @@ pub struct PruningArgs {
     /// Prunes all transaction lookup data.
     #[arg(long = "prune.transactionlookup.full", conflicts_with_all = &["transaction_lookup_distance", "transaction_lookup_before"])]
     pub transaction_lookup_full: bool,
-    /// Prune transaction lookup data before the `head-N` block number. In other words, keep last N + 1 blocks.
+    /// Prune transaction lookup data before the `head-N` block number. In other words, keep last N
+    /// + 1 blocks.
     #[arg(long = "prune.transactionlookup.distance", value_name = "BLOCKS", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_before"])]
     pub transaction_lookup_distance: Option<u64>,
-    /// Prune transaction lookup data before the specified block number. The specified block number is not pruned.
+    /// Prune transaction lookup data before the specified block number. The specified block number
+    /// is not pruned.
     #[arg(long = "prune.transactionlookup.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_distance"])]
     pub transaction_lookup_before: Option<BlockNumber>,
 
@@ -60,7 +64,8 @@ pub struct PruningArgs {
     /// Prune account before the `head-N` block number. In other words, keep last N + 1 blocks.
     #[arg(long = "prune.accounthistory.distance", value_name = "BLOCKS", conflicts_with_all = &["account_history_full", "account_history_before"])]
     pub account_history_distance: Option<u64>,
-    /// Prune account history before the specified block number. The specified block number is not pruned.
+    /// Prune account history before the specified block number. The specified block number is not
+    /// pruned.
     #[arg(long = "prune.accounthistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["account_history_full", "account_history_distance"])]
     pub account_history_before: Option<BlockNumber>,
 
@@ -68,10 +73,12 @@ pub struct PruningArgs {
     /// Prunes all storage history data.
     #[arg(long = "prune.storagehistory.full", conflicts_with_all = &["storage_history_distance", "storage_history_before"])]
     pub storage_history_full: bool,
-    /// Prune storage history before the `head-N` block number. In other words, keep last N + 1 blocks.
+    /// Prune storage history before the `head-N` block number. In other words, keep last N + 1
+    /// blocks.
     #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["storage_history_full", "storage_history_before"])]
     pub storage_history_distance: Option<u64>,
-    /// Prune storage history before the specified block number. The specified block number is not pruned.
+    /// Prune storage history before the specified block number. The specified block number is not
+    /// pruned.
     #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
     pub storage_history_before: Option<BlockNumber>,
 
@@ -138,7 +145,6 @@ impl PruningArgs {
             match self.parse_receipts_log_filter() {
                 Ok(filter_config) => config.segments.receipts_log_filter = filter_config,
                 Err(e) => {
-                    // TODO (garwah): Confirm how this should be handled.
                     eprintln!("Error parsing receipts log filter: {}", e);
                 }
             }
@@ -215,16 +221,16 @@ impl PruningArgs {
                 return Err(ReceiptsLogError::InvalidFilterFormat(filter.clone()));
             }
             // Parse the address
-            let address = parts[0].parse::<Address>()
+            let address = parts[0]
+                .parse::<Address>()
                 .map_err(|_| ReceiptsLogError::InvalidAddress(parts[0].to_string()))?;
 
             // Parse the prune mode
             let prune_mode = match parts[1] {
                 "full" => PruneMode::Full,
                 s if s.starts_with("distance") => {
-                    let distance = parts[2]
-                        .parse::<u64>()
-                        .map_err(ReceiptsLogError::InvalidDistance)?;
+                    let distance =
+                        parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidDistance)?;
                     PruneMode::Distance(distance)
                 }
                 s if s.starts_with("before") => {
@@ -253,12 +259,9 @@ mod tests {
         args: T,
     }
 
-    /// Helper function for constructing `PruningArgs` with a ReceiptsLogFilter
+    /// Helper function for constructing `PruningArgs` with a `ReceiptsLogFilter`
     fn create_pruning_args(filters: Vec<String>) -> PruningArgs {
-        PruningArgs {
-            receipts_log_filter: filters,
-            ..Default::default()
-        }
+        PruningArgs { receipts_log_filter: filters, ..Default::default() }
     }
 
     #[test]
@@ -311,21 +314,27 @@ mod tests {
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_prune_mode() {
-        let args = create_pruning_args(vec!["0x0000000000000000000000000000000000000000:invalid_mode".to_string()]);
+        let args = create_pruning_args(vec![
+            "0x0000000000000000000000000000000000000000:invalid_mode".to_string(),
+        ]);
         let result = args.parse_receipts_log_filter();
         assert!(matches!(result, Err(ReceiptsLogError::InvalidPruneMode(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_distance() {
-        let args = create_pruning_args(vec!["0x0000000000000000000000000000000000000000:distance:invalid_distance".to_string()]);
+        let args = create_pruning_args(vec![
+            "0x0000000000000000000000000000000000000000:distance:invalid_distance".to_string(),
+        ]);
         let result = args.parse_receipts_log_filter();
         assert!(matches!(result, Err(ReceiptsLogError::InvalidDistance(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_block_number() {
-        let args = create_pruning_args(vec!["0x0000000000000000000000000000000000000000:before:invalid_block".to_string()]);
+        let args = create_pruning_args(vec![
+            "0x0000000000000000000000000000000000000000:before:invalid_block".to_string(),
+        ]);
         let result = args.parse_receipts_log_filter();
         assert!(matches!(result, Err(ReceiptsLogError::InvalidBlockNumber(_))));
     }
