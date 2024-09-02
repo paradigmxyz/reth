@@ -613,7 +613,7 @@ where
         loop {
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
-                    debug!(target: "engine", "received new engine message");
+                    debug!(target: "engine", ?msg, "received new engine message");
                     if let Err(fatal) = self.on_engine_message(msg) {
                         error!(target: "engine", %fatal, "insert block fatal error");
                         return
