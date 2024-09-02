@@ -6,7 +6,7 @@ use reth_evm_ethereum::revm_spec_by_timestamp_after_merge;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, Address, BlobTransactionSidecar, EthereumHardfork, Header,
-    SealedBlock, Withdrawals, B256, U256,
+    Receipt, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -35,14 +35,21 @@ pub struct EthBuiltPayload {
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    /// The receipts of the block
+    pub(crate) receipts: Vec<Receipt>,
 }
 
 // === impl BuiltPayload ===
 
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub const fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self { id, block, fees, sidecars: Vec::new() }
+    pub const fn new(
+        id: PayloadId,
+        block: SealedBlock,
+        fees: U256,
+        receipts: Vec<Receipt>,
+    ) -> Self {
+        Self { id, block, fees, sidecars: Vec::new(), receipts }
     }
 
     /// Returns the identifier of the payload.
@@ -79,6 +86,10 @@ impl BuiltPayload for EthBuiltPayload {
     fn fees(&self) -> U256 {
         self.fees
     }
+
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
+    }
 }
 
 impl<'a> BuiltPayload for &'a EthBuiltPayload {
@@ -88,6 +99,10 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 
     fn fees(&self) -> U256 {
         (**self).fees()
+    }
+
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 

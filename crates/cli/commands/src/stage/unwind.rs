@@ -3,6 +3,8 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -28,9 +30,9 @@ use tracing::info;
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -44,7 +46,7 @@ pub struct Command {
     offline: bool,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
@@ -207,14 +209,28 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
+    use reth_node_core::args::utils::DefaultChainSpecParser;
+
     use super::*;
 
     #[test]
     fn parse_unwind() {
-        let cmd = Command::parse_from(["reth", "--datadir", "dir", "to-block", "100"]);
+        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+            "reth",
+            "--datadir",
+            "dir",
+            "to-block",
+            "100",
+        ]);
         assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
 
-        let cmd = Command::parse_from(["reth", "--datadir", "dir", "num-blocks", "100"]);
+        let cmd = Command::<DefaultChainSpecParser>::parse_from([
+            "reth",
+            "--datadir",
+            "dir",
+            "num-blocks",
+            "100",
+        ]);
         assert_eq!(cmd.command, Subcommands::NumBlocks { amount: 100 });
     }
 }

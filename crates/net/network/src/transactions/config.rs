@@ -6,7 +6,8 @@ use super::{
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::transactions::constants::tx_fetcher::{
-    DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
+    DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
+    DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
 
 /// Configuration for managing transactions within the network.
@@ -46,6 +47,11 @@ pub struct TransactionFetcherConfig {
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) response on packing a
     /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request with hashes.
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    /// Max capacity of the cache of transaction hashes, for transactions that weren't yet fetched.
+    /// A transaction is pending fetch if its hash didn't fit into a
+    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) yet, or it wasn't returned
+    /// upon request to peers.
+    pub max_capacity_cache_txns_pending_fetch: u32,
 }
 
 impl Default for TransactionFetcherConfig {
@@ -56,7 +62,8 @@ impl Default for TransactionFetcherConfig {
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
-                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ
+                DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+                max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
         }
     }
 }
