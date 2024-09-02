@@ -29,7 +29,7 @@ async fn start_ship() -> ContainerAsync<GenericImage> {
     //   and should be the tag for linux/amd64
     let container: ContainerAsync<GenericImage> = GenericImage::new(
         "ghcr.io/telosnetwork/testcontainer-nodeos-evm",
-        "v0.1.4@sha256:a8dc857e46404d74b286f8c8d8646354ca6674daaaf9eb6f972966052c95eb4a",
+        "v0.1.5@sha256:d66a3d5347a31be0419385f1326b3f122b124fc95d5365a464f90626a451cbeb",
     )
     .with_exposed_port(Tcp(8888))
     .with_exposed_port(Tcp(18999))
@@ -64,6 +64,15 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
         ChainSpecBuilder::default()
             .chain(TEVMTESTNET.chain)
             .genesis(TEVMTESTNET.genesis.clone())
+            .frontier_activated()
+            .homestead_activated()
+            .tangerine_whistle_activated()
+            .spurious_dragon_activated()
+            .byzantium_activated()
+            .constantinople_activated()
+            .petersburg_activated()
+            .istanbul_activated()
+            .berlin_activated()
             .build(),
     );
 
@@ -90,12 +99,13 @@ async fn start_consensus(
         jwt_secret: reth_handle.jwt_secret,
         ship_endpoint: format!("ws://localhost:{ship_port}"),
         chain_endpoint: format!("http://localhost:{chain_port}"),
-        batch_size: 5,
-        block_delta: None,
+        batch_size: 1,
+        block_delta: Some(57),
         prev_hash: "b25034033c9ca7a40e879ddcc29cf69071a22df06688b5fe8cc2d68b4e0528f9".to_string(),
         validate_hash: None,
         start_block: 1,
-        stop_block: Some(60),
+        // TODO: Determine a good stop block and test it here
+        stop_block: None,
     };
 
     let mut client_under_test = ConsensusClient::new(config).await?;
@@ -133,9 +143,10 @@ async fn testing_chain_sync() {
         .unwrap();
 
     let execution_port = node_handle.node.auth_server_handle().local_addr().port();
+    let rpc_port = node_handle.node.rpc_server_handles.rpc.http_local_addr().unwrap().port();
     let reth_handle = TelosRethNodeHandle { execution_port, jwt_secret };
     _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
-    info!("Started Reth!");
+    info!("Started Reth on RPC port {}!", rpc_port);
 
     if let Err(error) = start_consensus(reth_handle, ship_port, chain_port).await {
         panic!("Error with consensus client: {error:?}");
