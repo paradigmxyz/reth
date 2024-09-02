@@ -160,10 +160,17 @@ pub fn insert_state<'a, 'b, DB: Database>(
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            let bytecode = Bytecode::new_raw(code.clone());
-            let hash = bytecode.hash_slow();
-            contracts.insert(hash, bytecode);
-            Some(hash)
+            match Bytecode::new_raw_checked(code.clone()) {
+                Ok(bytecode) => {
+                    let hash = bytecode.hash_slow();
+                    contracts.insert(hash, bytecode);
+                    Some(hash)
+                }
+                Err(err) => {
+                    error!(%address, %err, "Failed to decode genesis bytecode.");
+                    return Err(DatabaseError::Other(err.to_string()).into());
+                }
+            }
         } else {
             None
         };

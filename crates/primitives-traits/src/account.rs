@@ -5,7 +5,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
 use reth_codecs::{add_arbitrary_tests, Compact};
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
+use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
@@ -58,6 +58,14 @@ impl Bytecode {
     /// Panics if bytecode is EOF and has incorrect format.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
+    }
+
+    /// Creates a new raw [`revm_primitives::Bytecode`].
+    ///
+    /// Returns an error on incorrect Bytecode format.
+    #[inline]
+    pub fn new_raw_checked(bytecode: Bytes) -> Result<Self, BytecodeDecodeError> {
+        Ok(Self(RevmBytecode::new_raw(bytecode)))
     }
 }
 
