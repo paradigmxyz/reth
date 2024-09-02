@@ -43,13 +43,20 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
         })
     }
 
+    parse_l1_info(l1_info_tx_data)
+}
+
+/// Parses the data of the first transaction in the block, into [`L1BlockInfo`].
+///
+/// Returns an error if data is incorrect length.
+pub fn parse_l1_info(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
-    if l1_info_tx_data[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
-        parse_l1_info_tx_ecotone(l1_info_tx_data[4..].as_ref())
+    if data[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
+        parse_l1_info_tx_ecotone(data[4..].as_ref())
     } else {
-        parse_l1_info_tx_bedrock(l1_info_tx_data[4..].as_ref())
+        parse_l1_info_tx_bedrock(data[4..].as_ref())
     }
 }
 
@@ -90,7 +97,6 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
     l1block.l1_fee_overhead = Some(l1_fee_overhead);
-    l1block.l1_base_fee_scalar = l1_fee_scalar;
 
     Ok(l1block)
 }
@@ -116,15 +122,27 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
             message: "unexpected l1 block info tx calldata length found".to_string(),
         })
     }
+    // data layout assumed for Ecotone:
+    // offset type varname
+    // 0     <selector>
+    // 4     uint32 _basefeeScalar (start offset in this scope)
+    // 8     uint32 _blobBaseFeeScalar
+    // 12    uint64 _sequenceNumber,
+    // 20    uint64 _timestamp,
+    // 28    uint64 _l1BlockNumber
+    // 36    uint256 _basefee,
+    // 68    uint256 _blobBaseFee,
+    // 100   bytes32 _hash,
+    // 132   bytes32 _batcherHash,
 
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or_else(|| {
-        OptimismBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee scalar".to_string(),
-        }
-    })?;
-    let l1_base_fee_scalar = U256::try_from_be_slice(&data[12..16]).ok_or_else(|| {
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 base fee scalar".to_string(),
+        }
+    })?;
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or_else(|| {
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee scalar".to_string(),
         }
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
@@ -318,5 +336,23 @@ mod tests {
         assert_eq!(l1_info.l1_blob_base_fee, Some(U256::from(22_380_075_395u64)));
         assert_eq!(l1_info.l1_blob_base_fee_scalar, Some(U256::from(0)));
         assert_eq!(l1_info.l1_fee_overhead, None);
+    }
+
+    #[test]
+    fn parse_l1_info_fjord() {
+        // L1 block info for OP mainnet block 124665056
+        let l1_base_fee = U256::from(1055991687);
+        let l1_base_fee_scalar = U256::from(5227);
+        let l1_blob_base_fee = Some(U256::from(1));
+        let l1_blob_base_fee_scalar = Some(U256::from(1014213));
+
+        const DATA: &[u8] = &hex!("440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
+
+        let l1_block_info = parse_l1_info(DATA).unwrap();
+
+        assert_eq!(l1_block_info.l1_base_fee, l1_base_fee);
+        assert_eq!(l1_block_info.l1_base_fee_scalar, l1_base_fee_scalar);
+        assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
     }
 }

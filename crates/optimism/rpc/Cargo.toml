@@ -49,7 +49,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-optimism-chainspec.workspace = true 
+reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = []
