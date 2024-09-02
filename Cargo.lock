@@ -6363,6 +6363,7 @@ dependencies = [
  "itertools 0.13.0",
  "proptest",
  "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "ratatui",
  "reth-beacon-consensus",
  "reth-chainspec",
