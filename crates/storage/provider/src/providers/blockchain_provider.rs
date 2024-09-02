@@ -175,7 +175,7 @@ where
                 }
             }
 
-            let current_range_head_hash = get_head_hash(range.end().clone());
+            let current_range_head_hash = get_head_hash(*range.end());
             if current_range_head_hash != initial_range_head_hash {
                 items.clear();
                 initial_range_head_hash = current_range_head_hash;
@@ -385,7 +385,7 @@ where
             |end| {
                 self.canonical_in_memory_state
                     .state_by_number(end)
-                    .map(|block_state| block_state.block().block().header.hash().clone())
+                    .map(|block_state| block_state.block().block().header.hash())
             },
             |_| true,
         )
@@ -408,7 +408,7 @@ where
             |end| {
                 self.canonical_in_memory_state
                     .state_by_number(end)
-                    .map(|block_state| block_state.block().block().header.hash().clone())
+                    .map(|block_state| block_state.block().block().header.hash())
             },
             predicate,
         )
@@ -656,7 +656,7 @@ where
             |end| {
                 self.canonical_in_memory_state
                     .state_by_number(end)
-                    .map(|block_state| block_state.block().block().header.hash().clone())
+                    .map(|block_state| block_state.block().block().header.hash())
             },
             |_| true,
         )
@@ -679,7 +679,7 @@ where
             |num| {
                 self.canonical_in_memory_state
                     .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.hash().clone())
+                    .map(|block_state| block_state.block().block().header.hash())
             },
             |_| true,
         )
@@ -702,7 +702,7 @@ where
             |num| {
                 self.canonical_in_memory_state
                     .state_by_number(num)
-                    .map(|block_state| block_state.block().block().header.hash().clone())
+                    .map(|block_state| block_state.block().block().header.hash())
             },
             |_| true,
         )
