@@ -6,16 +6,16 @@ use std::{
     path::Path,
 };
 
-/// Performs consistency checks on the [`NippyJar`] file
+/// Performs consistency checks or heals on the [`NippyJar`] file
 /// * Is the offsets file size expected?
 /// * Is the data file size expected?
 ///
 /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
 /// to be updated when something is written, as by the `NippyJarWriter::commit()` function shows.
 ///
-/// **For read-only: use `check_consistency` method.**
+/// **For checks (read-only) use `check_consistency` method.**
 ///
-/// **For read-write: use `ensure_consistency`method.**
+/// **For heals (read-write) use `ensure_consistency` method.**
 #[derive(Debug)]
 pub struct NippyJarChecker<H: NippyJarHeader = ()> {
     /// Associated [`NippyJar`], containing all necessary configurations for data
