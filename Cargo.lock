@@ -5105,6 +5105,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-reth"
+version = "1.0.6"
+dependencies = [
+ "clap",
+ "reth-cli-util",
+ "reth-node-builder",
+ "reth-node-optimism",
+ "reth-optimism-cli",
+ "reth-optimism-rpc",
+ "reth-provider",
+ "tikv-jemallocator",
+]
+
+[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6040,13 +6054,8 @@ dependencies = [
  "aquamarine",
  "backon",
  "clap",
- "discv5",
  "eyre",
- "fdlimit",
  "futures",
- "itertools 0.13.0",
- "libc",
- "metrics-process",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -6060,7 +6069,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-db",
  "reth-db-api",
- "reth-db-common",
  "reth-discv4",
  "reth-downloaders",
  "reth-engine-util",
@@ -6079,10 +6087,6 @@ dependencies = [
  "reth-node-ethereum",
  "reth-node-events",
  "reth-node-metrics",
- "reth-node-optimism",
- "reth-optimism-cli",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -6098,21 +6102,17 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
- "reth-stages-api",
  "reth-static-file",
- "reth-static-file-types",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
- "serde",
  "serde_json",
  "similar-asserts",
  "tempfile",
  "tikv-jemallocator",
  "tokio",
- "toml",
  "tracing",
 ]
 
@@ -7778,6 +7778,7 @@ dependencies = [
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
+ "reth-cli-runner",
  "reth-config",
  "reth-consensus",
  "reth-db",
@@ -7788,6 +7789,7 @@ dependencies = [
  "reth-evm-optimism",
  "reth-execution-types",
  "reth-network-p2p",
+ "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
  "reth-optimism-chainspec",
@@ -7799,6 +7801,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
+ "reth-tracing",
  "tempfile",
  "tokio",
  "tokio-util",
