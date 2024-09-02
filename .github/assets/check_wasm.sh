@@ -66,17 +66,18 @@ exclude_crates=(
   reth-stages
   reth-storage-errors
   # The following are not supposed to be working
-  reth # all of the crates below 
+  reth # all of the crates below
   reth-db # mdbx
+  reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
   reth-nippy-jar # sucds
   reth-provider # reth-db, reth-nippy-jar
   reth-prune # reth-db
   reth-stages-api # reth-provider, reth-prune
-  reth-static-file # reth-nippy-jar 
+  reth-static-file # reth-nippy-jar
   reth-transaction-pool # c-kzg
-  reth-trie-db # reth-db 
+  reth-trie-db # reth-db
   reth-trie-parallel # reth-db
 )
 
