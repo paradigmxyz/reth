@@ -2,21 +2,19 @@ use antelope::api::client::{APIClient, DefaultProvider};
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig},
-    tasks::{TaskManager},
+    tasks::TaskManager,
 };
 use reth_chainspec::{ChainSpecBuilder, TEVMTESTNET};
 use reth_e2e_test_utils::node::NodeTestContext;
-use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Genesis, B256, b256};
+use reth_node_telos::{TelosArgs, TelosNode};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use telos_consensus_client::client::{ConsensusClient, Error};
+use telos_consensus_client::client::ConsensusClient;
 use telos_consensus_client::config::AppConfig;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tracing::info;
-use reth_node_telos::{TelosArgs, TelosNode};
 
 struct TelosRethNodeHandle {
     execution_port: u16,
@@ -80,7 +78,11 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
     Ok((node_config, jwt))
 }
 
-async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain_port: u16) -> eyre::Result<(), Error> {
+async fn start_consensus(
+    reth_handle: TelosRethNodeHandle,
+    ship_port: u16,
+    chain_port: u16,
+) -> eyre::Result<()> {
     let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: 41,
@@ -96,8 +98,8 @@ async fn start_consensus(reth_handle: TelosRethNodeHandle, ship_port: u16, chain
         stop_block: Some(60),
     };
 
-    let mut client_under_test = ConsensusClient::new(config).await;
-    client_under_test.run().await
+    let mut client_under_test = ConsensusClient::new(config).await?;
+    Ok(client_under_test.run().await?)
 }
 
 #[tokio::test]
@@ -136,6 +138,6 @@ async fn testing_chain_sync() {
     info!("Started Reth!");
 
     if let Err(error) = start_consensus(reth_handle, ship_port, chain_port).await {
-	panic!("Error with consensus client: {error:?}");
+        panic!("Error with consensus client: {error:?}");
     }
 }
