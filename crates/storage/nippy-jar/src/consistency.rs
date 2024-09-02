@@ -34,17 +34,17 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
     /// It will throw an error if the [`NippyJar`] is in a inconsistent state.
     pub fn check_consistency(&mut self) -> Result<(), NippyJarError> {
-        self.consistency_guard(ConsistencyFailStrategy::ThrowError)
+        self.handle_consistency(ConsistencyFailStrategy::ThrowError)
     }
 
     /// It will attempt to heal if the [`NippyJar`] is in a inconsistent state.
     ///
     /// **ATTENTION**: disk commit should be handled externally by consuming `Self`
     pub fn ensure_consistency(&mut self) -> Result<(), NippyJarError> {
-        self.consistency_guard(ConsistencyFailStrategy::Heal)
+        self.handle_consistency(ConsistencyFailStrategy::Heal)
     }
 
-    fn consistency_guard(&mut self, mode: ConsistencyFailStrategy) -> Result<(), NippyJarError> {
+    fn handle_consistency(&mut self, mode: ConsistencyFailStrategy) -> Result<(), NippyJarError> {
         self.load_files(mode)?;
         let reader = self.jar.open_data_reader()?;
 
@@ -122,7 +122,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
-                        self.consistency_guard(ConsistencyFailStrategy::Heal)?;
+                        self.handle_consistency(ConsistencyFailStrategy::Heal)?;
                         break
                     }
                 }
