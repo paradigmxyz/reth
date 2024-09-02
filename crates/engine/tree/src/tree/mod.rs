@@ -27,8 +27,9 @@ use reth_primitives::{
     SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
-    StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
+    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -40,6 +41,7 @@ use reth_rpc_types::{
 };
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -518,7 +520,8 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTr
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
@@ -2167,8 +2170,47 @@ where
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
         let root_time = Instant::now();
-        let (state_root, trie_output) =
-            state_provider.state_root_with_updates(hashed_state.clone())?;
+        let mut state_root_result = None;
+        let persistence_in_progress = self.persistence_state.in_progress();
+        if !persistence_in_progress {
+            // NOTE: there is a possibility of a race condition here if some data was persisted. ???
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let mut state = HashedPostState::default();
+            let mut trie_nodes = TrieUpdates::default();
+            if let Some((historical, blocks)) =
+                self.state.tree_state.blocks_by_hash(block.parent_hash)
+            {
+                state.extend(consistent_view.revert_state(historical)?);
+                for block in blocks.iter().rev() {
+                    state.extend_ref(block.hashed_state.as_ref());
+                    trie_nodes.extend_ref(block.trie.as_ref());
+                }
+            }
+
+            state_root_result = match ParallelStateRoot::new(consistent_view, hashed_state.clone())
+                .incremental_root_with_updates()
+                .map_err(ProviderError::from)
+            {
+                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                Err(ProviderError::ConsistentView(error)) => {
+                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            };
+        }
+
+        if state_root_result.is_none() {
+            state_root_result = Some(state_provider.state_root_with_updates(hashed_state.clone())?);
+        }
+        let (state_root, trie_output) = match state_root_result {
+            Some(result) => result,
+            None => {
+                debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+                state_provider.state_root_with_updates(hashed_state.clone())?
+            }
+        };
+
         if state_root != block.state_root {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
