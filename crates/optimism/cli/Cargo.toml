@@ -37,6 +37,10 @@ reth-errors.workspace = true
 reth-config.workspace = true
 reth-evm-optimism.workspace = true
 reth-cli.workspace = true
+reth-cli-runner.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+
 
 # eth
 alloy-primitives.workspace = true
