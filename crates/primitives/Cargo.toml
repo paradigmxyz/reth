@@ -33,6 +33,7 @@ alloy-eips = { workspace = true, features = ["serde"] }
 
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
+op-alloy-consensus = { workspace = true, optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
@@ -98,6 +99,7 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "reth-codec",
+    "op-alloy-consensus/arbitrary",
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "alloy-consensus/kzg"]
@@ -106,6 +108,7 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
     "dep:reth-optimism-chainspec",
+    "dep:op-alloy-consensus",
 ]
 alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types", "dep:alloy-serde", "dep:op-alloy-rpc-types"]
 test-utils = ["reth-primitives-traits/test-utils"]

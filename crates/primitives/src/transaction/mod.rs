@@ -250,7 +250,7 @@ impl Transaction {
             Self::Eip4844(_) => TxType::Eip4844,
             Self::Eip7702(_) => TxType::Eip7702,
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
+            Self::Deposit(_) => TxType::Deposit,
         }
     }
 
@@ -315,7 +315,7 @@ impl Transaction {
             Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit as u64,
             Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
+            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit as u64,
         }
     }
 
@@ -569,7 +569,7 @@ impl Transaction {
             Self::Eip4844(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip7702(tx) => tx.gas_limit = gas_limit.into(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.gas_limit = gas_limit,
+            Self::Deposit(tx) => tx.gas_limit = gas_limit.into(),
         }
     }
 
@@ -1243,7 +1243,10 @@ impl TransactionSigned {
                 true,
             ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
         }
     }
 
@@ -1370,7 +1373,7 @@ impl TransactionSigned {
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_fields(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_fields(data)?),
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_fields(data)?),
             TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
         };
 

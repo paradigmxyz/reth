@@ -3,6 +3,8 @@ mod eip2930;
 mod eip4844;
 mod eip7702;
 mod legacy;
+#[cfg(feature = "optimism")]
+mod optimism;
 
 #[cfg(test)]
 mod tests {
