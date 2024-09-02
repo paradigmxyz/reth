@@ -48,6 +48,7 @@ use crate::{
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB>>;
 
+#[allow(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///
@@ -120,7 +121,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// The following diagram shows the flow of the node builder from CLI to a launched node.
 ///
-/// `include_mmd!("docs/mermaid/builder.mmd`")
+/// include_mmd!("docs/mermaid/builder.mmd")
 ///
 /// ## Internals
 ///

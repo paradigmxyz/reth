@@ -159,7 +159,12 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Eip1559(tx)
             }
-            TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
+            TxType::Eip4844 => {
+                let mut tx = TxEip4844::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip4844(tx)
+            }
+
             TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
@@ -238,7 +243,7 @@ impl Transaction {
             Self::Legacy(_) => TxType::Legacy,
             Self::Eip2930(_) => TxType::Eip2930,
             Self::Eip1559(_) => TxType::Eip1559,
-            Self::Eip4844(blob_tx) => blob_tx.tx_type(),
+            Self::Eip4844(_) => TxType::Eip4844,
             Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
@@ -302,7 +307,7 @@ impl Transaction {
         match self {
             Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
             Self::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit as u64,
             Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
             Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
@@ -536,7 +541,11 @@ impl Transaction {
                 out,
                 with_header,
             ),
-            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
             Self::Eip7702(set_code_tx) => {
                 set_code_tx.encode_with_signature(signature, out, with_header)
             }
@@ -551,7 +560,7 @@ impl Transaction {
             Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip2930(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_limit = gas_limit,
@@ -1219,7 +1228,10 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 true,
             ),
-            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
+            Transaction::Eip4844(blob_tx) => blob_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature(&self.signature)
             }
@@ -1348,7 +1360,7 @@ impl TransactionSigned {
         let transaction = match tx_type {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_fields(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_fields(data)?),
-            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_fields(data)?),
             TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
             #[cfg(feature = "optimism")]
             TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
@@ -1427,9 +1439,10 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 false,
             ),
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.payload_len_with_signature_without_header(&self.signature)
-            }
+            Transaction::Eip4844(blob_tx) => blob_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             Transaction::Eip7702(set_code_tx) => {
                 set_code_tx.payload_len_with_signature_without_header(&self.signature)
             }
@@ -1531,11 +1544,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
-
-        if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
-            tx_eip_4844.placeholder =
-                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]
