@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct TxEip7702 {
+pub(crate) struct TxEip7702 {
     chain_id: ChainId,
     nonce: u64,
     gas_limit: u64,
