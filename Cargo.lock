@@ -7527,7 +7527,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7543,7 +7543,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#27e7cdc20d9f472f9937e1d49087393dca52abee"
+source = "git+https://github.com/telosnetwork/telos-reth.git#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7570,7 +7570,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -7581,7 +7581,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#27e7cdc20d9f472f9937e1d49087393dca52abee"
+source = "git+https://github.com/telosnetwork/telos-reth.git#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -8159,7 +8159,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-forks"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
@@ -9097,7 +9097,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-eips",
  "alloy-genesis",
@@ -9153,7 +9153,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9174,7 +9174,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#27e7cdc20d9f472f9937e1d49087393dca52abee"
+source = "git+https://github.com/telosnetwork/telos-reth.git#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9586,7 +9586,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-types"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -9744,7 +9744,7 @@ dependencies = [
 [[package]]
 name = "reth-static-file-types"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -9941,7 +9941,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-common"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#15f441221100c585045cad7043b89c751ac9323f"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -9961,7 +9961,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-common"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#27e7cdc20d9f472f9937e1d49087393dca52abee"
+source = "git+https://github.com/telosnetwork/telos-reth.git#4ab511ae26506465946adce0f71dc262020071cf"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -11244,6 +11244,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?branch=master#430190f3d27f94187a83ae661a3eaaafe7f09811"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -11279,6 +11280,7 @@ dependencies = [
 [[package]]
 name = "telos-translator-rs"
 version = "0.1.0"
+source = "git+https://github.com/telosnetwork/telos-translator-rs.git?branch=master#6c181eb0ec68fda2b560907b32704e17e657161f"
 dependencies = [
  "alloy",
  "alloy-consensus",
