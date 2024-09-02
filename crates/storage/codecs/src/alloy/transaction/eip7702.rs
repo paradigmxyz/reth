@@ -5,6 +5,9 @@ use alloy_primitives::{Bytes, ChainId, TxKind, U256};
 use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// This is a helper type to use derive on it instead of manually managing `bitfield`.
