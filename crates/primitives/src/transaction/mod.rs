@@ -168,7 +168,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
             TxType::Eip7702 => {
                 let mut tx = TxEip7702::arbitrary(u)?;
                 tx.gas_limit = (tx.gas_limit as u64).into();
-                Self::Eip2930(tx)
+                Self::Eip7702(tx)
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
