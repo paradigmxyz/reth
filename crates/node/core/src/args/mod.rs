@@ -59,3 +59,4 @@ pub use benchmark_args::BenchmarkArgs;
 pub mod utils;
 
 pub mod types;
+mod error;
