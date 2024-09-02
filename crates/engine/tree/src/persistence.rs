@@ -88,6 +88,7 @@ where
     }
 
     fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<(), PersistenceError> {
+        debug!(target: "tree::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.provider_rw()?;
         let sf_provider = self.provider.static_file_provider();
@@ -100,6 +101,7 @@ where
     }
 
     fn on_save_blocks(&self, blocks: Vec<ExecutedBlock>) -> Result<Option<B256>, PersistenceError> {
+        debug!(target: "tree::persistence", first=?blocks.first().map(|b| b.block.number), last=?blocks.last().map(|b| b.block.number), "Saving range of blocks");
         let start_time = Instant::now();
         let last_block_hash = blocks.last().map(|block| block.block().hash());
 
