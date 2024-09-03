@@ -22,7 +22,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// Windows specific estension for std::fs
+// Windows specific extension for std::fs
 #[cfg(windows)]
 use std::os::windows::prelude::OpenOptionsExt;
 
