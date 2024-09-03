@@ -1355,28 +1355,30 @@ where
         let block = self.state.tree_state.executed_block_by_hash(hash).cloned();
 
         if block.is_some() {
-            Ok(block)
-        } else if let Some((_, updates)) = self.state.tree_state.persisted_trie_updates.get(&hash) {
-            let SealedBlockWithSenders { block, senders } = self
-                .provider
-                .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
-            let execution_output = self
-                .provider
-                .get_state(block.number)?
-                .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
-            let hashed_state = execution_output.hash_state_slow();
-
-            Ok(Some(ExecutedBlock {
-                block: Arc::new(block),
-                senders: Arc::new(senders),
-                trie: updates.clone(),
-                execution_output: Arc::new(execution_output),
-                hashed_state: Arc::new(hashed_state),
-            }))
-        } else {
-            Ok(None)
+            return Ok(block)
         }
+        
+        let Some((_, updates)) = self.state.tree_state.persisted_trie_updates.get(&hash) else {
+            return Ok(None)
+        };
+
+        let SealedBlockWithSenders { block, senders } = self
+            .provider
+            .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
+        let execution_output = self
+            .provider
+            .get_state(block.number)?
+            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number))?;
+        let hashed_state = execution_output.hash_state_slow();
+
+        Ok(Some(ExecutedBlock {
+            block: Arc::new(block),
+            senders: Arc::new(senders),
+            trie: updates.clone(),
+            execution_output: Arc::new(execution_output),
+            hashed_state: Arc::new(hashed_state),
+        }))
     }
 
     /// Return sealed block from database or in-memory state by hash.
