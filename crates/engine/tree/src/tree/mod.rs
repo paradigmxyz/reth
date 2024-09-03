@@ -1357,7 +1357,7 @@ where
         if block.is_some() {
             return Ok(block)
         }
-        
+
         let Some((_, updates)) = self.state.tree_state.persisted_trie_updates.get(&hash) else {
             return Ok(None)
         };
