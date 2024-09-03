@@ -1,3 +1,4 @@
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{
@@ -16,7 +17,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> EthCall for OpEthApi<N>
 where
     Self: Call,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
 }
 

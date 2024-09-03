@@ -32,6 +32,7 @@ reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true

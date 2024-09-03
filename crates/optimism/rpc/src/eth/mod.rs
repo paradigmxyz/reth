@@ -101,7 +101,7 @@ where
 impl<N> EthApiSpec for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
     fn provider(
@@ -151,7 +151,7 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
     fn provider(
@@ -179,7 +179,7 @@ where
 impl<N> LoadState for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
@@ -226,7 +226,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents> AddDevSigners for OpEthApi<N> {
+impl<N: FullNodeComponents<ChainSpec = ChainSpec>> AddDevSigners for OpEthApi<N> {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }

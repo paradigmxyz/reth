@@ -22,7 +22,7 @@ use crate::OpEthApi;
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents,
+    N: FullNodeComponents<ChainSpec = ChainSpec>,
 {
     #[inline]
     fn provider(

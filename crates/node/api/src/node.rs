@@ -2,38 +2,21 @@
 
 use std::marker::PhantomData;
 
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::EthChainSpec;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
+use reth_node_types::{NodePrimitives, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-
-/// The type that configures the essential types of an Ethereum-like node.
-///
-/// This includes the primitive types of a node.
-///
-/// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + Unpin + 'static {
-    /// The node's primitive types, defining basic operations and structures.
-    type Primitives: NodePrimitives;
-    /// The type used for configuration of the EVM.
-    type ChainSpec: EthChainSpec;
-}
-
-/// The type that configures an Ethereum-like node with an engine for consensus.
-pub trait NodeTypesWithEngine: NodeTypes {
-    /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
-}
+use crate::{ConfigureEvm, EngineTypes};
 
 /// A [`NodeTypes`] type builder.
 #[derive(Default, Debug)]
@@ -109,11 +92,9 @@ where
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypesWithEngine<ChainSpec = ChainSpec> + 'static {
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+pub trait FullNodeTypes: NodeTypesWithDB + Sized + 'static {
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self::DB, Self::ChainSpec>;
+    type Provider: FullProvider<Self>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
@@ -148,9 +129,9 @@ impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
 
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypesWithEngine,
-    DB: Send + Sync + Unpin + 'static,
+    Types: NodeTypes,
     Provider: Send + Sync + Unpin + 'static,
+    DB: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
@@ -165,13 +146,21 @@ where
     type Engine = Types::Engine;
 }
 
-impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, DB, Provider> NodeTypesWithDB for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    Provider: FullProvider<DB, Types::ChainSpec>,
+    Types: NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Provider: Send + Sync + Unpin + 'static,
 {
     type DB = DB;
+}
+
+impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypesWithEngine,
+    Provider: FullProvider<Self>,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+{
     type Provider = Provider;
 }
 

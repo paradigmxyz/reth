@@ -219,7 +219,7 @@ where
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-        P: FullProvider<DB, T::ChainSpec>,
+        P: FullProvider<FullNodeTypesAdapter<T, DB, P>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
@@ -277,7 +277,7 @@ where
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-        P: FullProvider<DB, T::ChainSpec>,
+        P: FullProvider<FullNodeTypesAdapter<T, DB, P>>,
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),

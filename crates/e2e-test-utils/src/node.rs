@@ -15,6 +15,7 @@ use reth::{
         types::engine::PayloadStatusEnum,
     },
 };
+use reth_chainspec::ChainSpec;
 use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypesWithEngine};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use reth_rpc_types::WithOtherFields;
@@ -47,7 +48,7 @@ where
 
 impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
-    Node: FullNodeComponents,
+    Node: FullNodeComponents<ChainSpec = ChainSpec>,
     Node::Network: PeersHandleProvider,
     AddOns: NodeAddOns<Node>,
 {

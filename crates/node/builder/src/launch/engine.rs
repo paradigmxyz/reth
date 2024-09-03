@@ -16,7 +16,7 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns};
+use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypesWithDB};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -59,7 +59,7 @@ impl EngineNodeLauncher {
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     T: FullNodeTypes<
-        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
+        Provider = BlockchainProvider2<<T as NodeTypesWithDB>::DB>,
         ChainSpec = ChainSpec,
     >,
     CB: NodeComponentsBuilder<T>,

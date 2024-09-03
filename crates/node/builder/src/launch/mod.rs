@@ -21,7 +21,7 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -103,7 +103,7 @@ impl DefaultNodeLauncher {
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<
-        Provider = BlockchainProvider<<T as FullNodeTypes>::DB>,
+        Provider = BlockchainProvider<<T as NodeTypesWithDB>::DB>,
         ChainSpec = ChainSpec,
     >,
     CB: NodeComponentsBuilder<T>,

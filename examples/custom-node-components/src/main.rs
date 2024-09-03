@@ -4,6 +4,7 @@
 
 use reth::{
     builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},
+    chainspec::ChainSpec,
     cli::Cli,
     providers::CanonStateSubscriptions,
     transaction_pool::{
@@ -45,7 +46,7 @@ pub struct CustomPoolBuilder {
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
 impl<Node> PoolBuilder<Node> for CustomPoolBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<ChainSpec = ChainSpec>,
 {
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
 

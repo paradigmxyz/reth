@@ -9,7 +9,7 @@ use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithEngine,
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -99,8 +99,11 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithEngine for NodeAdapter
     type Engine = T::Engine;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithDB for NodeAdapter<T, C> {
     type DB = T::DB;
+}
+
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
     type Provider = T::Provider;
 }
 

@@ -67,6 +67,7 @@ members = [
     "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/node/types",
     "crates/optimism/bin",
     "crates/optimism/chainspec",
     "crates/optimism/cli",
@@ -350,6 +351,7 @@ reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-node-types = { path = "crates/node/types" }
 op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
