@@ -40,7 +40,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
@@ -2175,21 +2175,36 @@ where
         if !persistence_in_progress {
             // NOTE: there is a possibility of a race condition here if some data was persisted. ???
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-            let mut state = HashedPostState::default();
             let mut trie_nodes = TrieUpdates::default();
+            let mut state = HashedPostState::default();
+            let mut prefix_sets = TriePrefixSetsMut::default();
             if let Some((historical, blocks)) =
                 self.state.tree_state.blocks_by_hash(block.parent_hash)
             {
-                state.extend(consistent_view.revert_state(historical)?);
+                // Retrieve revert state for historical block.
+                let revert_state = consistent_view.revert_state(historical)?;
+                prefix_sets.extend(revert_state.construct_prefix_sets());
+                state.extend(revert_state);
+
+                // Extend with contents of parent in-memory blocks.
                 for block in blocks.iter().rev() {
-                    state.extend_ref(block.hashed_state.as_ref());
                     trie_nodes.extend_ref(block.trie.as_ref());
+                    state.extend_ref(block.hashed_state.as_ref());
                 }
             }
 
-            state_root_result = match ParallelStateRoot::new(consistent_view, hashed_state.clone())
-                .incremental_root_with_updates()
-                .map_err(ProviderError::from)
+            // Extend with block we are validating root for.
+            prefix_sets.extend(hashed_state.construct_prefix_sets());
+            state.extend_ref(&hashed_state);
+
+            state_root_result = match ParallelStateRoot::new(
+                consistent_view,
+                trie_nodes,
+                state,
+                prefix_sets.freeze(),
+            )
+            .incremental_root_with_updates()
+            .map_err(ProviderError::from)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ProviderError::ConsistentView(error)) => {
@@ -2200,9 +2215,6 @@ where
             };
         }
 
-        if state_root_result.is_none() {
-            state_root_result = Some(state_provider.state_root_with_updates(hashed_state.clone())?);
-        }
         let (state_root, trie_output) = match state_root_result {
             Some(result) => result,
             None => {

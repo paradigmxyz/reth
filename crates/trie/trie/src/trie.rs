@@ -25,7 +25,7 @@ pub struct StateRoot<T, H> {
     pub trie_cursor_factory: T,
     /// The factory for hashed cursors.
     pub hashed_cursor_factory: H,
-    /// A set of prefix sets that have changes.
+    /// A set of prefix sets that have changed.
     pub prefix_sets: TriePrefixSets,
     /// Previous intermediate state.
     previous_state: Option<IntermediateStateRootState>,

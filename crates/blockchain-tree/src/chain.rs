@@ -225,10 +225,16 @@ impl AppendableChain {
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
                 let hashed_state = execution_outcome.hash_state_slow();
-                ParallelStateRoot::new(consistent_view, hashed_state)
-                    .incremental_root_with_updates()
-                    .map(|(root, updates)| (root, Some(updates)))
-                    .map_err(ProviderError::from)?
+                let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+                ParallelStateRoot::new(
+                    consistent_view,
+                    Default::default(),
+                    hashed_state,
+                    prefix_sets,
+                )
+                .incremental_root_with_updates()
+                .map(|(root, updates)| (root, Some(updates)))
+                .map_err(ProviderError::from)?
             } else {
                 let hashed_state =
                     HashedPostState::from_bundle_state(&initial_execution_outcome.state().state);
