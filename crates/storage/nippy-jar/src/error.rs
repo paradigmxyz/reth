@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Errors associated with [`crate::NippyJar`].
@@ -60,4 +61,6 @@ pub enum NippyJarError {
     FrozenJar,
     #[error("File is in an inconsistent state.")]
     InconsistentState,
+    #[error("Missing file: {0}.")]
+    MissingFile(PathBuf),
 }

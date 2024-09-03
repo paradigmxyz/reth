@@ -32,7 +32,7 @@ impl PruningArgs {
                     .deposit_contract
                     .as_ref()
                     .map(|contract| PruneMode::Before(contract.block))
-                    .or(Some(PruneMode::Full)),
+                    .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
                 account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                 storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                 receipts_log_filter: ReceiptsLogPruneConfig(

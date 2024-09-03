@@ -27,7 +27,7 @@ use reth::{
     api::PayloadTypes,
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
-        node::NodeTypes,
+        node::{NodeTypes, NodeTypesWithEngine},
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
     primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -194,9 +194,12 @@ struct MyCustomNode;
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
-    // use the custom engine types
-    type Engine = CustomEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+/// Configure the node types with the custom engine types
+impl NodeTypesWithEngine for MyCustomNode {
+    type Engine = CustomEngineTypes;
 }
 
 /// Implement the Node trait for the custom node
