@@ -159,50 +159,6 @@ pub struct FullNodeTypesAdapter<Types, Provider> {
     pub provider: PhantomData<Provider>,
 }
 
-impl<Types, Provider> FullNodeTypesAdapter<Types, Provider> {
-    /// Create a new adapter with the configured types.
-    pub fn new() -> Self {
-        Self { types: Default::default(), provider: Default::default() }
-    }
-}
-
-impl<Types, Provider> Default for FullNodeTypesAdapter<Types, Provider> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Types, Provider> Clone for FullNodeTypesAdapter<Types, Provider> {
-    fn clone(&self) -> Self {
-        Self { types: self.types, provider: self.provider }
-    }
-}
-
-impl<Types, Provider> NodeTypes for FullNodeTypesAdapter<Types, Provider>
-where
-    Types: NodeTypes,
-    Provider: Send + Sync + Unpin + 'static,
-{
-    type Primitives = Types::Primitives;
-    type ChainSpec = Types::ChainSpec;
-}
-
-impl<Types, Provider> NodeTypesWithEngine for FullNodeTypesAdapter<Types, Provider>
-where
-    Types: NodeTypesWithEngine,
-    Provider: Send + Sync + Unpin + 'static,
-{
-    type Engine = Types::Engine;
-}
-
-impl<Types, Provider> NodeTypesWithDB for FullNodeTypesAdapter<Types, Provider>
-where
-    Types: NodeTypesWithDB,
-    Provider: Send + Sync + Unpin + 'static,
-{
-    type DB = Types::DB;
-}
-
 impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
     Types: NodeTypesWithDB,
