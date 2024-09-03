@@ -9,7 +9,7 @@ use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
 use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -88,19 +88,6 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     pub task_executor: TaskExecutor,
     /// The provider of the node.
     pub provider: T::Provider,
-}
-
-impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
-    type Primitives = <T::Types as NodeTypes>::Primitives;
-    type ChainSpec = <T::Types as NodeTypes>::ChainSpec;
-}
-
-impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithEngine for NodeAdapter<T, C> {
-    type Engine = <T::Types as NodeTypesWithEngine>::Engine;
-}
-
-impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithDB for NodeAdapter<T, C> {
-    type DB = <T::Types as NodeTypesWithDB>::DB;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {

@@ -289,10 +289,9 @@ pub struct EthereumConsensusBuilder {
     // TODO add closure to modify consensus
 }
 
-impl<Types, Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
+impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 
