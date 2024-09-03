@@ -589,11 +589,7 @@ mod tests {
         };
 
         // Define a chain containing the blocks.
-        let chain = Chain::new(
-            vec![block_1.clone(), block_2.clone()],
-            Default::default(),
-            Default::default(),
-        );
+        let chain = Chain::new(vec![block_1, block_2], Default::default(), Default::default());
 
         // Insert the chain into the BlockIndices.
         block_indices.insert_chain(chain_id, &chain);
