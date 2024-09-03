@@ -30,13 +30,15 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+
+/// Alias for consensus engine stream.
+type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
 type EngineServiceType<DB, Client, T> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EngineApiRequest<T>>,
-        UnboundedReceiverStream<BeaconEngineMessage<T>>,
+        EngineMessageStream<T>,
         BasicBlockDownloader<Client>,
     >,
     PipelineSync<DB>,
@@ -70,7 +72,7 @@ where
         executor_factory: E,
         chain_spec: Arc<ChainSpec>,
         client: Client,
-        incoming_requests: UnboundedReceiverStream<BeaconEngineMessage<T>>,
+        incoming_requests: EngineMessageStream<T>,
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<DB>,
@@ -149,6 +151,7 @@ mod tests {
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
+    use tokio_stream::wrappers::UnboundedReceiverStream;
 
     #[test]
     fn eth_chain_orchestrator_build() {
@@ -185,7 +188,7 @@ mod tests {
             executor_factory,
             chain_spec,
             client,
-            incoming_requests,
+            Box::pin(incoming_requests),
             pipeline,
             pipeline_task_spawner,
             provider_factory,

@@ -10,7 +10,7 @@ use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
@@ -136,7 +136,7 @@ impl Command {
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
+        let block_execution_output = executor.execute(
             (
                 &block
                     .clone()
@@ -147,14 +147,12 @@ impl Command {
             )
                 .into(),
         )?;
-        let execution_outcome =
-            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
+        let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             execution_outcome.hash_state_slow(),
-            Default::default(),
         )?;
 
         if in_memory_state_root == block.state_root {

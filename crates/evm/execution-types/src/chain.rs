@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn chain_append() {
-        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
+        let block = SealedBlockWithSenders::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

@@ -396,6 +396,11 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
@@ -407,10 +412,6 @@ where
 
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
-
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.number);
-        }
 
         Ok(())
     }
@@ -500,8 +501,11 @@ mod tests {
         let account = Account { balance: U256::MAX, ..Account::default() };
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec =
-            Arc::new(ChainSpecBuilder::from(&*BASE_MAINNET).regolith_activated().build());
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+                .regolith_activated()
+                .build(),
+        );
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
@@ -581,8 +585,11 @@ mod tests {
 
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec =
-            Arc::new(ChainSpecBuilder::from(&*BASE_MAINNET).canyon_activated().build());
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+                .canyon_activated()
+                .build(),
+        );
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {

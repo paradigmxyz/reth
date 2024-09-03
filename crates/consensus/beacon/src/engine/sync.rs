@@ -218,8 +218,7 @@ where
     ///
     /// Note: this is mainly for debugging purposes.
     pub(crate) fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
-        let has_reached_max_block =
-            self.max_block.map(|target| progress >= target).unwrap_or_default();
+        let has_reached_max_block = self.max_block.is_some_and(|target| progress >= target);
         if has_reached_max_block {
             trace!(
                 target: "consensus::engine::sync",

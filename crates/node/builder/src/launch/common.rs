@@ -1,10 +1,7 @@
 //! Helper types that can be used by launchers.
 
-use crate::{
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
-};
+use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
+
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -47,10 +44,15 @@ use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, St
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
 use tokio::sync::{
     mpsc::{unbounded_channel, Receiver, UnboundedSender},
     oneshot, watch,
+};
+
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::OnComponentInitializedHook,
+    BuilderContext, NodeAdapter,
 };
 
 /// Allows to set a tree viewer for a configured blockchain provider.
@@ -115,7 +117,7 @@ impl LaunchContext {
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
-        let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
+        let mut toml_config = reth_config::Config::from_path(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
@@ -567,7 +569,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where
         T: FullNodeTypes,
-        T::Provider: FullProvider<DB>,
+        T::Provider: FullProvider<DB, T::ChainSpec>,
         F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
@@ -596,8 +598,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -716,8 +717,7 @@ where
 impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB> + WithTree,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -915,8 +915,7 @@ pub struct WithMeteredProvider<DB> {
 pub struct WithMeteredProviders<DB, T>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
 {
     db_provider_container: WithMeteredProvider<DB>,
     blockchain_db: T::Provider,
@@ -932,8 +931,7 @@ where
 pub struct WithComponents<DB, T, CB>
 where
     DB: Database,
-    T: FullNodeTypes,
-    T::Provider: FullProvider<DB>,
+    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<DB>,
@@ -972,12 +970,8 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(
-                reth_config.prune.as_ref().map(|p| p.block_interval),
-                node_config.prune_config().map(|p| p.block_interval)
-            );
+            let loaded_config = Config::from_path(config_path).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
             assert_eq!(reth_config, loaded_config);
         })
     }

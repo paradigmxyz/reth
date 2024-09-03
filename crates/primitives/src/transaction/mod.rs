@@ -86,8 +86,9 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
     ///
@@ -334,7 +335,7 @@ impl Transaction {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip7702(_) => None,
             Self::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                Some(blob_versioned_hashes.to_vec())
+                Some(blob_versioned_hashes.clone())
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => None,
@@ -810,8 +811,9 @@ impl Encodable for Transaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
     pub signature: Signature,
@@ -1457,7 +1459,14 @@ impl Decodable for TransactionSigned {
         let remaining_len = buf.len();
 
         // if the transaction is encoded as a string then it is a typed transaction
-        if !header.list {
+        if header.list {
+            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
+
+            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
+            // buffer
+            *buf = original_encoding;
+            Ok(tx)
+        } else {
             let tx = Self::decode_enveloped_typed_transaction(buf)?;
 
             let bytes_consumed = remaining_len - buf.len();
@@ -1468,13 +1477,6 @@ impl Decodable for TransactionSigned {
                 return Err(RlpError::UnexpectedLength)
             }
 
-            Ok(tx)
-        } else {
-            let tx = Self::decode_rlp_legacy_transaction(&mut original_encoding)?;
-
-            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
-            // buffer
-            *buf = original_encoding;
             Ok(tx)
         }
     }
@@ -1491,7 +1493,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
             tx_eip_4844.placeholder =
-                if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]
@@ -1587,13 +1589,6 @@ pub trait IntoRecoveredTransaction {
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
-}
-
-impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.clone()
-    }
 }
 
 /// Generic wrapper with encoded Bytes, such as transaction data.

@@ -1,14 +1,15 @@
 #![allow(dead_code)]
 
+use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
-use reth_primitives::{SealedBlock, B256};
+use reth_primitives::B256;
 use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
-use std::sync::{
-    mpsc::{Receiver, SendError, Sender},
-    Arc,
+use std::{
+    sync::mpsc::{Receiver, SendError, Sender},
+    time::Instant,
 };
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -29,24 +30,29 @@ pub struct PersistenceService<DB> {
     incoming: Receiver<PersistenceAction>,
     /// The pruner
     pruner: Pruner<DB, ProviderFactory<DB>>,
+    /// metrics
+    metrics: PersistenceMetrics,
 }
 
 impl<DB: Database> PersistenceService<DB> {
     /// Create a new persistence service
-    pub const fn new(
+    pub fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
-        Self { provider, incoming, pruner }
+        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default() }
     }
 
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "tree::persistence", ?block_num, "Running pruner");
+        let start_time = Instant::now();
         // TODO: doing this properly depends on pruner segment changes
-        self.pruner.run(block_num)
+        let result = self.pruner.run(block_num);
+        self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
+        result
     }
 }
 
@@ -61,33 +67,14 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let provider_rw = self.provider.provider_rw()?;
-                    let sf_provider = self.provider.static_file_provider();
-
-                    UnifiedStorageWriter::from(&provider_rw, &sf_provider)
-                        .remove_blocks_above(new_tip_num)?;
-                    UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
-
+                    self.on_remove_blocks_above(new_tip_num)?;
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
-                    let Some(last_block) = blocks.last() else {
-                        let _ = sender.send(None);
-                        continue
-                    };
-
-                    let last_block_hash = last_block.block().hash();
-
-                    let provider_rw = self.provider.provider_rw()?;
-                    let static_file_provider = self.provider.static_file_provider();
-
-                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
-                        .save_blocks(&blocks)?;
-                    UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
-
+                    let result = self.on_save_blocks(blocks)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(Some(last_block_hash));
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::PruneBefore(block_num, sender) => {
                     let res = self.prune_before(block_num)?;
@@ -95,18 +82,36 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::WriteTransactions(_block, _sender) => {
-                    unimplemented!()
-                    // let (block_num, td) =
-                    //     self.write_transactions(block).expect("todo: handle errors");
-                    // self.update_transaction_meta(block_num, td).expect("todo: handle errors");
-
-                    // // we ignore the error because the caller may or may not care about the
-                    // result let _ = sender.send(());
-                }
             }
         }
         Ok(())
+    }
+
+    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<(), PersistenceError> {
+        let start_time = Instant::now();
+        let provider_rw = self.provider.provider_rw()?;
+        let sf_provider = self.provider.static_file_provider();
+
+        UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
+
+        self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
+        Ok(())
+    }
+
+    fn on_save_blocks(&self, blocks: Vec<ExecutedBlock>) -> Result<Option<B256>, PersistenceError> {
+        let start_time = Instant::now();
+        let last_block_hash = blocks.last().map(|block| block.block().hash());
+
+        if last_block_hash.is_some() {
+            let provider_rw = self.provider.provider_rw()?;
+            let static_file_provider = self.provider.static_file_provider();
+
+            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(&blocks)?;
+            UnifiedStorageWriter::commit(provider_rw, static_file_provider)?;
+        }
+        self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
+        Ok(last_block_hash)
     }
 }
 
@@ -131,13 +136,6 @@ pub enum PersistenceAction {
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
     SaveBlocks(Vec<ExecutedBlock>, oneshot::Sender<Option<B256>>),
-
-    /// The given block has been added to the canonical chain, its transactions and headers will be
-    /// persisted for durability.
-    ///
-    /// This will first append the header and transactions to static files, then update the
-    /// checkpoints for headers and block bodies in the database.
-    WriteTransactions(Arc<SealedBlock>, oneshot::Sender<()>),
 
     /// Removes block data above the given block number from the database.
     ///

@@ -5,7 +5,7 @@
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use futures::SinkExt;
 use reth_primitives::{BlockBody, SealedHeader, B256};
-use reth_testing_utils::{generators, generators::random_block_range};
+use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};
 use tokio_util::codec::FramedWrite;
@@ -21,7 +21,11 @@ pub(crate) fn generate_bodies(
     range: RangeInclusive<u64>,
 ) -> (Vec<SealedHeader>, HashMap<B256, BlockBody>) {
     let mut rng = generators::rng();
-    let blocks = random_block_range(&mut rng, range, B256::ZERO, 0..2);
+    let blocks = random_block_range(
+        &mut rng,
+        range,
+        BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
+    );
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
     let bodies = blocks

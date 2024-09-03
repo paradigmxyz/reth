@@ -165,7 +165,7 @@ mod tests {
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };
     use reth_prune::PruneMode;
-    use reth_testing_utils::generators::{self, random_block_range};
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 
     stage_test_suite_ext!(PruneTestRunner, prune);
 
@@ -200,8 +200,7 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 input.checkpoint().block_number..=input.target(),
-                B256::ZERO,
-                1..3,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..3, ..Default::default() },
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(

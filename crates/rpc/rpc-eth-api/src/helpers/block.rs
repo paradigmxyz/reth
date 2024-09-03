@@ -6,10 +6,10 @@ use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
+use reth_rpc_types::{AnyTransactionReceipt, Header, Index};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
-use crate::FromEthApiError;
+use crate::{FromEthApiError, RpcBlock};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -25,11 +25,8 @@ pub trait EthBlocks: LoadBlock {
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
+    ) -> impl Future<Output = Result<Option<Header>, Self::Error>> + Send {
+        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.header)) }
     }
 
     /// Returns the populated rpc block object for the given block id.
@@ -40,9 +37,7 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         full: bool,
-    ) -> impl Future<Output = Result<Option<RichBlock>, Self::Error>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
+    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
             let block = match self.block_with_senders(block_id).await? {
@@ -56,7 +51,7 @@ pub trait EthBlocks: LoadBlock {
                 .ok_or(EthApiError::UnknownBlockNumber)?;
             let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
                 .map_err(Self::Error::from_eth_err)?;
-            Ok(Some(block.into()))
+            Ok(Some(block))
         }
     }
 
@@ -150,10 +145,19 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             if block_id.is_pending() {
-                return Ok(LoadBlock::provider(self)
+                // First, try to get the pending block from the provider, in case we already
+                // received the actual pending block from the CL.
+                if let Some((block, receipts)) = LoadBlock::provider(self)
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
+                {
+                    return Ok(Some((block, Arc::new(receipts))));
+                }
+
+                // If no pending block from provider, build the pending block locally.
+                if let Some((block, receipts)) = self.local_pending_block().await? {
+                    return Ok(Some((block.block, Arc::new(receipts))));
+                }
             }
 
             if let Some(block_hash) = LoadBlock::provider(self)
@@ -187,7 +191,8 @@ pub trait EthBlocks: LoadBlock {
         &self,
         block_id: BlockId,
         index: Index,
-    ) -> impl Future<Output = Result<Option<RichBlock>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
+    {
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
@@ -202,10 +207,7 @@ pub trait EthBlocks: LoadBlock {
             }
             .unwrap_or_default();
 
-            let index = usize::from(index);
-            let uncle =
-                uncles.into_iter().nth(index).map(|header| uncle_block_from_header(header).into());
-            Ok(uncle)
+            Ok(uncles.into_iter().nth(index.into()).map(uncle_block_from_header))
         }
     }
 }
@@ -250,8 +252,12 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 return if maybe_pending.is_some() {
                     Ok(maybe_pending)
                 } else {
-                    self.local_pending_block().await
-                }
+                    // If no pending block from provider, try to get local pending block
+                    return match self.local_pending_block().await? {
+                        Some((block, _)) => Ok(Some(block)),
+                        None => Ok(None),
+                    };
+                };
             }
 
             let block_hash = match LoadPendingBlock::provider(self)

@@ -3,7 +3,7 @@ use alloy_eips::eip2718::Encodable2718;
 use reth_node_api::EngineTypes;
 use reth_node_core::{
     primitives::B256,
-    rpc::types::{BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3, RichBlock},
+    rpc::types::{Block, BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3},
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
@@ -19,10 +19,10 @@ pub trait BlockProvider: Send + Sync + 'static {
     /// Runs a block provider to send new blocks to the given sender.
     ///
     /// Note: This is expected to be spawned in a separate task.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
+    fn subscribe_blocks(&self, tx: mpsc::Sender<Block>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.
-    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<RichBlock>> + Send;
+    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<Block>> + Send;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
@@ -47,7 +47,7 @@ pub trait BlockProvider: Send + Sync + 'static {
                 None => return Ok(B256::default()),
             };
             let block = self.get_block(previous_block_number).await?;
-            block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))
+            Ok(block.header.hash)
         }
     }
 }
@@ -78,7 +78,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
 
         let mut block_stream = {
-            let (tx, rx) = mpsc::channel::<RichBlock>(64);
+            let (tx, rx) = mpsc::channel::<Block>(64);
             let block_provider = self.block_provider.clone();
             tokio::spawn(async move {
                 block_provider.subscribe_blocks(tx).await;
@@ -87,7 +87,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = rich_block_to_execution_payload_v3(block);
+            let payload = block_to_execution_payload_v3(block);
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -152,27 +152,27 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
 
 /// Cancun "new payload" event.
 #[derive(Debug)]
-struct ExecutionNewPayload {
-    execution_payload_v3: ExecutionPayloadV3,
-    versioned_hashes: Vec<B256>,
-    parent_beacon_block_root: B256,
+pub struct ExecutionNewPayload {
+    pub execution_payload_v3: ExecutionPayloadV3,
+    pub versioned_hashes: Vec<B256>,
+    pub parent_beacon_block_root: B256,
 }
 
 impl ExecutionNewPayload {
     /// Get block hash from block in the payload
-    const fn block_hash(&self) -> B256 {
+    pub const fn block_hash(&self) -> B256 {
         self.execution_payload_v3.payload_inner.payload_inner.block_hash
     }
 
     /// Get block number from block in the payload
-    const fn block_number(&self) -> u64 {
+    pub const fn block_number(&self) -> u64 {
         self.execution_payload_v3.payload_inner.payload_inner.block_number
     }
 }
 
-/// Convert a rich block from RPC / Etherscan to params for an execution client's "new payload"
+/// Convert a block from RPC / Etherscan to params for an execution client's "new payload"
 /// method. Assumes that the block contains full transactions.
-fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
+pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
     let transactions = match &block.transactions {
         BlockTransactions::Full(txs) => txs.clone(),
         // Empty array gets deserialized as BlockTransactions::Hashes.
@@ -198,13 +198,13 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
                 receipts_root: block.header.receipts_root,
                 logs_bloom: block.header.logs_bloom,
                 prev_randao: block.header.mix_hash.unwrap(),
-                block_number: block.header.number.unwrap(),
+                block_number: block.header.number,
                 gas_limit: block.header.gas_limit.try_into().unwrap(),
                 gas_used: block.header.gas_used.try_into().unwrap(),
                 timestamp: block.header.timestamp,
                 extra_data: block.header.extra_data.clone(),
                 base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
-                block_hash: block.header.hash.unwrap(),
+                block_hash: block.header.hash,
                 transactions: transactions
                     .into_iter()
                     .map(|tx| {

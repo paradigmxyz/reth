@@ -165,7 +165,7 @@ impl Block {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Block].
+    /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() +
@@ -268,7 +268,8 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(rlp 32))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
 #[derive(
     Debug,
     Clone,

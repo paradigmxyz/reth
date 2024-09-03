@@ -8,12 +8,15 @@ pub(crate) mod engine;
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
+use std::{future::Future, sync::Arc};
+
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
+use reth_chainspec::ChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -29,11 +32,10 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
-use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -100,11 +102,20 @@ impl DefaultNodeLauncher {
 
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider<<T as FullNodeTypes>::DB>,
+        ChainSpec = ChainSpec,
+    >,
     CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi:
-        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + AddDevSigners,
+    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -189,6 +200,7 @@ where
                 ctx.components().evm_config().clone(),
                 reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
                 node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
             )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
@@ -322,7 +334,6 @@ where
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-                database.clone(),
             ),
         );
 

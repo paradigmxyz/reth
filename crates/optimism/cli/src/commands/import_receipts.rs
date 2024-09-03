@@ -184,7 +184,7 @@ where
     let static_file_provider = provider_factory.static_file_provider();
 
     while let Some(file_client) =
-        reader.next_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
     {
         // create a new file client from chunk read from file
         let ReceiptFileClient {
@@ -216,9 +216,6 @@ where
             debug_assert!(genesis_receipts.is_empty());
             // this ensures the execution outcome and static file producer start at block 1
             first_block = 1;
-            // we don't count this as decoded so the partial import check later does not error if
-            // this branch is executed
-            total_decoded_receipts -= 1; // safe because chunk will be `None` if empty
         }
 
         // We're reusing receipt writing code internal to

@@ -209,7 +209,6 @@ impl Command {
                 Some(Box::new(network)),
                 latest_block_number,
                 events,
-                provider_factory.db_ref().clone(),
             ),
         );
 

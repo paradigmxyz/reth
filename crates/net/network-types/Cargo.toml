@@ -16,9 +16,8 @@ workspace = true
 reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
 reth-ethereum-forks.workspace = true
-reth-network-p2p.workspace = true
 
-# io
+# misc
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
@@ -27,5 +26,5 @@ serde_json = { workspace = true }
 tracing.workspace = true
 
 [features]
-serde = ["dep:serde", "dep:humantime-serde", "reth-network-p2p/serde"]
+serde = ["dep:serde", "dep:humantime-serde"]
 test-utils = []

@@ -3,11 +3,9 @@
 use clap::Parser;
 use reth::cli::Cli;
 use reth_node_builder::EngineNodeLauncher;
-use reth_node_optimism::{
-    args::RollupArgs, node::OptimismAddOns, rpc::SequencerClient, OptimismNode,
-};
+use reth_node_optimism::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
+use reth_optimism_rpc::eth::rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
-use std::sync::Arc;
 
 // We use jemalloc for performance reasons
 #[cfg(all(feature = "jemalloc", unix))]
@@ -38,9 +36,9 @@ fn main() {
                     .extend_rpc_modules(move |ctx| {
                         // register sequencer tx forwarder
                         if let Some(sequencer_http) = sequencer_http_arg {
-                            ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(
-                                SequencerClient::new(sequencer_http),
-                            ));
+                            ctx.registry
+                                .eth_api()
+                                .set_sequencer_client(SequencerClient::new(sequencer_http));
                         }
 
                         Ok(())
@@ -62,9 +60,9 @@ fn main() {
                     .extend_rpc_modules(move |ctx| {
                         // register sequencer tx forwarder
                         if let Some(sequencer_http) = sequencer_http_arg {
-                            ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(
-                                SequencerClient::new(sequencer_http),
-                            ));
+                            ctx.registry
+                                .eth_api()
+                                .set_sequencer_client(SequencerClient::new(sequencer_http));
                         }
 
                         Ok(())

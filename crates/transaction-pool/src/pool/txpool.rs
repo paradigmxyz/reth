@@ -146,10 +146,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
-            (Ordering::Equal, Ordering::Equal) | (Ordering::Equal, Ordering::Greater) => {
+            (Ordering::Equal, Ordering::Equal | Ordering::Greater) => {
                 // fee unchanged, nothing to update
             }
-            (Ordering::Greater, Ordering::Equal) | (Ordering::Greater, Ordering::Greater) => {
+            (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -320,6 +320,12 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns all transactions from the pending sub-pool
     pub(crate) fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pending_pool.all().collect()
+    }
+    /// Returns an iterator over all transactions from the pending sub-pool
+    pub(crate) fn pending_transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+        self.pending_pool.all()
     }
 
     /// Returns all transactions from parked pools

@@ -161,9 +161,7 @@ where
         let nothing_to_request = self.download_range.is_empty() ||
             // or all blocks have already been requested.
             self.in_progress_queue
-                .last_requested_block_number
-                .map(|last| last == *self.download_range.end())
-                .unwrap_or_default();
+                .last_requested_block_number.is_some_and(|last| last == *self.download_range.end());
 
         nothing_to_request &&
             self.in_progress_queue.is_empty() &&
@@ -609,7 +607,7 @@ mod tests {
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::{BlockBody, B256};
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-    use reth_testing_utils::{generators, generators::random_block_range};
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -652,7 +650,11 @@ mod tests {
         // Generate some random blocks
         let db = create_test_rw_db();
         let mut rng = generators::rng();
-        let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=199,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..2, ..Default::default() },
+        );
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
         let bodies = blocks

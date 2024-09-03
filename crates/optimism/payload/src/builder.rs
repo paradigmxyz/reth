@@ -113,7 +113,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit: u64 =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -124,8 +123,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.payload_attributes.timestamp,
             attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -158,7 +155,8 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
+        let hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let state_root = db.database.state_root(hashed_state).map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
@@ -289,8 +287,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.payload_attributes.timestamp,
         attributes.payload_attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -534,15 +530,13 @@ where
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.hashed_state_root_with_updates(hashed_state.clone()).inspect_err(
-            |err| {
-                warn!(target: "payload_builder",
-                    parent_hash=%parent_block.hash(),
-                    %err,
-                    "failed to calculate state root for empty payload"
-                );
-            },
-        )?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header

@@ -183,15 +183,13 @@ impl BlockBuffer {
 mod tests {
     use crate::BlockBuffer;
     use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, Rng},
-    };
+    use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
-        let block = random_block(rng, number, Some(parent), None, None);
+        let block =
+            random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
         block.seal_with_senders().unwrap()
     }
 
