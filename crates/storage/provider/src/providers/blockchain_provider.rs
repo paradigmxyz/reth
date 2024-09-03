@@ -4,7 +4,7 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -18,6 +18,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
@@ -1430,6 +1431,20 @@ where
         // use latest state provider
         let state_provider = self.latest()?;
         state_provider.basic_account(address)
+    }
+}
+
+impl<DB> StateReader for BlockchainProvider2<DB>
+where
+    DB: Database + Sync + Send,
+{
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
+            let state = state.block().execution_outcome().clone();
+            Ok(Some(state))
+        } else {
+            self.database.provider()?.get_state(block..=block)
+        }
     }
 }
 
