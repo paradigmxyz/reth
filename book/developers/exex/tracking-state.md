@@ -50,7 +50,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        while let Some(notification) = ready!(this.notifications.poll_recv(cx)) {
+        while let Some(notification) = ready!(this.notifications.poll_next_unpin(cx)) {
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
