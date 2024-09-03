@@ -189,7 +189,7 @@ impl LaunchContext {
 /// This can be used to sequentially attach additional values to the type during the launch process.
 ///
 /// The type provides common boilerplate for launching a node depending on the additional value.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LaunchContextWith<T> {
     /// The wrapped launch context.
     pub inner: LaunchContext,
