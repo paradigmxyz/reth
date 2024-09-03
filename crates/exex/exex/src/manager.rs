@@ -143,8 +143,7 @@ impl ExExHandle {
     }
 }
 
-/// A stream of [`ExExNotification`]s returned by [`ExExNotificationsSubscriber::subscribe`] or
-/// [`ExExNotificationsSubscriber::subscribe_with_head`].
+/// A stream of [`ExExNotification`]s returned by [`ExExNotificationsSubscriber::subscribe`].
 pub type ExExNotifications<'a> =
     Either<ExExNotificationsWithoutHead<'a>, ExExNotificationsWithHead<'a>>;
 
