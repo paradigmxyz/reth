@@ -1,6 +1,6 @@
 use std::num::ParseIntError;
 
-/// Error while parsing a [`ReceiptsLogPruneConfig`](ReceiptsLogPruneConfig)
+/// Error while parsing a `ReceiptsLogPruneConfig`
 #[derive(thiserror::Error, Debug)]
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum ReceiptsLogError {
