@@ -15,7 +15,7 @@ use reth::{
         types::engine::PayloadStatusEnum,
     },
 };
-use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypes};
+use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypesWithEngine};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use reth_rpc_types::WithOtherFields;
 use reth_stages_types::StageId;
@@ -118,8 +118,8 @@ where
         &mut self,
         attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <<Node as NodeTypes>::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypesWithEngine>::Engine as PayloadTypes>::BuiltPayload,
+        <<Node as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
@@ -144,7 +144,7 @@ where
         attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
         <Node::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:

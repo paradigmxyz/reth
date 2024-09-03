@@ -18,7 +18,7 @@ use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
     components::{
         Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
@@ -110,8 +110,11 @@ pub struct TestNode;
 
 impl NodeTypes for TestNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+impl NodeTypesWithEngine for TestNode {
+    type Engine = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
