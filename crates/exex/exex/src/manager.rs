@@ -165,14 +165,13 @@ impl ExExNotificationsSubscriber {
         ExExNotifications::Left(ExExNotificationsWithoutHead(&mut self.notifications))
     }
 
-    // TODO(alexey): uncomment when backfill is implemented in `ExExNotificationsWithHead`
-    // /// Subscribe to notifications with the given head.
-    // ///
-    // /// Notifications will be sent starting from the head, not inclusive. For example, if
-    // /// `head.number == 10`, then the first notification will be with `block.number == 11`.
-    // pub fn subscribe_with_head(&mut self, head: ExExHead) -> ExExNotifications<'_> {
-    //     ExExNotifications::Right(ExExNotificationsWithHead(&mut self.notifications, head))
-    // }
+    /// Subscribe to notifications with the given head.
+    ///
+    /// Notifications will be sent starting from the head, not inclusive. For example, if
+    /// `head.number == 10`, then the first notification will be with `block.number == 11`.
+    pub fn subscribe_with_head(&mut self, head: ExExHead) -> ExExNotifications<'_> {
+        ExExNotifications::Right(ExExNotificationsWithHead(&mut self.notifications, head))
+    }
 }
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
