@@ -35,7 +35,6 @@ tokio-util.workspace = true
 tokio.workspace = true
 
 ## misc
-derive_more.workspace = true
 eyre.workspace = true
 metrics.workspace = true
 

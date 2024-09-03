@@ -7173,7 +7173,6 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.6"
 dependencies = [
- "derive_more 1.0.0",
  "eyre",
  "futures",
  "metrics",

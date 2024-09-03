@@ -1,5 +1,5 @@
 use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
-use futures::{channel::oneshot, Stream, StreamExt};
+use futures::Stream;
 use metrics::Gauge;
 use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
