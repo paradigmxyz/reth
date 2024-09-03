@@ -2,21 +2,15 @@
 //!
 //! Types used in block building.
 
-use std::{fmt, time::Instant};
+use std::time::Instant;
 
 use derive_more::Constructor;
-use reth_chainspec::ChainSpec;
-use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
-use reth_provider::ProviderError;
-use reth_revm::state_change::apply_blockhashes_update;
-use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg,
+use reth_primitives::{
+    BlockId, BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader, B256,
 };
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
-use super::{EthApiError, EthResult};
-
-/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
+/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
 pub struct PendingBlockEnv {
     /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
@@ -25,32 +19,6 @@ pub struct PendingBlockEnv {
     pub block_env: BlockEnv,
     /// Origin block for the config
     pub origin: PendingBlockEnvOrigin,
-}
-
-/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
-///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
-/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`].
-///
-/// This uses [`apply_blockhashes_update`].
-pub fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
-    db: &mut DB,
-    chain_spec: &ChainSpec,
-    initialized_block_env: &BlockEnv,
-    block_number: u64,
-    parent_block_hash: B256,
-) -> EthResult<()>
-where
-    DB::Error: fmt::Display,
-{
-    apply_blockhashes_update(
-        db,
-        chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
-        parent_block_hash,
-    )
-    .map_err(|err| EthApiError::Internal(err.into()))
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
@@ -113,11 +81,13 @@ impl PendingBlockEnvOrigin {
     }
 }
 
-/// In memory pending block for `pending` tag
+/// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
 pub struct PendingBlock {
-    /// The cached pending block
-    pub block: SealedBlockWithSenders,
-    /// Timestamp when the pending block is considered outdated
+    /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
+    /// The locally built pending block.
+    pub block: SealedBlockWithSenders,
+    /// The receipts for the pending block
+    pub receipts: Vec<Receipt>,
 }

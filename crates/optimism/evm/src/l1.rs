@@ -32,7 +32,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
     let l1_info_tx_data = block
         .body
         .first()
-        .ok_or(OptimismBlockExecutionError::L1BlockInfoError {
+        .ok_or_else(|| OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not find l1 block info tx in the L2 block".to_string(),
         })
         .map(|tx| tx.input())?;
@@ -71,21 +71,21 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
         })
     }
 
-    let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+    let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 base fee".to_string(),
-        },
-    )?;
-    let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or(
+        }
+    })?;
+    let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 fee overhead".to_string(),
-        },
-    )?;
-    let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or(
+        }
+    })?;
+    let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 fee scalar".to_string(),
-        },
-    )?;
+        }
+    })?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
@@ -117,26 +117,26 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
         })
     }
 
-    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 blob base fee scalar".to_string(),
-        },
-    )?;
-    let l1_base_fee_scalar = U256::try_from_be_slice(&data[12..16]).ok_or(
+        }
+    })?;
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[12..16]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 base fee scalar".to_string(),
-        },
-    )?;
-    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
+        }
+    })?;
+    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 blob base fee".to_string(),
-        },
-    )?;
-    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
+        }
+    })?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
         OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not convert l1 blob base fee".to_string(),
-        },
-    )?;
+        }
+    })?;
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;

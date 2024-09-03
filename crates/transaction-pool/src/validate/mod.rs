@@ -5,9 +5,11 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
+use futures_util::future::Either;
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
+    Address, BlobTransactionSidecar, IntoRecoveredTransaction,
+    PooledTransactionsElementEcRecovered, SealedBlock, TransactionSignedEcRecovered, TxHash, B256,
+    U256,
 };
 use std::{fmt, future::Future, time::Instant};
 
@@ -152,7 +154,10 @@ impl<T: PoolTransaction> ValidTransaction<T> {
 /// Provides support for validating transaction at any given state of the chain
 pub trait TransactionValidator: Send + Sync {
     /// The transaction type to validate.
-    type Transaction: PoolTransaction;
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
 
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
@@ -206,6 +211,42 @@ pub trait TransactionValidator: Send + Sync {
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
+}
+
+impl<A, B> TransactionValidator for Either<A, B>
+where
+    A: TransactionValidator,
+    B: TransactionValidator<Transaction = A::Transaction>,
+{
+    type Transaction = A::Transaction;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        match self {
+            Self::Left(v) => v.validate_transaction(origin, transaction).await,
+            Self::Right(v) => v.validate_transaction(origin, transaction).await,
+        }
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions(transactions).await,
+            Self::Right(v) => v.validate_transactions(transactions).await,
+        }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        match self {
+            Self::Left(v) => v.on_new_head_block(new_tip_block),
+            Self::Right(v) => v.on_new_head_block(new_tip_block),
+        }
+    }
 }
 
 /// A valid transaction in the pool.
@@ -339,14 +380,16 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 }
 
-impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
+impl<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>> IntoRecoveredTransaction
+    for ValidPoolTransaction<T>
+{
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.to_recovered_transaction()
+        self.transaction.clone().into_consensus()
     }
 }
 
 #[cfg(test)]
-impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
+impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
     fn clone(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),

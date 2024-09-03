@@ -34,7 +34,17 @@ pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use reth_execution_types::*;
 
 pub mod bundle_state;
-pub use bundle_state::{OriginalValuesKnown, StateChanges, StateReverts};
+
+/// Re-export `OriginalValuesKnown`
+pub use revm::db::states::OriginalValuesKnown;
+
+/// Writer standalone type.
+pub mod writer;
+
+pub use reth_chain_state::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
+    CanonStateNotifications, CanonStateSubscriptions,
+};
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

@@ -10,7 +10,7 @@ pub(crate) struct TreeState {
     /// Keeps track of new unique identifiers for chains
     block_chain_id_generator: u64,
     /// The tracked chains and their current data.
-    pub(crate) chains: HashMap<BlockchainId, AppendableChain>,
+    pub(crate) chains: HashMap<SidechainId, AppendableChain>,
     /// Indices to block and their connection to the canonical chain.
     ///
     /// This gets modified by the tree itself and is read from engine API/RPC to access the pending
@@ -39,12 +39,12 @@ impl TreeState {
         }
     }
 
-    /// Issues a new unique identifier for a new chain.
+    /// Issues a new unique identifier for a new sidechain.
     #[inline]
-    fn next_id(&mut self) -> BlockchainId {
+    fn next_id(&mut self) -> SidechainId {
         let id = self.block_chain_id_generator;
         self.block_chain_id_generator += 1;
-        BlockchainId(id)
+        SidechainId(id)
     }
 
     /// Expose internal indices of the `BlockchainTree`.
@@ -68,7 +68,7 @@ impl TreeState {
         &self,
         block_hash: BlockHash,
     ) -> Option<&SealedBlockWithSenders> {
-        let id = self.block_indices.get_block_chain_id(&block_hash)?;
+        let id = self.block_indices.get_side_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
         chain.block_with_senders(block_hash)
     }
@@ -77,7 +77,7 @@ impl TreeState {
     ///
     /// Caution: This will not return blocks from the canonical chain.
     pub(crate) fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
-        let id = self.block_indices.get_block_chain_id(&block_hash)?;
+        let id = self.block_indices.get_side_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
         chain.receipts_by_block_hash(block_hash)
     }
@@ -85,7 +85,7 @@ impl TreeState {
     /// Insert a chain into the tree.
     ///
     /// Inserts a chain into the tree and builds the block indices.
-    pub(crate) fn insert_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
+    pub(crate) fn insert_chain(&mut self, chain: AppendableChain) -> Option<SidechainId> {
         if chain.is_empty() {
             return None
         }
@@ -113,16 +113,16 @@ impl TreeState {
 
 /// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct BlockchainId(u64);
+pub(crate) struct SidechainId(u64);
 
-impl From<BlockchainId> for u64 {
-    fn from(value: BlockchainId) -> Self {
+impl From<SidechainId> for u64 {
+    fn from(value: SidechainId) -> Self {
         value.0
     }
 }
 
 #[cfg(test)]
-impl From<u64> for BlockchainId {
+impl From<u64> for SidechainId {
     fn from(value: u64) -> Self {
         Self(value)
     }

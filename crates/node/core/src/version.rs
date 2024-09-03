@@ -20,6 +20,12 @@ pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, .
 /// The build timestamp.
 pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 
+/// The target triple.
+pub const VERGEN_CARGO_TARGET_TRIPLE: &str = env!("VERGEN_CARGO_TARGET_TRIPLE");
+
+/// The build features.
+pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
+
 /// The short version information for reth.
 ///
 /// - The latest version from Cargo.toml
@@ -73,7 +79,8 @@ pub const LONG_VERSION: &str = const_format::concatcp!(
     BUILD_PROFILE_NAME
 );
 
-pub(crate) const BUILD_PROFILE_NAME: &str = {
+/// The build profile name.
+pub const BUILD_PROFILE_NAME: &str = {
     // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
     // We split on the path separator of the *host* machine, which may be different from
     // `std::path::MAIN_SEPARATOR_STR`.

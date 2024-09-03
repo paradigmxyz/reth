@@ -50,6 +50,14 @@ pub struct DebugArgs {
     #[arg(long = "debug.skip-new-payload", help_heading = "Debug")]
     pub skip_new_payload: Option<usize>,
 
+    /// If provided, the chain will be reorged at specified frequency.
+    #[arg(long = "debug.reorg-frequency", help_heading = "Debug")]
+    pub reorg_frequency: Option<usize>,
+
+    /// The reorg depth for chain reorgs.
+    #[arg(long = "debug.reorg-depth", requires = "reorg_frequency", help_heading = "Debug")]
+    pub reorg_depth: Option<usize>,
+
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.

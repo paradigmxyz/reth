@@ -16,7 +16,9 @@ use reth_basic_payload_builder::{
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
+        post_block_consolidation_requests_contract_call,
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+        pre_block_blockhashes_contract_call,
     },
     ConfigureEvm,
 };
@@ -35,8 +37,9 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
@@ -106,13 +109,13 @@ where
             );
             err
         })?;
+
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(state))
             .with_bundle_update()
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -123,8 +126,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.timestamp,
             attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -137,13 +138,15 @@ where
         })?;
 
         // apply eip-2935 blockhashes update
-        apply_blockhashes_update(
+        pre_block_blockhashes_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            initialized_block_env.timestamp.to::<u64>(),
-            block_number,
+            &initialized_cfg,
+            &initialized_block_env,
             parent_block.hash(),
-        ).map_err(|err| {
+        )
+        .map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
             PayloadBuilderError::Internal(err.into())
         })?;
@@ -169,14 +172,17 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for empty payload"
-            );
-            err
-        })?;
+        let state_root = db
+            .database
+            .state_root(HashedPostState::from_bundle_state(&bundle_state.state))
+            .map_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+                err
+            })?;
 
         let mut excess_blob_gas = None;
         let mut blob_gas_used = None;
@@ -196,25 +202,31 @@ where
         }
 
         // Calculate the requests and the requests root.
-        let (requests, requests_root) = if chain_spec
-            .is_prague_active_at_timestamp(attributes.timestamp)
-        {
-            // We do not calculate the EIP-6110 deposit requests because there are no
-            // transactions in an empty payload.
-            let withdrawal_requests = post_block_withdrawal_requests_contract_call::<EvmConfig, _>(
-                &self.evm_config,
-                &mut db,
-                &initialized_cfg,
-                &initialized_block_env,
-            )
-            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &self.evm_config,
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+                let consolidation_requests = post_block_consolidation_requests_contract_call(
+                    &self.evm_config,
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-            let requests = withdrawal_requests;
-            let requests_root = calculate_requests_root(&requests);
-            (Some(requests.into()), Some(requests_root))
-        } else {
-            (None, None)
-        };
+                let requests = [withdrawal_requests, consolidation_requests].concat();
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash: parent_block.hash(),
@@ -243,7 +255,7 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, Vec::new()))
     }
 }
 
@@ -303,8 +315,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -317,14 +327,18 @@ where
     })?;
 
     // apply eip-2935 blockhashes update
-    apply_blockhashes_update(
+    pre_block_blockhashes_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
         parent_block.hash(),
     )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    .map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -453,8 +467,15 @@ where
             &initialized_block_env,
         )
         .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = post_block_consolidation_requests_contract_call(
+            &evm_config,
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
         (Some(requests.into()), Some(requests_root))
     } else {
@@ -470,7 +491,7 @@ where
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts.clone()].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -481,7 +502,9 @@ where
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider
+            .db
+            .state_root(HashedPostState::from_bundle_state(&execution_outcome.state().state))?
     };
 
     // create the block header
@@ -542,7 +565,8 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees);
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay);
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);

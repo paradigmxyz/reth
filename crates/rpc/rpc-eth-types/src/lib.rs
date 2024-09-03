@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod builder;
 pub mod cache;
 pub mod error;
 pub mod fee_history;
@@ -20,6 +21,10 @@ pub mod revm_utils;
 pub mod transaction;
 pub mod utils;
 
+pub use builder::{
+    config::{EthConfig, EthFilterConfig},
+    ctx::EthApiBuilderCtx,
+};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,

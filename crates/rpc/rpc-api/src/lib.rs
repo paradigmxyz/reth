@@ -22,7 +22,6 @@ mod ganache;
 mod hardhat;
 mod mev;
 mod net;
-mod optimism;
 mod otterscan;
 mod reth;
 mod rpc;
@@ -73,6 +72,7 @@ pub mod clients {
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
+        reth::RethApiClient,
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,

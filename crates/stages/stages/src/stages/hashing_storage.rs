@@ -223,9 +223,8 @@ mod tests {
     };
     use reth_primitives::{Address, SealedBlock, U256};
     use reth_provider::providers::StaticFileWriter;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_contract_account_range},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_contract_account_range, BlockRangeParams,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -273,9 +272,9 @@ mod tests {
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
                     continue
-                } else {
-                    assert_eq!(checkpoint.block_number, previous_stage);
-                    assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
+                }
+                assert_eq!(checkpoint.block_number, previous_stage);
+                assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
                         progress: EntitiesCheckpoint {
                             processed,
                             total,
@@ -284,14 +283,13 @@ mod tests {
                     }) if processed == total &&
                         total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
 
-                    // Validate the stage execution
-                    assert!(
-                        runner.validate_execution(input, Some(result)).is_ok(),
-                        "execution validation"
-                    );
+                // Validate the stage execution
+                assert!(
+                    runner.validate_execution(input, Some(result)).is_ok(),
+                    "execution validation"
+                );
 
-                    break
-                }
+                break
             }
             panic!("Failed execution");
         }
@@ -342,7 +340,11 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut rng, &mut (0..n_accounts));
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..3);
+            let blocks = random_block_range(
+                &mut rng,
+                stage_progress..=end,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+            );
 
             self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -535,7 +537,7 @@ mod tests {
                         storage_cursor.delete_current()?;
                     }
 
-                    if entry.value != U256::ZERO {
+                    if !entry.value.is_zero() {
                         storage_cursor.upsert(bn_address.address(), entry)?;
                     }
                 }

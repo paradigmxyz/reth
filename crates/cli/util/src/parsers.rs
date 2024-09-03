@@ -12,6 +12,23 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
     Ok(Duration::from_secs(seconds))
 }
 
+/// Helper to parse a [Duration] from seconds if it's a number or milliseconds if the input contains
+/// a `ms` suffix:
+///  * `5ms` -> 5 milliseconds
+///  * `5` -> 5 seconds
+///  * `5s` -> 5 seconds
+pub fn parse_duration_from_secs_or_ms(
+    arg: &str,
+) -> eyre::Result<Duration, std::num::ParseIntError> {
+    if arg.ends_with("ms") {
+        arg.trim_end_matches("ms").parse::<u64>().map(Duration::from_millis)
+    } else if arg.ends_with('s') {
+        arg.trim_end_matches('s').parse::<u64>().map(Duration::from_secs)
+    } else {
+        arg.parse::<u64>().map(Duration::from_secs)
+    }
+}
+
 /// Parse [`BlockHashOrNumber`]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
     match B256::from_str(value) {
@@ -68,7 +85,7 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::Rng;
+    use rand::Rng;
 
     #[test]
     fn parse_socket_addresses() {
@@ -92,5 +109,19 @@ mod tests {
             assert!(socket_addr.ip().is_loopback());
             assert_eq!(socket_addr.port(), port);
         }
+    }
+
+    #[test]
+    fn parse_ms_or_seconds() {
+        let ms = parse_duration_from_secs_or_ms("5ms").unwrap();
+        assert_eq!(ms, Duration::from_millis(5));
+
+        let seconds = parse_duration_from_secs_or_ms("5").unwrap();
+        assert_eq!(seconds, Duration::from_secs(5));
+
+        let seconds = parse_duration_from_secs_or_ms("5s").unwrap();
+        assert_eq!(seconds, Duration::from_secs(5));
+
+        assert!(parse_duration_from_secs_or_ms("5ns").is_err());
     }
 }

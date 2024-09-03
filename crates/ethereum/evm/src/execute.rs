@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
@@ -12,8 +13,8 @@ use reth_evm::{
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
-        apply_beacon_root_contract_call, apply_consolidation_requests_contract_call,
-        apply_withdrawal_requests_contract_call,
+        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
+        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
     },
     ConfigureEvm,
 };
@@ -23,18 +24,19 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats},
-    db::states::bundle_state::BundleRetention,
-    state_change::{apply_blockhashes_update, post_block_balance_increments},
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 #[cfg(feature = "std")]
-use std::{fmt::Display, sync::Arc, vec, vec::Vec};
+use std::sync::Arc;
+
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
 pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
@@ -99,11 +101,7 @@ where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let executor = self.eth_executor(db);
-        EthBatchExecutor {
-            executor,
-            batch_record: BlockBatchRecord::default(),
-            stats: BlockExecutorStats::default(),
-        }
+        EthBatchExecutor { executor, batch_record: BlockBatchRecord::default() }
     }
 }
 
@@ -145,7 +143,7 @@ where
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
-        DB::Error: Into<ProviderError> + std::fmt::Display,
+        DB::Error: Into<ProviderError> + Display,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -156,12 +154,13 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        apply_blockhashes_update(
-            evm.db_mut(),
+        apply_blockhashes_contract_call(
+            &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_hash,
+            &mut evm,
         )?;
 
         // execute transactions
@@ -363,7 +362,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -397,7 +396,6 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
     executor: EthBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and records receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
-    stats: BlockExecutorStats,
 }
 
 impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
@@ -419,6 +417,11 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
         let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
@@ -434,16 +437,10 @@ where
         // store requests in the set
         self.batch_record.save_requests(requests);
 
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.number);
-        }
-
         Ok(())
     }
 
     fn finalize(mut self) -> Self::Output {
-        self.stats.log_debug();
-
         ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
@@ -469,7 +466,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::{
-        eip2935::HISTORY_STORAGE_ADDRESS,
+        eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
@@ -870,11 +867,26 @@ mod tests {
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 
+    /// Create a state provider with blockhashes and the EIP-2935 system contract.
     fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
         let mut db = StateProviderTest::default();
         for block_number in 0..=latest_block {
             db.insert_block_hash(block_number, keccak256(block_number.to_string()));
         }
+
+        let blockhashes_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(HISTORY_STORAGE_CODE.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            HISTORY_STORAGE_ADDRESS,
+            blockhashes_contract_account,
+            Some(HISTORY_STORAGE_CODE.clone()),
+            HashMap::new(),
+        );
+
         db
     }
 
@@ -920,9 +932,9 @@ mod tests {
         // ensure that the block hash was *not* written to storage, since this is before the fork
         // was activated
         //
-        // we load the account first, which should also not exist, because revm expects it to be
+        // we load the account first, because revm expects it to be
         // loaded
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
@@ -970,9 +982,9 @@ mod tests {
         // ensure that the block hash was *not* written to storage, since there are no blocks
         // preceding genesis
         //
-        // we load the account first, which should also not exist, because revm expects it to be
+        // we load the account first, because revm expects it to be
         // loaded
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
@@ -1142,7 +1154,10 @@ mod tests {
             );
 
         // nothing should be written as the genesis has no ancestors
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        //
+        // we load the account first, because revm expects it to be
+        // loaded
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)

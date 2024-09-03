@@ -1,10 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
-use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    RawTransactionForwarder,
-};
+use reth_rpc_eth_api::helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking};
 use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
@@ -23,11 +20,6 @@ where
     }
 
     #[inline]
-    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
-    }
-
-    #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
     }
@@ -43,7 +35,7 @@ where
     type Pool = Pool;
 
     #[inline]
-    fn provider(&self) -> impl reth_provider::TransactionsProvider {
+    fn provider(&self) -> impl TransactionsProvider {
         self.inner.provider()
     }
 
@@ -96,7 +88,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         );
 

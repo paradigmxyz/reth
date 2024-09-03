@@ -1,42 +1,58 @@
-use crate::{
-    engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
-    rpc::RpcTestContext, traits::PayloadEnvelopeExt,
-};
+use std::{marker::PhantomData, pin::Pin};
 
+use alloy_network::Network;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
+    network::PeersHandleProvider,
     payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
-    rpc::types::engine::PayloadStatusEnum,
+    rpc::{
+        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
+        types::engine::PayloadStatusEnum,
+    },
 };
-use reth_node_builder::NodeTypes;
+use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypes};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use reth_rpc_types::WithOtherFields;
 use reth_stages_types::StageId;
-use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
+use crate::{
+    engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
+    rpc::RpcTestContext, traits::PayloadEnvelopeExt,
+};
+
 /// An helper struct to handle node actions
-pub struct NodeTestContext<Node>
+#[allow(missing_debug_implementations)]
+pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
 {
-    pub inner: FullNode<Node>,
+    /// The core structure representing the full node.
+    pub inner: FullNode<Node, AddOns>,
+    /// Context for testing payload-related features.
     pub payload: PayloadTestContext<Node::Engine>,
-    pub network: NetworkTestContext,
+    /// Context for testing network functionalities.
+    pub network: NetworkTestContext<Node::Network>,
+    /// Context for testing the Engine API.
     pub engine_api: EngineApiTestContext<Node::Engine>,
-    pub rpc: RpcTestContext<Node>,
+    /// Context for testing RPC features.
+    pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
 
-impl<Node> NodeTestContext<Node>
+impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    Node::Network: PeersHandleProvider,
+    AddOns: NodeAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
+    pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {
@@ -53,7 +69,7 @@ where
     }
 
     /// Establish a connection to the node
-    pub async fn connect(&mut self, node: &mut NodeTestContext<Node>) {
+    pub async fn connect(&mut self, node: &mut Self) {
         self.network.add_peer(node.network.record()).await;
         node.network.next_session_established().await;
         self.network.next_session_established().await;
@@ -77,6 +93,9 @@ where
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
+        <AddOns::EthApi as EthApiTypes>::NetworkTypes:
+            Network<TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>>,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
@@ -175,14 +194,16 @@ where
                     assert_eq!(latest_block.hash_slow(), expected_block_hash);
                     break
                 }
-                if wait_finish_checkpoint {
-                    panic!("Finish checkpoint matches, but could not fetch block.");
-                }
+                assert!(
+                    !wait_finish_checkpoint,
+                    "Finish checkpoint matches, but could not fetch block."
+                );
             }
         }
         Ok(())
     }
 
+    /// Waits for the node to unwind to the given block number
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;

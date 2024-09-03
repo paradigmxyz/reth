@@ -1,13 +1,14 @@
 use super::{
-    metrics::StaticFileProviderMetrics, LoadedJar, StaticFileJarProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
+    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
+    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
-use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -21,7 +22,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
@@ -39,7 +40,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 use strum::IntoEnumIterator;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -114,8 +115,8 @@ pub struct StaticFileProviderInner {
     /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
     /// won't be able to be queried directly.
     load_filters: bool,
-    /// Maintains a map of `StaticFile` writers for each [`StaticFileSegment`]
-    writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
+    /// Maintains a writer set of [`StaticFileSegment`].
+    writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
@@ -329,9 +330,12 @@ impl StaticFileProvider {
         let key = (fixed_block_range.end(), segment);
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
+        trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
         let mut provider: StaticFileJarProvider<'_> = if let Some(jar) = self.map.get(&key) {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
             jar.into()
         } else {
+            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
             let mut jar =
                 NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -532,6 +536,18 @@ impl StaticFileProvider {
         provider: &DatabaseProvider<TX>,
         has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>> {
+        // OVM chain contains duplicate transactions, so is inconsistent by default since reth db
+        // not designed for duplicate transactions (see <https://github.com/paradigmxyz/reth/blob/v1.0.3/crates/optimism/primitives/src/bedrock_import.rs>). Undefined behaviour for queries
+        // to OVM chain is also in op-erigon.
+        if provider.chain_spec().is_optimism_mainnet() {
+            info!(target: "reth::cli",
+                "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
+            );
+            return Ok(None);
+        }
+
+        info!(target: "reth::cli", "Verifying storage consistency.");
+
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
             if let Some(target) = unwind_target.as_mut() {
@@ -557,7 +573,12 @@ impl StaticFileProvider {
             // * pruning data was interrupted before a config commit, then we have deleted data that
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
-            self.ensure_file_consistency(segment)?;
+            if self.access.is_read_only() {
+                self.check_segment_consistency(segment)?;
+            } else {
+                // Fetching the writer will attempt to heal any file level inconsistency.
+                self.latest_writer(segment)?;
+            }
 
             // Only applies to block-based static files. (Headers)
             //
@@ -637,6 +658,23 @@ impl StaticFileProvider {
         }
 
         Ok(unwind_target.map(PipelineTarget::Unwind))
+    }
+
+    /// Checks consistency of the latest static file segment and throws an error if at fault.
+    /// Read-only.
+    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        if let Some(latest_block) = self.get_highest_static_file_block(segment) {
+            let file_path =
+                self.directory().join(segment.filename(&find_fixed_range(latest_block)));
+
+            let jar = NippyJar::<SegmentHeader>::load(&file_path)
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+
+            NippyJarChecker::new(jar)
+                .check_consistency()
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Check invariants for each corresponding table and static file segment:
@@ -851,6 +889,12 @@ impl StaticFileProvider {
                             };
                             return Err(err)
                         }
+                        // There is a very small chance of hitting a deadlock if two consecutive
+                        // static files share the same bucket in the
+                        // internal dashmap and we don't drop the current provider
+                        // before requesting the next one.
+                        drop(cursor);
+                        drop(provider);
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
                         retrying = true;
@@ -883,14 +927,19 @@ impl StaticFileProvider {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
-        let mut provider = get_provider(range.start)?;
 
+        let mut provider = Some(get_provider(range.start)?);
         Ok(range.filter_map(move |number| {
-            match get_fn(&mut provider.cursor().ok()?, number).transpose() {
+            match get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose() {
                 Some(result) => Some(result),
                 None => {
-                    provider = get_provider(number).ok()?;
-                    get_fn(&mut provider.cursor().ok()?, number).transpose()
+                    // There is a very small chance of hitting a deadlock if two consecutive static
+                    // files share the same bucket in the internal dashmap and
+                    // we don't drop the current provider before requesting the
+                    // next one.
+                    provider.take();
+                    provider = Some(get_provider(number).ok()?);
+                    get_fn(&mut provider.as_ref().expect("qed").cursor().ok()?, number).transpose()
                 }
             }
         }))
@@ -1013,9 +1062,6 @@ pub trait StaticFileWriter {
 
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
-
-    /// Checks consistency of the segment latest file and heals if possible.
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
 impl StaticFileWriter for StaticFileProvider {
@@ -1028,18 +1074,9 @@ impl StaticFileWriter for StaticFileProvider {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
-        tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
-        Ok(match self.writers.entry(segment) {
-            DashMapEntry::Occupied(entry) => entry.into_ref(),
-            DashMapEntry::Vacant(entry) => {
-                let writer = StaticFileProviderRW::new(
-                    segment,
-                    block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-                entry.insert(writer)
-            }
+        trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
+        self.writers.get_or_create(segment, || {
+            StaticFileProviderRW::new(segment, block, Arc::downgrade(&self.0), self.metrics.clone())
         })
     }
 
@@ -1051,32 +1088,7 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn commit(&self) -> ProviderResult<()> {
-        for mut writer in self.writers.iter_mut() {
-            writer.commit()?;
-        }
-        Ok(())
-    }
-
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        match self.access {
-            StaticFileAccess::RO => {
-                let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
-
-                let mut writer = StaticFileProviderRW::new(
-                    segment,
-                    latest_block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-
-                writer.ensure_file_consistency(self.access.is_read_only())?;
-            }
-            StaticFileAccess::RW => {
-                self.latest_writer(segment)?.ensure_file_consistency(self.access.is_read_only())?;
-            }
-        }
-
-        Ok(())
+        self.writers.commit()
     }
 }
 
@@ -1237,7 +1249,8 @@ impl TransactionsProviderExt for StaticFileProvider {
         let mut channels = Vec::new();
 
         // iterator over the chunks
-        let chunks = (tx_range.start..tx_range.end)
+        let chunks = tx_range
+            .clone()
             .step_by(chunk_size)
             .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 

@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput};
+use syn::{parse_macro_input, Data, DeriveInput, Generics};
 
 mod generator;
 use generator::*;
@@ -43,11 +43,18 @@ pub enum FieldTypes {
 pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
     let mut output = quote! {};
 
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+    let DeriveInput { ident, data, generics, .. } = parse_macro_input!(input);
+
+    let has_lifetime = has_lifetime(&generics);
+
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &fields, is_zstd));
-    output.extend(generate_from_to(&ident, &fields, is_zstd));
+    output.extend(generate_flag_struct(&ident, has_lifetime, &fields, is_zstd));
+    output.extend(generate_from_to(&ident, has_lifetime, &fields, is_zstd));
     output.into()
+}
+
+pub fn has_lifetime(generics: &Generics) -> bool {
+    generics.lifetimes().next().is_some()
 }
 
 /// Given a list of fields on a struct, extract their fields and types.
@@ -60,7 +67,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                 for field in &data_fields.named {
                     load_field(field, &mut fields, false);
                 }
-                assert_eq!(fields.len(), data_fields.named.len());
+                assert_eq!(fields.len(), data_fields.named.len(), "get_fields");
             }
             syn::Fields::Unnamed(ref data_fields) => {
                 assert_eq!(
@@ -99,37 +106,54 @@ pub fn get_fields(data: &Data) -> FieldList {
 }
 
 fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
-    if let syn::Type::Path(ref path) = field.ty {
-        let segments = &path.path.segments;
-        if !segments.is_empty() {
-            let mut ftype = String::new();
+    match field.ty {
+        syn::Type::Reference(ref reference) => match &*reference.elem {
+            syn::Type::Path(path) => {
+                load_field_from_segments(&path.path.segments, is_enum, fields, field)
+            }
+            _ => unimplemented!("{:?}", &field.ident),
+        },
+        syn::Type::Path(ref path) => {
+            load_field_from_segments(&path.path.segments, is_enum, fields, field)
+        }
+        _ => unimplemented!("{:?}", &field.ident),
+    }
+}
 
-            let mut use_alt_impl: UseAlternative = false;
+fn load_field_from_segments(
+    segments: &syn::punctuated::Punctuated<syn::PathSegment, syn::token::PathSep>,
+    is_enum: bool,
+    fields: &mut Vec<FieldTypes>,
+    field: &syn::Field,
+) {
+    if !segments.is_empty() {
+        let mut ftype = String::new();
 
-            for (index, segment) in segments.iter().enumerate() {
-                ftype.push_str(&segment.ident.to_string());
-                if index < segments.len() - 1 {
-                    ftype.push_str("::");
-                }
+        let mut use_alt_impl: UseAlternative = false;
 
-                use_alt_impl = should_use_alt_impl(&ftype, segment);
+        for (index, segment) in segments.iter().enumerate() {
+            ftype.push_str(&segment.ident.to_string());
+            if index < segments.len() - 1 {
+                ftype.push_str("::");
             }
 
-            if is_enum {
-                fields.push(FieldTypes::EnumUnnamedField((ftype.to_string(), use_alt_impl)));
-            } else {
-                let should_compact = is_flag_type(&ftype) ||
-                    field.attrs.iter().any(|attr| {
-                        attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
-                    });
+            use_alt_impl = should_use_alt_impl(&ftype, segment);
+        }
 
-                fields.push(FieldTypes::StructField((
-                    field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
-                    ftype,
-                    should_compact,
-                    use_alt_impl,
-                )));
-            }
+        if is_enum {
+            fields.push(FieldTypes::EnumUnnamedField((ftype.to_string(), use_alt_impl)));
+        } else {
+            let should_compact = is_flag_type(&ftype) ||
+                field.attrs.iter().any(|attr| {
+                    attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
+                });
+
+            fields.push(FieldTypes::StructField((
+                field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
+                ftype,
+                should_compact,
+                use_alt_impl,
+            )));
         }
     }
 }
@@ -211,8 +235,8 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, &fields, false));
-        output.extend(generate_from_to(&ident, &fields, false));
+        output.extend(generate_flag_struct(&ident, false, &fields, false));
+        output.extend(generate_from_to(&ident, false, &fields, false));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
@@ -267,7 +291,7 @@ mod tests {
                 fuzz_test_test_struct(TestStruct::default())
             }
             impl Compact for TestStruct {
-                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+                fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_length = 0;
                     let mut buffer = bytes::BytesMut::new();

@@ -64,6 +64,8 @@ impl Serialize for NewPayloadResult {
 /// latency.
 #[derive(Debug)]
 pub(crate) struct CombinedResult {
+    /// The block number of the block being processed.
+    pub(crate) block_number: u64,
     /// The `newPayload` result.
     pub(crate) new_payload_result: NewPayloadResult,
     /// The latency of the `forkchoiceUpdated` call.
@@ -83,7 +85,8 @@ impl std::fmt::Display for CombinedResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Payload processed at {:.4} Ggas/s, used {} total gas. Combined gas per second: {:.4} Ggas/s. fcu latency: {:?}, newPayload latency: {:?}",
+            "Payload {} processed at {:.4} Ggas/s, used {} total gas. Combined gas per second: {:.4} Ggas/s. fcu latency: {:?}, newPayload latency: {:?}",
+            self.block_number,
             self.new_payload_result.gas_per_second() / GIGAGAS as f64,
             self.new_payload_result.gas_used,
             self.combined_gas_per_second() / GIGAGAS as f64,
@@ -104,9 +107,10 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 4)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 5)?;
 
         // flatten the new payload result because this is meant for CSV writing
+        state.serialize_field("block_number", &self.block_number)?;
         state.serialize_field("gas_used", &self.new_payload_result.gas_used)?;
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;

@@ -9,7 +9,6 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::Requests;
@@ -31,7 +30,7 @@ prop_compose! {
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[add_arbitrary_tests(rlp, 25)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
@@ -134,6 +133,12 @@ impl Block {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
 
+    /// Returns whether or not the block contains any EIP-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip7702())
+    }
+
     /// Returns an iterator over all blob transactions of the block
     #[inline]
     pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
@@ -160,7 +165,7 @@ impl Block {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// Calculates a heuristic for the in-memory size of the [Block].
+    /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() +
@@ -263,7 +268,8 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp 32)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
 #[derive(
     Debug,
     Clone,
@@ -440,6 +446,12 @@ impl SealedBlock {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
 
+    /// Returns whether or not the block contains any eip-7702 transactions.
+    #[inline]
+    pub fn has_eip7702_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip7702())
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -539,7 +551,7 @@ impl SealedBlockWithSenders {
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[add_arbitrary_tests(rlp, 10)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 10))]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]

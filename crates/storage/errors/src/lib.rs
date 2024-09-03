@@ -20,3 +20,6 @@ pub mod lockfile;
 
 /// Provider error
 pub mod provider;
+
+/// Writer error
+pub mod writer;

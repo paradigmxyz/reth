@@ -10,6 +10,10 @@ pub trait StageCheckpointReader: Send + Sync {
 
     /// Get stage checkpoint progress.
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>>;
+
+    /// Reads all stage checkpoints and returns a list with the name of the stage and the checkpoint
+    /// data.
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>>;
 }
 
 /// The trait for updating stage checkpoint related data.

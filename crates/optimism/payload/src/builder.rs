@@ -5,6 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
@@ -17,11 +18,13 @@ use reth_primitives::{
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -110,7 +113,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit: u64 =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -121,8 +123,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.payload_attributes.timestamp,
             attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -155,7 +155,8 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
+        let hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let state_root = db.database.state_root(hashed_state).map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
@@ -208,12 +209,16 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
+        let receipts = Vec::new();
+
         Ok(OptimismBuiltPayload::new(
             attributes.payload_attributes.payload_id(),
             sealed_block,
             U256::ZERO,
             chain_spec,
             attributes,
+            None,
+            receipts,
         ))
     }
 }
@@ -262,6 +267,7 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
+    let mut executed_senders = Vec::with_capacity(attributes.transactions.len());
 
     let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
@@ -284,8 +290,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.payload_attributes.timestamp,
         attributes.payload_attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -402,7 +406,8 @@ where
                 .then_some(1),
         }));
 
-        // append transaction to the list of executed transactions
+        // append sender and transaction to the respective lists
+        executed_senders.push(sequencer_tx.signer());
         executed_txs.push(sequencer_tx.into_signed());
     }
 
@@ -419,7 +424,8 @@ where
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
-                best_txs.mark_invalid(&pool_tx)
+                best_txs.mark_invalid(&pool_tx);
+                continue
             }
 
             // check if the job was cancelled, if so we can exit early
@@ -489,7 +495,8 @@ where
                 .expect("fee is always valid; execution succeeded");
             total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-            // append transaction to the list of executed transactions
+            // append sender and transaction to the respective lists
+            executed_senders.push(tx.signer());
             executed_txs.push(tx.into_signed());
         }
     }
@@ -511,8 +518,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome =
-        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let execution_outcome = ExecutionOutcome::new(
+        db.take_bundle(),
+        vec![receipts.clone()].into(),
+        block_number,
+        Vec::new(),
+    );
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -523,9 +534,16 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = {
+    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+    let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header
@@ -581,12 +599,24 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
+    // create the executed block data
+    let executed = ExecutedBlock {
+        block: Arc::new(sealed_block.clone()),
+        senders: Arc::new(executed_senders),
+        execution_output: Arc::new(execution_outcome),
+        hashed_state: Arc::new(hashed_state),
+        trie: Arc::new(trie_output),
+    };
+
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
         total_fees,
         chain_spec,
         attributes,
+        Some(executed),
+        receipts_pay,
     );
 
     // extend the payload with the blob sidecars from the executed txs

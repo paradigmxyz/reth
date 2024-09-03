@@ -15,10 +15,8 @@ use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, U256};
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::{BlockBatchRecord, BlockExecutorStats},
-    db::states::bundle_state::BundleRetention,
-    state_change::post_block_balance_increments,
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -85,11 +83,7 @@ where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let executor = self.op_executor(db);
-        OpBatchExecutor {
-            executor,
-            batch_record: BlockBatchRecord::default(),
-            stats: BlockExecutorStats::default(),
-        }
+        OpBatchExecutor { executor, batch_record: BlockBatchRecord::default() }
     }
 }
 
@@ -376,7 +370,6 @@ pub struct OpBatchExecutor<EvmConfig, DB> {
     executor: OpBlockExecutor<EvmConfig, DB>,
     /// Keeps track of the batch and record receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
-    stats: BlockExecutorStats,
 }
 
 impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
@@ -403,6 +396,11 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
+
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
@@ -415,16 +413,10 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.number);
-        }
-
         Ok(())
     }
 
     fn finalize(mut self) -> Self::Output {
-        self.stats.log_debug();
-
         ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
@@ -509,8 +501,11 @@ mod tests {
         let account = Account { balance: U256::MAX, ..Account::default() };
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec =
-            Arc::new(ChainSpecBuilder::from(&*BASE_MAINNET).regolith_activated().build());
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+                .regolith_activated()
+                .build(),
+        );
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
@@ -590,8 +585,11 @@ mod tests {
 
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec =
-            Arc::new(ChainSpecBuilder::from(&*BASE_MAINNET).canyon_activated().build());
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+                .canyon_activated()
+                .build(),
+        );
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {

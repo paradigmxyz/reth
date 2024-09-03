@@ -63,6 +63,11 @@ impl PruneModes {
         }
     }
 
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.receipts.is_some() || !self.receipts_log_filter.is_empty()
+    }
+
     /// Returns true if all prune modes are set to [`None`].
     pub fn is_empty(&self) -> bool {
         self == &Self::none()

@@ -105,8 +105,8 @@ And the corresponding trait implementations are present in the primitives crate.
 
 [File: crates/primitives/src/transaction/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/primitives/src/transaction/mod.rs)
 ```rust, ignore
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[reth_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     pub hash: TxHash,
     pub signature: Signature,

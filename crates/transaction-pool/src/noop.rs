@@ -204,7 +204,7 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
-    fn get_transactions_by_sender_and_nonce(
+    fn get_transaction_by_sender_and_nonce(
         &self,
         _sender: Address,
         _nonce: u64,
@@ -249,6 +249,13 @@ impl TransactionPool for NoopTransactionPool {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_pending_transactions_by_origin(
+        &self,
+        _origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
     }
 }
 

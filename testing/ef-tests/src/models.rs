@@ -41,7 +41,7 @@ pub struct BlockchainTest {
 }
 
 /// A block header in an Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Header {
     /// Bloom filter.
@@ -120,7 +120,7 @@ impl From<Header> for SealedHeader {
 }
 
 /// A block in an Ethereum blockchain test.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Block {
     /// Block header.
@@ -138,7 +138,7 @@ pub struct Block {
 }
 
 /// Transaction sequence in block
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSequence {
@@ -148,7 +148,7 @@ pub struct TransactionSequence {
 }
 
 /// Ethereum blockchain test data state.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Default)]
 pub struct State(BTreeMap<Address, Account>);
 
 impl State {
@@ -194,7 +194,7 @@ impl Deref for State {
 }
 
 /// An account.
-#[derive(Debug, PartialEq, Eq, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Clone, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Account {
     /// Balance.

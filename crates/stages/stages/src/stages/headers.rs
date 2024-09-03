@@ -138,7 +138,7 @@ where
             })?;
 
             // Append to Headers segment
-            writer.append_header(header, td, header_hash)?;
+            writer.append_header(&header, td, &header_hash)?;
         }
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
@@ -507,12 +507,12 @@ mod tests {
 
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
                 self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
-                let tip = if !headers.is_empty() {
-                    headers.last().unwrap().hash()
-                } else {
+                let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None);
                     self.db.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
+                } else {
+                    headers.last().unwrap().hash()
                 };
                 self.send_tip(tip);
                 Ok(())

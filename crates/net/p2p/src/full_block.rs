@@ -3,6 +3,7 @@ use crate::{
     bodies::client::{BodiesClient, SingleBodyRequest},
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
+    BlockClient,
 };
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
@@ -41,7 +42,7 @@ impl<Client> FullBlockClient<Client> {
 
 impl<Client> FullBlockClient<Client>
 where
-    Client: BodiesClient + HeadersClient + Clone,
+    Client: BlockClient,
 {
     /// Returns a future that fetches the [`SealedBlock`] for the given hash.
     ///
@@ -105,7 +106,7 @@ where
 #[must_use = "futures do nothing unless polled"]
 pub struct FetchFullBlockFuture<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     client: Client,
     hash: B256,
@@ -116,7 +117,7 @@ where
 
 impl<Client> FetchFullBlockFuture<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     /// Returns the hash of the block being requested.
     pub const fn hash(&self) -> &B256 {
@@ -168,7 +169,7 @@ where
 
 impl<Client> Future for FetchFullBlockFuture<Client>
 where
-    Client: BodiesClient + HeadersClient + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Output = SealedBlock;
 
@@ -183,12 +184,12 @@ where
                             let (peer, maybe_header) =
                                 maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
                             if let Some(header) = maybe_header {
-                                if header.hash() != this.hash {
+                                if header.hash() == this.hash {
+                                    this.header = Some(header);
+                                } else {
                                     debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
                                     // received a different header than requested
                                     this.client.report_bad_message(peer)
-                                } else {
-                                    this.header = Some(header);
                                 }
                             }
                         }
@@ -229,7 +230,7 @@ where
 
 impl<Client> Debug for FetchFullBlockFuture<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FetchFullBlockFuture")
@@ -242,7 +243,7 @@ where
 
 struct FullBlockRequest<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     header: Option<SingleHeaderRequest<<Client as HeadersClient>::Output>>,
     body: Option<SingleBodyRequest<<Client as BodiesClient>::Output>>,
@@ -250,7 +251,7 @@ where
 
 impl<Client> FullBlockRequest<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ResponseResult> {
         if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
@@ -362,7 +363,7 @@ fn ensure_valid_body_response(
 #[allow(missing_debug_implementations)]
 pub struct FetchFullBlockRangeFuture<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     /// The client used to fetch headers and bodies.
     client: Client,
@@ -384,7 +385,7 @@ where
 
 impl<Client> FetchFullBlockRangeFuture<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     /// Returns the block hashes for the given range, if they are available.
     pub fn range_block_hashes(&self) -> Option<Vec<B256>> {
@@ -490,16 +491,12 @@ where
             headers_falling.sort_unstable_by_key(|h| Reverse(h.number));
 
             // check the starting hash
-            if headers_falling[0].hash() != self.start_hash {
-                // received a different header than requested
-                self.client.report_bad_message(peer);
-            } else {
+            if headers_falling[0].hash() == self.start_hash {
                 let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
-                // ensure the downloaded headers are valid
+                // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
-                    return
                 }
 
                 // get the bodies request so it can be polled later
@@ -516,6 +513,9 @@ where
 
                 // set the headers response
                 self.headers = Some(headers_falling);
+            } else {
+                // received a different header than requested
+                self.client.report_bad_message(peer);
             }
         }
     }
@@ -539,7 +539,7 @@ where
 
 impl<Client> Future for FetchFullBlockRangeFuture<Client>
 where
-    Client: BodiesClient + HeadersClient + Unpin + 'static,
+    Client: BlockClient + 'static,
 {
     type Output = Vec<SealedBlock>;
 
@@ -638,7 +638,7 @@ where
 /// on which future successfully returned.
 struct FullBlockRangeRequest<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     headers: Option<<Client as HeadersClient>::Output>,
     bodies: Option<<Client as BodiesClient>::Output>,
@@ -646,7 +646,7 @@ where
 
 impl<Client> FullBlockRangeRequest<Client>
 where
-    Client: BodiesClient + HeadersClient,
+    Client: BlockClient,
 {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RangeResponseResult> {
         if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
@@ -756,6 +756,25 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 50).await;
         assert_eq!(received.len(), 50);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_with_invalid_header() {
+        let client = TestFullBlockClient::default();
+        let range_length: usize = 3;
+        let (header, _) = insert_headers_into_client(&client, 0..range_length);
+
+        let test_consensus = reth_consensus::test_utils::TestConsensus::default();
+        test_consensus.set_fail_validation(true);
+        let client = FullBlockClient::new(client, Arc::new(test_consensus));
+
+        let received = client.get_full_block_range(header.hash(), range_length as u64).await;
+
+        assert_eq!(received.len(), range_length);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
             assert_eq!(block.header.number, expected_number);

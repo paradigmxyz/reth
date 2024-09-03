@@ -25,7 +25,6 @@ derive_more.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # misc
-thiserror-no-std = { workspace = true, default-features = false }
 roaring = "0.10.2"
 byteorder = "1"
 
@@ -40,20 +39,23 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-consensus = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 
 [features]
 default = ["std"]
-std = ["thiserror-no-std/std"]
+std = []
 test-utils = ["arbitrary"]
 arbitrary = [
+    "std",
     "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-arbitrary-interop",

@@ -83,6 +83,8 @@ pub struct NetworkMetrics {
 pub struct SessionManagerMetrics {
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
+    /// Number of dropped outgoing peer messages.
+    pub(crate) total_outgoing_peer_messages_dropped: Counter,
 }
 
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
@@ -347,12 +349,25 @@ pub struct AnnouncedTxTypesMetrics {
     pub(crate) eip7702: Histogram,
 }
 
+/// Counts the number of transactions by their type in a block or collection.
+///
+/// This struct keeps track of the count of different transaction types
+/// as defined by various Ethereum Improvement Proposals (EIPs).
 #[derive(Debug, Default)]
 pub struct TxTypesCounter {
+    /// Count of legacy transactions (pre-EIP-2718).
     pub(crate) legacy: usize,
+
+    /// Count of transactions conforming to EIP-2930 (Optional access lists).
     pub(crate) eip2930: usize,
+
+    /// Count of transactions conforming to EIP-1559 (Fee market change).
     pub(crate) eip1559: usize,
+
+    /// Count of transactions conforming to EIP-4844 (Shard Blob Transactions).
     pub(crate) eip4844: usize,
+
+    /// Count of transactions conforming to EIP-7702 (Restricted Storage Windows).
     pub(crate) eip7702: usize,
 }
 

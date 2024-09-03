@@ -1,0 +1,56 @@
+[package]
+name = "reth-chain-state"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth state related types and functionality."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-errors.workspace = true
+reth-execution-types.workspace = true
+reth-metrics.workspace = true
+reth-primitives.workspace = true
+reth-storage-api.workspace = true
+reth-trie.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+
+# tracing
+tracing.workspace = true
+
+# misc
+auto_impl.workspace = true
+derive_more.workspace = true
+metrics.workspace = true
+parking_lot.workspace = true
+pin-project.workspace = true
+
+# optional deps for test-utils
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+revm = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+rand.workspace = true
+revm.workspace = true
+
+[features]
+test-utils = [
+  "alloy-signer",
+  "alloy-signer-local",
+  "rand",
+  "revm"
+]

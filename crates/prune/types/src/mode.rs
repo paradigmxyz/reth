@@ -1,11 +1,13 @@
 use crate::{segment::PrunePurpose, PruneSegment, PruneSegmentError};
 use alloy_primitives::BlockNumber;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
+use serde::{Deserialize, Serialize};
 
 /// Prune mode.
-#[main_codec]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Compact)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub enum PruneMode {
     /// Prune all blocks.
     Full,
@@ -39,7 +41,9 @@ impl PruneMode {
             }
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
             Self::Before(n) if *n > tip => None, // Nothing to prune yet
-            Self::Before(n) if tip - n >= segment.min_blocks(purpose) => Some((n - 1, *self)),
+            Self::Before(n) if tip - n >= segment.min_blocks(purpose) => {
+                Some(((*n).saturating_sub(1), *self))
+            }
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)

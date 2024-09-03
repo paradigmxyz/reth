@@ -12,17 +12,17 @@ use std::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{IntoRecoveredTransaction, TransactionSignedEcRecovered, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
-    EthApiError, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
+    EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind,
+    PendingTransactionFilterKind, Transaction, WithOtherFields,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -98,7 +98,10 @@ where
     /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.inner.stale_filter_ttl,
+            self.inner.stale_filter_ttl,
+        );
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -129,7 +132,10 @@ where
     <Pool as TransactionPool>::Transaction: 'static,
 {
     /// Returns all the filter changes for the given id, if any
-    pub async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges, EthFilterError> {
+    pub async fn filter_changes(
+        &self,
+        id: FilterId,
+    ) -> Result<FilterChanges<WithOtherFields<Transaction>>, EthFilterError> {
         let info = self.inner.provider.chain_info()?;
         let best_number = info.best_number;
 
@@ -219,7 +225,7 @@ where
 }
 
 #[async_trait]
-impl<Provider, Pool> EthFilterApiServer for EthFilter<Provider, Pool>
+impl<Provider, Pool> EthFilterApiServer<WithOtherFields<Transaction>> for EthFilter<Provider, Pool>
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
@@ -265,7 +271,10 @@ where
     }
 
     /// Handler for `eth_getFilterChanges`
-    async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
+    async fn filter_changes(
+        &self,
+        id: FilterId,
+    ) -> RpcResult<FilterChanges<WithOtherFields<Transaction>>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
         Ok(Self::filter_changes(self, id).await?)
     }
@@ -515,56 +524,6 @@ where
     }
 }
 
-/// Config for the filter
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthFilterConfig {
-    /// Maximum number of blocks that a filter can scan for logs.
-    ///
-    /// If `None` then no limit is enforced.
-    pub max_blocks_per_filter: Option<u64>,
-    /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
-    ///
-    /// If `None` then no limit is enforced.
-    pub max_logs_per_response: Option<usize>,
-    /// How long a filter remains valid after the last poll.
-    ///
-    /// A filter is considered stale if it has not been polled for longer than this duration and
-    /// will be removed.
-    pub stale_filter_ttl: Duration,
-}
-
-impl EthFilterConfig {
-    /// Sets the maximum number of blocks that a filter can scan for logs.
-    pub const fn max_blocks_per_filter(mut self, num: u64) -> Self {
-        self.max_blocks_per_filter = Some(num);
-        self
-    }
-
-    /// Sets the maximum number of logs that can be returned in a single response in `eth_getLogs`
-    /// calls.
-    pub const fn max_logs_per_response(mut self, num: usize) -> Self {
-        self.max_logs_per_response = Some(num);
-        self
-    }
-
-    /// Sets how long a filter remains valid after the last poll before it will be removed.
-    pub const fn stale_filter_ttl(mut self, duration: Duration) -> Self {
-        self.stale_filter_ttl = duration;
-        self
-    }
-}
-
-impl Default for EthFilterConfig {
-    fn default() -> Self {
-        Self {
-            max_blocks_per_filter: None,
-            max_logs_per_response: None,
-            // 5min
-            stale_filter_ttl: Duration::from_secs(5 * 60),
-        }
-    }
-}
-
 /// All active filters
 #[derive(Debug, Clone, Default)]
 pub struct ActiveFilters {
@@ -594,7 +553,7 @@ impl PendingTransactionsReceiver {
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_receiver.lock().await;
 
@@ -623,7 +582,10 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>>
+    where
+        T: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
+    {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -639,15 +601,15 @@ where
 /// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
 #[async_trait]
 trait FullTransactionsFilter: fmt::Debug + Send + Sync + Unpin + 'static {
-    async fn drain(&self) -> FilterChanges;
+    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>>;
 }
 
 #[async_trait]
 impl<T> FullTransactionsFilter for FullTransactionsReceiver<T>
 where
-    T: PoolTransaction + 'static,
+    T: PoolTransaction<Consensus = TransactionSignedEcRecovered> + 'static,
 {
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
         Self::drain(self).await
     }
 }
@@ -664,7 +626,7 @@ enum PendingTransactionKind {
 }
 
 impl PendingTransactionKind {
-    async fn drain(&self) -> FilterChanges {
+    async fn drain(&self) -> FilterChanges<WithOtherFields<Transaction>> {
         match self {
             Self::Hashes(receiver) => receiver.drain().await,
             Self::FullTransaction(receiver) => receiver.drain().await,

@@ -2,7 +2,7 @@
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
-pub use alloy_eips::eip2930::{AccessList, AccessListItem};
+pub use alloy_eips::eip2930::{AccessList, AccessListItem, AccessListResult};
 
 #[cfg(test)]
 mod tests {
@@ -11,14 +11,26 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{main_codec, Compact};
+    use reth_codecs::{add_arbitrary_tests, Compact};
+    use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// AccessList type natively
-    #[main_codec(rlp)]
     #[derive(
-        Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper,
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        Default,
+        RlpDecodableWrapper,
+        RlpEncodableWrapper,
+        Serialize,
+        Deserialize,
+        Compact,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(compact, rlp)]
     struct RethAccessList(Vec<RethAccessListItem>);
 
     impl PartialEq<AccessList> for RethAccessList {
@@ -28,8 +40,21 @@ mod tests {
     }
 
     // This
-    #[main_codec(rlp)]
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
+    #[derive(
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        Default,
+        RlpDecodable,
+        RlpEncodable,
+        Serialize,
+        Deserialize,
+        Compact,
+    )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(compact, rlp)]
     #[serde(rename_all = "camelCase")]
     struct RethAccessListItem {
         /// Account address that would be loaded at the start of execution
@@ -52,7 +77,7 @@ mod tests {
             // Convert access_list to buffer and then create alloy_access_list from buffer and
             // compare
             let mut compacted_reth_access_list = Vec::<u8>::new();
-            let len = access_list.clone().to_compact(&mut compacted_reth_access_list);
+            let len = access_list.to_compact(&mut compacted_reth_access_list);
 
             // decode the compacted buffer to AccessList
             let alloy_access_list = AccessList::from_compact(&compacted_reth_access_list, len).0;

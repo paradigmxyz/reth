@@ -1,12 +1,14 @@
 use crate::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
-use bytes::Buf;
-use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+use reth_codecs::Compact;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
 /// parameter. In the case of a 3, the full transaction type is read from the buffer as a
 /// single byte.
+#[cfg(any(test, feature = "reth-codec"))]
 const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
@@ -31,15 +33,16 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
 /// Transaction Type
 ///
-/// Currently being used as 2-bit type when encoding it to [`Compact`] on
+/// Currently being used as 2-bit type when encoding it to `reth_codecs::Compact` on
 /// [`crate::TransactionSignedNoHash`]. Adding more transaction types will break the codec and
 /// database format.
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
-#[derive_arbitrary(compact)]
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,
 )]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum TxType {
     /// Legacy transaction pre EIP-2929
     #[default]
@@ -134,8 +137,9 @@ impl TryFrom<U64> for TxType {
     }
 }
 
-impl Compact for TxType {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TxType {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -144,16 +148,16 @@ impl Compact for TxType {
             Self::Eip2930 => 1,
             Self::Eip1559 => 2,
             Self::Eip4844 => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             Self::Eip7702 => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             #[cfg(feature = "optimism")]
             Self::Deposit => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }
@@ -163,6 +167,7 @@ impl Compact for TxType {
     // parameter. In the case of a 3, the full transaction type is read from the buffer as a
     // single byte.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         (
             match identifier {
                 0 => Self::Legacy,
@@ -215,11 +220,23 @@ impl Decodable for TxType {
     }
 }
 
+impl From<alloy_consensus::TxType> for TxType {
+    fn from(value: alloy_consensus::TxType) -> Self {
+        match value {
+            alloy_consensus::TxType::Legacy => Self::Legacy,
+            alloy_consensus::TxType::Eip2930 => Self::Eip2930,
+            alloy_consensus::TxType::Eip1559 => Self::Eip1559,
+            alloy_consensus::TxType::Eip4844 => Self::Eip4844,
+            alloy_consensus::TxType::Eip7702 => Self::Eip7702,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
-
     use crate::hex;
+    use rand::Rng;
+    use reth_codecs::Compact;
 
     use super::*;
 
@@ -316,8 +333,7 @@ mod tests {
         assert_eq!(tx_type, TxType::Eip7702);
 
         // Test random byte not in range
-        let buf = [rand::thread_rng().gen_range(4..=u8::MAX)];
-        println!("{buf:?}");
+        let buf = [rand::thread_rng().gen_range(5..=u8::MAX)];
         assert!(TxType::decode(&mut &buf[..]).is_err());
 
         // Test for Deposit transaction

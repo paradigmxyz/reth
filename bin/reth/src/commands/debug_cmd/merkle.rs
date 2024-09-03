@@ -1,8 +1,10 @@
 //! Command for debugging merkle trie calculation.
-use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
+use crate::{args::NetworkArgs, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -11,13 +13,14 @@ use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
-use reth_network::NetworkHandle;
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -30,9 +33,9 @@ use tracing::*;
 
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -50,7 +53,7 @@ pub struct Command {
     skip_node_depth: Option<usize>,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network(
         &self,
         config: &Config,
@@ -91,7 +94,7 @@ impl Command {
             )
             .await?;
 
-        let executor_provider = block_executor!(provider_factory.chain_spec());
+        let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
@@ -150,10 +153,15 @@ impl Command {
                 ),
             ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
-            executor.finalize().write_to_storage(&provider_rw, None, OriginalValuesKnown::Yes)?;
+            let execution_outcome = executor.finalize();
+
+            let mut storage_writer = UnifiedStorageWriter::from_database(&provider_rw);
+            storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
-                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+                block_number
+                    .checked_sub(1)
+                    .ok_or_else(|| eyre::eyre!("GenesisBlockHasNoParent"))?,
             ));
 
             let mut account_hashing_done = false;
@@ -242,7 +250,7 @@ impl Command {
                 }
             }
 
-            // Stoarge trie
+            // Storage trie
             let mut first_mismatched_storage = None;
             let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
             let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();

@@ -6,39 +6,30 @@ use crate::{
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
-    metrics::prometheus_exporter,
     utils::get_single_header,
 };
-use metrics_exporter_prometheus::PrometheusHandle;
-use once_cell::sync::Lazy;
+use eyre::eyre;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
+use serde::{de::DeserializeOwned, Serialize};
+use std::{fs, path::Path};
+
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
-use reth_provider::{
-    providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
-};
+use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
-
-/// The default prometheus recorder handle. We use a global static to ensure that it is only
-/// installed once.
-pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
-    Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -47,10 +38,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder
 ///     let builder = NodeConfig::default();
 ///
@@ -66,7 +53,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -75,10 +61,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder with a test database, using the `test` method
 ///     let builder = NodeConfig::test();
 ///
@@ -284,38 +266,6 @@ impl NodeConfig {
         Ok(EnvKzgSettings::Default)
     }
 
-    /// Installs the prometheus recorder.
-    pub fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
-        Ok(PROMETHEUS_RECORDER_HANDLE.clone())
-    }
-
-    /// Serves the prometheus endpoint over HTTP with the given database and prometheus handle.
-    pub async fn start_metrics_endpoint<Metrics>(
-        &self,
-        prometheus_handle: PrometheusHandle,
-        db: Metrics,
-        static_file_provider: StaticFileProvider,
-        task_executor: TaskExecutor,
-    ) -> eyre::Result<()>
-    where
-        Metrics: DatabaseMetrics + 'static + Send + Sync,
-    {
-        if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::serve(
-                listen_addr,
-                prometheus_handle,
-                db,
-                static_file_provider,
-                metrics_process::Collector::default(),
-                task_executor,
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
@@ -417,6 +367,33 @@ impl NodeConfig {
     /// Resolve the final datadir path.
     pub fn datadir(&self) -> ChainPath<DataDirPath> {
         self.datadir.clone().resolve_datadir(self.chain.chain)
+    }
+
+    /// Load an application configuration from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn load_path<T: Serialize + DeserializeOwned + Default>(
+        path: impl AsRef<Path>,
+    ) -> eyre::Result<T> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = T::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
     }
 }
 

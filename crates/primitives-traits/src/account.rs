@@ -4,13 +4,14 @@ use alloy_primitives::{keccak256, Bytes, B256, U256};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{main_codec, Compact};
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
+use reth_codecs::{add_arbitrary_tests, Compact};
+use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
-#[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
@@ -34,16 +35,6 @@ impl Account {
             self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
-    /// Makes an [Account] from [`GenesisAccount`] type
-    pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Self {
-            // nonce must exist, so we default to zero when converting a genesis account
-            nonce: value.nonce.unwrap_or_default(),
-            balance: value.balance,
-            bytecode_hash: value.code.as_ref().map(keccak256),
-        }
-    }
-
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
@@ -61,19 +52,36 @@ impl Bytecode {
     /// Create new bytecode from raw bytes.
     ///
     /// No analysis will be performed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if bytecode is EOF and has incorrect format.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
+    }
+
+    /// Creates a new raw [`revm_primitives::Bytecode`].
+    ///
+    /// Returns an error on incorrect Bytecode format.
+    #[inline]
+    pub fn new_raw_checked(bytecode: Bytes) -> Result<Self, BytecodeDecodeError> {
+        Ok(Self(RevmBytecode::new_raw(bytecode)))
     }
 }
 
 impl Compact for Bytecode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let bytecode = &self.0.bytecode()[..];
+        let bytecode = match &self.0 {
+            RevmBytecode::LegacyRaw(bytes) => bytes,
+            RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
+            RevmBytecode::Eof(eof) => eof.raw(),
+            RevmBytecode::Eip7702(eip7702) => eip7702.raw(),
+        };
         buf.put_u32(bytecode.len() as u32);
-        buf.put_slice(bytecode);
+        buf.put_slice(bytecode.as_ref());
         let len = match &self.0 {
             RevmBytecode::LegacyRaw(_) => {
                 buf.put_u8(0);
@@ -88,9 +96,12 @@ impl Compact for Bytecode {
                 1 + 8 + map.len()
             }
             RevmBytecode::Eof(_) => {
-                // buf.put_u8(3);
-                // TODO(EOF)
-                todo!("EOF")
+                buf.put_u8(3);
+                1
+            }
+            RevmBytecode::Eip7702(_) => {
+                buf.put_u8(4);
+                1
             }
         };
         len + bytecode.len() + 4
@@ -114,11 +125,23 @@ impl Compact for Bytecode {
                     JumpTable::from_slice(buf),
                 )
             }),
-            // TODO(EOF)
-            3 => todo!("EOF"),
+            3 | 4 => {
+                // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
+                Self(RevmBytecode::new_raw(bytes))
+            }
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])
+    }
+}
+
+impl From<&GenesisAccount> for Account {
+    fn from(value: &GenesisAccount) -> Self {
+        Self {
+            nonce: value.nonce.unwrap_or_default(),
+            balance: value.balance,
+            bytecode_hash: value.code.as_ref().map(keccak256),
+        }
     }
 }
 
@@ -209,7 +232,7 @@ mod tests {
             2,
             JumpTable::from_slice(&[0]),
         )));
-        let len = bytecode.clone().to_compact(&mut buf);
+        let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);

@@ -48,8 +48,9 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
-/// Maximum eth historical proof window. Equivalent to roughly one month of data.
-pub const MAX_ETH_PROOF_WINDOW: u64 = 216_000;
+/// Maximum eth historical proof window. Equivalent to roughly one and a half months of data on a 12
+/// second block time, and a week on a 2 second block time.
+pub const MAX_ETH_PROOF_WINDOW: u64 = 7 * 24 * 60 * 60 / 2;
 
 /// GPO specific constants
 pub mod gas_oracle {
@@ -87,6 +88,9 @@ pub mod gas_oracle {
     /// Taken from Geth's implementation in order to pass the hive tests
     /// <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/internal/ethapi/api.go#L56>
     pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
+
+    /// Gas required at the beginning of a call.
+    pub const CALL_STIPEND_GAS: u64 = 2_300;
 }
 
 /// Cache specific constants

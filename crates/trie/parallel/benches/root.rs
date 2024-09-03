@@ -5,13 +5,14 @@ use proptest_arbitrary_interop::arb;
 use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
-    bundle_state::HashedStateChanges, providers::ConsistentDbView,
-    test_utils::create_test_provider_factory,
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, StateChangeWriter,
+    TrieWriter,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
 };
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 
@@ -27,10 +28,10 @@ pub fn calculate_state_root(c: &mut Criterion) {
         let provider_factory = create_test_provider_factory();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
-            HashedStateChanges(&db_state.into_sorted()).write_to_db(&provider_rw).unwrap();
+            provider_rw.write_hashed_state(&db_state.into_sorted()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.write_to_database(provider_rw.tx_ref()).unwrap();
+            provider_rw.write_trie_updates(&updates).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -46,11 +47,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
                     (provider, sorted_state, prefix_sets)
                 },
                 |(provider, sorted_state, prefix_sets)| async move {
+                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                        &sorted_state,
+                    );
                     StateRoot::from_tx(provider.tx_ref())
-                        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                            provider.tx_ref(),
-                            &sorted_state,
-                        ))
+                        .with_hashed_cursor_factory(hashed_cursor_factory)
                         .with_prefix_sets(prefix_sets)
                         .root()
                 },
@@ -96,14 +98,14 @@ fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     .unwrap()
     .current();
 
-    let keys = db_state.keys().cloned().collect::<Vec<_>>();
+    let keys = db_state.keys().copied().collect::<Vec<_>>();
     let keys_to_update = subsequence(keys, size / 2).new_tree(&mut runner).unwrap().current();
 
     let updated_storages = keys_to_update
         .into_iter()
         .map(|address| {
             let (_, storage) = db_state.get(&address).unwrap();
-            let slots = storage.keys().cloned().collect::<Vec<_>>();
+            let slots = storage.keys().copied().collect::<Vec<_>>();
             let slots_to_update =
                 subsequence(slots, storage_size / 2).new_tree(&mut runner).unwrap().current();
             (

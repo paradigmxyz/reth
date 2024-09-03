@@ -25,12 +25,6 @@ reth-trie = { workspace = true, optional = true }
 # revm
 revm.workspace = true
 
-# alloy
-alloy-eips.workspace = true
-
-# common
-tracing.workspace = true
-
 [dev-dependencies]
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true

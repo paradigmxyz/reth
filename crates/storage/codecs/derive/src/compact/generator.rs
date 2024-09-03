@@ -4,7 +4,12 @@ use super::*;
 use convert_case::{Case, Casing};
 
 /// Generates code to implement the `Compact` trait for a data type.
-pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> TokenStream2 {
+pub fn generate_from_to(
+    ident: &Ident,
+    has_lifetime: bool,
+    fields: &FieldList,
+    is_zstd: bool,
+) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
     let to_compact = generate_to_compact(fields, ident, is_zstd);
@@ -15,26 +20,58 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> Tok
     let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
     let test = format_ident!("fuzz_{snake_case_ident}");
 
+    let lifetime = if has_lifetime {
+        quote! { 'a }
+    } else {
+        quote! {}
+    };
+
+    let impl_compact = if has_lifetime {
+        quote! {
+           impl<#lifetime> Compact for #ident<#lifetime>
+        }
+    } else {
+        quote! {
+           impl Compact for #ident
+        }
+    };
+
+    let fn_from_compact = if has_lifetime {
+        quote! { unimplemented!("from_compact not supported with ref structs") }
+    } else {
+        quote! {
+            let (flags, mut buf) = #flags::from(buf);
+            #from_compact
+        }
+    };
+
+    let fuzz_tests = if has_lifetime {
+        quote! {}
+    } else {
+        quote! {
+            #[cfg(test)]
+            #[allow(dead_code)]
+            #[test_fuzz::test_fuzz]
+            fn #fuzz(obj: #ident)  {
+                let mut buf = vec![];
+                let len = obj.clone().to_compact(&mut buf);
+                let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
+                assert_eq!(obj, same_obj);
+            }
+
+            #[test]
+            pub fn #test() {
+                #fuzz(#ident::default())
+            }
+        }
+    };
+
     // Build function
     quote! {
+        #fuzz_tests
 
-        #[cfg(test)]
-        #[allow(dead_code)]
-        #[test_fuzz::test_fuzz]
-        fn #fuzz(obj: #ident)  {
-            let mut buf = vec![];
-            let len = obj.clone().to_compact(&mut buf);
-            let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
-            assert_eq!(obj, same_obj);
-        }
-
-        #[test]
-        pub fn #test() {
-            #fuzz(#ident::default())
-        }
-
-        impl Compact for #ident {
-            fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+        #impl_compact {
+            fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();
                 let mut total_length = 0;
                 #(#to_compact)*
@@ -42,8 +79,7 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList, is_zstd: bool) -> Tok
             }
 
             fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-                let (flags, mut buf) = #flags::from(buf);
-                #from_compact
+                #fn_from_compact
             }
         }
     }

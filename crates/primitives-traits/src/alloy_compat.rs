@@ -32,7 +32,7 @@ impl TryFrom<RpcHeader> for Header {
             logs_bloom: header.logs_bloom,
             mix_hash: header.mix_hash.unwrap_or_default(),
             nonce: u64::from_be_bytes(header.nonce.unwrap_or_default().0),
-            number: header.number.ok_or(ConversionError::MissingBlockNumber)?,
+            number: header.number,
             ommers_hash: header.uncles_hash,
             parent_beacon_block_root: header.parent_beacon_block_root,
             parent_hash: header.parent_hash,
@@ -41,8 +41,7 @@ impl TryFrom<RpcHeader> for Header {
             timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
-            // TODO: requests_root: header.requests_root,
-            requests_root: None,
+            requests_root: header.requests_root,
         })
     }
 }

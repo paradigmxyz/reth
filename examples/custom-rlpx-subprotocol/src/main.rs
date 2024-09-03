@@ -7,15 +7,19 @@
 //! ```
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
+
+mod subprotocol;
+
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use reth::builder::NodeHandle;
 use reth_network::{
     config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
     NetworkProtocols,
 };
-use reth_network_api::NetworkInfo;
+use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::test_utils::NoopProvider;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -25,8 +29,6 @@ use subprotocol::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
-
-mod subprotocol;
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {

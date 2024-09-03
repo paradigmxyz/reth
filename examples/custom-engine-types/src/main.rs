@@ -46,7 +46,8 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
-    EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
+    EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+    EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -195,6 +196,7 @@ impl NodeTypes for MyCustomNode {
     type Primitives = ();
     // use the custom engine types
     type Engine = CustomEngineTypes;
+    type ChainSpec = ChainSpec;
 }
 
 /// Implement the Node trait for the custom node
@@ -202,7 +204,7 @@ impl NodeTypes for MyCustomNode {
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Engine = CustomEngineTypes>,
+    N: FullNodeTypes<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -212,8 +214,9 @@ where
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
+    type AddOns = EthereumAddOns;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
@@ -231,7 +234,7 @@ pub struct CustomPayloadServiceBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
-    Node: FullNodeTypes<Engine = CustomEngineTypes>,
+    Node: FullNodeTypes<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(

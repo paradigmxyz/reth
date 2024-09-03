@@ -13,6 +13,7 @@ jobs:
       test_result: ${{ steps.test_result.outputs.test_result }}
       test_status: ${{ steps.test_result.outputs.test_status }}
       failed_test_status: ${{ steps.test_result.outputs.failed_test_status }}
+    if: github.repository == 'paradigmxyz/reth'
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4

@@ -17,7 +17,6 @@ reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-downloaders.workspace = true
-reth-optimism-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
@@ -25,6 +24,10 @@ reth-static-file.workspace = true
 reth-execution-types.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
+
+## optimisim
+reth-optimism-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
 
 reth-chainspec.workspace = true
 reth-stages-types.workspace = true
@@ -34,16 +37,17 @@ reth-errors.workspace = true
 reth-config.workspace = true
 reth-evm-optimism.workspace = true
 reth-cli.workspace = true
+reth-cli-runner.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+
 
 # eth
-alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 
 # misc
-shellexpand.workspace = true
-serde_json.workspace = true
 futures-util.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
@@ -58,8 +62,14 @@ tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+reth-stages = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
+
 [features] 
  optimism = [ 
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
+    "reth-provider/optimism",
  ] 

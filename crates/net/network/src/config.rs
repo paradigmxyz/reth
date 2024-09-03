@@ -1,11 +1,7 @@
 //! Network config support
 
-use crate::{
-    error::NetworkError,
-    import::{BlockImport, ProofOfStakeBlockImport},
-    transactions::TransactionsManagerConfig,
-    NetworkHandle, NetworkManager,
-};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -17,7 +13,13 @@ use reth_primitives::{ForkFilter, Head};
 use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
+use crate::{
+    error::NetworkError,
+    import::{BlockImport, ProofOfStakeBlockImport},
+    transactions::TransactionsManagerConfig,
+    NetworkHandle, NetworkManager,
+};
 
 // re-export for convenience
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
@@ -142,7 +144,6 @@ where
             .split_with_handle();
 
         tokio::task::spawn(network);
-        // TODO: tokio::task::spawn(txpool);
         tokio::task::spawn(eth);
         Ok(handle)
     }
@@ -385,10 +386,15 @@ impl NetworkConfigBuilder {
         self.boot_nodes(sepolia_nodes())
     }
 
-    /// Sets the boot nodes.
+    /// Sets the boot nodes to use to bootstrap the configured discovery services (discv4 + discv5).
     pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
         self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Returns an iterator over all configured boot nodes.
+    pub fn boot_nodes_iter(&self) -> impl Iterator<Item = &TrustedPeer> + '_ {
+        self.boot_nodes.iter()
     }
 
     /// Disable the DNS discovery.
@@ -505,7 +511,7 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        let head = head.unwrap_or(Head {
+        let head = head.unwrap_or_else(|| Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
             timestamp: chain_spec.genesis.timestamp,

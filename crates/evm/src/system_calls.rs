@@ -1,7 +1,16 @@
 //! System contract call functions.
 
+#[cfg(feature = "std")]
+use std::fmt::Display;
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{boxed::Box, format, string::ToString, vec::Vec},
+    core::fmt::Display,
+};
+
 use crate::ConfigureEvm;
 use alloy_eips::{
+    eip2935::HISTORY_STORAGE_ADDRESS,
     eip4788::BEACON_ROOTS_ADDRESS,
     eip7002::{WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS},
     eip7251::{ConsolidationRequest, CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS},
@@ -15,27 +24,125 @@ use revm_primitives::{
     ResultAndState, B256,
 };
 
+/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block contract call.
+///
+/// This constructs a new [`Evm`] with the given database and environment ([`CfgEnvWithHandlerCfg`]
+/// and [`BlockEnv`]) to execute the pre block contract call.
+///
+/// This uses [`apply_blockhashes_contract_call`] to ultimately apply the blockhash contract state
+/// change.
+pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
+    db: &mut DB,
+    evm_config: &EvmConfig,
+    chain_spec: &ChainSpec,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
+    initialized_block_env: &BlockEnv,
+    parent_block_hash: B256,
+) -> Result<(), BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: Display,
+    EvmConfig: ConfigureEvm,
+{
+    // Apply the pre-block EIP-2935 contract call
+    let mut evm_pre_block = Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
+        .build();
+
+    apply_blockhashes_contract_call(
+        evm_config,
+        chain_spec,
+        initialized_block_env.timestamp.to(),
+        initialized_block_env.number.to(),
+        parent_block_hash,
+        &mut evm_pre_block,
+    )
+}
+
+/// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
+/// [`ChainSpec`], and EVM.
+///
+/// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
+/// state changes are made.
+///
+/// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
+#[inline]
+pub fn apply_blockhashes_contract_call<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    block_number: u64,
+    parent_block_hash: B256,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<(), BlockExecutionError>
+where
+    DB: Database + DatabaseCommit,
+    DB::Error: core::fmt::Display,
+    EvmConfig: ConfigureEvm,
+{
+    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
+        return Ok(())
+    }
+
+    // if the block number is zero (genesis block) then no system transaction may occur as per
+    // EIP-2935
+    if block_number == 0 {
+        return Ok(())
+    }
+
+    // get previous env
+    let previous_env = Box::new(evm.context.env().clone());
+
+    // modify env for pre block call
+    evm_config.fill_tx_env_system_contract_call(
+        &mut evm.context.evm.env,
+        alloy_eips::eip4788::SYSTEM_ADDRESS,
+        HISTORY_STORAGE_ADDRESS,
+        parent_block_hash.0.into(),
+    );
+
+    let mut state = match evm.transact() {
+        Ok(res) => res.state,
+        Err(e) => {
+            evm.context.evm.env = previous_env;
+            return Err(BlockValidationError::BlockHashContractCall { message: e.to_string() }.into())
+        }
+    };
+
+    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
+    state.remove(&evm.block().coinbase);
+
+    evm.context.evm.db.commit(state);
+
+    // re-set the previous env
+    evm.context.evm.env = previous_env;
+
+    Ok(())
+}
+
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm] with the given DB, and environment
+/// This constructs a new [`Evm`] with the given DB, and environment
 /// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the pre block contract call.
 ///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
-#[allow(clippy::too_many_arguments)]
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     evm_config: &EvmConfig,
     chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
-    block_number: u64,
-    block_timestamp: u64,
     parent_beacon_block_root: Option<B256>,
 ) -> Result<(), BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply pre-block EIP-4788 contract call
@@ -52,8 +159,8 @@ where
     apply_beacon_root_contract_call(
         evm_config,
         chain_spec,
-        block_timestamp,
-        block_number,
+        initialized_block_env.timestamp.to(),
+        initialized_block_env.number.to(),
         parent_beacon_block_root,
         &mut evm_pre_block,
     )
@@ -90,7 +197,7 @@ where
     // if the block number is zero (genesis block) then the parent beacon block root must
     // be 0x0 and no system transaction may occur as per EIP-4788
     if block_number == 0 {
-        if parent_beacon_block_root != B256::ZERO {
+        if !parent_beacon_block_root.is_zero() {
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
             }
@@ -148,7 +255,7 @@ pub fn post_block_withdrawal_requests_contract_call<EvmConfig, DB>(
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply post-block EIP-7002 contract call
@@ -162,7 +269,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(evm_config, &mut evm_post_block)
+    apply_withdrawal_requests_contract_call(evm_config, &mut evm_post_block)
 }
 
 /// Applies the post-block call to the EIP-7002 withdrawal requests contract.
@@ -256,11 +363,8 @@ where
 
         let amount = data.get_u64();
 
-        withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
-            source_address,
-            validator_pubkey,
-            amount,
-        }));
+        withdrawal_requests
+            .push(WithdrawalRequest { source_address, validator_pubkey, amount }.into());
     }
 
     Ok(withdrawal_requests)
@@ -281,7 +385,7 @@ pub fn post_block_consolidation_requests_contract_call<EvmConfig, DB>(
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
     DB: Database + DatabaseCommit,
-    DB::Error: std::fmt::Display,
+    DB::Error: Display,
     EvmConfig: ConfigureEvm,
 {
     // apply post-block EIP-7251 contract call
@@ -295,7 +399,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_consolidation_requests_contract_call::<EvmConfig, _, _>(evm_config, &mut evm_post_block)
+    apply_consolidation_requests_contract_call(evm_config, &mut evm_post_block)
 }
 
 /// Applies the post-block call to the EIP-7251 consolidation requests contract.

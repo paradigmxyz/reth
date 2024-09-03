@@ -16,7 +16,8 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
-use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
+use revm_inspectors::tracing::MuxError;
+use tracing::error;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -137,6 +138,11 @@ impl EthApiError {
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
+
+    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
+    pub const fn is_gas_too_high(&self) -> bool {
+        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -175,7 +181,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
                 err.to_string(),
             ),
-            err @ EthApiError::InternalBlockingTaskError | err @ EthApiError::InternalEthError => {
+            err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
@@ -185,10 +191,13 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
-impl From<JsInspectorError> for EthApiError {
-    fn from(error: JsInspectorError) -> Self {
+#[cfg(feature = "js-tracer")]
+impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
+    fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
         match error {
-            err @ JsInspectorError::JsError(_) => Self::InternalJsTracerError(err.to_string()),
+            err @ revm_inspectors::tracing::js::JsInspectorError::JsError(_) => {
+                Self::InternalJsTracerError(err.to_string())
+            }
             err => Self::InvalidParams(err.to_string()),
         }
     }
@@ -381,29 +390,6 @@ impl RpcInvalidTransactionError {
     }
 }
 
-/// Optimism specific invalid transaction errors
-#[cfg(feature = "optimism")]
-#[derive(thiserror::Error, Debug)]
-pub enum OptimismInvalidTransactionError {
-    /// A deposit transaction was submitted as a system transaction post-regolith.
-    #[error("no system transactions allowed after regolith")]
-    DepositSystemTxPostRegolith,
-    /// A deposit transaction halted post-regolith
-    #[error("deposit transaction halted after regolith")]
-    HaltedDepositPostRegolith,
-}
-
-#[cfg(feature = "optimism")]
-impl ToRpcError for OptimismInvalidTransactionError {
-    fn to_rpc_error(&self) -> jsonrpsee_types::error::ErrorObject<'static> {
-        match self {
-            Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
-                rpc_err(EthRpcErrorCode::TransactionRejected.code(), self.to_string(), None)
-            }
-        }
-    }
-}
-
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     const fn error_code(&self) -> i32 {
@@ -462,7 +448,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock => Self::GasTooHigh,
+            InvalidTransaction::CallerGasLimitMoreThanBlock |
             InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
@@ -488,13 +474,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::AuthorizationListInvalidFields => {
                 Self::AuthorizationListInvalidFields
             }
-            #[cfg(feature = "optimism")]
-            InvalidTransaction::DepositSystemTxPostRegolith => {
-                Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
-            }
-            #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => {
-                Self::Other(Box::new(OptimismInvalidTransactionError::HaltedDepositPostRegolith))
+            #[allow(unreachable_patterns)]
+            err => {
+                error!(target: "rpc",
+                    ?err,
+                    "unexpected transaction error"
+                );
+
+                Self::other(internal_rpc_err(format!("unexpected transaction error: {err}")))
             }
         }
     }

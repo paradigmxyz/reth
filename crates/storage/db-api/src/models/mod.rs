@@ -4,11 +4,12 @@ use crate::{
     table::{Compress, Decode, Decompress, Encode},
     DatabaseError,
 };
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{Address, B256, *};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
@@ -20,6 +21,7 @@ pub mod storage_sharded_key;
 pub use accounts::*;
 pub use blocks::*;
 pub use client_version::ClientVersion;
+pub use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 pub use sharded_key::ShardedKey;
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
@@ -184,7 +186,7 @@ macro_rules! impl_compression_for_compact {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _ = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(&self, buf);
                 }
             }
 
@@ -207,7 +209,7 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
-    StoredBranchNode,
+    BranchNodeCompact,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
@@ -234,7 +236,7 @@ macro_rules! impl_compression_fixed_compact {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _  = Compact::to_compact(&self, buf);
                 }
 
                 fn uncompressable_ref(&self) -> Option<&[u8]> {
@@ -263,8 +265,9 @@ macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
             /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
-            #[main_codec]
-            #[derive(Debug, Clone, PartialEq, Eq, Default)]
+            #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
+            #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+            #[add_arbitrary_tests(compact)]
             pub struct $wrapper(pub $name);
 
             impl From<$name> for $wrapper {
@@ -298,10 +301,7 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip1559, TxEip2930, TxEip4844,
-        TxLegacy, Withdrawals,
-    };
+    use reth_primitives::{Account, Header, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -340,10 +340,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 
@@ -373,10 +369,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }

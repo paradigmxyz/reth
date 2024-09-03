@@ -15,7 +15,7 @@ use reth_primitives::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
@@ -798,7 +798,7 @@ mod tests {
         EthPooledTransaction, Pool, TransactionPool,
     };
     use reth_chainspec::MAINNET;
-    use reth_primitives::{hex, FromRecoveredPooledTransaction, PooledTransactionsElement, U256};
+    use reth_primitives::{hex, PooledTransactionsElement, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {
@@ -807,7 +807,7 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransactionsElement::decode_enveloped(&mut data.as_ref()).unwrap();
 
-        EthPooledTransaction::from_recovered_pooled_transaction(tx.try_into_ecrecovered().unwrap())
+        tx.try_into_ecrecovered().unwrap().into()
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>

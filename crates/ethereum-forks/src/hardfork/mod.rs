@@ -15,9 +15,6 @@ use core::{
 };
 use dyn_clone::DynClone;
 
-#[cfg(not(feature = "std"))]
-use alloc::{format, string::String};
-
 /// Generic hardfork trait.
 #[auto_impl::auto_impl(&, Box)]
 pub trait Hardfork: Any + DynClone + Send + Sync + 'static {
@@ -104,13 +101,14 @@ mod tests {
 
     #[test]
     fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD"];
+        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe"];
         let expected_hardforks = [
             OptimismHardfork::Bedrock,
             OptimismHardfork::Regolith,
             OptimismHardfork::Canyon,
             OptimismHardfork::Ecotone,
             OptimismHardfork::Fjord,
+            OptimismHardfork::Granite,
         ];
 
         let hardforks: Vec<OptimismHardfork> =

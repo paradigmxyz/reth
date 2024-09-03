@@ -45,12 +45,12 @@
 
 // Re-export tracing crates
 pub use tracing;
+pub use tracing_appender;
 pub use tracing_subscriber;
 
-// Re-export LogFormat
+// Re-export our types
 pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard};
-
 pub use test_tracer::TestTracer;
 
 mod formatter;

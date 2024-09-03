@@ -90,7 +90,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
         // Iterate over transactions in batches, recover the senders and append them
-        let batch = (tx_range.start..tx_range.end)
+        let batch = tx_range
+            .clone()
             .step_by(BATCH_SIZE)
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
             .collect::<Vec<Range<u64>>>();
@@ -140,7 +141,8 @@ where
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
 
     // Preallocate channels
-    let (chunks, receivers): (Vec<_>, Vec<_>) = (tx_range.start..tx_range.end)
+    let (chunks, receivers): (Vec<_>, Vec<_>) = tx_range
+        .clone()
         .step_by(WORKER_CHUNK_SIZE)
         .map(|start| {
             let range = start..std::cmp::min(start + WORKER_CHUNK_SIZE as u64, tx_range.end);
@@ -287,9 +289,8 @@ mod tests {
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, random_block_range},
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
 
     use super::*;
@@ -320,9 +321,10 @@ mod tests {
                 random_block(
                     &mut rng,
                     number,
-                    None,
-                    Some((number == non_empty_block_number) as u8),
-                    None,
+                    BlockParams {
+                        tx_count: Some((number == non_empty_block_number) as u8),
+                        ..Default::default()
+                    },
                 )
             })
             .collect::<Vec<_>>();
@@ -361,8 +363,11 @@ mod tests {
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
 
         // Manually seed once with full input range
-        let seed =
-            random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..4); // set tx count range high enough to hit the threshold
+        let seed = random_block_range(
+            &mut rng,
+            stage_progress + 1..=previous_stage,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..4, ..Default::default() },
+        ); // set tx count range high enough to hit the threshold
         runner
             .db
             .insert_blocks(seed.iter(), StorageKind::Static)
@@ -432,7 +437,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=100,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..10, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -545,7 +554,11 @@ mod tests {
             let stage_progress = input.checkpoint().block_number;
             let end = input.target();
 
-            let blocks = random_block_range(&mut rng, stage_progress..=end, B256::ZERO, 0..2);
+            let blocks = random_block_range(
+                &mut rng,
+                stage_progress..=end,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
+            );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }

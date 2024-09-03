@@ -61,14 +61,16 @@ pub struct BlobStoreMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]
 pub struct MaintainPoolMetrics {
-    /// Number of currently dirty addresses that need to be updated in the pool by fetching account
-    /// info
+    /// Gauge indicating the number of addresses with pending updates in the pool,
+    /// requiring their account information to be fetched.
     pub(crate) dirty_accounts: Gauge,
-    /// How often the pool drifted from the canonical state.
+    /// Counter for the number of times the pool state diverged from the canonical blockchain
+    /// state.
     pub(crate) drift_count: Counter,
-    /// Number of transaction reinserted into the pool after reorg.
+    /// Counter for the number of transactions reinserted into the pool following a blockchain
+    /// reorganization (reorg).
     pub(crate) reinserted_transactions: Counter,
-    /// Number of transactions finalized blob transactions we were tracking.
+    /// Counter for the number of finalized blob transactions that have been removed from tracking.
     pub(crate) deleted_tracked_finalized_blobs: Counter,
 }
 

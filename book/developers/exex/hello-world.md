@@ -66,7 +66,7 @@ use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
 
-async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
+async fn my_exex<Node: FullNodeComponents>(mut _ctx: ExExContext<Node>) -> eyre::Result<()> {
     loop {}
 }
 
@@ -159,7 +159,7 @@ and it's safe to prune the associated data.
 
 </div>
 
-What we've arrived at is the [minimal ExEx example](https://github.com/paradigmxyz/reth/blob/b8cd7be6c92a71aea5341cdeba685f124c6de540/examples/exex/minimal/src/main.rs) that we provide in the Reth repository.
+What we've arrived at is the [minimal ExEx example](https://github.com/paradigmxyz/reth-exex-examples/blob/4f3498f0cc00e038d6d8c32cd94fe82788862f49/minimal/src/main.rs) that we provide in the [reth-exex-examples](https://github.com/paradigmxyz/reth-exex-examples) repository.
 
 ## What's next?
 

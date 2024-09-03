@@ -15,41 +15,6 @@
 //! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
-use crate::{
-    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
-    config::NetworkConfig,
-    discovery::Discovery,
-    error::{NetworkError, ServiceKind},
-    eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
-    listener::ConnectionListener,
-    message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
-    network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeerAddr, PeersHandle, PeersManager},
-    poll_nested_stream_with_budget,
-    protocol::IntoRlpxSubProtocol,
-    session::SessionManager,
-    state::NetworkState,
-    swarm::{Swarm, SwarmEvent},
-    transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
-};
-use futures::{Future, StreamExt};
-use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    DisconnectReason, EthVersion, Status,
-};
-use reth_fs_util::{self as fs, FsPathError};
-use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
-use reth_network_peers::{NodeRecord, PeerId};
-use reth_primitives::ForkId;
-use reth_storage_api::BlockNumReader;
-use reth_tasks::shutdown::GracefulShutdown;
-use reth_tokio_util::EventSender;
-use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     path::Path,
@@ -61,9 +26,45 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+
+use futures::{Future, StreamExt};
+use parking_lot::Mutex;
+use reth_eth_wire::{capability::CapabilityMessage, Capabilities, DisconnectReason};
+use reth_fs_util::{self as fs, FsPathError};
+use reth_metrics::common::mpsc::UnboundedMeteredSender;
+use reth_network_api::{
+    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
+};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::ReputationChangeKind;
+use reth_storage_api::BlockNumReader;
+use reth_tasks::shutdown::GracefulShutdown;
+use reth_tokio_util::EventSender;
+use secp256k1::SecretKey;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
+
+use crate::{
+    budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
+    config::NetworkConfig,
+    discovery::Discovery,
+    error::{NetworkError, ServiceKind},
+    eth_requests::IncomingEthRequest,
+    import::{BlockImport, BlockImportOutcome, BlockValidation},
+    listener::ConnectionListener,
+    message::{NewBlockMessage, PeerMessage},
+    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    network::{NetworkHandle, NetworkHandleMessage},
+    peers::PeersManager,
+    poll_nested_stream_with_budget,
+    protocol::IntoRlpxSubProtocol,
+    session::SessionManager,
+    state::NetworkState,
+    swarm::{Swarm, SwarmEvent},
+    transactions::NetworkTransactionEvent,
+    FetchClient, NetworkBuilder,
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Manages the _entire_ state of the network.
@@ -173,7 +174,7 @@ impl NetworkManager {
             secret_key,
             discovery_v4_addr,
             mut discovery_v4_config,
-            discovery_v5_config,
+            mut discovery_v5_config,
             listener_addr,
             peers_config,
             sessions_config,
@@ -202,18 +203,19 @@ impl NetworkManager {
         let listener_addr = incoming.local_address();
 
         // resolve boot nodes
-        let mut resolved_boot_nodes = vec![];
-        for record in &boot_nodes {
-            let resolved = record.resolve().await?;
-            resolved_boot_nodes.push(resolved);
-        }
+        let resolved_boot_nodes =
+            futures::future::try_join_all(boot_nodes.iter().map(|record| record.resolve())).await?;
 
-        discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
+        if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
-            disc_config
-        });
+        }
+
+        if let Some(discv5) = discovery_v5_config.as_mut() {
+            // merge configured boot nodes
+            discv5.extend_unsigned_boot_nodes(resolved_boot_nodes)
+        }
 
         let discovery = Discovery::new(
             listener_addr,
@@ -585,6 +587,9 @@ impl NetworkManager {
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
+            }
+            NetworkHandleMessage::ConnectPeer(peer_id, kind, addr) => {
+                self.swarm.state_mut().add_and_connect(peer_id, kind, addr);
             }
             NetworkHandleMessage::SetNetworkState(net_state) => {
                 // Sets network connection state between Active and Hibernate.
@@ -1039,47 +1044,6 @@ impl Future for NetworkManager {
 
         Poll::Pending
     }
-}
-
-/// (Non-exhaustive) Events emitted by the network that are of interest for subscribers.
-///
-/// This includes any event types that may be relevant to tasks, for metrics, keep track of peers
-/// etc.
-#[derive(Debug, Clone)]
-pub enum NetworkEvent {
-    /// Closed the peer session.
-    SessionClosed {
-        /// The identifier of the peer to which a session was closed.
-        peer_id: PeerId,
-        /// Why the disconnect was triggered
-        reason: Option<DisconnectReason>,
-    },
-    /// Established a new session with the given peer.
-    SessionEstablished {
-        /// The identifier of the peer to which a session was established.
-        peer_id: PeerId,
-        /// The remote addr of the peer to which a session was established.
-        remote_addr: SocketAddr,
-        /// The client version of the peer to which a session was established.
-        client_version: Arc<str>,
-        /// Capabilities the peer announced
-        capabilities: Arc<Capabilities>,
-        /// A request channel to the session task.
-        messages: PeerRequestSender,
-        /// The status of the peer to which a session was established.
-        status: Arc<Status>,
-        /// negotiated eth version of the session
-        version: EthVersion,
-    },
-    /// Event emitted when a new peer is added
-    PeerAdded(PeerId),
-    /// Event emitted when a new peer is removed
-    PeerRemoved(PeerId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiscoveredEvent {
-    EventQueued { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
 }
 
 #[derive(Debug, Default)]

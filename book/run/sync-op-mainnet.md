@@ -18,9 +18,6 @@ To export the OVM chain from `op-geth`, clone the `testinprod-io/op-geth` repo a
 <https://github.com/testinprod-io/op-geth/pull/1>. Commands to export blocks, receipts and state dump can be
 found in `op-geth/migrate.sh`.
 
-Output from running the command to export state, can also be downloaded from
-<https://datadirs.testinprod.io/world_trie_state_op_mainnet_b2c2b6e7edb919a0b856b9fd9aa02b11ead5305e63cdb33386babd82b9bc4cfe.jsonl.zst>.
-
 ## Manual Import Steps
 
 ### 1. Import Blocks
@@ -30,7 +27,7 @@ Imports a `.rlp` file of blocks.
 Import of >100 million OVM blocks, from genesis to Bedrock, completes in 45 minutes.
 
 ```bash
-./op-reth import-op <exported-blocks>
+$ op-reth import-op <exported-blocks>
 ```
 
 ### 2. Import Receipts
@@ -44,7 +41,7 @@ Imports a `.rlp` file of receipts, that has been exported with command specified
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 
 ```bash
-./op-reth import-receipts-op <exported-receipts>
+$ op-reth import-receipts-op <exported-receipts>
 ```
 
 ### 3. Import State
@@ -55,7 +52,7 @@ reth's database. This should be block 105 235 063, the first Bedrock block (see 
 Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 
 ```bash
-./op-reth init-state --chain optimism <state-dump>
+$ op-reth init-state --chain optimism <state-dump>
 ```
 
 ## Sync from Bedrock to tip
@@ -63,5 +60,5 @@ Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 Running the node with `--debug.tip <block-hash>`syncs the node without help from CL until a fixed tip. The
 block hash can be taken from the latest block on <https://optimistic.etherscan.io>.
 
-Use `op-node` to track the tip. Start `op-node` with `--syncmode=execution-layer`. If `op-node`'s RPC
+Use `op-node` to track the tip. Start `op-node` with `--syncmode=execution-layer` and `--l2.enginekind=reth`. If `op-node`'s RPC
 connection to L1 is over localhost, `--l1.trustrpc` can be set to improve performance.

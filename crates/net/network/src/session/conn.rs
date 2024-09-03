@@ -1,5 +1,10 @@
 //! Connection types for a session
 
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
@@ -7,10 +12,6 @@ use reth_eth_wire::{
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthMessage, EthStream, EthVersion, P2PStream,
-};
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
 };
 use tokio::net::TcpStream;
 
@@ -23,12 +24,14 @@ pub type EthSatelliteConnection =
 
 /// Connection types that support the ETH protocol.
 ///
-/// Either a [`EthPeerConnection`] or an [`EthSatelliteConnection`].
+/// This can be either:
+/// - A connection that only supports the ETH protocol
+/// - A connection that supports the ETH protocol and at least one other `RLPx` protocol
 // This type is boxed because the underlying stream is ~6KB,
 // mostly coming from `P2PStream`'s `snap::Encoder` (2072), and `ECIESStream` (3600).
 #[derive(Debug)]
 pub enum EthRlpxConnection {
-    /// A That only supports the ETH protocol.
+    /// A connection that only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection>),
     /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection>),

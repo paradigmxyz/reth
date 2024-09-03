@@ -1,19 +1,37 @@
-use crate::{providers::StaticFileProviderRWRefMut, DatabaseProviderRW};
-use reth_db::Database;
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives::BlockNumber;
 use reth_storage_errors::provider::ProviderResult;
-use revm::db::OriginalValuesKnown;
+use reth_trie::HashedPostStateSorted;
+use revm::db::{
+    states::{PlainStateReverts, StateChangeset},
+    OriginalValuesKnown,
+};
 
-/// A helper trait for [`ExecutionOutcome`](reth_execution_types::ExecutionOutcome) to
-/// write state and receipts to storage.
+/// A helper trait for [`ExecutionOutcome`] to write state and receipts to storage.
 pub trait StateWriter {
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
-    fn write_to_storage<DB>(
-        self,
-        provider_rw: &DatabaseProviderRW<DB>,
-        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+    fn write_to_storage(
+        &mut self,
+        execution_outcome: ExecutionOutcome,
         is_value_known: OriginalValuesKnown,
-    ) -> ProviderResult<()>
-    where
-        DB: Database;
+    ) -> ProviderResult<()>;
+}
+
+/// A trait specifically for writing state changes or reverts
+pub trait StateChangeWriter {
+    /// Write state reverts to the database.
+    ///
+    /// NOTE: Reverts will delete all wiped storage from plain state.
+    fn write_state_reverts(
+        &self,
+        reverts: PlainStateReverts,
+        first_block: BlockNumber,
+    ) -> ProviderResult<()>;
+
+    /// Write state changes to the database.
+    fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
+
+    /// Writes the hashed state changes to the database
+    fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
 }

@@ -168,7 +168,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn get_senders_by_submission_id(
         &self,
     ) -> impl Iterator<Item = SubmissionSenderId> + '_ {
-        self.last_sender_submission.iter().cloned()
+        self.last_sender_submission.iter().copied()
     }
 
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
@@ -743,5 +743,116 @@ mod tests {
             .map(|s| f.ids.sender_id(&s).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(senders, expected_senders);
+    }
+
+    #[test]
+    fn test_add_sender_count_new_sender() {
+        // Initialize a mock transaction factory
+        let mut f = MockTransactionFactory::default();
+        // Create an empty transaction pool
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        // Generate a validated transaction and add it to the pool
+        let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
+        pool.add_transaction(tx);
+
+        // Define a new sender ID and submission ID
+        let sender: SenderId = 11.into();
+        let submission_id = 1;
+
+        // Add the sender count to the pool
+        pool.add_sender_count(sender, submission_id);
+
+        // Assert that the sender transaction count is updated correctly
+        assert_eq!(pool.sender_transaction_count.len(), 2);
+        let sender_info = pool.sender_transaction_count.get(&sender).unwrap();
+        assert_eq!(sender_info.count, 1);
+        assert_eq!(sender_info.last_submission_id, submission_id);
+
+        // Assert that the last sender submission is updated correctly
+        assert_eq!(pool.last_sender_submission.len(), 2);
+        let submission_info = pool.last_sender_submission.iter().next().unwrap();
+        assert_eq!(submission_info.sender_id, sender);
+        assert_eq!(submission_info.submission_id, submission_id);
+    }
+
+    #[test]
+    fn test_add_sender_count_existing_sender() {
+        // Initialize a mock transaction factory
+        let mut f = MockTransactionFactory::default();
+        // Create an empty transaction pool
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        // Generate a validated transaction and add it to the pool
+        let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
+        pool.add_transaction(tx);
+
+        // Define a sender ID and initial submission ID
+        let sender: SenderId = 11.into();
+        let initial_submission_id = 1;
+
+        // Add the sender count to the pool with the initial submission ID
+        pool.add_sender_count(sender, initial_submission_id);
+
+        // Define a new submission ID
+        let new_submission_id = 2;
+        // Add the sender count to the pool with the new submission ID
+        pool.add_sender_count(sender, new_submission_id);
+
+        // Assert that the sender transaction count is updated correctly
+        assert_eq!(pool.sender_transaction_count.len(), 2);
+        let sender_info = pool.sender_transaction_count.get(&sender).unwrap();
+        assert_eq!(sender_info.count, 2);
+        assert_eq!(sender_info.last_submission_id, new_submission_id);
+
+        // Assert that the last sender submission is updated correctly
+        assert_eq!(pool.last_sender_submission.len(), 2);
+        let submission_info = pool.last_sender_submission.iter().next().unwrap();
+        assert_eq!(submission_info.sender_id, sender);
+        assert_eq!(submission_info.submission_id, new_submission_id);
+    }
+
+    #[test]
+    fn test_add_sender_count_multiple_senders() {
+        // Initialize a mock transaction factory
+        let mut f = MockTransactionFactory::default();
+        // Create an empty transaction pool
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+        // Generate two validated transactions and add them to the pool
+        let tx1 = f.validated_arc(MockTransaction::eip1559().inc_price());
+        let tx2 = f.validated_arc(MockTransaction::eip1559().inc_price());
+        pool.add_transaction(tx1);
+        pool.add_transaction(tx2);
+
+        // Define two different sender IDs and their corresponding submission IDs
+        let sender1: SenderId = 11.into();
+        let sender2: SenderId = 22.into();
+
+        // Add the sender counts to the pool
+        pool.add_sender_count(sender1, 1);
+        pool.add_sender_count(sender2, 2);
+
+        // Assert that the sender transaction counts are updated correctly
+        assert_eq!(pool.sender_transaction_count.len(), 4);
+
+        let sender1_info = pool.sender_transaction_count.get(&sender1).unwrap();
+        assert_eq!(sender1_info.count, 1);
+        assert_eq!(sender1_info.last_submission_id, 1);
+
+        let sender2_info = pool.sender_transaction_count.get(&sender2).unwrap();
+        assert_eq!(sender2_info.count, 1);
+        assert_eq!(sender2_info.last_submission_id, 2);
+
+        // Assert that the last sender submission is updated correctly
+        assert_eq!(pool.last_sender_submission.len(), 3);
+
+        // Verify that sender 1 is not in the last sender submission
+        let submission_info1 =
+            pool.last_sender_submission.iter().find(|info| info.sender_id == sender1);
+        assert!(submission_info1.is_none());
+
+        // Verify that sender 2 is in the last sender submission
+        let submission_info2 =
+            pool.last_sender_submission.iter().find(|info| info.sender_id == sender2).unwrap();
+        assert_eq!(submission_info2.sender_id, sender2);
+        assert_eq!(submission_info2.submission_id, 2);
     }
 }

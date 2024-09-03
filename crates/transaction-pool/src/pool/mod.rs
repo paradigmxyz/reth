@@ -78,11 +78,12 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -120,8 +121,11 @@ pub(crate) mod state;
 pub mod txpool;
 mod update;
 
-const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
-const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+/// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
+pub const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
+/// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
+pub const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+
 const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 
 /// Transaction pool internals.
@@ -194,7 +198,7 @@ where
         self.pool.write().set_block_info(info)
     }
 
-    /// Returns the internal `SenderId` for this address
+    /// Returns the internal [`SenderId`] for this address
     pub(crate) fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
     }
@@ -233,7 +237,7 @@ where
     /// Adds a new transaction listener to the pool that gets notified about every new _pending_
     /// transaction inserted into the pool
     pub fn add_pending_listener(&self, kind: TransactionListenerKind) -> mpsc::Receiver<TxHash> {
-        let (sender, rx) = mpsc::channel(PENDING_TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(self.config.pending_tx_listener_buffer_size);
         let listener = PendingTransactionHashListener { sender, kind };
         self.pending_transaction_listener.lock().push(listener);
         rx
@@ -244,7 +248,7 @@ where
         &self,
         kind: TransactionListenerKind,
     ) -> mpsc::Receiver<NewTransactionEvent<T::Transaction>> {
-        let (sender, rx) = mpsc::channel(NEW_TX_LISTENER_BUFFER_SIZE);
+        let (sender, rx) = mpsc::channel(self.config.new_tx_listener_buffer_size);
         let listener = TransactionListener { sender, kind };
         self.transaction_listener.lock().push(listener);
         rx
@@ -599,20 +603,18 @@ where
 
     /// Notifies transaction listeners about changes once a block was processed.
     fn notify_on_new_state(&self, outcome: OnNewCanonicalStateOutcome<T::Transaction>) {
-        // notify about promoted pending transactions
-        {
-            // emit hashes
-            let mut transaction_hash_listeners = self.pending_transaction_listener.lock();
-            transaction_hash_listeners.retain_mut(|listener| {
-                listener.send_all(outcome.pending_transactions(listener.kind))
-            });
+        trace!(target: "txpool", promoted=outcome.promoted.len(), discarded= outcome.discarded.len() ,"notifying listeners on state change");
 
-            // emit full transactions
-            let mut transaction_full_listeners = self.transaction_listener.lock();
-            transaction_full_listeners.retain_mut(|listener| {
-                listener.send_all(outcome.full_pending_transactions(listener.kind))
-            })
-        }
+        // notify about promoted pending transactions
+        // emit hashes
+        self.pending_transaction_listener
+            .lock()
+            .retain_mut(|listener| listener.send_all(outcome.pending_transactions(listener.kind)));
+
+        // emit full transactions
+        self.transaction_listener.lock().retain_mut(|listener| {
+            listener.send_all(outcome.full_pending_transactions(listener.kind))
+        });
 
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
@@ -731,6 +733,14 @@ where
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+    }
+
+    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    pub(crate) fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.get_pool_data().pending_transactions_iter().filter(|tx| tx.origin == origin).collect()
     }
 
     /// Returns all the transactions belonging to the hashes.

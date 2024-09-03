@@ -11,11 +11,13 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-rlp.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 
-thiserror-no-std = { workspace = true, default-features = false }
+# misc
+derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = ["thiserror-no-std/std"]
+std = []

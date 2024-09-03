@@ -1,9 +1,8 @@
 //! Helper types for `reth_rpc_eth_api::EthApiServer` implementation.
 //!
 //! Transaction wrapper that labels transaction with its origin.
-
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_rpc_types::{Transaction, TransactionInfo};
+use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 
 /// Represents from where a transaction was fetched.
@@ -78,18 +77,19 @@ impl From<TransactionSource> for TransactionSignedEcRecovered {
     }
 }
 
-impl From<TransactionSource> for Transaction {
+impl From<TransactionSource> for WithOtherFields<Transaction> {
     fn from(value: TransactionSource) -> Self {
         match value {
             TransactionSource::Pool(tx) => reth_rpc_types_compat::transaction::from_recovered(tx),
             TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
-                from_recovered_with_block_context(
-                    transaction,
-                    block_hash,
-                    block_number,
-                    base_fee,
-                    index as usize,
-                )
+                let tx_info = TransactionInfo {
+                    hash: Some(transaction.hash()),
+                    block_hash: Some(block_hash),
+                    block_number: Some(block_number),
+                    base_fee: base_fee.map(u128::from),
+                    index: Some(index),
+                };
+                from_recovered_with_block_context(transaction, tx_info)
             }
         }
     }

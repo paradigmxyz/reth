@@ -27,6 +27,7 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadV4>,
     > + DeserializeOwned
     + Serialize
+    + 'static
 {
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;

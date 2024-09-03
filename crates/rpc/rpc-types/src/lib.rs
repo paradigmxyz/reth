@@ -11,9 +11,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #[allow(hidden_glob_reexports)]
 mod eth;
-mod peer;
-mod rpc;
 
+/// Alias for a peer identifier
+pub type PeerId = B512;
+
+use alloy_primitives::B512;
 // re-export for convenience
 pub use alloy_rpc_types::serde_helpers;
 
@@ -38,23 +40,26 @@ pub use alloy_rpc_types_anvil as anvil;
 pub use alloy_rpc_types_mev as mev;
 
 // re-export beacon
+#[cfg(feature = "jsonrpsee-types")]
 pub use alloy_rpc_types_beacon as beacon;
 
 // re-export txpool
 pub use alloy_rpc_types_txpool as txpool;
 
+// re-export debug
+pub use alloy_rpc_types_debug as debug;
+
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
+#[cfg(feature = "jsonrpsee-types")]
+pub use eth::error::ToRpcError;
+pub use eth::transaction::{self, TransactionRequest, TypedTransactionRequest};
+#[cfg(feature = "jsonrpsee-types")]
 pub use eth::{
     engine,
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    error::ToRpcError,
-    transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
-
-pub use peer::*;
-pub use rpc::*;
 
 use alloy_eips::eip4844::BYTES_PER_BLOB;
 use alloy_primitives::FixedBytes;
@@ -68,4 +73,10 @@ pub struct BlobAndProofV1 {
     pub blob: FixedBytes<BYTES_PER_BLOB>,
     /// The KZG proof for the blob.
     pub proof: FixedBytes<48>,
+}
+
+/// Optimism specific rpc types.
+pub mod optimism {
+    pub use op_alloy_rpc_types::*;
+    pub use op_alloy_rpc_types_engine::*;
 }

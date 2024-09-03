@@ -17,12 +17,13 @@ reth-storage-errors.workspace = true
 reth-prune-types.workspace = true
 
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 alloy-eips.workspace = true
 revm-primitives.workspace = true
+nybbles.workspace = true
 
-thiserror-no-std = { workspace = true, default-features = false }
-
+derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = ["thiserror-no-std/std"]
+std = ["reth-consensus/std"]

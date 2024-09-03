@@ -1,5 +1,11 @@
 //! A generic [`NodeComponentsBuilder`]
 
+use std::{future::Future, marker::PhantomData};
+
+use reth_consensus::Consensus;
+use reth_evm::execute::BlockExecutorProvider;
+use reth_transaction_pool::TransactionPool;
+
 use crate::{
     components::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
@@ -7,10 +13,6 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
-use reth_consensus::Consensus;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_transaction_pool::TransactionPool;
-use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///

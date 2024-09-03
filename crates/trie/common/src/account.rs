@@ -35,7 +35,7 @@ impl From<GenesisAccount> for TrieAccount {
                 storage_root_unhashed(
                     storage
                         .into_iter()
-                        .filter(|(_, value)| *value != B256::ZERO)
+                        .filter(|(_, value)| !value.is_zero())
                         .map(|(slot, value)| (slot, U256::from_be_bytes(*value))),
                 )
             })

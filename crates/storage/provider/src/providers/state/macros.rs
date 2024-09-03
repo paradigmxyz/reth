@@ -42,14 +42,17 @@ macro_rules! delegate_provider_impls {
                 fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
             }
             StateRootProvider $(where [$($generics)*])? {
-                fn state_root(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
-                fn hashed_state_root(&self, state: &reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
-                fn state_root_with_updates(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
-                fn hashed_state_root_with_updates(&self, state: &reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
+                fn state_root_from_nodes(&self,  nodes: reth_trie::updates::TrieUpdates, state: reth_trie::HashedPostState, prefix_sets: reth_trie::prefix_set::TriePrefixSetsMut) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
+                fn state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn state_root_from_nodes_with_updates(&self,  nodes: reth_trie::updates::TrieUpdates, state: reth_trie::HashedPostState, prefix_sets: reth_trie::prefix_set::TriePrefixSetsMut) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
+            }
+            StorageRootProvider $(where [$($generics)*])? {
+                fn storage_root(&self, address: reth_primitives::Address, storage: reth_trie::HashedStorage) ->  reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
             }
             StateProofProvider $(where [$($generics)*])? {
-                fn proof(&self, state: &revm::db::BundleState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
-                fn hashed_proof(&self, state: &reth_trie::HashedPostState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
+                fn proof(&self, state: reth_trie::HashedPostState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
+                fn witness(&self, state: reth_trie::HashedPostState, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<std::collections::HashMap<reth_primitives::B256, reth_primitives::Bytes>>;
             }
         );
     }

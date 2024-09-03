@@ -1,47 +1,67 @@
 //! Abstraction for launching a node.
 
-use crate::{
-    builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::NodeHooks,
-    node::FullNode,
-    NodeBuilderWithComponents, NodeHandle,
-};
+pub mod common;
+mod exex;
+
+pub(crate) mod engine;
+
+pub use common::LaunchContext;
+pub use exex::ExExLauncher;
+
+use std::{future::Future, sync::Arc};
+
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
+use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
+use reth_chainspec::ChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::NetworkEvents;
-use reth_node_api::FullNodeTypes;
+use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types::engine::ClientVersionV1;
+use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
-use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-pub mod common;
-pub use common::LaunchContext;
-mod exex;
-pub use exex::ExExLauncher;
+use crate::{
+    builder::{NodeAdapter, NodeTypesAdapter},
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    node::FullNode,
+    rpc::EthApiBuilderProvider,
+    AddOns, NodeBuilderWithComponents, NodeHandle,
+};
+
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
+pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Evm,
+    <N as FullNodeComponents>::Network,
+    TaskExecutor,
+    <N as FullNodeTypes>::Provider,
+>;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
-/// Acts as a node factory.
+/// Acts as a node factory that targets a certain node configuration and returns a handle to the
+/// node.
 ///
 /// This is essentially the launch logic for a node.
 ///
@@ -80,25 +100,50 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
+impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider<<T as FullNodeTypes>::DB>,
+        ChainSpec = ChainSpec,
+    >,
     CB: NodeComponentsBuilder<T>,
+    AO: NodeAddOns<
+        NodeAdapter<T, CB::Components>,
+        EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
+                    + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + AddDevSigners,
+    >,
 {
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<T, CB>,
+        target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex },
+            add_ons: AddOns { hooks, rpc, exexs: installed_exex },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+
+        // TODO: remove tree and move tree_config and canon_state_notification_sender
+        // initialization to with_blockchain_db once the engine revamp is done
+        // https://github.com/paradigmxyz/reth/issues/8742
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let tree = Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+            canon_state_notification_sender.clone(),
+        ));
 
         // setup the launch context
         let ctx = ctx
@@ -116,7 +161,7 @@ where
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
-            .with_prometheus().await?
+            .with_prometheus_server().await?
             .inspect(|this| {
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
@@ -124,10 +169,12 @@ where
             .inspect(|this| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
-            .with_metrics()
+            .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>()?
+            .with_blockchain_db::<T, _>(move |provider_factory| {
+                Ok(BlockchainProvider::new(provider_factory, tree)?)
+            }, tree_config, canon_state_notification_sender)?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs
@@ -148,6 +195,13 @@ where
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+                node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
+            )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.
@@ -280,7 +334,6 @@ where
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-                database.clone(),
             ),
         );
 

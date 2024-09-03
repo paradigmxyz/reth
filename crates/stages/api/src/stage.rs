@@ -100,7 +100,7 @@ impl ExecInput {
         let (end_block, is_final_range, next_tx_num) = if all_tx_cnt <= tx_threshold {
             (target_block, true, target_block_body.next_tx_num())
         } else {
-            // get tx block number. next_tx_num in this case will be less thean all_tx_cnt.
+            // get tx block number. next_tx_num in this case will be less than all_tx_cnt.
             // So we are sure that transaction must exist.
             let end_block_number = provider
                 .transaction_block(first_tx_num + tx_threshold)?
