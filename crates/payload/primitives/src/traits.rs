@@ -2,7 +2,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, Header, SealedBlock, Withdrawals, B256, U256,
+    Address, Header, Receipt, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -22,6 +22,9 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
+
+    /// Returns the Receipts
+    fn receipts(&self) -> &[Receipt];
 
     /// Returns the entire execution data for the built block, if available.
     fn executed_block(&self) -> Option<ExecutedBlock> {

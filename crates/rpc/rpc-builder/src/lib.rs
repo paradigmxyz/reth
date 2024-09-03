@@ -813,7 +813,8 @@ where
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
                 reth_rpc_types::AnyTransactionReceipt,
-            > + TraceExt,
+            > + TraceExt
+            + EthTransactions,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -917,7 +918,8 @@ where
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
                 reth_rpc_types::AnyTransactionReceipt,
-            > + TraceExt,
+            > + TraceExt
+            + EthTransactions,
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)
