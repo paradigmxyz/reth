@@ -62,7 +62,7 @@ mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
-pub use invalid_block_hook::{InvalidBlockHook, NoopInvalidBlockHook};
+pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 
 /// Keeps track of the state of the tree.
 ///
@@ -1909,7 +1909,12 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         ) {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(block.seal_slow(), parent_block, output, None);
+            self.invalid_block_hook.on_invalid_block(
+                &block.seal_slow(),
+                &parent_block,
+                &output,
+                None,
+            );
             return Err(err.into())
         }
 
@@ -1921,10 +1926,10 @@ where
         if state_root != block.state_root {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
-                block.clone().seal_slow(),
-                parent_block,
-                output,
-                Some((trie_output, state_root)),
+                &block.clone().seal_slow(),
+                &parent_block,
+                &output,
+                Some((&trie_output, state_root)),
             );
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
