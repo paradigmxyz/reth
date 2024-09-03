@@ -657,7 +657,7 @@ mod tests {
             BTreeMap::from([(1, B256::from_slice(&[1; 32])), (2, B256::from_slice(&[2; 32]))]);
 
         // Update the block indices with the initial canonical chain.
-        block_indices.update_block_hashes(old_hashes.clone());
+        block_indices.update_block_hashes(old_hashes);
 
         // Define a new canonical chain that extends the old one with additional blocks.
         let new_hashes = BTreeMap::from([
@@ -668,7 +668,7 @@ mod tests {
         ]);
 
         // Update the block indices with the new chain.
-        let (removed, added) = block_indices.update_block_hashes(new_hashes.clone());
+        let (removed, added) = block_indices.update_block_hashes(new_hashes);
 
         // Verify that the canonical chain now contains the new blocks.
         assert_eq!(
@@ -732,7 +732,7 @@ mod tests {
         block_indices.blocks_to_chain.insert(child_block_hash_4, SidechainId::from(6));
 
         // Update the block indices with the initial canonical chain.
-        block_indices.update_block_hashes(initial_chain.clone());
+        block_indices.update_block_hashes(initial_chain);
 
         // Define a new canonical chain that removes the last two blocks (3 and 4) and the parent
         // block.
@@ -740,7 +740,7 @@ mod tests {
             BTreeMap::from([(1, B256::from_slice(&[1; 32])), (2, B256::from_slice(&[2; 32]))]);
 
         // Update the block indices with the new chain.
-        let (removed, added) = block_indices.update_block_hashes(new_chain.clone());
+        let (removed, added) = block_indices.update_block_hashes(new_chain);
 
         // We removed the parent block so all children should be removed.
         assert_eq!(
@@ -790,7 +790,7 @@ mod tests {
         block_indices.blocks_to_chain.insert(block_hash_3, SidechainId::from(3));
 
         // Update the block indices with the initial canonical chain.
-        block_indices.update_block_hashes(initial_chain.clone());
+        block_indices.update_block_hashes(initial_chain);
 
         // Define a new canonical chain that replaces the block at number 2 with a new hash.
         let new_chain = BTreeMap::from([
@@ -800,7 +800,7 @@ mod tests {
         ]);
 
         // Update the block indices with the new chain.
-        let (removed, added) = block_indices.update_block_hashes(new_chain.clone());
+        let (removed, added) = block_indices.update_block_hashes(new_chain);
 
         // Parent block has been removed so all children should be removed.
         assert_eq!(
@@ -831,10 +831,10 @@ mod tests {
         assert!(removed_chains.is_empty());
 
         // Verify that the block is no longer in the block_number_to_block_hashes mapping.
-        assert!(block_indices.block_number_to_block_hashes.get(&block_number).is_none());
+        assert!(!block_indices.block_number_to_block_hashes.contains_key(&block_number));
 
         // Verify that the block is no longer associated with a chain ID.
-        assert!(block_indices.blocks_to_chain.get(&block_hash).is_none());
+        assert!(!block_indices.blocks_to_chain.contains_key(&block_hash));
     }
 
     #[test]
@@ -867,14 +867,14 @@ mod tests {
         assert_eq!(removed_chains, BTreeSet::from([chain_id]));
 
         // Verify that the parent block is removed from the block_number_to_block_hashes mapping.
-        assert!(block_indices.block_number_to_block_hashes.get(&parent_block_number).is_none());
+        assert!(!block_indices.block_number_to_block_hashes.contains_key(&parent_block_number));
 
         // Verify that the parent block is no longer associated with a chain ID.
-        assert!(block_indices.blocks_to_chain.get(&parent_block_hash).is_none());
+        assert!(!block_indices.blocks_to_chain.contains_key(&parent_block_hash));
 
         // Verify that the child blocks are also removed from the blocks_to_chain mapping.
-        assert!(block_indices.blocks_to_chain.get(&child_block_hash_1).is_none());
-        assert!(block_indices.blocks_to_chain.get(&child_block_hash_2).is_none());
+        assert!(!block_indices.blocks_to_chain.contains_key(&child_block_hash_1));
+        assert!(!block_indices.blocks_to_chain.contains_key(&child_block_hash_2));
     }
 
     #[test]
@@ -892,9 +892,9 @@ mod tests {
         assert!(removed_chains.is_empty());
 
         // Verify that there are no entries in block_number_to_block_hashes for the given number.
-        assert!(block_indices.block_number_to_block_hashes.get(&block_number).is_none());
+        assert!(!block_indices.block_number_to_block_hashes.contains_key(&block_number));
 
         // Verify that there is no association of the block hash with any chain ID.
-        assert!(block_indices.blocks_to_chain.get(&block_hash).is_none());
+        assert!(!block_indices.blocks_to_chain.contains_key(&block_hash));
     }
 }
