@@ -8,7 +8,9 @@
 use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
+use reth_node_api::{
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithEngine,
+};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
@@ -90,8 +92,11 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
     type Primitives = T::Primitives;
-    type Engine = T::Engine;
     type ChainSpec = T::ChainSpec;
+}
+
+impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithEngine for NodeAdapter<T, C> {
+    type Engine = T::Engine;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
