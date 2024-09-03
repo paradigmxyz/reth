@@ -861,7 +861,7 @@ where
                     .collect::<Result<Vec<_>, _>>()?,
             ))
         } else {
-            Box::new(NoopInvalidBlockHook)
+            Box::new(NoopInvalidBlockHook::default())
         })
     }
 }
