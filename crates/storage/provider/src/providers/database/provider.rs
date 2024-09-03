@@ -108,13 +108,13 @@ impl<DB: Database> DatabaseProviderRW<DB> {
 #[derive(Debug)]
 pub struct DatabaseProvider<TX> {
     /// Database transaction.
-    tx: TX,
+    pub(crate) tx: TX,
     /// Chain spec
-    chain_spec: Arc<ChainSpec>,
+    pub(crate) chain_spec: Arc<ChainSpec>,
     /// Static File provider
-    static_file_provider: StaticFileProvider,
+    pub(crate) static_file_provider: StaticFileProvider,
     /// Pruning configuration
-    prune_modes: PruneModes,
+    pub(crate) prune_modes: PruneModes,
 }
 
 impl<TX> DatabaseProvider<TX> {

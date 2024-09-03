@@ -24,6 +24,8 @@ pub mod primitives;
 pub mod node;
 pub use node::*;
 
+pub mod storage;
+
 // re-export for convenience
 pub use reth_provider::FullProvider;
 

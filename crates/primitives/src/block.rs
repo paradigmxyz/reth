@@ -49,6 +49,8 @@ pub struct Block {
     pub requests: Option<Requests>,
 }
 
+impl reth_primitives_traits::Block for Block {}
+
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {

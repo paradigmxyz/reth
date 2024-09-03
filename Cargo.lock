@@ -7493,6 +7493,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.0.6"
 dependencies = [
+ "auto_impl",
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
@@ -7500,6 +7501,8 @@ dependencies = [
  "reth-network-api",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-eth-api",
  "reth-tasks",

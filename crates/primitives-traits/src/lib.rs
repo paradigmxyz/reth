@@ -42,6 +42,9 @@ pub use log::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+/// Mock Block trait
+pub trait Block {}
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
