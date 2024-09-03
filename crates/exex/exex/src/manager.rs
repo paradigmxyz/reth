@@ -197,6 +197,7 @@ impl Stream for ExExNotificationsWithHead<'_> {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // TODO(alexey): backfill according to the head
         loop {
             let Some(notification) = ready!(this.0.poll_recv(cx)) else { return Poll::Ready(None) };
 
