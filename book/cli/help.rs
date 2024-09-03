@@ -213,7 +213,7 @@ fn cmd_markdown(out_dir: &Path, cmd: &[String], stdout: &str) -> io::Result<()> 
 fn help_markdown(cmd: &[String], stdout: &str) -> String {
     let (description, s) = parse_description(stdout);
     format!(
-        "{}\n\n```bash\n$ {} --help\n{}\n```",
+        "{}\n\n```bash\n$ {} --help\n```\n```txt\n{}\n```",
         description,
         cmd.join(" "),
         preprocess_help(s.trim())
