@@ -86,7 +86,7 @@ pub struct PruningArgs {
     /// Configure receipts log filter. Format:
     /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
     /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
-    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_delimiter = ',')]
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_delimiter = ',', value_parser = parse_receipts_log_filter)]
     pub receipts_log_filter: Vec<String>,
 }
 
@@ -139,15 +139,6 @@ impl PruningArgs {
         }
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);
-        }
-
-        if !self.receipts_log_filter.is_empty() {
-            match self.parse_receipts_log_filter() {
-                Ok(filter_config) => config.segments.receipts_log_filter = filter_config,
-                Err(e) => {
-                    eprintln!("Error parsing receipts log filter: {}", e);
-                }
-            }
         }
 
         Some(config)
@@ -211,40 +202,49 @@ impl PruningArgs {
             None
         }
     }
+}
 
-    fn parse_receipts_log_filter(&self) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
-        let mut config = BTreeMap::new();
-        // Each filter is provided in the form <address>:<prunemode>
-        for filter in &self.receipts_log_filter {
-            let parts: Vec<&str> = filter.split(':').collect();
-            if parts.len() < 2 {
-                return Err(ReceiptsLogError::InvalidFilterFormat(filter.clone()));
-            }
-            // Parse the address
-            let address = parts[0]
-                .parse::<Address>()
-                .map_err(|_| ReceiptsLogError::InvalidAddress(parts[0].to_string()))?;
-
-            // Parse the prune mode
-            let prune_mode = match parts[1] {
-                "full" => PruneMode::Full,
-                s if s.starts_with("distance") => {
-                    let distance =
-                        parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidDistance)?;
-                    PruneMode::Distance(distance)
-                }
-                s if s.starts_with("before") => {
-                    let block_number = parts[2]
-                        .parse::<BlockNumber>()
-                        .map_err(ReceiptsLogError::InvalidBlockNumber)?;
-                    PruneMode::Before(block_number)
-                }
-                _ => return Err(ReceiptsLogError::InvalidPruneMode(parts[0].to_string())),
-            };
-            config.insert(address, prune_mode);
+pub(crate) fn parse_receipts_log_filter(
+    value: &str,
+) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
+    let mut config = BTreeMap::new();
+    // Split out each of the filters.
+    let filters = value.split(',');
+    for filter in filters {
+        let parts: Vec<&str> = filter.split(':').collect();
+        if parts.len() < 2 {
+            return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
         }
-        Ok(ReceiptsLogPruneConfig(config))
+        // Parse the address
+        let address = parts[0]
+            .parse::<Address>()
+            .map_err(|_| ReceiptsLogError::InvalidAddress(parts[0].to_string()))?;
+
+        // Parse the prune mode
+        let prune_mode = match parts[1] {
+            "full" => PruneMode::Full,
+            s if s.starts_with("distance") => {
+                if parts.len() < 3 {
+                    return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
+                }
+                let distance =
+                    parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidDistance)?;
+                PruneMode::Distance(distance)
+            }
+            s if s.starts_with("before") => {
+                if parts.len() < 3 {
+                    return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
+                }
+                let block_number = parts[2]
+                    .parse::<BlockNumber>()
+                    .map_err(ReceiptsLogError::InvalidBlockNumber)?;
+                PruneMode::Before(block_number)
+            }
+            _ => return Err(ReceiptsLogError::InvalidPruneMode(parts[1].to_string())),
+        };
+        config.insert(address, prune_mode);
     }
+    Ok(ReceiptsLogPruneConfig(config))
 }
 
 #[cfg(test)]
@@ -259,11 +259,6 @@ mod tests {
         args: T,
     }
 
-    /// Helper function for constructing `PruningArgs` with a `ReceiptsLogFilter`
-    fn create_pruning_args(filters: Vec<String>) -> PruningArgs {
-        PruningArgs { receipts_log_filter: filters, ..Default::default() }
-    }
-
     #[test]
     fn pruning_args_sanity_check() {
         let default_args = PruningArgs::default();
@@ -273,25 +268,21 @@ mod tests {
 
     #[test]
     fn test_parse_receipts_log_filter() {
-        let addr1 = "0x0000000000000000000000000000000000000001";
-        let addr2 = "0x0000000000000000000000000000000000000002";
-        let addr3 = "0x0000000000000000000000000000000000000003";
-        let args = create_pruning_args(vec![
-            format!("{}:full", addr1),
-            format!("{}:distance:1000", addr2),
-            format!("{}:before:5000000", addr3),
-        ]);
+        let filter1 = "0x0000000000000000000000000000000000000001:full";
+        let filter2 = "0x0000000000000000000000000000000000000002:distance:1000";
+        let filter3 = "0x0000000000000000000000000000000000000003:before:5000000";
+        let filters = [filter1, filter2, filter3].join(",");
 
         // Args can be parsed.
-        let result = args.parse_receipts_log_filter();
+        let result = parse_receipts_log_filter(&filters);
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(config.0.len(), 3);
 
         // Check that the args were parsed correctly.
-        let addr1: Address = addr1.parse().unwrap();
-        let addr2: Address = addr2.parse().unwrap();
-        let addr3: Address = addr3.parse().unwrap();
+        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
+        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
+        let addr3: Address = "0x0000000000000000000000000000000000000003".parse().unwrap();
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
@@ -300,42 +291,36 @@ mod tests {
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_filter_format() {
-        let args = create_pruning_args(vec!["invalid_format".to_string()]);
-        let result = args.parse_receipts_log_filter();
+        let result = parse_receipts_log_filter("invalid_format");
         assert!(matches!(result, Err(ReceiptsLogError::InvalidFilterFormat(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_address() {
-        let args = create_pruning_args(vec!["invalid_address:full".to_string()]);
-        let result = args.parse_receipts_log_filter();
+        let result = parse_receipts_log_filter("invalid_address:full");
         assert!(matches!(result, Err(ReceiptsLogError::InvalidAddress(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_prune_mode() {
-        let args = create_pruning_args(vec![
-            "0x0000000000000000000000000000000000000000:invalid_mode".to_string(),
-        ]);
-        let result = args.parse_receipts_log_filter();
+        let result =
+            parse_receipts_log_filter("0x0000000000000000000000000000000000000000:invalid_mode");
         assert!(matches!(result, Err(ReceiptsLogError::InvalidPruneMode(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_distance() {
-        let args = create_pruning_args(vec![
-            "0x0000000000000000000000000000000000000000:distance:invalid_distance".to_string(),
-        ]);
-        let result = args.parse_receipts_log_filter();
+        let result = parse_receipts_log_filter(
+            "0x0000000000000000000000000000000000000000:distance:invalid_distance",
+        );
         assert!(matches!(result, Err(ReceiptsLogError::InvalidDistance(_))));
     }
 
     #[test]
     fn test_parse_receipts_log_filter_invalid_block_number() {
-        let args = create_pruning_args(vec![
-            "0x0000000000000000000000000000000000000000:before:invalid_block".to_string(),
-        ]);
-        let result = args.parse_receipts_log_filter();
+        let result = parse_receipts_log_filter(
+            "0x0000000000000000000000000000000000000000:before:invalid_block",
+        );
         assert!(matches!(result, Err(ReceiptsLogError::InvalidBlockNumber(_))));
     }
 }
