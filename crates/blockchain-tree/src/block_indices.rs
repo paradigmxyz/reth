@@ -135,11 +135,12 @@ impl BlockIndices {
         &mut self,
         hashes: BTreeMap<u64, BlockHash>,
     ) -> (BTreeSet<SidechainId>, Vec<BlockNumHash>) {
+        let mut old_hashes = self.canonical_chain().clone().into_iter();
+
         // set new canonical hashes.
         self.canonical_chain.replace(hashes.clone());
 
         let mut new_hashes = hashes.into_iter();
-        let mut old_hashes = self.canonical_chain().clone().into_iter();
 
         let mut removed = Vec::new();
         let mut added = Vec::new();
@@ -612,5 +613,288 @@ mod tests {
         let mut expected_children = LinkedHashSet::new();
         expected_children.insert(block_hash_1);
         assert_eq!(block_indices.fork_to_child.get(&parent_hash), Some(&expected_children));
+    }
+
+    #[test]
+    fn update_block_hashes_no_changes() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define the initial set of block hashes for the canonical chain.
+        let old_hashes = BTreeMap::from([
+            (1, B256::from_slice(&[1; 32])),
+            (2, B256::from_slice(&[2; 32])),
+            (3, B256::from_slice(&[3; 32])),
+        ]);
+
+        // Update the block indices with the initial canonical chain.
+        block_indices.update_block_hashes(old_hashes.clone());
+
+        // Call the update function again with the same chain, expecting no changes.
+        let (removed, added) = block_indices.update_block_hashes(old_hashes);
+
+        // Verify that the canonical chain remains the same.
+        assert_eq!(
+            *block_indices.canonical_chain(),
+            CanonicalChain::new(BTreeMap::from([
+                (1, B256::from_slice(&[1; 32])),
+                (2, B256::from_slice(&[2; 32])),
+                (3, B256::from_slice(&[3; 32])),
+            ]))
+        );
+
+        // Verify that no blocks were removed.
+        assert!(removed.is_empty());
+        // Verify that no blocks were added.
+        assert!(added.is_empty());
+    }
+
+    #[test]
+    fn update_block_hashes_new_blocks_added() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define the initial set of block hashes for the canonical chain.
+        let old_hashes =
+            BTreeMap::from([(1, B256::from_slice(&[1; 32])), (2, B256::from_slice(&[2; 32]))]);
+
+        // Update the block indices with the initial canonical chain.
+        block_indices.update_block_hashes(old_hashes.clone());
+
+        // Define a new canonical chain that extends the old one with additional blocks.
+        let new_hashes = BTreeMap::from([
+            (1, B256::from_slice(&[1; 32])),
+            (2, B256::from_slice(&[2; 32])),
+            (3, B256::from_slice(&[3; 32])),
+            (4, B256::from_slice(&[4; 32])),
+        ]);
+
+        // Update the block indices with the new chain.
+        let (removed, added) = block_indices.update_block_hashes(new_hashes.clone());
+
+        // Verify that the canonical chain now contains the new blocks.
+        assert_eq!(
+            *block_indices.canonical_chain(),
+            CanonicalChain::new(BTreeMap::from([
+                (1, B256::from_slice(&[1; 32])),
+                (2, B256::from_slice(&[2; 32])),
+                (3, B256::from_slice(&[3; 32])),
+                (4, B256::from_slice(&[4; 32])),
+            ]))
+        );
+
+        // Verify that no blocks were removed.
+        assert!(removed.is_empty());
+        // Verify that the new blocks were correctly added.
+        assert_eq!(
+            added,
+            vec![
+                BlockNumHash { number: 3, hash: B256::from_slice(&[3; 32]) },
+                BlockNumHash { number: 4, hash: B256::from_slice(&[4; 32]) }
+            ]
+        );
+    }
+
+    #[test]
+    fn update_block_hashes_blocks_removed() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Simulate child blocks associated with the parent block.
+        let parent_block_hash = B256::from_slice(&[0; 32]);
+
+        // Child blocks forked from the parent.
+        let child_block_hash_1 = B256::from_slice(&[1; 32]);
+        let child_block_hash_2 = B256::from_slice(&[2; 32]);
+        let child_block_hash_3 = B256::from_slice(&[3; 32]);
+        let child_block_hash_4 = B256::from_slice(&[4; 32]);
+
+        // Define initial canonical chain with four blocks.
+        let initial_chain = BTreeMap::from([
+            // Parent block.
+            (0, parent_block_hash),
+            // Child blocks.
+            (1, child_block_hash_1),
+            (2, child_block_hash_2),
+            (3, child_block_hash_3),
+            (4, child_block_hash_4),
+        ]);
+
+        // Insert forked child blocks into the fork_to_child mapping.
+        let mut child_set = LinkedHashSet::new();
+        child_set.insert(child_block_hash_1);
+        child_set.insert(child_block_hash_2);
+        child_set.insert(child_block_hash_3);
+        child_set.insert(child_block_hash_4);
+        block_indices.fork_to_child.insert(parent_block_hash, child_set);
+
+        // Simulate that these child blocks belong to the same chain ID.
+        block_indices.blocks_to_chain.insert(child_block_hash_1, SidechainId::from(3));
+        block_indices.blocks_to_chain.insert(child_block_hash_2, SidechainId::from(4));
+        block_indices.blocks_to_chain.insert(child_block_hash_3, SidechainId::from(5));
+        block_indices.blocks_to_chain.insert(child_block_hash_4, SidechainId::from(6));
+
+        // Update the block indices with the initial canonical chain.
+        block_indices.update_block_hashes(initial_chain.clone());
+
+        // Define a new canonical chain that removes the last two blocks (3 and 4) and the parent
+        // block.
+        let new_chain =
+            BTreeMap::from([(1, B256::from_slice(&[1; 32])), (2, B256::from_slice(&[2; 32]))]);
+
+        // Update the block indices with the new chain.
+        let (removed, added) = block_indices.update_block_hashes(new_chain.clone());
+
+        // We removed the parent block so all children should be removed.
+        assert_eq!(
+            removed,
+            BTreeSet::from([
+                SidechainId::from(3),
+                SidechainId::from(4),
+                SidechainId::from(5),
+                SidechainId::from(6)
+            ])
+        );
+
+        // Verify that no blocks were added to the new canonical chain.
+        assert!(added.is_empty());
+    }
+
+    #[test]
+    fn update_block_hashes_blocks_replaced() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Simulate child blocks associated with the parent block.
+        let parent_block_hash = B256::from_slice(&[0; 32]);
+
+        // Define initial blocks.
+        let block_hash_1 = B256::from_slice(&[1; 32]);
+        let block_hash_2 = B256::from_slice(&[2; 32]);
+        let block_hash_3 = B256::from_slice(&[3; 32]);
+
+        // Define initial canonical chain with two blocks.
+        let initial_chain = BTreeMap::from([
+            (0, parent_block_hash),
+            (1, block_hash_1),
+            (2, block_hash_2),
+            (3, block_hash_3),
+        ]);
+
+        // Insert blocks into the fork_to_child mapping as children of the parent block.
+        let mut child_set = LinkedHashSet::new();
+        child_set.insert(block_hash_1);
+        child_set.insert(block_hash_2);
+        child_set.insert(block_hash_3);
+        block_indices.fork_to_child.insert(parent_block_hash, child_set);
+
+        // Simulate that these blocks belong to the same chain ID.
+        block_indices.blocks_to_chain.insert(block_hash_1, SidechainId::from(1));
+        block_indices.blocks_to_chain.insert(block_hash_2, SidechainId::from(2));
+        block_indices.blocks_to_chain.insert(block_hash_3, SidechainId::from(3));
+
+        // Update the block indices with the initial canonical chain.
+        block_indices.update_block_hashes(initial_chain.clone());
+
+        // Define a new canonical chain that replaces the block at number 2 with a new hash.
+        let new_chain = BTreeMap::from([
+            (1, block_hash_1),
+            (2, B256::from_slice(&[5; 32])), // Replacing block hash 2 with a new hash [5; 32]
+            (3, block_hash_3),
+        ]);
+
+        // Update the block indices with the new chain.
+        let (removed, added) = block_indices.update_block_hashes(new_chain.clone());
+
+        // Parent block has been removed so all children should be removed.
+        assert_eq!(
+            removed,
+            BTreeSet::from([SidechainId::from(1), SidechainId::from(2), SidechainId::from(3)])
+        );
+
+        // Verify that the added block is the new block at number 2.
+        assert_eq!(added, vec![BlockNumHash { number: 2, hash: B256::from_slice(&[5; 32]) }]);
+    }
+
+    #[test]
+    fn remove_block_single_no_forks() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define a block number and block hash to add and then remove.
+        let block_number = 1;
+        let block_hash = B256::from_slice(&[1; 32]);
+        let chain_id = SidechainId::from(84);
+
+        // Insert the block into the block indices.
+        block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
+
+        // Remove the block from the block indices.
+        let removed_chains = block_indices.remove_block(block_number, block_hash);
+
+        // Verify that no sidechains are returned as removed (since there were no forks).
+        assert!(removed_chains.is_empty());
+
+        // Verify that the block is no longer in the block_number_to_block_hashes mapping.
+        assert!(block_indices.block_number_to_block_hashes.get(&block_number).is_none());
+
+        // Verify that the block is no longer associated with a chain ID.
+        assert!(block_indices.blocks_to_chain.get(&block_hash).is_none());
+    }
+
+    #[test]
+    fn remove_block_with_forks() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define a parent block number and block hash.
+        let parent_block_number = 1;
+        let parent_block_hash = B256::from_slice(&[1; 32]);
+        let chain_id = SidechainId::from(84);
+
+        // Define two child blocks that fork from the parent.
+        let child_block_hash_1 = B256::from_slice(&[2; 32]);
+        let child_block_hash_2 = B256::from_slice(&[3; 32]);
+
+        // Simulate the children of the parent block by adding them to the fork_to_child mapping.
+        let mut child_set = LinkedHashSet::new();
+        child_set.insert(child_block_hash_1);
+        child_set.insert(child_block_hash_2);
+        block_indices.fork_to_child.insert(parent_block_hash, child_set);
+
+        // Simulate that these child blocks belong to the same chain ID.
+        block_indices.blocks_to_chain.insert(child_block_hash_1, chain_id);
+        block_indices.blocks_to_chain.insert(child_block_hash_2, chain_id);
+
+        // Remove the parent block and expect its children (forks) to be removed as well.
+        let removed_chains = block_indices.remove_block(parent_block_number, parent_block_hash);
+
+        // Verify that the removed chain IDs include the chain ID of the child blocks.
+        assert_eq!(removed_chains, BTreeSet::from([chain_id]));
+
+        // Verify that the parent block is removed from the block_number_to_block_hashes mapping.
+        assert!(block_indices.block_number_to_block_hashes.get(&parent_block_number).is_none());
+
+        // Verify that the parent block is no longer associated with a chain ID.
+        assert!(block_indices.blocks_to_chain.get(&parent_block_hash).is_none());
+
+        // Verify that the child blocks are also removed from the blocks_to_chain mapping.
+        assert!(block_indices.blocks_to_chain.get(&child_block_hash_1).is_none());
+        assert!(block_indices.blocks_to_chain.get(&child_block_hash_2).is_none());
+    }
+
+    #[test]
+    fn remove_block_not_present() {
+        let mut block_indices = BlockIndices::new(0, BTreeMap::new());
+
+        // Define a block number and block hash that was never added.
+        let block_number = 1;
+        let block_hash = B256::from_slice(&[1; 32]);
+
+        // Attempt to remove the non-existent block from the indices.
+        let removed_chains = block_indices.remove_block(block_number, block_hash);
+
+        // Verify that no sidechains are returned as removed (since the block was never there).
+        assert!(removed_chains.is_empty());
+
+        // Verify that there are no entries in block_number_to_block_hashes for the given number.
+        assert!(block_indices.block_number_to_block_hashes.get(&block_number).is_none());
+
+        // Verify that there is no association of the block hash with any chain ID.
+        assert!(block_indices.blocks_to_chain.get(&block_hash).is_none());
     }
 }

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 ///
 /// This is a wrapper type around an ordered set of block numbers and hashes that belong to the
 /// canonical chain that is not yet finalized.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CanonicalChain {
     /// All blocks of the canonical chain in order of their block number.
     chain: BTreeMap<BlockNumber, BlockHash>,
