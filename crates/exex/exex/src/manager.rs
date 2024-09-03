@@ -1,4 +1,5 @@
 use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
+use futures::{channel::oneshot, Stream, StreamExt};
 use metrics::Gauge;
 use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
@@ -18,7 +19,10 @@ use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
-use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
+use tokio_util::{
+    either::Either,
+    sync::{PollSendError, PollSender, ReusableBoxFuture},
+};
 
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
@@ -41,16 +45,12 @@ pub struct ExExHandle {
     id: String,
     /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
-
     /// Channel to send [`ExExNotification`]s to the `ExEx`.
     sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
-    /// The state of the notifications channel.
-    notifications_state_rx: watch::Receiver<ExExNotificationsState>,
     /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
-
     /// The finished block number of the `ExEx`.
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
@@ -65,11 +65,7 @@ impl ExExHandle {
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, ExExNotificationsSubscriber) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (notifications_state_tx, notifications_state_rx) =
-            watch::channel(ExExNotificationsState::Inactive);
-
-        let notifications =
-            ExExNotificationsSubscriber::new(notification_rx, notifications_state_tx);
+        let notifications = ExExNotificationsSubscriber::new(notification_rx);
 
         (
             Self {
@@ -77,7 +73,6 @@ impl ExExHandle {
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
                 sender: PollSender::new(notification_tx),
                 receiver: event_rx,
-                notifications_state_rx,
                 next_notification_id: 0,
                 finished_height: None,
             },
@@ -95,11 +90,6 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
     ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
-        // If the notifications channel is not active, we don't need to send any notifications.
-        if !self.notifications_state_rx.borrow().is_active() {
-            return Poll::Ready(Ok(()))
-        }
-
         if let Some(finished_height) = self.finished_height {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
@@ -153,75 +143,71 @@ impl ExExHandle {
     }
 }
 
+/// A stream of [`ExExNotification`]s returned by [`ExExNotificationsSubscriber::subscribe`] or
+/// [`ExExNotificationsSubscriber::subscribe_with_head`].
+pub type ExExNotifications<'a> =
+    Either<ExExNotificationsWithoutHead<'a>, ExExNotificationsWithHead<'a>>;
+
 /// A subscriber for [`ExExNotifications`].
 #[derive(Debug)]
 pub struct ExExNotificationsSubscriber {
-    notifications: ExExNotifications,
-    state_tx: watch::Sender<ExExNotificationsState>,
+    notifications: Receiver<ExExNotification>,
 }
 
 impl ExExNotificationsSubscriber {
     /// Creates a new [`ExExNotificationsSubscriber`].
-    pub fn new(
-        receiver: Receiver<ExExNotification>,
-        state_tx: watch::Sender<ExExNotificationsState>,
-    ) -> Self {
-        Self { notifications: ExExNotifications { receiver, state_tx: state_tx.clone() }, state_tx }
+    pub const fn new(notifications: Receiver<ExExNotification>) -> Self {
+        Self { notifications }
     }
-
-    // TODO(alexey): uncomment when we have a way to subscribe to notifications with a head
-    // /// Subscribe to notifications with the given head. Notifications will be sent starting from
-    // /// the head, not inclusive. For example, if `head.number == 10`, then the first
-    // /// notification will be with `block.number == 11`.
-    // ///
-    // /// When the return value is dropped, the subscription is cancelled.
-    // pub fn subscribe_with_head(&mut self, head: ExExHead) -> &mut ExExNotifications {
-    //     self.state_tx.send(ExExNotificationsState::Active(Some(head))).unwrap();
-    //     &mut self.notifications
-    // }
 
     /// Subscribe to notifications.
+    pub fn subscribe(&mut self) -> ExExNotifications<'_> {
+        ExExNotifications::Left(ExExNotificationsWithoutHead(&mut self.notifications))
+    }
+
+    /// Subscribe to notifications with the given head.
     ///
-    /// When the return value is dropped, the subscription is cancelled.
-    /// It means that you will miss some of the notifications that could have arrived while the
-    /// subscription is inactive.
-    // /// To prevent this, you can use [`Self::subscribe_with_head`] to
-    // /// explicitly pass the head where you stopped and continue from there.
-    pub fn subscribe(&mut self) -> &mut ExExNotifications {
-        self.state_tx.send(ExExNotificationsState::Active(None)).unwrap();
-        &mut self.notifications
+    /// Notifications will be sent starting from the head, not inclusive. For example, if
+    /// `head.number == 10`, then the first notification will be with `block.number == 11`.
+    pub fn subscribe_with_head(&mut self, head: ExExHead) -> ExExNotifications<'_> {
+        ExExNotifications::Right(ExExNotificationsWithHead(&mut self.notifications, head))
     }
 }
 
-#[allow(clippy::doc_markdown)]
-/// A state of the ExEx notifications subscription.
+/// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 #[derive(Debug)]
-pub enum ExExNotificationsState {
-    /// The subscription is active and will receive notifications according to the given head, if
-    /// provided.
-    Active(Option<ExExHead>),
-    /// The subscription is inactive.
-    Inactive,
-}
+pub struct ExExNotificationsWithoutHead<'a>(&'a mut Receiver<ExExNotification>);
 
-impl ExExNotificationsState {
-    pub(crate) const fn is_active(&self) -> bool {
-        matches!(self, Self::Active(_))
+impl Stream for ExExNotificationsWithoutHead<'_> {
+    type Item = ExExNotification;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().0.poll_recv(cx)
     }
 }
 
-/// An active subscription to [`ExExNotification`]s.
-#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
-pub struct ExExNotifications {
-    #[deref]
-    #[deref_mut]
-    receiver: Receiver<ExExNotification>,
-    state_tx: watch::Sender<ExExNotificationsState>,
-}
+/// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
+/// committed or reverted after the given head.
+#[derive(Debug)]
+pub struct ExExNotificationsWithHead<'a>(&'a mut Receiver<ExExNotification>, ExExHead);
 
-impl Drop for ExExNotifications {
-    fn drop(&mut self) {
-        let _ = self.state_tx.send(ExExNotificationsState::Inactive);
+impl Stream for ExExNotificationsWithHead<'_> {
+    type Item = ExExNotification;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            let Some(notification) = ready!(this.0.poll_recv(cx)) else { return Poll::Ready(None) };
+
+            if notification
+                .committed_chain()
+                .or_else(|| notification.reverted_chain())
+                .map_or(false, |chain| chain.first().number > this.1.number)
+            {
+                return Poll::Ready(Some(notification))
+            }
+        }
     }
 }
 
