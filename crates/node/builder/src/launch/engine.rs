@@ -10,7 +10,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{NoopInvalidBlockHook, TreeConfig},
+    tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -207,8 +207,6 @@ where
             warn!(target: "reth::cli", ?hook_type, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
         }
 
-        let invalid_block_hook = Box::new(NoopInvalidBlockHook::default());
-
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
             ctx.consensus(),
@@ -223,7 +221,7 @@ where
             pruner,
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
-            invalid_block_hook,
+            ctx.invalid_block_hook()?,
         );
 
         let event_sender = EventSender::default();
