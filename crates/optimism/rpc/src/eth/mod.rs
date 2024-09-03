@@ -16,7 +16,7 @@ use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
@@ -101,7 +101,7 @@ where
 impl<N> EthApiSpec for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
@@ -151,7 +151,7 @@ where
 impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
@@ -179,7 +179,7 @@ where
 impl<N> LoadState for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: FullNodeComponents<ChainSpec = ChainSpec>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
@@ -226,7 +226,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents<ChainSpec = ChainSpec>> AddDevSigners for OpEthApi<N> {
+impl<N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>> AddDevSigners for OpEthApi<N> {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }

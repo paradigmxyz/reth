@@ -56,12 +56,10 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<
-        Provider = BlockchainProvider2<<T as NodeTypesWithDB>::DB>,
-        ChainSpec = ChainSpec,
-    >,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types::DB>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,

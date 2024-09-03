@@ -36,7 +36,7 @@ pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
 
 impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
-    pub const fn new(config: NodeConfig, database: T::DB) -> Self {
+    pub const fn new(config: NodeConfig, database: <T::Types as NodeTypesWithDB>::DB) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
 
@@ -63,12 +63,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
 /// Container for the node's types and the database the node uses.
 pub struct NodeTypesAdapter<T: FullNodeTypes> {
     /// The database type used by the node.
-    pub database: T::DB,
+    pub database: <T::Types as NodeTypesWithDB>::DB,
 }
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) const fn new(database: T::DB) -> Self {
+    pub(crate) const fn new(database: <T::Types as NodeTypesWithDB>::DB) -> Self {
         Self { database }
     }
 }
@@ -91,19 +91,20 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
-    type Primitives = T::Primitives;
-    type ChainSpec = T::ChainSpec;
+    type Primitives = <T::Types as NodeTypes>::Primitives;
+    type ChainSpec = <T::Types as NodeTypes>::ChainSpec;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithEngine for NodeAdapter<T, C> {
-    type Engine = T::Engine;
+    type Engine = <T::Types as NodeTypesWithEngine>::Engine;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypesWithDB for NodeAdapter<T, C> {
-    type DB = T::DB;
+    type DB = <T::Types as NodeTypesWithDB>::DB;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
+    type Types = T::Types;
     type Provider = T::Provider;
 }
 
@@ -133,7 +134,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<T::Engine> {
+    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine> {
         self.components.payload_builder()
     }
 

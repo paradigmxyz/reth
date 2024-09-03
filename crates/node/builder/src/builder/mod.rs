@@ -22,7 +22,8 @@ use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -554,7 +555,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the chain spec of the node.
-    pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider().chain_spec()
     }
 

@@ -100,12 +100,10 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
+impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    T: FullNodeTypes<
-        Provider = BlockchainProvider<<T as NodeTypesWithDB>::DB>,
-        ChainSpec = ChainSpec,
-    >,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: FullNodeTypes<Provider = BlockchainProvider<Types::DB>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
@@ -409,7 +407,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
+                rpc_consensus_client.run::<Types::Engine>().await
             });
         }
 
@@ -422,7 +420,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("rpc consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
+                rpc_consensus_client.run::<Types::Engine>().await
             });
         }
 

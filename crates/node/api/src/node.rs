@@ -92,9 +92,11 @@ where
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypesWithDB + Sized + 'static {
+pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
+    /// Node's types with the database.
+    type Types: NodeTypesWithDB;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self>;
+    type Provider: FullProvider<Self::Types>;
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
@@ -206,6 +208,7 @@ where
     Types: NodeTypesWithDB,
     Provider: FullProvider<Types>,
 {
+    type Types = Types;
     type Provider = Provider;
 }
 
@@ -239,7 +242,9 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
+    fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
 
     /// Returns handle to runtime.
     fn task_executor(&self) -> &TaskExecutor;

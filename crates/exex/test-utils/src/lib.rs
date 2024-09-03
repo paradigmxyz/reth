@@ -121,7 +121,7 @@ impl NodeTypesWithEngine for TestNode {
 
 impl<N> Node<N> for TestNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
+    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
