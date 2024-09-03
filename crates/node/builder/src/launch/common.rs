@@ -844,22 +844,23 @@ where
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
         Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
-            warn!(target: "reth::cli", ?hook, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
-            Box::new(InvalidBlockHooks(
-                hook.iter()
-                    .copied()
-                    .map(|hook| match hook {
+            let hooks = hook
+                .iter()
+                .copied()
+                .map(|hook| {
+                    Ok(match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {
-                            Ok(Box::new(reth_invalid_block_hooks::witness)
-                                as Box<dyn InvalidBlockHook>)
+                            Box::new(reth_invalid_block_hooks::witness) as Box<dyn InvalidBlockHook>
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
                         reth_node_core::args::InvalidBlockHook::Opcode => {
                             eyre::bail!("invalid block hook {hook:?} is not implemented yet")
                         }
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ))
+                })
+                .collect::<Result<_, _>>()?;
+
+            Box::new(InvalidBlockHooks(hooks))
         } else {
             Box::new(NoopInvalidBlockHook::default())
         })

@@ -207,8 +207,6 @@ where
             warn!(target: "reth::cli", ?hook_type, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
         }
 
-        let invalid_block_hook = Box::new(NoopInvalidBlockHook::default());
-
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
             ctx.consensus(),
