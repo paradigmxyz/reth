@@ -1484,7 +1484,7 @@ mod tests {
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
+        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
         TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
@@ -3059,6 +3059,37 @@ mod tests {
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
             in_memory_block.ommers
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_receipt_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
+        )?;
+
+        let blocks = [database_blocks, in_memory_blocks].concat();
+
+        for block in blocks {
+            let block_number = block.number as usize;
+            for (txn_number, _) in block.body.iter().enumerate() {
+                let txn_hash = block.body.get(txn_number).unwrap().hash();
+                let txn_id = provider.transaction_id(txn_hash)?.unwrap();
+                assert_eq!(
+                    provider.receipt(txn_id)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+                assert_eq!(
+                    provider.receipt_by_hash(txn_hash)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+            }
+        }
 
         Ok(())
     }
