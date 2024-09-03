@@ -36,7 +36,8 @@ where
 }
 
 /// A no-op [`InvalidBlockHook`] that does nothing.
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct NoopInvalidBlockHook;
 
 impl InvalidBlockHook for NoopInvalidBlockHook {
