@@ -545,6 +545,7 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::{FutureExt, StreamExt};
     use reth_primitives::{SealedBlockWithSenders, B256};
     use reth_provider::Chain;
 
@@ -828,23 +829,11 @@ mod tests {
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
 
-        // Send a notification and ensure it's not received because the subscription is inactive
+        // Send a notification and ensure it's received correctly
+        let mut notifications_rx = notifications.subscribe();
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                assert!(
-                    notifications.notifications.receiver.is_empty(),
-                    "Receiver channel should be empty"
-                );
-            }
-            Poll::Pending => panic!("Notification send is pending"),
-            Poll::Ready(Err(e)) => panic!("Failed to send notification: {:?}", e),
-        }
-
-        // Send a notification and ensure it's received correctly because the subscription is active
-        let notifications_rx = notifications.subscribe();
-        match exex_handle.send(&mut cx, &(22, notification.clone())) {
-            Poll::Ready(Ok(())) => {
-                let received_notification = notifications_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.next().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending => panic!("Notification send is pending"),
@@ -858,7 +847,7 @@ mod tests {
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
         let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
-        let notifications_rx = notifications.subscribe();
+        let mut notifications_rx = notifications.subscribe();
 
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(15);
@@ -876,9 +865,17 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification)) {
             Poll::Ready(Ok(())) => {
-                // The notification should be skipped, so nothing should be sent.
-                // Check that the receiver channel is indeed empty
-                assert!(notifications_rx.try_recv().is_err(), "Receiver channel should be empty");
+                poll_fn(|cx| {
+                    // The notification should be skipped, so nothing should be sent.
+                    // Check that the receiver channel is indeed empty
+                    assert_eq!(
+                        notifications_rx.next().poll_unpin(cx),
+                        Poll::Pending,
+                        "Receiver channel should be empty"
+                    );
+                    Poll::Ready(())
+                })
+                .await;
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
                 panic!("Notification should not be pending or fail");
@@ -892,7 +889,7 @@ mod tests {
     #[tokio::test]
     async fn test_sends_chain_reorged_notification() {
         let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
-        let notifications_rx = notifications.subscribe();
+        let mut notifications_rx = notifications.subscribe();
 
         let notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::default()),
@@ -908,7 +905,7 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notifications_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.next().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
@@ -923,7 +920,7 @@ mod tests {
     #[tokio::test]
     async fn test_sends_chain_reverted_notification() {
         let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string());
-        let notifications_rx = notifications.subscribe();
+        let mut notifications_rx = notifications.subscribe();
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
 
@@ -936,7 +933,7 @@ mod tests {
         // Send the notification
         match exex_handle.send(&mut cx, &(22, notification.clone())) {
             Poll::Ready(Ok(())) => {
-                let received_notification = notifications_rx.recv().await.unwrap();
+                let received_notification = notifications_rx.next().await.unwrap();
                 assert_eq!(received_notification, notification);
             }
             Poll::Pending | Poll::Ready(Err(_)) => {
