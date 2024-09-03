@@ -37,10 +37,33 @@ pub(crate) fn calculate_receipt_root_optimism(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use alloy_primitives::{b256, Address, LogData};
-    use reth_chainspec::SEPOLIA;
-    use reth_primitives::{bloom, hex_literal::hex, Log, TxType};
+    use std::{
+        collections::{btree_map::Entry, BTreeMap, HashSet, HashMap},
+        sync::Arc,
+    };
+    use reth_blockchain_tree::{
+        BlockchainTreeConfig, TreeExternals
+    };
+    use reth_blockchain_tree_api::{
+        BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
+    };
+    use reth_db::tables;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use alloy_primitives::{U256, b256, Address, LogData};
+    use reth_chainspec::{ChainSpecBuilder, SEPOLIA, MAINNET};
+    use reth_primitives::{
+        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
+        keccak256,
+        proofs::{calculate_receipt_root, calculate_transaction_root},
+        revm_primitives::AccountInfo,
+        Account, Address, Header, Receipt, SealedBlockWithSenders, Signature, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256, SealedBlock
+    };
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_trie::{root::state_root_unhashed};
+    use reth_prune_types::PruneModes;
 
     #[test]
     fn consecutive_reorgs() {

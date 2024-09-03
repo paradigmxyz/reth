@@ -13,13 +13,29 @@ workspace = true
 
 [dependencies]
 # reth
-reth-consensus-common.workspace = true
+reth-blockchain-tree.workspace = true
+reth-blockchain-tree-api.workspace = true
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
+reth-consensus-common.workspace = true
 reth-consensus.workspace = true
+reth-db.workspace = true
+reth-revm.workspace = true
+reth-provider.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
+reth-primitives.workspace = true
 reth-trie-common.workspace = true
+reth-prune-types.workspace = true
 
 tracing.workspace = true
+
+[dev-dependencies]
+alloy-genesis.workspace = true
+reth-chainspec.workspace = true
+reth-revm.workspace = true
+reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
 
 [features]
 optimism = ["reth-primitives/optimism"]
