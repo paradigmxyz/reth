@@ -4,10 +4,10 @@ use reth_trie::updates::TrieUpdates;
 
 /// Generates a witness for the given block and saves it to a file.
 pub fn witness(
-    _block: SealedBlockWithSenders,
-    _header: SealedHeader,
-    _output: BlockExecutionOutput<Receipt>,
-    _trie_updates: Option<(TrieUpdates, B256)>,
+    _block: &SealedBlockWithSenders,
+    _header: &SealedHeader,
+    _output: &BlockExecutionOutput<Receipt>,
+    _trie_updates: Option<(&TrieUpdates, B256)>,
 ) {
-    // TODO: generate witness from trie updates and write to file
+    unimplemented!("witness generation is not supported")
 }

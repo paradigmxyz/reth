@@ -15,6 +15,7 @@ use reth_consensus::Consensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::FullNodeTypes;
@@ -188,7 +189,7 @@ impl LaunchContext {
 /// This can be used to sequentially attach additional values to the type during the launch process.
 ///
 /// The type provides common boilerplate for launching a node depending on the additional value.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LaunchContextWith<T> {
     /// The wrapped launch context.
     pub inner: LaunchContext,
@@ -813,7 +814,7 @@ where
                     inconsistent_stage_checkpoint = stage_checkpoint,
                     "Pipeline sync progress is inconsistent"
                 );
-                return self.blockchain_db().block_hash(first_stage_checkpoint)
+                return self.blockchain_db().block_hash(first_stage_checkpoint);
             }
         }
 
@@ -838,6 +839,30 @@ where
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
+    }
+
+    /// Returns the [`InvalidBlockHook`] to use for the node.
+    pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
+        Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
+            warn!(target: "reth::cli", ?hook, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
+            Box::new(InvalidBlockHooks(
+                hook.iter()
+                    .copied()
+                    .map(|hook| match hook {
+                        reth_node_core::args::InvalidBlockHook::Witness => {
+                            Ok(Box::new(reth_invalid_block_hooks::witness)
+                                as Box<dyn InvalidBlockHook>)
+                        }
+                        reth_node_core::args::InvalidBlockHook::PreState |
+                        reth_node_core::args::InvalidBlockHook::Opcode => {
+                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))
+        } else {
+            Box::new(NoopInvalidBlockHook)
+        })
     }
 }
 

@@ -85,7 +85,7 @@ pub struct DebugArgs {
 /// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
 /// let config: InvalidBlockSelection = vec![InvalidBlockHook::Witness].into();
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref)]
 pub struct InvalidBlockSelection(HashSet<InvalidBlockHook>);
 
 impl InvalidBlockSelection {

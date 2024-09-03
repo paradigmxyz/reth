@@ -10,7 +10,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{InvalidBlockHook, InvalidBlockHookChain, NoopInvalidBlockHook, TreeConfig},
+    tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -30,7 +30,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
-use reth_tracing::tracing::{debug, error, info, warn};
+use reth_tracing::tracing::{debug, error, info};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -51,7 +51,7 @@ pub struct EngineNodeLauncher {
 
 impl EngineNodeLauncher {
     /// Create a new instance of the ethereum node launcher.
-    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
@@ -202,29 +202,6 @@ where
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
-        let invalid_block_hook: Box<dyn InvalidBlockHook> = if let Some(ref hook) =
-            ctx.node_config().debug.invalid_block_hook
-        {
-            warn!(target: "reth::cli", ?hook, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
-            Box::new(InvalidBlockHookChain(
-                hook.to_selection()
-                    .into_iter()
-                    .map(|hook| match hook {
-                        reth_node_core::args::InvalidBlockHook::Witness => {
-                            Ok(Box::new(reth_invalid_block_hooks::witness)
-                                as Box<dyn InvalidBlockHook>)
-                        }
-                        reth_node_core::args::InvalidBlockHook::PreState |
-                        reth_node_core::args::InvalidBlockHook::Opcode => {
-                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ))
-        } else {
-            Box::new(NoopInvalidBlockHook)
-        };
-
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
             ctx.consensus(),
@@ -239,7 +216,7 @@ where
             pruner,
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
-            invalid_block_hook,
+            ctx.invalid_block_hook()?,
         );
 
         let event_sender = EventSender::default();
