@@ -18,7 +18,9 @@ use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{
+    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+};
 use reth_node_builder::{
     components::{
         Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
@@ -148,9 +150,9 @@ pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 /// boot the testing environment
 pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
-    <<TestNode as Node<FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
-        RethFullAdapter<TmpDB, TestNode>,
-    >>::Components,
+    <<TestNode as Node<
+        FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, TmpDB>, BlockchainProvider<TmpDB>>,
+    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
 >;
 /// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;
@@ -251,7 +253,7 @@ pub async fn test_exex_context_with_chain_spec(
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
+    let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {
             transaction_pool,
             evm_config,

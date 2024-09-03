@@ -97,69 +97,114 @@ pub trait FullNodeTypes: NodeTypesWithDB + Sized + 'static {
     type Provider: FullProvider<Self>;
 }
 
-/// An adapter type that adds the builtin provider type to the user configured node types.
+/// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
 #[derive(Debug)]
-pub struct FullNodeTypesAdapter<Types, DB, Provider> {
-    /// An instance of the user configured node types.
-    pub types: PhantomData<Types>,
-    /// The database type used by the node.
-    pub db: PhantomData<DB>,
-    /// The provider type used by the node.
-    pub provider: PhantomData<Provider>,
+pub struct NodeTypesWithDBAdapter<Types, DB> {
+    types: PhantomData<Types>,
+    db: PhantomData<DB>,
 }
 
-impl<Types, DB, Provider> FullNodeTypesAdapter<Types, DB, Provider> {
+impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
     /// Create a new adapter with the configured types.
     pub fn new() -> Self {
-        Self { types: Default::default(), db: Default::default(), provider: Default::default() }
+        Self { types: Default::default(), db: Default::default() }
     }
 }
 
-impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> {
+impl<Types, DB> Default for NodeTypesWithDBAdapter<Types, DB> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
+impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
     fn clone(&self) -> Self {
-        Self { types: self.types, db: self.db, provider: self.provider }
+        Self { types: self.types, db: self.db }
     }
 }
 
-impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    Provider: Send + Sync + Unpin + 'static,
     DB: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
 }
 
-impl<Types, DB, Provider> NodeTypesWithEngine for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypesWithEngine,
     DB: Send + Sync + Unpin + 'static,
+{
+    type Engine = Types::Engine;
+}
+
+impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
+where
+    Types: NodeTypesWithEngine,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+{
+    type DB = DB;
+}
+
+/// An adapter type that adds the builtin provider type to the user configured node types.
+#[derive(Debug)]
+pub struct FullNodeTypesAdapter<Types, Provider> {
+    /// An instance of the user configured node types.
+    pub types: PhantomData<Types>,
+    /// The provider type used by the node.
+    pub provider: PhantomData<Provider>,
+}
+
+impl<Types, Provider> FullNodeTypesAdapter<Types, Provider> {
+    /// Create a new adapter with the configured types.
+    pub fn new() -> Self {
+        Self { types: Default::default(), provider: Default::default() }
+    }
+}
+
+impl<Types, Provider> Default for FullNodeTypesAdapter<Types, Provider> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<Types, Provider> Clone for FullNodeTypesAdapter<Types, Provider> {
+    fn clone(&self) -> Self {
+        Self { types: self.types, provider: self.provider }
+    }
+}
+
+impl<Types, Provider> NodeTypes for FullNodeTypesAdapter<Types, Provider>
+where
+    Types: NodeTypes,
+    Provider: Send + Sync + Unpin + 'static,
+{
+    type Primitives = Types::Primitives;
+    type ChainSpec = Types::ChainSpec;
+}
+
+impl<Types, Provider> NodeTypesWithEngine for FullNodeTypesAdapter<Types, Provider>
+where
+    Types: NodeTypesWithEngine,
     Provider: Send + Sync + Unpin + 'static,
 {
     type Engine = Types::Engine;
 }
 
-impl<Types, DB, Provider> NodeTypesWithDB for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, Provider> NodeTypesWithDB for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypesWithEngine,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Types: NodeTypesWithDB,
     Provider: Send + Sync + Unpin + 'static,
 {
-    type DB = DB;
+    type DB = Types::DB;
 }
 
-impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypesWithEngine,
-    Provider: FullProvider<Self>,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Types: NodeTypesWithDB,
+    Provider: FullProvider<Types>,
 {
     type Provider = Provider;
 }
