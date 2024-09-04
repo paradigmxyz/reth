@@ -11,7 +11,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     BlockClient,
 };
-use reth_node_types::{NodeTypesWithDB};
+use reth_node_types::NodeTypesWithDB;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;

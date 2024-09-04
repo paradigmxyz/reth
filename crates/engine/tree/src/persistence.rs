@@ -2,8 +2,9 @@
 
 use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
-use reth_db::Database;
+use reth_chainspec::ChainSpec;
 use reth_errors::ProviderError;
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::B256;
 use reth_provider::{
     writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory, StaticFileProviderFactory,
@@ -25,23 +26,23 @@ use tracing::{debug, error};
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<DB> {
+pub struct PersistenceService<N: NodeTypesWithDB> {
     /// The provider factory to use
-    provider: ProviderFactory<DB>,
+    provider: ProviderFactory<N>,
     /// Incoming requests
     incoming: Receiver<PersistenceAction>,
     /// The pruner
-    pruner: Pruner<DB, ProviderFactory<DB>>,
+    pruner: Pruner<N::DB, ProviderFactory<N>>,
     /// metrics
     metrics: PersistenceMetrics,
 }
 
-impl<DB: Database> PersistenceService<DB> {
+impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PersistenceService<N> {
     /// Create a new persistence service
     pub fn new(
-        provider: ProviderFactory<DB>,
+        provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
     ) -> Self {
         Self { provider, incoming, pruner, metrics: PersistenceMetrics::default() }
     }
@@ -58,10 +59,7 @@ impl<DB: Database> PersistenceService<DB> {
     }
 }
 
-impl<DB> PersistenceService<DB>
-where
-    DB: Database,
-{
+impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PersistenceService<N> {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -167,9 +165,9 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<DB: Database + 'static>(
-        provider_factory: ProviderFactory<DB>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+    pub fn spawn_service<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+        provider_factory: ProviderFactory<N>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
     ) -> Self {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
