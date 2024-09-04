@@ -82,7 +82,7 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<N: NodeTypesWithDB>(
+pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     factory: ProviderFactory<N>,
 ) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
@@ -320,9 +320,9 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<DB: Database>(
+pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;
