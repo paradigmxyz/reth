@@ -6595,6 +6595,7 @@ dependencies = [
  "reth-db-api",
  "reth-etl",
  "reth-fs-util",
+ "reth-node-types",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

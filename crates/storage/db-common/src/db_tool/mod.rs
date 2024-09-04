@@ -12,13 +12,14 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_fs_util as fs;
+use reth_node_types::NodeTypesWithDB;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
-pub struct DbTool<DB: Database> {
+pub struct DbTool<N: NodeTypesWithDB> {
     /// The provider factory that the db tool will use.
     pub provider_factory: ProviderFactory<DB>,
 }

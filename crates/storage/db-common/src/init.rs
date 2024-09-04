@@ -7,6 +7,7 @@ use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
@@ -81,7 +82,9 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<N: NodeTypesWithDB>(
+    factory: ProviderFactory<N>,
+) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();

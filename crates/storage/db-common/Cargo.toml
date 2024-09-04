@@ -21,6 +21,7 @@ reth-etl.workspace = true
 reth-codecs.workspace = true
 reth-stages-types.workspace = true
 reth-fs-util.workspace = true
+reth-node-types.workspace = true
 
 # eth
 alloy-genesis.workspace = true

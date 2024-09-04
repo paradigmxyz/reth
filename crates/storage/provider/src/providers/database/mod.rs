@@ -7,7 +7,7 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_chainspec::{ChainInfo, ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
@@ -42,7 +42,7 @@ mod metrics;
 #[derive(Debug)]
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database
-    db: Arc<N::DB>,
+    db: N::DB,
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File Provider
@@ -58,7 +58,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { db: Arc::new(db), chain_spec, static_file_provider, prune_modes: PruneModes::none() }
+        Self { db, chain_spec, static_file_provider, prune_modes: PruneModes::none() }
     }
 
     /// Enables metrics on the static file provider.
@@ -85,7 +85,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<DB = DatabaseEnv>> ProviderFactory<N> {
+impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
     pub fn new_with_database_path<P: AsRef<Path>>(
@@ -593,7 +593,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PruneCheckpointReader for Provid
 impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
     fn clone(&self) -> Self {
         Self {
-            db: Arc::clone(&self.db),
+            db: self.db.clone(),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
