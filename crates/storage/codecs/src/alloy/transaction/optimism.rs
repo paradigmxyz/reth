@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
-struct TxDeposit {
+pub(crate) struct TxDeposit {
     source_hash: B256,
     from: Address,
     to: TxKind,

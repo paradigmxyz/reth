@@ -33,7 +33,7 @@ alloy-eips = { workspace = true, features = ["serde"] }
 
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
-op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-consensus = { workspace = true, features = ["arbitrary"], optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
