@@ -46,17 +46,17 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
     parse_l1_info(l1_info_tx_data)
 }
 
-/// Parses the data of the first transaction in the block, into [`L1BlockInfo`].
+/// Parses the input of the first transaction in the L2 block, into [`L1BlockInfo`].
 ///
 /// Returns an error if data is incorrect length.
-pub fn parse_l1_info(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
+pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
-    if data[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
-        parse_l1_info_tx_ecotone(data[4..].as_ref())
+    if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
+        parse_l1_info_tx_ecotone(input[4..].as_ref())
     } else {
-        parse_l1_info_tx_bedrock(data[4..].as_ref())
+        parse_l1_info_tx_bedrock(input[4..].as_ref())
     }
 }
 
@@ -97,6 +97,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
     l1block.l1_fee_overhead = Some(l1_fee_overhead);
+    l1block.l1_base_fee_scalar = l1_fee_scalar;
 
     Ok(l1block)
 }
@@ -122,6 +123,9 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
             message: "unexpected l1 block info tx calldata length found".to_string(),
         })
     }
+
+    // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
+    //
     // data layout assumed for Ecotone:
     // offset type varname
     // 0     <selector>
@@ -292,6 +296,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reth_chainspec::OptimismHardforks;
+    use reth_optimism_chainspec::OP_MAINNET;
+    use reth_primitives::TransactionSigned;
+
     use super::*;
 
     #[test]
@@ -318,24 +326,67 @@ mod tests {
 
     #[test]
     fn sanity_l1_block_ecotone() {
-        use reth_primitives::{hex_literal::hex, Bytes, Header, TransactionSigned};
+        // rig
 
-        let bytes = Bytes::from_static(&hex!("7ef8f8a0b84fa363879a2159e341c50a32da3ea0d21765b7bd43db37f2e5e04e8848b1ee94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f42400000000000000000000000040000000065c41f680000000000a03f6b00000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000535f4d983dea59eac60478a64ecfdcde8571e611404295350de7ed4ccb404296c1a84ab7a00000000000000000000000073b4168cc87f35cc239200a20eb841cded23493b"));
-        let l1_info_tx = TransactionSigned::decode_enveloped(&mut bytes.as_ref()).unwrap();
-        let mock_block = Block {
-            header: Header::default(),
-            body: vec![l1_info_tx],
-            ommers: Vec::default(),
-            withdrawals: None,
-            requests: None,
-        };
+        // OP mainnet ecotone block 118024092
+        // <https://optimistic.etherscan.io/block/118024092>
+        const TIMESTAMP: u64 = 1711603765;
+        assert!(OP_MAINNET.is_ecotone_active_at_timestamp(TIMESTAMP));
 
-        let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
-        assert_eq!(l1_info.l1_base_fee, U256::from(8));
-        assert_eq!(l1_info.l1_base_fee_scalar, U256::from(4));
-        assert_eq!(l1_info.l1_blob_base_fee, Some(U256::from(22_380_075_395u64)));
-        assert_eq!(l1_info.l1_blob_base_fee_scalar, Some(U256::from(0)));
-        assert_eq!(l1_info.l1_fee_overhead, None);
+        // First transaction in OP mainnet block 118024092
+        //
+        // https://optimistic.etherscan.io/getRawTx?tx=0x88501da5d5ca990347c2193be90a07037af1e3820bb40774c8154871c7669150
+        const TX: [u8; 251] = hex!("7ef8f8a0a539eb753df3b13b7e386e147d45822b67cb908c9ddc5618e3dbaa22ed00850b94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e2000000558000c5fc50000000000000000000000006605a89f00000000012a10d90000000000000000000000000000000000000000000000000000000af39ac3270000000000000000000000000000000000000000000000000000000d5ea528d24e582fa68786f080069bdbfe06a43f8e67bfd31b8e4d8a8837ba41da9a82a54a0000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
+
+        let tx = TransactionSigned::decode_enveloped(&mut TX.as_slice()).unwrap();
+        let block = Block { body: vec![tx], ..Default::default() };
+
+        // expected l1 block info
+        let expected_l1_base_fee = U256::from_be_bytes(hex!(
+            "0000000000000000000000000000000000000000000000000000000af39ac327" // 47036678951
+        ));
+        let expected_l1_base_fee_scalar = U256::from(1368);
+        let expected_l1_blob_base_fee = U256::from_be_bytes(hex!(
+            "0000000000000000000000000000000000000000000000000000000d5ea528d2" // 57422457042
+        ));
+        let expecte_l1_blob_base_fee_scalar = U256::from(810949);
+
+        // test
+
+        let l1_block_info: L1BlockInfo = extract_l1_info(&block).unwrap();
+
+        assert_eq!(l1_block_info.l1_base_fee, expected_l1_base_fee);
+        assert_eq!(l1_block_info.l1_base_fee_scalar, expected_l1_base_fee_scalar);
+        assert_eq!(l1_block_info.l1_blob_base_fee, Some(expected_l1_blob_base_fee));
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, Some(expecte_l1_blob_base_fee_scalar));
+    }
+
+    #[test]
+    fn parse_l1_info_fjord() {
+        // rig
+
+        // L1 block info for OP mainnet block 124665056 (stored in input of tx at index 0)
+        //
+        // https://optimistic.etherscan.io/tx/0x312e290cf36df704a2217b015d6455396830b0ce678b860ebfcc30f41403d7b1
+        const DATA: &[u8] = &hex!("440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
+
+        // expected l1 block info verified against expected l1 fee for tx. l1 tx fee listed on OP
+        // mainnet block scanner
+        //
+        // https://github.com/bluealloy/revm/blob/fa5650ee8a4d802f4f3557014dd157adfb074460/crates/revm/src/optimism/l1block.rs#L414-L443
+        let l1_base_fee = U256::from(1055991687);
+        let l1_base_fee_scalar = U256::from(5227);
+        let l1_blob_base_fee = Some(U256::from(1));
+        let l1_blob_base_fee_scalar = Some(U256::from(1014213));
+
+        // test
+
+        let l1_block_info = parse_l1_info(DATA).unwrap();
+
+        assert_eq!(l1_block_info.l1_base_fee, l1_base_fee);
+        assert_eq!(l1_block_info.l1_base_fee_scalar, l1_base_fee_scalar);
+        assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
     }
 
     #[test]

@@ -62,9 +62,9 @@ mod tests {
         StaticFileSegment, B256, U256,
     };
     use reth_provider::{
-        providers::StaticFileWriter, AccountExtReader, BlockReader, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        providers::{StaticFileProvider, StaticFileWriter},
+        AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
+        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{
@@ -297,7 +297,10 @@ mod tests {
         is_full_node: bool,
         expected: Option<PipelineTarget>,
     ) {
-        let static_file_provider = db.factory.static_file_provider();
+        // We recreate the static file provider, since consistency heals are done on fetching the
+        // writer for the first time.
+        let static_file_provider =
+            StaticFileProvider::read_write(db.factory.static_file_provider().path()).unwrap();
 
         // Simulate corruption by removing `prune_count` rows from the data file without updating
         // its offset list and configuration.
@@ -312,8 +315,11 @@ mod tests {
             data_file.get_ref().sync_all().unwrap();
         }
 
+        // We recreate the static file provider, since consistency heals are done on fetching the
+        // writer for the first time.
         assert_eq!(
-            static_file_provider
+            StaticFileProvider::read_write(db.factory.static_file_provider().path())
+                .unwrap()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
             Ok(expected)
         );

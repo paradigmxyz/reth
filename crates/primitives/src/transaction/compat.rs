@@ -78,7 +78,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.authorization_list = None;
             }
             Transaction::Eip7702(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_limit = tx.gas_limit as u64;
                 tx_env.gas_price = U256::from(tx.max_fee_per_gas);
                 tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = tx.to;
