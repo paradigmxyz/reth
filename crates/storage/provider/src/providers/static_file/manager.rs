@@ -574,6 +574,9 @@ impl StaticFileProvider {
             }
         }
 
+        // If this is a re-initialization, we need to clear this as well
+        self.map.clear();
+
         Ok(())
     }
 
