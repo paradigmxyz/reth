@@ -7592,6 +7592,7 @@ dependencies = [
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-node-types",
  "reth-optimism-chainspec",
  "reth-primitives",
  "reth-provider",
