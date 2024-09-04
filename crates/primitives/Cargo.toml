@@ -99,7 +99,6 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "reth-codec",
-    "op-alloy-consensus/arbitrary",
 ]
 secp256k1 = ["dep:secp256k1"]
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg", "alloy-consensus/kzg"]

@@ -5057,7 +5057,6 @@ dependencies = [
  "alloy-primitives 0.8.0",
  "alloy-rlp",
  "alloy-serde",
- "arbitrary",
  "derive_more 1.0.0",
  "serde",
  "spin",
