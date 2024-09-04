@@ -844,13 +844,19 @@ where
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
         Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
+            let output_directory = self.data_dir().invalid_block_hooks();
             let hooks = hook
                 .iter()
                 .copied()
                 .map(|hook| {
+                    let output_directory = output_directory.join(hook.to_string());
+
                     Ok(match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {
-                            Box::new(reth_invalid_block_hooks::witness) as Box<dyn InvalidBlockHook>
+                            Box::new(reth_invalid_block_hooks::Witness::new(
+                                output_directory,
+                                self.blockchain_db().clone(),
+                            )) as Box<dyn InvalidBlockHook>
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
                         reth_node_core::args::InvalidBlockHook::Opcode => {

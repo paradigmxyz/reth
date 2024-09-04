@@ -6818,8 +6818,12 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.0.6"
 dependencies = [
+ "eyre",
  "reth-chainspec",
+ "reth-execution-types",
  "reth-payload-primitives",
+ "reth-primitives",
+ "reth-trie",
  "serde",
 ]
 
@@ -6860,6 +6864,7 @@ version = "1.0.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
+ "eyre",
  "futures",
  "metrics",
  "rand 0.8.5",
@@ -7256,9 +7261,14 @@ dependencies = [
 name = "reth-invalid-block-hooks"
 version = "1.0.6"
 dependencies = [
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "eyre",
+ "reth-engine-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
+ "serde_json",
 ]
 
 [[package]]
