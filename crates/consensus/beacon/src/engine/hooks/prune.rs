@@ -166,8 +166,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PrunerState::Idle(f0) => f.debug_tuple("Idle").field(&f0).finish(),
-            PrunerState::Running(f0) => f.debug_tuple("Running").field(&f0).finish(),
+            Self::Idle(f0) => f.debug_tuple("Idle").field(&f0).finish(),
+            Self::Running(f0) => f.debug_tuple("Running").field(&f0).finish(),
         }
     }
 }

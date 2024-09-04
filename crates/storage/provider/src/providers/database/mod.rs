@@ -56,15 +56,13 @@ where
     N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ProviderFactory { db, chain_spec, static_file_provider, prune_modes } => f
-                .debug_struct("ProviderFactory")
-                .field("db", &db)
-                .field("chain_spec", &chain_spec)
-                .field("static_file_provider", &static_file_provider)
-                .field("prune_modes", &prune_modes)
-                .finish(),
-        }
+        let Self { db, chain_spec, static_file_provider, prune_modes } = self;
+        f.debug_struct("ProviderFactory")
+            .field("db", &db)
+            .field("chain_spec", &chain_spec)
+            .field("static_file_provider", &static_file_provider)
+            .field("prune_modes", &prune_modes)
+            .finish()
     }
 }
 
