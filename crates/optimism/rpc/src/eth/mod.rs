@@ -15,7 +15,7 @@ use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, NodeCore};
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -40,10 +40,10 @@ use crate::{eth::rpc::SequencerClient, OpEthApiError};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
-    <N as NodeCore>::Provider,
-    <N as NodeCore>::Pool,
-    <N as NodeCore>::Network,
-    <N as NodeCore>::Evm,
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
 >;
 
 /// OP-Reth `Eth` API implementation.
@@ -57,14 +57,14 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct OpEthApi<N: NodeCore> {
+pub struct OpEthApi<N: FullNodeComponents> {
     inner: Arc<EthApiNodeBackend<N>>,
     sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
 }
 
 impl<N> OpEthApi<N>
 where
-    N: NodeCore<
+    N: FullNodeComponents<
         Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
     >,
 {
@@ -96,7 +96,7 @@ where
 impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
-    N: NodeCore,
+    N: FullNodeComponents,
 {
     type Error = OpEthApiError;
     type NetworkTypes = AnyNetwork;
@@ -248,7 +248,7 @@ where
     }
 }
 
-impl<N: NodeCore> fmt::Debug for OpEthApi<N> {
+impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }

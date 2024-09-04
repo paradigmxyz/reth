@@ -21,7 +21,7 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeTypes, NodeAddOns, NodeCore};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -48,14 +48,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`NodeCore`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as NodeCore>::Provider,
-    <N as NodeCore>::Pool,
-    <N as NodeCore>::Evm,
-    <N as NodeCore>::Network,
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Evm,
+    <N as FullNodeComponents>::Network,
     TaskExecutor,
-    <N as NodeCore>::Provider,
+    <N as FullNodeTypes>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.

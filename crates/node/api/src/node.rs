@@ -223,7 +223,7 @@ impl<N: FullNodeComponents> NodeAddOns<N> for () {
 }
 
 /// Returns the builder for type.
-pub trait BuilderProvider<N>: Send {
+pub trait BuilderProvider<N: FullNodeComponents>: Send {
     /// Context required to build type.
     type Ctx<'a>;
 
@@ -232,7 +232,7 @@ pub trait BuilderProvider<N>: Send {
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
 }
 
-impl<N> BuilderProvider<N> for () {
+impl<N: FullNodeComponents> BuilderProvider<N> for () {
     type Ctx<'a> = ();
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
@@ -241,48 +241,3 @@ impl<N> BuilderProvider<N> for () {
 }
 
 const fn noop_builder(_: ()) {}
-
-/// Helper trait to relax trait bounds on [`NodeTypes`], when defining types.
-pub trait NodeTy {
-    /// The node's primitive types, defining basic operations and structures.
-    type Primitives;
-    /// The type used for configuration of the EVM.
-    type ChainSpec: Send + Sync;
-}
-
-impl<T> NodeTy for T
-where
-    T: NodeTypes + Clone,
-{
-    type Primitives = <T as NodeTypes>::Primitives;
-    type ChainSpec = <T as NodeTypes>::ChainSpec;
-}
-
-/// Helper trait to relax trait bounds on [`FullNodeComponents`] and [`FullNodeTypes`], when
-/// defining types.
-pub trait NodeCore: NodeTy + Clone {
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Send + Sync + Clone + Unpin;
-    /// The provider type used to interact with the node.
-    type Provider: Send + Sync + Clone + Unpin;
-    /// The transaction pool of the node.
-    type Pool: Send + Sync + Clone + Unpin;
-    /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: Send + Sync + Clone + Unpin;
-    /// The type that knows how to execute blocks.
-    type Executor: Send + Sync + Clone + Unpin;
-    /// Network API.
-    type Network: Send + Sync + Clone;
-}
-
-impl<T> NodeCore for T
-where
-    T: FullNodeComponents,
-{
-    type DB = <T as FullNodeTypes>::DB;
-    type Provider = <T as FullNodeTypes>::Provider;
-    type Pool = <T as FullNodeComponents>::Pool;
-    type Network = <T as FullNodeComponents>::Network;
-    type Evm = <T as FullNodeComponents>::Evm;
-    type Executor = <T as FullNodeComponents>::Executor;
-}
