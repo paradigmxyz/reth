@@ -24,9 +24,6 @@ use std::{
 use sucds::{int_vectors::PrefixSummedEliasFano, Serializable};
 use tracing::*;
 
-pub mod filter;
-use filter::{Cuckoo, InclusionFilter, InclusionFilters};
-
 pub mod compression;
 #[cfg(test)]
 use compression::Compression;
@@ -36,6 +33,11 @@ use compression::Compressors;
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Functions {}
+
+/// empty enum for backwards compatibility
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum InclusionFilters {}
 
 mod error;
 pub use error::NippyJarError;
@@ -176,12 +178,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self
     }
 
-    /// Adds [`filter::Cuckoo`] filter.
-    pub fn with_cuckoo_filter(mut self, max_capacity: usize) -> Self {
-        self.filter = Some(InclusionFilters::Cuckoo(Cuckoo::new(max_capacity)));
-        self
-    }
-
     /// Gets a reference to the user header.
     pub const fn user_header(&self) -> &H {
         &self.user_header
@@ -195,11 +191,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// Gets total rows in jar.
     pub const fn rows(&self) -> usize {
         self.rows
-    }
-
-    /// Returns the size of inclusion filter
-    pub fn filter_size(&self) -> usize {
-        self.size()
     }
 
     /// Returns the size of offsets index
@@ -303,20 +294,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
             OpenOptions::new().read(true).open(parent)?.sync_all()?;
         }
         Ok(())
-    }
-}
-
-impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
-    fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
-        self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
-    }
-
-    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
-        self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
-    }
-
-    fn size(&self) -> usize {
-        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
     }
 }
 
@@ -560,29 +537,7 @@ mod tests {
         let num_rows = col1.len() as u64;
         let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        let mut nippy = NippyJar::new_without_header(num_columns, file_path.path());
-
-        assert!(matches!(
-            InclusionFilter::add(&mut nippy, &col1[0]),
-            Err(NippyJarError::FilterMissing)
-        ));
-
-        nippy = nippy.with_cuckoo_filter(4);
-
-        // Add col1[0]
-        assert!(!InclusionFilter::contains(&nippy, &col1[0]).unwrap());
-        assert!(InclusionFilter::add(&mut nippy, &col1[0]).is_ok());
-        assert!(InclusionFilter::contains(&nippy, &col1[0]).unwrap());
-
-        // Add col1[1]
-        assert!(!InclusionFilter::contains(&nippy, &col1[1]).unwrap());
-        assert!(InclusionFilter::add(&mut nippy, &col1[1]).is_ok());
-        assert!(InclusionFilter::contains(&nippy, &col1[1]).unwrap());
-
-        // // Add more columns until max_capacity
-        assert!(InclusionFilter::add(&mut nippy, &col1[2]).is_ok());
-        assert!(InclusionFilter::add(&mut nippy, &col1[3]).is_ok());
-
+        let nippy = NippyJar::new_without_header(num_columns, file_path.path());
         let nippy = nippy
             .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
             .unwrap();
@@ -590,12 +545,6 @@ mod tests {
         loaded_nippy.load_filters().unwrap();
 
         assert_eq!(nippy, loaded_nippy);
-
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[0]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[1]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[2]).unwrap());
-        assert!(InclusionFilter::contains(&loaded_nippy, &col1[3]).unwrap());
-        assert!(!InclusionFilter::contains(&loaded_nippy, &col1[4]).unwrap());
     }
 
     #[test]
@@ -773,8 +722,7 @@ mod tests {
         {
             let mut nippy =
                 NippyJar::new(num_columns, file_path.path(), BlockJarHeader { block_start })
-                    .with_zstd(true, 5000)
-                    .with_cuckoo_filter(col1.len());
+                    .with_zstd(true, 5000);
 
             nippy.prepare_compression(data.clone()).unwrap();
             nippy
@@ -788,7 +736,6 @@ mod tests {
             loaded_nippy.load_filters().unwrap();
 
             assert!(loaded_nippy.compressor().is_some());
-            assert!(loaded_nippy.filter.is_some());
             assert_eq!(loaded_nippy.user_header().block_start, block_start);
 
             if let Some(Compressors::Zstd(_zstd)) = loaded_nippy.compressor() {
@@ -827,10 +774,8 @@ mod tests {
 
         // Create file
         {
-            let mut nippy = NippyJar::new_without_header(num_columns, file_path.path())
-                .with_zstd(true, 5000)
-                .with_cuckoo_filter(col1.len());
-
+            let mut nippy =
+                NippyJar::new_without_header(num_columns, file_path.path()).with_zstd(true, 5000);
             nippy.prepare_compression(data).unwrap();
             nippy
                 .freeze(vec![clone_with_result(&col1), clone_with_result(&col2)], num_rows)
