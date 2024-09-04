@@ -150,7 +150,9 @@ impl StaticFileProvider {
                             // Ensure it's well formatted static file name
                             if StaticFileSegment::parse_filename(
                                 &segment.file_stem().expect("qed").to_string_lossy(),
-                            ).is_none() {
+                            )
+                            .is_none()
+                            {
                                 continue
                             }
 
