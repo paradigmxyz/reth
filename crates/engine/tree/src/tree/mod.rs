@@ -526,7 +526,7 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
-    /// A bad block hook.
+    /// An invalid block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
