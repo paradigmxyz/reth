@@ -52,7 +52,6 @@ default = ["std", "alloy"]
 std = ["alloy-primitives/std", "bytes/std", "serde?/std"]
 alloy = [
     "dep:alloy-consensus",
-    "dep:op-alloy-consensus",
     "dep:alloy-eips",
     "dep:alloy-genesis",
     "dep:modular-bitfield",
