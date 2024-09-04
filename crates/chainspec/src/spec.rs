@@ -695,7 +695,7 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks: ChainHardforks::new(hardforks),
+            hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
             #[cfg(feature = "optimism")]

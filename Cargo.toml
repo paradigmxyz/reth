@@ -225,13 +225,13 @@ unused_rounding = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
 zero_sized_map_values = "warn"
+collection_is_never_read = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
 # Explicitly listing should make it easier to fix in the future.
 as_ptr_cast_mut = "allow"
 cognitive_complexity = "allow"
-collection_is_never_read = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
