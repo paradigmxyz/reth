@@ -3,7 +3,10 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_evm::{
+    execute::{BatchExecutor, BlockExecutorProvider},
+    metrics::ExecutorMetrics,
+};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{BlockNumber, Header, StaticFileSegment};
@@ -18,8 +21,8 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
-    ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -61,7 +64,6 @@ use tracing::*;
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {
-    metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal block executor
     executor_provider: E,
     /// The commit thresholds of the execution stage.
@@ -83,11 +85,13 @@ pub struct ExecutionStage<E> {
     post_unwind_commit_input: Option<Chain>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
+    /// Executor metrics.
+    metrics: ExecutorMetrics,
 }
 
 impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
-    pub const fn new(
+    pub fn new(
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
@@ -95,7 +99,6 @@ impl<E> ExecutionStage<E> {
         exex_manager_handle: ExExManagerHandle,
     ) -> Self {
         Self {
-            metrics_tx: None,
             external_clean_threshold,
             executor_provider,
             thresholds,
@@ -103,6 +106,7 @@ impl<E> ExecutionStage<E> {
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
             exex_manager_handle,
+            metrics: ExecutorMetrics::default(),
         }
     }
 
@@ -133,12 +137,6 @@ impl<E> ExecutionStage<E> {
             prune_modes,
             ExExManagerHandle::empty(),
         )
-    }
-
-    /// Set the metric events sender.
-    pub fn with_metrics_tx(mut self, metrics_tx: MetricEventsSender) -> Self {
-        self.metrics_tx = Some(metrics_tx);
-        self
     }
 
     /// Adjusts the prune modes related to changesets.
@@ -272,12 +270,13 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
-                StageError::Block {
+            self.metrics.metered((&block, td).into(), |input| {
+                executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
                     block: Box::new(block.header.clone().seal_slow()),
                     error: BlockErrorKind::Execution(error),
-                }
+                })
             })?;
+
             execution_duration += execute_start.elapsed();
 
             // Log execution throughput
@@ -294,12 +293,6 @@ where
                 last_execution_duration = execution_duration;
                 last_cumulative_gas = cumulative_gas;
                 last_log_instant = Instant::now();
-            }
-
-            // Gas metrics
-            if let Some(metrics_tx) = &mut self.metrics_tx {
-                let _ =
-                    metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used });
             }
 
             stage_progress = block_number;

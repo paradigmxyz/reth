@@ -4,7 +4,7 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -18,6 +18,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
@@ -1433,6 +1434,20 @@ where
     }
 }
 
+impl<DB> StateReader for BlockchainProvider2<DB>
+where
+    DB: Database + Sync + Send,
+{
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
+            let state = state.block().execution_outcome().clone();
+            Ok(Some(state))
+        } else {
+            self.database.provider()?.get_state(block..=block)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1444,7 +1459,8 @@ mod tests {
     use crate::{
         providers::BlockchainProvider2,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        BlockWriter, CanonChainTracker, StaticFileWriter,
+        writer::UnifiedStorageWriter,
+        BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
     use itertools::Itertools;
     use rand::Rng;
@@ -1468,7 +1484,7 @@ mod tests {
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
+        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
         TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
@@ -1547,21 +1563,26 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let provider_rw = factory.provider_rw()?;
 
-        // Insert blocks and receipts into the database
+        // Insert blocks into the database
         for block in &database_blocks {
             provider_rw.insert_historical_block(
                 block.clone().seal_with_senders().expect("failed to seal block with senders"),
             )?;
-
-            // Insert the receipts into the database using the writer from the provider_rw
-            let mut writer =
-                provider_rw.static_file_provider().latest_writer(StaticFileSegment::Receipts)?;
-            let block_number = block.number as usize;
-            for receipt in receipts.get(block_number).unwrap() {
-                writer.append_receipt(block.number, receipt)?;
-            }
         }
-        provider_rw.commit()?;
+
+        // Insert receipts into the static files
+        UnifiedStorageWriter::new(
+            &provider_rw,
+            Some(factory.static_file_provider().latest_writer(StaticFileSegment::Receipts)?),
+        )
+        .append_receipts_from_blocks(
+            // The initial block number is required
+            database_blocks.first().map(|b| b.number).unwrap_or_default(),
+            receipts.iter().map(|vec| vec.clone().into_iter().map(Some).collect::<Vec<_>>()),
+        )?;
+
+        // Commit to both storages: database and static files
+        UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
 
         let provider = BlockchainProvider2::new(factory)?;
 
@@ -3043,13 +3064,44 @@ mod tests {
     }
 
     #[test]
+    fn test_receipt_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
+        )?;
+
+        let blocks = [database_blocks, in_memory_blocks].concat();
+
+        for block in blocks {
+            let block_number = block.number as usize;
+            for (txn_number, _) in block.body.iter().enumerate() {
+                let txn_hash = block.body.get(txn_number).unwrap().hash();
+                let txn_id = provider.transaction_id(txn_hash)?.unwrap();
+                assert_eq!(
+                    provider.receipt(txn_id)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+                assert_eq!(
+                    provider.receipt_by_hash(txn_hash)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_receipt_provider_id_ext_receipts_by_block_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3058,12 +3110,18 @@ mod tests {
         let block_number = database_block.number;
         let block_hash = database_block.header.hash();
 
+        assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
+        assert!(!provider
+            .receipts_by_number_or_tag(database_block.number.into())?
+            .unwrap()
+            .is_empty());
+
         assert_eq!(
-            provider.receipts_by_block_id(block_number.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_number.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_block_id(block_hash.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_hash.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
 
@@ -3071,11 +3129,11 @@ mod tests {
         let block_hash = in_memory_block.header.hash();
 
         assert_eq!(
-            provider.receipts_by_block_id(block_number.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_number.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_block_id(block_hash.into())?.unwrap_or_default(),
+            provider.receipts_by_block_id(block_hash.into())?.unwrap(),
             receipts.get(block_number as usize).unwrap().clone()
         );
 
@@ -3089,7 +3147,7 @@ mod tests {
             &mut rng,
             TEST_BLOCKS_COUNT,
             TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
         )?;
 
         let database_block = database_blocks.first().unwrap().clone();
@@ -3099,20 +3157,26 @@ mod tests {
         let safe_block = in_memory_blocks.get(in_memory_block_count - 2).unwrap().clone();
         let finalized_block = in_memory_blocks.get(in_memory_block_count - 3).unwrap().clone();
 
+        assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
+        assert!(!provider
+            .receipts_by_number_or_tag(database_block.number.into())?
+            .unwrap()
+            .is_empty());
+
         assert_eq!(
-            provider.receipts_by_number_or_tag(database_block.number.into())?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(database_block.number.into())?.unwrap(),
             receipts.get(database_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap(),
             receipts.get(canonical_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Safe)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Safe)?.unwrap(),
             receipts.get(safe_block.number as usize).unwrap().clone()
         );
         assert_eq!(
-            provider.receipts_by_number_or_tag(BlockNumberOrTag::Finalized)?.unwrap_or_default(),
+            provider.receipts_by_number_or_tag(BlockNumberOrTag::Finalized)?.unwrap(),
             receipts.get(finalized_block.number as usize).unwrap().clone()
         );
 

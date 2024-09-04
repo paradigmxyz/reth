@@ -26,6 +26,7 @@ members = [
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
     "crates/e2e-test-utils/",
+    "crates/engine/invalid-block-hooks/",
     "crates/engine/primitives/",
     "crates/engine/service",
     "crates/engine/tree/",
@@ -67,6 +68,7 @@ members = [
     "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/optimism/bin",
     "crates/optimism/chainspec",
     "crates/optimism/cli",
     "crates/optimism/consensus",
@@ -329,6 +331,7 @@ reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }
+reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
@@ -349,6 +352,7 @@ reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
@@ -413,40 +417,41 @@ alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
 alloy-trie = { version = "0.5", default-features = false }
 
-alloy-consensus = { version = "0.3.0", default-features = false }
-alloy-eips = { version = "0.3.0", default-features = false }
-alloy-genesis = { version = "0.3.0", default-features = false }
-alloy-json-rpc = { version = "0.3.0", default-features = false }
-alloy-network = { version = "0.3.0", default-features = false }
-alloy-node-bindings = { version = "0.3.0", default-features = false }
-alloy-provider = { version = "0.3.0", features = [
+alloy-consensus = { version = "0.3.1", default-features = false }
+alloy-eips = { version = "0.3.1", default-features = false }
+alloy-genesis = { version = "0.3.1", default-features = false }
+alloy-json-rpc = { version = "0.3.1", default-features = false }
+alloy-network = { version = "0.3.1", default-features = false }
+alloy-node-bindings = { version = "0.3.1", default-features = false }
+alloy-provider = { version = "0.3.1", features = [
     "reqwest",
 ], default-features = false }
-alloy-pubsub = { version = "0.3.0", default-features = false }
-alloy-rpc-client = { version = "0.3.0", default-features = false }
-alloy-rpc-types = { version = "0.3.0", features = [
+alloy-pubsub = { version = "0.3.1", default-features = false }
+alloy-rpc-client = { version = "0.3.1", default-features = false }
+alloy-rpc-types = { version = "0.3.1", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-admin = { version = "0.3.0", default-features = false }
-alloy-rpc-types-anvil = { version = "0.3.0", default-features = false }
-alloy-rpc-types-beacon = { version = "0.3.0", default-features = false }
-alloy-rpc-types-engine = { version = "0.3.0", default-features = false }
-alloy-rpc-types-eth = { version = "0.3.0", default-features = false }
-alloy-rpc-types-mev = { version = "0.3.0", default-features = false }
-alloy-rpc-types-trace = { version = "0.3.0", default-features = false }
-alloy-rpc-types-txpool = { version = "0.3.0", default-features = false }
-alloy-serde = { version = "0.3.0", default-features = false }
-alloy-signer = { version = "0.3.0", default-features = false }
-alloy-signer-local = { version = "0.3.0", default-features = false }
-alloy-transport = { version = "0.3.0" }
-alloy-transport-http = { version = "0.3.0", features = [
+alloy-rpc-types-admin = { version = "0.3.1", default-features = false }
+alloy-rpc-types-anvil = { version = "0.3.1", default-features = false }
+alloy-rpc-types-beacon = { version = "0.3.1", default-features = false }
+alloy-rpc-types-debug = { version = "0.3.1", default-features = false }
+alloy-rpc-types-engine = { version = "0.3.1", default-features = false }
+alloy-rpc-types-eth = { version = "0.3.1", default-features = false }
+alloy-rpc-types-mev = { version = "0.3.1", default-features = false }
+alloy-rpc-types-trace = { version = "0.3.1", default-features = false }
+alloy-rpc-types-txpool = { version = "0.3.1", default-features = false }
+alloy-serde = { version = "0.3.1", default-features = false }
+alloy-signer = { version = "0.3.1", default-features = false }
+alloy-signer-local = { version = "0.3.1", default-features = false }
+alloy-transport = { version = "0.3.1" }
+alloy-transport-http = { version = "0.3.1", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ipc = { version = "0.3.0", default-features = false }
-alloy-transport-ws = { version = "0.3.0", default-features = false }
+alloy-transport-ipc = { version = "0.3.1", default-features = false }
+alloy-transport-ws = { version = "0.3.1", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.2"
+op-alloy-rpc-types = "0.2.5"
 op-alloy-rpc-types-engine = "0.2"
 op-alloy-network = "0.2"
 
@@ -562,3 +567,4 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
+tikv-jemallocator = { version = "0.5.0" }

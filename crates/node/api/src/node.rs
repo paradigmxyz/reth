@@ -17,55 +17,99 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 
-/// The type that configures the essential types of an ethereum like node.
+/// The type that configures the essential types of an Ethereum-like node.
 ///
-/// This includes the primitive types of a node, the engine API types for communication with the
-/// consensus layer.
+/// This includes the primitive types of a node.
 ///
 /// This trait is intended to be stateless and only define the types of the node.
 pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
-    /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec;
 }
 
-/// A [`NodeTypes`] type builder
-#[derive(Default, Debug)]
-pub struct AnyNodeTypes<P = (), E = (), C = ()>(PhantomData<P>, PhantomData<E>, PhantomData<C>);
+/// The type that configures an Ethereum-like node with an engine for consensus.
+pub trait NodeTypesWithEngine: NodeTypes {
+    /// The node's engine types, defining the interaction with the consensus engine.
+    type Engine: EngineTypes;
+}
 
-impl<P, E, C> AnyNodeTypes<P, E, C> {
+/// A [`NodeTypes`] type builder.
+#[derive(Default, Debug)]
+pub struct AnyNodeTypes<P = (), C = ()>(PhantomData<P>, PhantomData<C>);
+
+impl<P, C> AnyNodeTypes<P, C> {
     /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E, C> {
-        AnyNodeTypes::<T, E, C>(PhantomData::<T>, PhantomData::<E>, PhantomData::<C>)
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, C> {
+        AnyNodeTypes::<T, C>(PhantomData::<T>, PhantomData::<C>)
     }
 
-    /// Sets the `Engine` associated type.
-    pub const fn engine<T>(self) -> AnyNodeTypes<P, T, C> {
-        AnyNodeTypes::<P, T, C>(PhantomData::<P>, PhantomData::<T>, PhantomData::<C>)
+    /// Sets the `ChainSpec` associated type.
+    pub const fn chain_spec<T>(self) -> AnyNodeTypes<P, T> {
+        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
     }
 }
 
-impl<P, E, C> NodeTypes for AnyNodeTypes<P, E, C>
+impl<P, C> NodeTypes for AnyNodeTypes<P, C>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    C: EthChainSpec,
+{
+    type Primitives = P;
+    type ChainSpec = C;
+}
+
+/// A [`NodeTypesWithEngine`] type builder.
+#[derive(Default, Debug)]
+pub struct AnyNodeTypesWithEngine<P = (), E = (), C = ()> {
+    /// Embedding the basic node types.
+    base: AnyNodeTypes<P, C>,
+    /// Phantom data for the engine.
+    _engine: PhantomData<E>,
+}
+
+impl<P, E, C> AnyNodeTypesWithEngine<P, E, C> {
+    /// Sets the `Primitives` associated type.
+    pub const fn primitives<T>(self) -> AnyNodeTypesWithEngine<T, E, C> {
+        AnyNodeTypesWithEngine { base: self.base.primitives::<T>(), _engine: PhantomData }
+    }
+
+    /// Sets the `Engine` associated type.
+    pub const fn engine<T>(self) -> AnyNodeTypesWithEngine<P, T, C> {
+        AnyNodeTypesWithEngine { base: self.base, _engine: PhantomData::<T> }
+    }
+
+    /// Sets the `ChainSpec` associated type.
+    pub const fn chain_spec<T>(self) -> AnyNodeTypesWithEngine<P, E, T> {
+        AnyNodeTypesWithEngine { base: self.base.chain_spec::<T>(), _engine: PhantomData }
+    }
+}
+
+impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec,
 {
     type Primitives = P;
-
-    type Engine = E;
-
     type ChainSpec = C;
 }
 
-/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
-/// node.
+impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin,
+    C: EthChainSpec,
+{
+    type Engine = E;
+}
+
+/// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
+/// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypes<ChainSpec = ChainSpec> + 'static {
+pub trait FullNodeTypes: NodeTypesWithEngine<ChainSpec = ChainSpec> + 'static {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
@@ -104,18 +148,26 @@ impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
 
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypes,
+    Types: NodeTypesWithEngine,
     DB: Send + Sync + Unpin + 'static,
     Provider: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
-    type Engine = Types::Engine;
     type ChainSpec = Types::ChainSpec;
+}
+
+impl<Types, DB, Provider> NodeTypesWithEngine for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypesWithEngine,
+    DB: Send + Sync + Unpin + 'static,
+    Provider: Send + Sync + Unpin + 'static,
+{
+    type Engine = Types::Engine;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypes<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     Provider: FullProvider<DB, Types::ChainSpec>,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {

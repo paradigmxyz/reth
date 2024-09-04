@@ -19,11 +19,6 @@ pub const SUPPORTED_CHAINS: &[&str] =
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
 
-/// The help info for the --chain flag
-pub fn chain_help() -> String {
-    format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
-}
-
 /// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
