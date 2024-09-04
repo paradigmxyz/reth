@@ -148,9 +148,9 @@ impl StaticFileProvider {
                             }
 
                             // Ensure it's well formatted static file name
-                            if let None = StaticFileSegment::parse_filename(
+                            if StaticFileSegment::parse_filename(
                                 &segment.file_stem().expect("qed").to_string_lossy(),
-                            ) {
+                            ).is_none() {
                                 continue
                             }
 
