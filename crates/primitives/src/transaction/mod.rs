@@ -556,7 +556,7 @@ impl Transaction {
                 with_header,
             ),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_inner(out, with_header),
         }
     }
 
@@ -839,7 +839,7 @@ impl Encodable for Transaction {
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => {
-                deposit_tx.encode(out, true);
+                deposit_tx.encode_inner(out, true);
             }
         }
     }
@@ -852,7 +852,7 @@ impl Encodable for Transaction {
             Self::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
             Self::Eip7702(set_code_tx) => set_code_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Self::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 }
@@ -1243,10 +1243,7 @@ impl TransactionSigned {
                 true,
             ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len_with_signature(
-                &self.signature.as_signature_with_boolean_parity(),
-                true,
-            ),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 
@@ -1458,7 +1455,7 @@ impl TransactionSigned {
                 false,
             ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
         }
     }
 }
