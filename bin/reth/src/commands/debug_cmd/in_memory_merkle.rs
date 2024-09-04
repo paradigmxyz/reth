@@ -1,7 +1,9 @@
 //! Command for debugging in-memory merkle trie calculation.
 
-use std::{path::PathBuf, sync::Arc};
-
+use crate::{
+    args::NetworkArgs,
+    utils::{get_single_body, get_single_header},
+};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_chainspec::ChainSpec;
@@ -16,6 +18,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
@@ -27,13 +30,8 @@ use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
-
-use crate::{
-    args::NetworkArgs,
-    macros::block_executor,
-    utils::{get_single_body, get_single_header},
-};
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.
@@ -134,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             provider_factory.static_file_provider(),
         ));
 
-        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();

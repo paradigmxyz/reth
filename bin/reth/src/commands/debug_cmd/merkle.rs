@@ -1,7 +1,5 @@
 //! Command for debugging merkle trie calculation.
-
-use std::{path::PathBuf, sync::Arc};
-
+use crate::{args::NetworkArgs, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -18,6 +16,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::UnifiedStorageWriter, BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider,
@@ -29,9 +28,8 @@ use reth_stages::{
     ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
-
-use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
 
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]
@@ -96,7 +94,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             )
             .await?;
 
-        let executor_provider = block_executor!(provider_factory.chain_spec());
+        let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");

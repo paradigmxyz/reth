@@ -1,5 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
+use crate::args::NetworkArgs;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -19,6 +18,7 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -28,10 +28,9 @@ use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::*;
-
-use crate::{args::NetworkArgs, macros::block_executor};
 
 /// `reth debug replay-engine` command
 /// This script will read stored engine API messages and replay them by the timestamp.
@@ -82,7 +81,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Configure blockchain tree
         let tree_externals =
@@ -111,14 +110,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .await?;
 
         // Set up payload builder
-        #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
-
-        // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
@@ -129,13 +121,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             payload_builder,
         );
 
-        #[cfg(feature = "optimism")]
-        let (payload_service, payload_builder): (
-            _,
-            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
-        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
-
-        #[cfg(not(feature = "optimism"))]
         let (payload_service, payload_builder): (
             _,
             PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
