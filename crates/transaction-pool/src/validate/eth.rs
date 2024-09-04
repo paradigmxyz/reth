@@ -326,13 +326,37 @@ where
             }
         };
 
-        // Signer account shouldn't have bytecode. Presence of bytecode means this is a
-        // smartcontract.
+        // Unless Prague is active, the signer account shouldn't have bytecode.
+        //
+        // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
+        //
+        // Any other case means that the account is not an EOA, and should not be able to send
+        // transactions.
         if account.has_bytecode() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::SignerAccountHasBytecode.into(),
-            )
+            let is_eip7702 = if self.fork_tracker.is_prague_activated() {
+                match self
+                    .client
+                    .latest()
+                    .and_then(|state| state.bytecode_by_hash(account.get_bytecode_hash()))
+                {
+                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
+                    Err(err) => {
+                        return TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        )
+                    }
+                }
+            } else {
+                false
+            };
+
+            if !is_eip7702 {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::SignerAccountHasBytecode.into(),
+                )
+            }
         }
 
         // Checks for nonce
