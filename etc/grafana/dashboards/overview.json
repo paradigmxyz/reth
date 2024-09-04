@@ -2656,7 +2656,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The amount of gas processed by the execution in gas per second\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
+      "description": "The throughput of the node's executor. The metric is the amount of gas processed in a block, divided by the time it took to process the block.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2731,7 +2731,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "d5c021a2-e309-4059-9c15-852a2d9f9371"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_sync_execution_gas_per_second{instance=~\"$instance\"}",
@@ -2740,7 +2740,7 @@
           "refId": "A"
         }
       ],
-      "title": "Gas per second",
+      "title": "Execution throughput",
       "type": "timeseries"
     },
     {
