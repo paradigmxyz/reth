@@ -7801,6 +7801,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
+ "reth-node-optimism",
  "reth-optimism-chainspec",
  "reth-optimism-primitives",
  "reth-primitives",
