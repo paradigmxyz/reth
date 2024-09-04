@@ -95,7 +95,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
 
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
-    pub fn into_db(self) -> Arc<N::DB> {
+    pub fn into_db(self) -> N::DB {
         self.db
     }
 }
