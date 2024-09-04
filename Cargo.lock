@@ -8067,6 +8067,7 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
+ "reth-node-types",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
