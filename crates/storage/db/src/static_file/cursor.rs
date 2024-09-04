@@ -39,7 +39,7 @@ impl<'a> StaticFileCursor<'a> {
         }
 
         let row = match key_or_num {
-            KeyOrNumber::Key(_) => Err(NippyJarError::UnsupportedFilterQuery),
+            KeyOrNumber::Key(_) => unimplemented!(),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
