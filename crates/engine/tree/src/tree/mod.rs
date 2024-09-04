@@ -41,6 +41,7 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
+    cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
     fmt::Debug,
     ops::Bound,
@@ -530,6 +531,7 @@ where
             last_persisted_block_hash: header.hash(),
             last_persisted_block_number: best_block_number,
             rx: None,
+            remove_above_state: None,
         };
 
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
@@ -1050,14 +1052,21 @@ where
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
     fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
-        if self.should_persist() && !self.persistence_state.in_progress() {
-            let blocks_to_persist = self.get_canonical_blocks_to_persist();
-            if blocks_to_persist.is_empty() {
-                debug!(target: "engine", "Returned empty set of blocks to persist");
-            } else {
+        if !self.persistence_state.in_progress() {
+            if let Some(new_tip_num) = self.persistence_state.remove_above_state.take() {
+                debug!(target: "engine", ?new_tip_num, "Removing blocks using persistence task");
                 let (tx, rx) = oneshot::channel();
-                let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+                let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
                 self.persistence_state.start(rx);
+            } else if self.should_persist() {
+                let blocks_to_persist = self.get_canonical_blocks_to_persist();
+                if blocks_to_persist.is_empty() {
+                    debug!(target: "engine", "Returned empty set of blocks to persist");
+                } else {
+                    let (tx, rx) = oneshot::channel();
+                    let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+                    self.persistence_state.start(rx);
+                }
             }
         }
 
@@ -1794,12 +1803,54 @@ where
         None
     }
 
+    /// This determines whether or not we should remove blocks from the chain, based on a canonical
+    /// chain update.
+    ///
+    /// If the chain update is a reorg:
+    /// * is the new chain behind the last persisted block, or
+    /// * if the root of the new chain is at the same height as the last persisted block, is it a
+    ///   different block
+    ///
+    /// If either of these are true, then this returns the height of the first block. Otherwise,
+    /// this returns [`None`]. This should be used to check whether or not we should be sending a
+    /// remove command to the persistence task.
+    fn find_disk_reorg(&self, chain_update: &NewCanonicalChain) -> Option<u64> {
+        let NewCanonicalChain::Reorg { new, old: _ } = chain_update else { return None };
+
+        let BlockNumHash { number: new_num, hash: new_hash } =
+            new.first().map(|block| block.block.num_hash())?;
+
+        match new_num.cmp(&self.persistence_state.last_persisted_block_number) {
+            Ordering::Greater => {
+                // new number is above the last persisted block so the reorg can be performed
+                // entirely in memory
+                None
+            }
+            Ordering::Equal => {
+                // new number is the same, if the hash is the same then we should not need to remove
+                // any blocks
+                (self.persistence_state.last_persisted_block_hash != new_hash).then_some(new_num)
+            }
+            Ordering::Less => {
+                // this means we are below the last persisted block and must remove on disk blocks
+                Some(new_num)
+            }
+        }
+    }
+
     /// Invoked when we the canonical chain has been updated.
     ///
     /// This is invoked on a valid forkchoice update, or if we can make the target block canonical.
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain) {
         trace!(target: "engine", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
+
+        // schedule a remove_above call if we have an on-disk reorg
+        if let Some(height) = self.find_disk_reorg(&chain_update) {
+            // calculate the new tip by subtracting one from the lowest part of the chain
+            let new_tip_num = height.saturating_sub(1);
+            self.persistence_state.schedule_removal(new_tip_num);
+        }
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
@@ -2308,6 +2359,9 @@ pub struct PersistenceState {
     ///
     /// This tracks the chain height that is persisted on disk
     last_persisted_block_number: u64,
+    /// The block above which blocks should be removed from disk, because there has been an on disk
+    /// reorg.
+    remove_above_state: Option<u64>,
 }
 
 impl PersistenceState {
@@ -2320,6 +2374,12 @@ impl PersistenceState {
     /// Sets state for a started persistence task.
     fn start(&mut self, rx: oneshot::Receiver<Option<B256>>) {
         self.rx = Some((rx, Instant::now()));
+    }
+
+    /// Sets the `remove_above_state`, to the new tip number specified.
+    fn schedule_removal(&mut self, new_tip_num: u64) {
+        // TODO: what about multiple on-disk reorgs in a row?
+        self.remove_above_state = Some(new_tip_num);
     }
 
     /// Sets state for a finished persistence task.
