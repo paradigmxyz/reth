@@ -219,8 +219,7 @@ mod tests {
             "The condition should transition at timestamp 12345"
         );
 
-        // Test if the condition does not transition if there is a false relation betwen parent and
-        // child
+        // Test if the condition does not transition if the parent timestamp is already the same
         assert!(
             !fork_condition.transitions_at_timestamp(12345, 12345),
             "The condition should not transition if the parent timestamp is already 12345"
