@@ -18,7 +18,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::FullNodeTypes;
+use reth_node_api::{FullNodeTypes, NodeTypesWithDB};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -65,7 +65,7 @@ pub trait WithTree {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;
 }
 
-impl<DB: Database> WithTree for BlockchainProvider<DB> {
+impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self {
         self.with_tree(tree)
     }
