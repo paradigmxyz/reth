@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_node_builder::NodeTypesWithDB;
+use reth_node_builder::NodeTypesWithEngine;
 
 mod storage_tries;
 
@@ -24,7 +24,7 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `recover` command
-    pub async fn execute<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
