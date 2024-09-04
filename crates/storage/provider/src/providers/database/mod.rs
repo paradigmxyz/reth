@@ -7,6 +7,7 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use core::fmt;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -39,7 +40,6 @@ mod metrics;
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug)]
 pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Database
     db: N::DB,
@@ -49,6 +49,23 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
     prune_modes: PruneModes,
+}
+
+impl<N> fmt::Debug for ProviderFactory<N>
+where
+    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProviderFactory { db, chain_spec, static_file_provider, prune_modes } => f
+                .debug_struct("ProviderFactory")
+                .field("db", &db)
+                .field("chain_spec", &chain_spec)
+                .field("static_file_provider", &static_file_provider)
+                .field("prune_modes", &prune_modes)
+                .finish(),
+        }
+    }
 }
 
 impl<N: NodeTypesWithDB> ProviderFactory<N> {

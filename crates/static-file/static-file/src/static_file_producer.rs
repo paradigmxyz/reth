@@ -26,7 +26,7 @@ use tracing::{debug, trace};
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [`StaticFileProducer`] instance itself with the result of [`StaticFileProducerInner::run`]
-pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
+pub type StaticFileProducerWithResult<N> = (StaticFileProducer<N>, StaticFileProducerResult);
 
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.

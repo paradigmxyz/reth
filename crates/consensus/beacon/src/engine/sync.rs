@@ -6,11 +6,11 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_chainspec::ChainSpec;
-use reth_db_api::database::Database;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockNumber, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -31,9 +31,9 @@ use tracing::trace;
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
 /// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
-pub(crate) struct EngineSyncController<DB, Client>
+pub(crate) struct EngineSyncController<N, Client>
 where
-    DB: Database,
+    N: NodeTypesWithDB,
     Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
@@ -42,7 +42,7 @@ where
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<DB>,
+    pipeline_state: PipelineState<N>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
     /// In-flight full block requests in progress.
@@ -61,18 +61,18 @@ where
     metrics: EngineSyncMetrics,
 }
 
-impl<DB, Client> EngineSyncController<DB, Client>
+impl<N, Client> EngineSyncController<N, Client>
 where
-    DB: Database + 'static,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     Client: BlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<N>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<N::ChainSpec>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
@@ -393,14 +393,14 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<DB: Database> {
+enum PipelineState<N: NodeTypesWithDB> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<DB>>),
+    Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<DB>>),
+    Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<N: NodeTypesWithDB> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))

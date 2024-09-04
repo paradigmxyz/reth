@@ -15,10 +15,10 @@ use reth_network_p2p::headers::client::HeadersClient;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fs, path::Path};
 
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
@@ -269,7 +269,10 @@ impl NodeConfig {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(&self, factory: ProviderFactory<N>) -> ProviderResult<Head> {
+    pub fn lookup_head<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+        &self,
+        factory: ProviderFactory<N>,
+    ) -> ProviderResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;

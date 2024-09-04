@@ -105,7 +105,9 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
     pub fn events(&self) -> EventStream<PipelineEvent> {
         self.event_sender.new_listener()
     }
+}
 
+impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
