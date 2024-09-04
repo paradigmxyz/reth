@@ -44,6 +44,8 @@ where
         _output: &BlockExecutionOutput<Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
+        // TODO(alexey): unify with `DebugApi::debug_execution_witness`
+
         // Setup database.
         let mut db = StateBuilder::new()
             .with_database(StateProviderDatabase::new(
