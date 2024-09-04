@@ -254,10 +254,10 @@ pub trait NodeTy {
 
 impl<T> NodeTy for T
 where
-    T: NodeTypes + Clone,
+    T: NodeTypesWithEngine + Clone,
 {
     type Primitives = <T as NodeTypes>::Primitives;
-    type Engine = <T as NodeTypes>::Engine;
+    type Engine = <T as NodeTypesWithEngine>::Engine;
     type ChainSpec = <T as NodeTypes>::ChainSpec;
 }
 
