@@ -2178,6 +2178,7 @@ where
             let mut trie_nodes = TrieUpdates::default();
             let mut state = HashedPostState::default();
             let mut prefix_sets = TriePrefixSetsMut::default();
+
             if let Some((historical, blocks)) =
                 self.state.tree_state.blocks_by_hash(block.parent_hash)
             {
