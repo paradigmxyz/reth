@@ -102,21 +102,20 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     Ok(l1block)
 }
 
-/// Parses the calldata of the [`L1BlockInfo`] transaction post-Ecotone hardfork.
+/// Updates the L1 block values for an Ecotone upgraded chain.
+/// Params are packed and passed in as raw msg.data instead of ABI to reduce calldata size.
+/// Params are expected to be in the following order:
+///   1. _baseFeeScalar      L1 base fee scalar
+///   2. _blobBaseFeeScalar  L1 blob base fee scalar
+///   3. _sequenceNumber     Number of L2 blocks since epoch start.
+///   4. _timestamp          L1 timestamp.
+///   5. _number             L1 blocknumber.
+///   6. _basefee            L1 base fee.
+///   7. _blobBaseFee        L1 blob base fee.
+///   8. _hash               L1 blockhash.
+///   9. _batcherHash        Versioned hash to authenticate batcher by.
 ///
-/// This will fail if the call data is not exactly 160 bytes long:
-///
-/// The `setL1BlockValuesEcotone` tx calldata must be exactly 160 bytes long, considering that
-/// we already removed the first 4 bytes (the function selector). Detailed breakdown:
-///   8 bytes for the block sequence number
-/// + 4 bytes for the blob base fee scalar
-/// + 4 bytes for the base fee scalar
-/// + 8 bytes for the block number
-/// + 8 bytes for the block timestamp
-/// + 32 bytes for the base fee
-/// + 32 bytes for the blob base fee
-/// + 32 bytes for the block hash
-/// + 32 bytes for the batcher hash
+/// <https://github.com/ethereum-optimism/optimism/blob/957e13dd504fb336a4be40fb5dd0d8ba0276be34/packages/contracts-bedrock/src/L2/L1Block.sol#L136>
 pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     if data.len() != 160 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
