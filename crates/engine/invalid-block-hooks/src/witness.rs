@@ -1,7 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use alloy_rpc_types_debug::ExecutionWitness;
-use eyre::OptionExt;
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
@@ -40,7 +39,7 @@ where
 {
     fn on_invalid_block(
         &self,
-        _parent_header: &SealedHeader,
+        parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
         _output: &BlockExecutionOutput<Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
@@ -48,7 +47,7 @@ where
         // Setup database.
         let mut db = StateBuilder::new()
             .with_database(StateProviderDatabase::new(
-                self.provider.state_by_block_hash(block.hash())?,
+                self.provider.state_by_block_hash(parent_header.hash())?,
             ))
             .with_bundle_update()
             .build();
@@ -85,8 +84,7 @@ where
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.transactions() {
-            let tx = tx.clone().into_ecrecovered().ok_or_eyre("failed to recover sender")?;
+        for tx in block.clone().into_transactions_ecrecovered() {
             let env = EnvWithHandlerCfg {
                 env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), evm_config.tx_env(&tx)),
                 handler_cfg: cfg.handler_cfg,
