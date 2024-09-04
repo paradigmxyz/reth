@@ -1,6 +1,6 @@
 use super::Header;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, BlockHash};
+use alloy_primitives::{keccak256, BlockHash, Sealable};
 #[cfg(any(test, feature = "test-utils"))]
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -66,7 +66,8 @@ impl SealedHeader {
 
 impl Default for SealedHeader {
     fn default() -> Self {
-        Header::default().seal_slow()
+        let sealed = Header::default().seal_slow();
+        Self { hash: sealed.seal(), header: sealed.inner().clone() }
     }
 }
 

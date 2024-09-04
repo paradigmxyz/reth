@@ -11,7 +11,8 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
+    alloy_primitives::Sealable, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header,
+    SealedHeader, B256,
 };
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
@@ -115,7 +116,10 @@ impl FileClient {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
+        self.headers.get(&self.max_block()?).map(|h| {
+            let sealed = h.clone().seal_slow();
+            SealedHeader::new(sealed.inner().clone(), sealed.seal())
+        })
     }
 
     /// Returns true if all blocks are canonical (no gaps)

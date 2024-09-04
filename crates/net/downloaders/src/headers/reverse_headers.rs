@@ -17,7 +17,10 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, GotExpected, Header, SealedHeader, B256};
+use reth_primitives::{
+    alloy_primitives::Sealable, BlockHashOrNumber, BlockNumber, GotExpected, Header, SealedHeader,
+    B256,
+};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
@@ -247,7 +250,13 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
+        let sealed_headers = headers
+            .into_par_iter()
+            .map(|h| {
+                let sealed = h.seal_slow();
+                SealedHeader::new(sealed.inner().clone(), sealed.seal())
+            })
+            .collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -373,7 +382,8 @@ where
                     .into())
                 }
 
-                let target = headers.remove(0).seal_slow();
+                let sealed_target = headers.remove(0).seal_slow();
+                let target = SealedHeader::new(sealed_target.inner().clone(), sealed_target.seal());
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {

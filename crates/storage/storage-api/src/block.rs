@@ -4,8 +4,8 @@ use crate::{
 };
 use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
+    alloy_primitives::Sealable, Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
+    BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -243,7 +243,13 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
     ) -> ProviderResult<Option<SealedHeader>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
-            .map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+            .map_or_else(
+                || Ok(None),
+                |h| {
+                    let sealed = h.seal_slow();
+                    Ok(Some(SealedHeader::new(sealed.inner().clone(), sealed.seal())))
+                },
+            )
     }
 
     /// Returns the sealed header with the matching `BlockId` from the database.

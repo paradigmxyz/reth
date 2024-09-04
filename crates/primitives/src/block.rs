@@ -5,6 +5,7 @@ use crate::{
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+use alloy_primitives::Sealable;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -52,8 +53,9 @@ pub struct Block {
 impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
+        let sealed = self.header.seal_slow();
         SealedBlock {
-            header: self.header.seal_slow(),
+            header: SealedHeader::new(sealed.inner().clone(), sealed.seal()),
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
@@ -66,7 +68,7 @@ impl Block {
     /// WARNING: This method does not perform validation whether the hash is correct.
     pub fn seal(self, hash: B256) -> SealedBlock {
         SealedBlock {
-            header: self.header.seal(hash),
+            header: SealedHeader::new(self.header, hash),
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
