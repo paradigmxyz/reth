@@ -33,5 +33,5 @@ parking_lot.workspace = true
 
 [features]
 default = ["std"]
-std = ["dep:reth-metrics", "dep:metrics"]
+std = ["dep:metrics", "dep:reth-metrics"]
 test-utils = ["dep:parking_lot"]
