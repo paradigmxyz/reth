@@ -544,6 +544,7 @@ impl StaticFileProvider {
         let mut max_block = self.static_files_max_block.write();
         let mut tx_index = self.static_files_tx_index.write();
 
+        max_block.clear();
         tx_index.clear();
 
         for (segment, ranges) in
