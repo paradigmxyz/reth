@@ -33,7 +33,7 @@ use tracing::trace;
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
-mod metrics;
+pub(crate) mod metrics;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -209,7 +209,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         self.static_file_provider.get_with_static_file_or_database(
