@@ -7493,6 +7493,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-evm",
  "reth-network-api",
+ "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
@@ -7745,6 +7746,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-node-types"
+version = "1.0.6"
+dependencies = [
+ "reth-chainspec",
+ "reth-db-api",
+ "reth-engine-primitives",
 ]
 
 [[package]]
@@ -8021,6 +8031,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-nippy-jar",
+ "reth-node-types",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",

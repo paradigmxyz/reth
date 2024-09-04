@@ -43,6 +43,7 @@ exclude_crates=(
   reth-net-nat
   reth-network
   reth-node-api
+  reth-node-types
   reth-node-builder
   reth-node-core
   reth-node-ethereum
