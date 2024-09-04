@@ -170,9 +170,6 @@ impl Command {
         let static_files = iter_static_files(data_dir.static_files())?;
         let static_file_provider = StaticFileProvider::read_only(data_dir.static_files(), false)?;
 
-        loop {
-            let _ = tokio::time::sleep(Duration::from_secs(2));
-        }
         let mut total_data_size = 0;
         let mut total_index_size = 0;
         let mut total_offsets_size = 0;

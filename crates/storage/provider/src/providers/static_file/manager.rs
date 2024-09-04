@@ -101,7 +101,7 @@ impl StaticFileProvider {
         Self::new(path, StaticFileAccess::RW)
     }
 
-    /// Watches the directory for changes and manually update the in-memory index when modifications
+    /// Watches the directory for changes and updates the in-memory index when modifications
     /// are detected.
     ///
     /// This may be necessary, since a non-node process that owns a [`StaticFileProvider`] does not
@@ -120,10 +120,17 @@ impl StaticFileProvider {
                 .watch(&provider.path, RecursiveMode::NonRecursive)
                 .expect("failed to watch path");
 
+            // Some backends send repeated modified events
+            let mut last_event_timestamp = None;
+
             while let Some(res) = rx.recv().await {
                 match res {
                     Ok(event) => {
-                        if !event.kind.is_modify() {
+                        // We only care about modified data events
+                        if !matches!(
+                            event.kind,
+                            notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                        ) {
                             continue
                         }
 
@@ -131,20 +138,44 @@ impl StaticFileProvider {
                         // modified. This means that a
                         // static_file_provider.commit() was called on the node after
                         // appending/truncating rows
-                        if event.paths.iter().any(|segment| {
-                            segment.is_file() &&
-                                segment.ends_with(CONFIG_FILE_EXTENSION) &&
-                                StaticFileSegment::parse_filename(
-                                    &segment.file_stem().expect("qed").to_string_lossy(),
-                                )
-                                .is_some()
-                                && { info!(target: "providers::static_file", file = ?segment.file_stem(), "re-initializing static file provider index"); true}
-                        }) {
-                            provider.initialize_index().expect("failed to re-initialize index");
+                        for segment in event.paths {
+                            // Ensure it's a file with the .conf extension
+                            if !segment
+                                .extension()
+                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
+                            {
+                                continue
+                            }
+
+                            // Ensure it's well formatted static file name
+                            if let None = StaticFileSegment::parse_filename(
+                                &segment.file_stem().expect("qed").to_string_lossy(),
+                            ) {
+                                continue
+                            }
+
+                            // If we can read the metadata and modified timestamp, ensure this is
+                            // not an old or repeated event.
+                            if let Ok(current_modified_timestamp) =
+                                std::fs::metadata(&segment).and_then(|m| m.modified())
+                            {
+                                if last_event_timestamp.is_some_and(|last_timestamp| {
+                                    last_timestamp >= current_modified_timestamp
+                                }) {
+                                    continue
+                                }
+                                last_event_timestamp = Some(current_modified_timestamp);
+                            }
+
+                            info!(target: "providers::static_file", updated_file = ?segment.file_stem(), "re-initializing static file provider index");
+                            if let Err(err) = provider.initialize_index() {
+                                warn!(target: "providers::static_file", "failed to re-initialize index: {err}");
+                            }
+                            break
                         }
                     }
 
-                    Err(e) => warn!(target: "providers::watcher", "watch error: {:?}", e),
+                    Err(err) => warn!(target: "providers::watcher", "watch error: {err:?}"),
                 }
             }
         });
