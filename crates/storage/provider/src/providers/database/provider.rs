@@ -24,7 +24,7 @@ use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db::{
-    cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState,
+    common::KeyValue, cursor::{DbDupCursorRW, RangeWalker}, table::TableRow, tables, BlockNumberList, PlainAccountState, PlainStorageState
 };
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -46,7 +46,7 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
 };
-use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -247,7 +247,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
+            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -345,7 +345,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
         cursor.delete_current()?;
 
@@ -354,10 +354,10 @@ where
         let first = list.iter().next().expect("List can't be empty");
         if first >= block_number {
             item = cursor.prev()?;
-            continue
+            continue;
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
-            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>());
         }
         return Ok(list.iter().collect::<Vec<_>>())
     }
@@ -493,7 +493,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         F: FnMut(H, Range<TxNumber>, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -612,6 +612,152 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
             assemble_block(header, body, ommers, withdrawals, senders)
         })
+    }
+
+    /// Get requested blocks transaction with senders
+    pub(crate) fn get_block_transaction_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
+        // Raad range of block bodies to get all transactions id's of this range.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
+
+        if block_bodies.is_empty() {
+           return Ok(Vec::new())
+        }
+
+        // Compute the first and last tx ID in the range
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
+
+        // If this is the case then all of the blocks in the range are empty
+        if last_transaction < first_transaction {
+           return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+        }
+
+        // Get transactions and senders
+        let transactions = self
+            .get::<tables::Transactions>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
+        let mut senders =
+            self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
+
+        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
+
+        // Merge transaction into blocks
+        let mut block_tx = Vec::with_capacity(block_bodies.len());
+        let mut senders = senders.into_iter();
+        let mut transactions = transactions.into_iter();
+        for (block_number, block_body) in block_bodies {
+            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                let tx = transactions.next();
+                let sender = senders.next();
+
+                let recovered = match (tx, sender) {
+                    (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
+                        if tx_id == sender_tx_id {
+                            Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                        }
+                    }
+                    (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
+                        Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                    }
+                    (None, None) => Err(ProviderError::BlockBodyTransactionCount),
+                }?;
+                one_block_tx.push(recovered)
+            }
+            block_tx.push((block_number, one_block_tx));
+        }
+
+        Ok(block_tx)
+    }
+
+    /// Get the given range of blocks.
+    pub fn get_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>>
+    where
+        Spec: EthereumHardforks,
+    {
+        // For blocks we need:
+        //
+        // - Headers
+        // - Bodies (transactions)
+        // - Uncles/ommers
+        // - Withdrawals
+        // - Signers
+
+        let block_headers = self.get::<tables::Headers>(range.clone())?;
+        if block_headers.is_empty() {
+           return Ok(Vec::new())
+        }
+
+        let block_header_hashes = self.get::<tables::CanonicalHeaders>(range.clone())?;
+        let block_ommers = self.get::<tables::BlockOmmers>(range.clone())?;
+        let block_withdrawals = self.get::<tables::BlockWithdrawals>(range.clone())?;
+
+        let block_tx = self.get_block_transaction_range(range)?;
+        let mut blocks = Vec::with_capacity(block_headers.len());
+
+        // merge all into block
+        let block_header_iter = block_headers.into_iter();
+        let block_header_hashes_iter = block_header_hashes.into_iter();
+        let block_tx_iter = block_tx.into_iter();
+
+        // Ommers can be empty for some blocks
+        let mut block_ommers_iter = block_ommers.into_iter();
+        let mut block_withdrawals_iter = block_withdrawals.into_iter();
+        let mut block_ommers = block_ommers_iter.next();
+        let mut block_withdrawals = block_withdrawals_iter.next();
+
+        for ((main_block_number, header), (_, header_hash), (_, tx)) in
+            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
+        {
+            let header = SealedHeader::new(header, header_hash);
+
+            let (transactions, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
+
+            // Ommers can be missing
+            let mut ommers = Vec::new();
+            if let Some((block_number, _)) = block_ommers.as_ref() {
+                if *block_number == main_block_number {
+                    ommers = block_ommers.take().unwrap().1.ommers;
+                    block_ommers = block_ommers_iter.next();
+                }
+            };
+
+            // withdrawal can be missing
+            let shanghai_is_active =
+                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
+            let mut withdrawals = Some(Withdrawals::default());
+            if shanghai_is_active {
+                if let Some((block_number, _)) = block_withdrawals.as_ref() {
+                    if *block_number == main_block_number {
+                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
+                        block_withdrawals = block_withdrawals_iter.next();
+                    }
+                }
+            } else {
+                withdrawals = None
+            }
+
+            blocks.push(SealedBlockWithSenders {
+                block: SealedBlock {
+                    header,
+                    body: BlockBody { transactions, ommers, withdrawals },
+                },
+                senders,
+            })
+        }
+
+        Ok(blocks)
     }
 
     /// Return the last N blocks of state, recreating the [`ExecutionOutcome`].
@@ -790,6 +936,248 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         Ok(self.tx.commit()?)
     }
 
+    /// Remove the last N blocks of state.
+    ///
+    /// The latest state will be unwound
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    pub fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        if range.is_empty() {
+            return Ok(());
+        }
+
+        // We are not removing block meta as it is used to get block changesets.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let (state, _) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over local plain state remove all account and all storages.
+        for (address, (old_account, new_account, storage)) in &state {
+            // revert account if needed.
+            if old_account != new_account {
+                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                if let Some(account) = old_account {
+                    plain_accounts_cursor.upsert(*address, *account)?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
+                }
+            }
+
+            // revert storages
+            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
+                // delete previous value
+                // TODO: This does not use dupsort features
+                if plain_storage_cursor
+                    .seek_by_key_subkey(*address, *storage_key)?
+                    .filter(|s| s.key == *storage_key)
+                    .is_some()
+                {
+                    plain_storage_cursor.delete_current()?
+                }
+
+                // insert value if needed
+                if !old_storage_value.is_zero() {
+                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                }
+            }
+        }
+
+        // iterate over block body and remove receipts
+        self.remove::<tables::Receipts>(from_transaction_num..=to_transaction_num)?;
+
+        Ok(())
+    }
+
+    /// Take the last N blocks of state, recreating the [`ExecutionOutcome`].
+    ///
+    /// The latest state will be unwound and returned back with all the blocks
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    pub fn take_state(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<ExecutionOutcome> {
+        if range.is_empty() {
+            return Ok(ExecutionOutcome::default());
+        }
+        let start_block_number = *range.start();
+
+        // We are not removing block meta as it is used to get block changesets.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        // populate bundle state and reverts from changesets / state cursors, to iterate over,
+        // remove, and return later
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over local plain state remove all account and all storages.
+        for (address, (old_account, new_account, storage)) in &state {
+            // revert account if needed.
+            if old_account != new_account {
+                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                if let Some(account) = old_account {
+                    plain_accounts_cursor.upsert(*address, *account)?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
+                }
+            }
+
+            // revert storages
+            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
+                // delete previous value
+                // TODO: This does not use dupsort features
+                if plain_storage_cursor
+                    .seek_by_key_subkey(*address, *storage_key)?
+                    .filter(|s| s.key == *storage_key)
+                    .is_some()
+                {
+                    plain_storage_cursor.delete_current()?
+                }
+
+                // insert value if needed
+                if !old_storage_value.is_zero() {
+                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                }
+            }
+        }
+
+        // iterate over block body and create ExecutionResult
+        let mut receipt_iter =
+            self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::new();
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_receipts.push(Some(receipt));
+                }
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts.into(),
+            start_block_number,
+            Vec::new(),
+        ))
+    }
+
+    /// Remove list of entries from the table. Returns the number of entries removed.
+    #[inline]
+    pub fn remove<T: Table>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<usize, DatabaseError> {
+        let mut entries = 0;
+        let mut cursor_write = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor_write.walk_range(range)?;
+        while walker.next().transpose()?.is_some() {
+            walker.delete_current()?;
+            entries += 1;
+        }
+        Ok(entries)
+    }
+
+    /// Return a list of entries from the table, and remove them, based on the given range.
+    #[inline]
+    pub fn take<T: Table>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
+        let mut cursor_write = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor_write.walk_range(range)?;
+        let mut items = Vec::new();
+        while let Some(i) = walker.next().transpose()? {
+            walker.delete_current()?;
+            items.push(i)
+        }
+        Ok(items)
+    }
+
     /// Remove requested block transactions, without returning them.
     ///
     /// This will remove block data for the given range from the following tables:
@@ -806,7 +1194,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let block_bodies = self.take::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         // Compute the first and last tx ID in the range
@@ -815,7 +1203,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(())
+            return Ok(());
         }
 
         // Get transactions so we can then remove
@@ -861,7 +1249,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // Compute the first and last tx ID in the range
@@ -870,7 +1258,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
         }
 
         // Get transactions and senders
@@ -947,7 +1335,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<()> {
         let block_headers = self.remove::<tables::Headers>(range.clone())?;
         if block_headers == 0 {
-            return Ok(())
+            return Ok(());
         }
 
         self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -990,7 +1378,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         let block_headers = self.take::<tables::Headers>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -1060,6 +1448,177 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         Ok(blocks)
     }
 
+    /// Unwind table by some number key.
+    /// Returns number of rows unwound.
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
+    #[inline]
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DatabaseError>
+    where
+        T: Table<Key = u64>,
+    {
+        self.unwind_table::<T, _>(num, |key| key)
+    }
+
+    /// Unwind the table to a provided number key.
+    /// Returns number of rows unwound.
+    ///
+    /// Note: Key is not inclusive and specified key would stay in db.
+    pub(crate) fn unwind_table<T, F>(
+        &self,
+        key: u64,
+        mut selector: F,
+    ) -> Result<usize, DatabaseError>
+    where
+        T: Table,
+        F: FnMut(T::Key) -> u64,
+    {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut reverse_walker = cursor.walk_back(None)?;
+        let mut deleted = 0;
+
+        while let Some(Ok((entry_key, _))) = reverse_walker.next() {
+            if selector(entry_key.clone()) <= key {
+                break;
+            }
+            reverse_walker.delete_current()?;
+            deleted += 1;
+        }
+
+        Ok(deleted)
+    }
+
+    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
+    pub fn unwind_table_by_walker<T1, T2>(
+        &self,
+        range: impl RangeBounds<T1::Key>,
+    ) -> Result<(), DatabaseError>
+    where
+        T1: Table,
+        T2: Table<Key = T1::Value>,
+    {
+        let mut cursor = self.tx.cursor_write::<T1>()?;
+        let mut walker = cursor.walk_range(range)?;
+        while let Some((_, value)) = walker.next().transpose()? {
+            self.tx.delete::<T2>(value, None)?;
+        }
+        Ok(())
+    }
+
+    /// Prune the table for the specified pre-sorted key iterator.
+    ///
+    /// Returns number of rows pruned.
+    pub fn prune_table_with_iterator<T: Table>(
+        &self,
+        keys: impl IntoIterator<Item = T::Key>,
+        limiter: &mut PruneLimiter,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> Result<(usize, bool), DatabaseError> {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut keys = keys.into_iter();
+
+        let mut deleted_entries = 0;
+
+        for key in &mut keys {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break;
+            }
+
+            let row = cursor.seek_exact(key)?;
+            if let Some(row) = row {
+                cursor.delete_current()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
+            }
+        }
+
+        let done = keys.next().is_none();
+        Ok((deleted_entries, done))
+    }
+
+    /// Prune the table for the specified key range.
+    ///
+    /// Returns number of rows pruned.
+    pub fn prune_table_with_range<T: Table>(
+        &self,
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limiter: &mut PruneLimiter,
+        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> Result<(usize, bool), DatabaseError> {
+        let mut cursor = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor.walk_range(keys)?;
+
+        let mut deleted_entries = 0;
+
+        let done = loop {
+            // check for time out must be done in this scope since it's not done in
+            // `prune_table_with_range_step`
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break false;
+            }
+
+            let done = self.prune_table_with_range_step(
+                &mut walker,
+                limiter,
+                &mut skip_filter,
+                &mut delete_callback,
+            )?;
+
+            if done {
+                break true;
+            } else {
+                deleted_entries += 1;
+            }
+        };
+
+        Ok((deleted_entries, done))
+    }
+
+    /// Steps once with the given walker and prunes the entry in the table.
+    ///
+    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
+    ///
+    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
+    /// pruning different tables concurrently, by letting them step to the same height before
+    /// timing out.
+    pub fn prune_table_with_range_step<T: Table>(
+        &self,
+        walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
+        limiter: &mut PruneLimiter,
+        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
+        delete_callback: &mut impl FnMut(TableRow<T>),
+    ) -> Result<bool, DatabaseError> {
+        let Some(res) = walker.next() else { return Ok(true) };
+
+        let row = res?;
+
+        if !skip_filter(&row) {
+            walker.delete_current()?;
+            limiter.increment_deleted_entries_count();
+            delete_callback(row);
+        }
+
+        Ok(false)
+    }
+
     /// Load shard and remove it. If list is empty, last shard was full or
     /// there are no shards at all.
     fn take_shard<T>(&self, key: T::Key) -> ProviderResult<Vec<u64>>
@@ -1072,7 +1631,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter().collect::<Vec<_>>();
-            return Ok(list)
+            return Ok(list);
         }
         Ok(Vec::new())
     }
@@ -1228,7 +1787,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvide
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
             }
             Ordering::Equal => {}
         }
@@ -1275,7 +1834,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1332,7 +1891,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
                     let sealed = SealedHeader::new(header, hash);
                     if !predicate(&sealed) {
-                        break
+                        break;
                     }
                     headers.push(sealed);
                 }
@@ -1462,11 +2021,11 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
+                return Ok(Some(Vec::new()));
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return Ok(ommers);
         }
 
         Ok(None)
@@ -1723,7 +2282,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
                                 timestamp: header.timestamp,
                             };
 
-                            return Ok(Some((transaction, meta)))
+                            return Ok(Some((transaction, meta)));
                         }
                     }
                 }
@@ -1756,7 +2315,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
                             .map(Into::into)
                             .collect(),
                     ))
-                }
+                };
             }
         }
         Ok(None)
@@ -1836,7 +2395,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProv
                     Ok(Some(Vec::new()))
                 } else {
                     self.receipts_by_tx_range(tx_range).map(Some)
-                }
+                };
             }
         }
         Ok(None)
@@ -1873,7 +2432,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return Ok(Some(withdrawals));
             }
         }
         Ok(None)
@@ -2456,7 +3015,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Writes trie updates. Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0)
+            return Ok(0);
         }
 
         // Track the number of inserted entries.
@@ -2530,7 +3089,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         updates: &StorageTrieUpdates,
     ) -> ProviderResult<usize> {
         if updates.is_empty() {
-            return Ok(0)
+            return Ok(0);
         }
 
         let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
@@ -2752,7 +3311,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })))
+                })));
             }
             self.write_trie_updates(&trie_updates)?;
         }
@@ -2983,7 +3542,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })))
+            })));
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3082,7 +3641,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })))
+            })));
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3109,33 +3668,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 'static> BlockWriter
     for DatabaseProvider<TX, N>
 {
-    /// Inserts the block into the database, always modifying the following tables:
-    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
-    /// * [`Headers`](tables::Headers)
-    /// * [`HeaderNumbers`](tables::HeaderNumbers)
-    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
-    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
-    ///
-    /// If there are transactions in the block, the following tables will be modified:
-    /// * [`Transactions`](tables::Transactions)
-    /// * [`TransactionBlocks`](tables::TransactionBlocks)
-    ///
-    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
-    /// If withdrawals are not empty, this will modify
-    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
-    ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
-    ///
-    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
-    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
-    fn insert_block(
+    fn insert_block_header_and_transaction_data(
         &self,
         block: SealedBlockWithSenders,
+        durations_recorder: &mut metrics::DurationsRecorder,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
-
-        let mut durations_recorder = metrics::DurationsRecorder::default();
 
         self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
         durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
@@ -3160,15 +3698,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
 
-        // insert body ommers data
-        if !block.body.ommers.is_empty() {
-            self.tx.put::<tables::BlockOmmers>(
-                block_number,
-                StoredBlockOmmers { ommers: block.block.body.ommers },
-            )?;
-            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
-        }
-
+        // Transaction data
         let mut next_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
@@ -3238,6 +3768,34 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
             tx_hash_numbers_elapsed,
         );
 
+        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
+        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
+        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
+
+        if !block_indices.is_empty() {
+            self.tx.put::<tables::TransactionBlocks>(block_indices.last_tx_num(), block_number)?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
+        }
+
+        Ok(block_indices)
+    }
+
+    fn insert_block_additional_data(
+        &self,
+        block: SealedBlockWithSenders,
+        durations_recorder: &mut metrics::DurationsRecorder,
+    ) -> ProviderResult<()> {
+        let block_number = block.number;
+
+        // insert body ommers data
+        if !block.block.body.ommers.is_empty() {
+            self.tx.put::<tables::BlockOmmers>(
+                block_number,
+                StoredBlockOmmers { ommers: block.block.body.ommers },
+            )?;
+            durations_recorder.record_relative(metrics::Action::InsertBlockOmmers);
+        }
+
         if let Some(withdrawals) = block.block.body.withdrawals {
             if !withdrawals.is_empty() {
                 self.tx.put::<tables::BlockWithdrawals>(
@@ -3248,14 +3806,40 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
             }
         }
 
-        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
-        self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
-        durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
+        Ok(())
+    }
 
-        if !block_indices.is_empty() {
-            self.tx.put::<tables::TransactionBlocks>(block_indices.last_tx_num(), block_number)?;
-            durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
-        }
+    /// Inserts the block into the database, always modifying the following tables:
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`Headers`](tables::Headers)
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    ///
+    /// If there are transactions in the block, the following tables will be modified:
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    ///
+    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// If withdrawals are not empty, this will modify
+    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify
+    /// [`TransactionSenders`](tables::TransactionSenders).
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
+    fn insert_block(
+        &self,
+        block: SealedBlockWithSenders,
+    ) -> ProviderResult<StoredBlockBodyIndices> {
+        let block_number = block.number;
+        let mut durations_recorder = metrics::DurationsRecorder::default();
+
+        let block_indices =
+            self.insert_block_header_and_transaction_data(block.clone(), &mut durations_recorder)?;
+        self.insert_block_additional_data(block, &mut durations_recorder)?;
 
         debug!(
             target: "providers::db",
@@ -3277,7 +3861,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         let first_number = blocks.first().unwrap().number;

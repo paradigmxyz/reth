@@ -6,6 +6,8 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use std::ops::RangeInclusive;
 
+use crate::providers::metrics;
+
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
@@ -39,6 +41,61 @@ pub trait BlockWriter: Send + Sync {
     /// transition in the block.
     fn insert_block(&self, block: SealedBlockWithSenders)
         -> ProviderResult<StoredBlockBodyIndices>;
+
+    /// Insert additional block data that is not part of the header or transactions.
+    ///
+    /// This function handles the insertion of ommers, withdrawals, and requests data.
+    ///
+    /// # Tables modified
+    /// * If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// * If withdrawals are not empty, this will modify
+    ///   [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// * If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// # Arguments
+    /// * `block` - Reference to the [SealedBlockWithSenders] containing the additional data
+    ///
+    /// # Returns
+    /// * `ProviderResult<()>` - Ok if the insertion was successful, or an error if it failed
+    fn insert_block_additional_data(
+        &self,
+        block: SealedBlockWithSenders,
+        durations_recorder: &mut metrics::DurationsRecorder,
+    ) -> ProviderResult<()>;
+
+    /// Insert block header data and transaction data, making the block canonical.
+    ///
+    /// This function handles the insertion of header-related data and transaction data.
+    /// It calculates the total difficulty and inserts all transaction-related information.
+    ///
+    /// # Tables modified
+    /// Always modifies the following tables:
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`Headers`](tables::Headers)
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    ///
+    /// If there are transactions in the block, the following tables will be modified:
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify
+    /// [`TransactionSenders`](tables::TransactionSenders).
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
+    ///
+    /// # Arguments
+    /// * `block` - Reference to the [SealedBlockWithSenders] to be inserted
+    ///
+    /// # Returns
+    /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
+    fn insert_block_header_and_transaction_data(
+        &self,
+        block: SealedBlockWithSenders,
+        durations_recorder: &mut metrics::DurationsRecorder,
+    ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.
