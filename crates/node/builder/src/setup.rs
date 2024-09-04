@@ -102,7 +102,7 @@ where
 
     let pipeline = builder
         .with_tip_sender(tip_tx)
-        .with_metrics_tx(metrics_tx.clone())
+        .with_metrics_tx(metrics_tx)
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
@@ -114,16 +114,13 @@ where
                 stage_config.clone(),
                 prune_modes.clone(),
             )
-            .set(
-                ExecutionStage::new(
-                    executor,
-                    stage_config.execution.into(),
-                    stage_config.execution_external_clean_threshold(),
-                    prune_modes,
-                    exex_manager_handle,
-                )
-                .with_metrics_tx(metrics_tx),
-            ),
+            .set(ExecutionStage::new(
+                executor,
+                stage_config.execution.into(),
+                stage_config.execution_external_clean_threshold(),
+                prune_modes,
+                exex_manager_handle,
+            )),
         )
         .build(provider_factory, static_file_producer);
 

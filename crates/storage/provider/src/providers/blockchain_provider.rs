@@ -4,7 +4,7 @@ use crate::{
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderRO, EvmEnvProvider, FinalizedBlockReader, HeaderProvider, ProviderError,
     ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -18,6 +18,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
     BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
@@ -1433,6 +1434,20 @@ where
     }
 }
 
+impl<DB> StateReader for BlockchainProvider2<DB>
+where
+    DB: Database + Sync + Send,
+{
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
+            let state = state.block().execution_outcome().clone();
+            Ok(Some(state))
+        } else {
+            self.database.provider()?.get_state(block..=block)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1469,7 +1484,7 @@ mod tests {
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
+        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
         TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
@@ -3044,6 +3059,37 @@ mod tests {
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
             in_memory_block.ommers
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_receipt_provider() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, receipts) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams { tx_count: 1..3, ..Default::default() },
+        )?;
+
+        let blocks = [database_blocks, in_memory_blocks].concat();
+
+        for block in blocks {
+            let block_number = block.number as usize;
+            for (txn_number, _) in block.body.iter().enumerate() {
+                let txn_hash = block.body.get(txn_number).unwrap().hash();
+                let txn_id = provider.transaction_id(txn_hash)?.unwrap();
+                assert_eq!(
+                    provider.receipt(txn_id)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+                assert_eq!(
+                    provider.receipt_by_hash(txn_hash)?.unwrap(),
+                    receipts.get(block_number).unwrap().clone().get(txn_number).unwrap().clone()
+                );
+            }
+        }
 
         Ok(())
     }

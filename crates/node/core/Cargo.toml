@@ -55,6 +55,7 @@ rand.workspace = true
 derive_more.workspace = true
 toml.workspace = true
 serde.workspace = true
+strum = { workspace = true, features = ["derive"] }
 
 # io
 dirs-next = "2.0.0"

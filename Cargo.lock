@@ -7089,10 +7089,12 @@ dependencies = [
  "alloy-eips",
  "auto_impl",
  "futures-util",
+ "metrics",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-metrics",
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-errors",
@@ -7248,6 +7250,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "reth-invalid-block-hooks"
+version = "1.0.6"
+dependencies = [
+ "reth-primitives",
+ "reth-provider",
+ "reth-trie",
 ]
 
 [[package]]
@@ -7533,6 +7544,7 @@ dependencies = [
  "reth-engine-util",
  "reth-evm",
  "reth-exex",
+ "reth-invalid-block-hooks",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -7611,6 +7623,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "strum",
  "tempfile",
  "tokio",
  "toml",

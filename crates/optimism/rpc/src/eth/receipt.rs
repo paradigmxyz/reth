@@ -3,7 +3,7 @@
 use op_alloy_rpc_types::{receipt::L1BlockInfo, OptimismTransactionReceiptFields};
 use reth_chainspec::{ChainSpec, OptimismHardforks};
 use reth_evm_optimism::RethL1BlockInfo;
-use reth_node_api::{FullNodeComponents, NodeCore};
+use reth_node_api::FullNodeComponents;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{
@@ -56,7 +56,7 @@ where
 
 impl<N> OpEthApi<N>
 where
-    N: NodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
 {
     /// Builds a receipt w.r.t. chain spec.
     pub fn build_op_receipt_meta(

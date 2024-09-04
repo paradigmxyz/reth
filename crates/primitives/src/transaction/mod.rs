@@ -309,10 +309,10 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub const fn gas_limit(&self) -> u64 {
         match self {
-            Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit as u64,
+            Self::Legacy(TxLegacy { gas_limit, .. }) |
+            Self::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
+            Self::Eip7702(TxEip7702 { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,

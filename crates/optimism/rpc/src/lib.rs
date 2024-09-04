@@ -14,4 +14,4 @@ pub mod error;
 pub mod eth;
 
 pub use error::OpEthApiError;
-pub use eth::{receipt::OpReceiptFieldsBuilder, OpEthApi};
+pub use eth::OpEthApi;

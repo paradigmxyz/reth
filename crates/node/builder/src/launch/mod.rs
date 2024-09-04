@@ -21,7 +21,7 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeTypes, NodeAddOns, NodeCore};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -34,7 +34,7 @@ use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -48,14 +48,14 @@ use crate::{
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`NodeCore`].
+/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`FullNodeComponents`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as NodeCore>::Provider,
-    <N as NodeCore>::Pool,
-    <N as NodeCore>::Evm,
-    <N as NodeCore>::Network,
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Evm,
+    <N as FullNodeComponents>::Network,
     TaskExecutor,
-    <N as NodeCore>::Provider,
+    <N as FullNodeTypes>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.
@@ -209,6 +209,10 @@ where
 
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
+
+        if let Some(ref hook_type) = ctx.node_config().debug.invalid_block_hook {
+            warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
+        }
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
