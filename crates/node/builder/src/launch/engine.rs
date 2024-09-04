@@ -287,6 +287,7 @@ where
         )
         .await?;
 
+        // TODO: migrate to devmode with https://github.com/paradigmxyz/reth/issues/10104
         if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
             info!(target: "reth::cli", "Using etherscan as consensus client");
 
