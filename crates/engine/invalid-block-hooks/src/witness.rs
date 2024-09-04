@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 
 use alloy_rpc_types_debug::ExecutionWitness;
 use reth_chainspec::ChainSpec;
@@ -15,6 +15,7 @@ use reth_revm::{
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     DatabaseCommit, StateBuilder,
 };
+use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 
 /// Generates a witness for the given block and saves it to a file.
@@ -42,7 +43,7 @@ where
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
         _output: &BlockExecutionOutput<Receipt>,
-        _trie_updates: Option<(&TrieUpdates, B256)>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
@@ -137,12 +138,27 @@ where
         // Generate an execution witness for the aggregated state of accessed accounts.
         // Destruct the cache database to retrieve the state provider.
         let state_provider = db.database.into_inner();
-        let witness = state_provider.witness(HashedPostState::default(), hashed_state)?;
+        let witness = state_provider.witness(HashedPostState::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let path = self.output_directory.join(format!("{}_{}.json", block.number, block.hash()));
+        let mut file = File::options()
+            .create_new(true)
+            .open(self.output_directory.join(format!("{}_{}.jsonl", block.number, block.hash())))?;
         let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
-        std::fs::write(path, serde_json::to_string(&response)?)?;
+        writeln!(&mut file, "{}", serde_json::to_string(&response)?)?;
+
+        // Calculate the state root and trie updates after re-execution. They should match
+        // the original ones.
+        let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
+        let new_trie_updates = (&trie_output, state_root);
+        match trie_updates {
+            Some(trie_updates) if new_trie_updates != trie_updates => {
+                warn!(target: "engine::invalid_block_hooks::witness", "Trie updates mismatch after re-execution");
+                writeln!(&mut file, "{}", serde_json::to_string(&trie_updates)?)?;
+                writeln!(&mut file, "{}", serde_json::to_string(&new_trie_updates)?)?;
+            }
+            _ => {}
+        }
 
         Ok(())
     }

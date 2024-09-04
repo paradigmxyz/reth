@@ -18,7 +18,8 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
-reth-trie.workspace = true
+reth-tracing.workspace = true
+reth-trie = { workspace = true, features = ["serde"] }
 
 # alloy
 alloy-rlp.workspace = true

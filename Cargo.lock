@@ -7270,6 +7270,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-tracing",
  "reth-trie",
  "serde_json",
 ]
