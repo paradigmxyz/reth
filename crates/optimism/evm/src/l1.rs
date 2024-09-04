@@ -344,15 +344,23 @@ mod tests {
 
     #[test]
     fn parse_l1_info_fjord() {
+        // rig
+
         // L1 block info for OP mainnet block 124665056 (stored in input of tx at index 0)
         //
         // https://optimistic.etherscan.io/tx/0x312e290cf36df704a2217b015d6455396830b0ce678b860ebfcc30f41403d7b1
         const DATA: &[u8] = &hex!("440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
 
+        // expected l1 block info verified against expected l1 fee for tx. l1 tx fee listed on OP
+        // mainnet block scanner
+        //
+        // https://github.com/bluealloy/revm/blob/fa5650ee8a4d802f4f3557014dd157adfb074460/crates/revm/src/optimism/l1block.rs#L414-L443
         let l1_base_fee = U256::from(1055991687);
         let l1_base_fee_scalar = U256::from(5227);
         let l1_blob_base_fee = Some(U256::from(1));
         let l1_blob_base_fee_scalar = Some(U256::from(1014213));
+
+        // test
 
         let l1_block_info = parse_l1_info(DATA).unwrap();
 
