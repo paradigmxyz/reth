@@ -204,7 +204,7 @@ impl Stream for ExExNotificationsWithHead<'_> {
             if notification
                 .committed_chain()
                 .or_else(|| notification.reverted_chain())
-                .map_or(false, |chain| chain.first().number > this.1.number)
+                .map_or(false, |chain| chain.first().number > this.1.block.number)
             {
                 return Poll::Ready(Some(notification))
             }
