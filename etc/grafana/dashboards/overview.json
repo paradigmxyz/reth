@@ -147,9 +147,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -217,9 +215,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -287,9 +283,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -357,9 +351,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -427,9 +419,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -497,9 +487,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -579,9 +567,7 @@
         "minVizWidth": 75,
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -649,9 +635,7 @@
         "namePlacement": "auto",
         "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": [
-            "last"
-          ],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
@@ -751,9 +735,7 @@
         "orientation": "auto",
         "percentChangeColorMode": "standard",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1632,22 +1614,16 @@
       },
       "id": 48,
       "options": {
-        "displayLabels": [
-          "name"
-        ],
+        "displayLabels": ["name"],
         "legend": {
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1806,15 +1782,11 @@
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -1974,9 +1946,7 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": [
-            "sum"
-          ],
+          "reducer": ["sum"],
           "show": false
         },
         "showHeader": true
@@ -2142,22 +2112,16 @@
       },
       "id": 202,
       "options": {
-        "displayLabels": [
-          "name"
-        ],
+        "displayLabels": ["name"],
         "legend": {
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "values": ["value"]
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -2307,9 +2271,7 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": [
-            "sum"
-          ],
+          "reducer": ["sum"],
           "show": false
         },
         "showHeader": true
@@ -2457,9 +2419,7 @@
         "footer": {
           "countRows": false,
           "fields": "",
-          "reducer": [
-            "sum"
-          ],
+          "reducer": ["sum"],
           "show": false
         },
         "showHeader": true
@@ -2696,7 +2656,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The amount of gas processed by the execution stage in millions per second.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
+      "description": "The amount of gas processed by the executor per second.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2743,7 +2703,7 @@
               }
             ]
           },
-          "unit": "Mgas/s",
+          "unit": "gas/s",
           "unitScale": true
         },
         "overrides": []
@@ -2774,7 +2734,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[30s])",
+          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30s])",
           "legendFormat": "Gas/s (30s)",
           "range": true,
           "refId": "A"
@@ -2785,7 +2745,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[1m])",
+          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
           "hide": false,
           "legendFormat": "Gas/s (1m)",
           "range": true,
@@ -2797,7 +2757,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[5m])",
+          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
           "hide": false,
           "legendFormat": "Gas/s (5m)",
           "range": true,
@@ -2809,7 +2769,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_processed_total{instance=~\"$instance\"}[10m])",
+          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
           "hide": false,
           "legendFormat": "Gas/s (10m)",
           "range": true,
@@ -8099,9 +8059,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
