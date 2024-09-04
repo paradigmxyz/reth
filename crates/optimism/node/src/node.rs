@@ -13,7 +13,7 @@ use reth_node_builder::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
-    node::{FullNodeTypes, NodeTypes},
+    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_optimism_consensus::OptimismBeaconConsensus;
@@ -100,8 +100,11 @@ where
 
 impl NodeTypes for OptimismNode {
     type Primitives = ();
-    type Engine = OptimismEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+impl NodeTypesWithEngine for OptimismNode {
+    type Engine = OptimismEngineTypes;
 }
 
 /// Add-ons w.r.t. optimism.

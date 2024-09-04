@@ -1,5 +1,5 @@
 // re-export the node api types
-pub use reth_node_api::{FullNodeTypes, NodeTypes};
+pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 
 use std::{marker::PhantomData, sync::Arc};
 
@@ -20,10 +20,10 @@ use crate::{
     NodeAdapter, NodeAddOns,
 };
 
-/// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
+/// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
+pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
@@ -60,9 +60,16 @@ where
 {
     type Primitives = N::Primitives;
 
-    type Engine = N::Engine;
-
     type ChainSpec = N::ChainSpec;
+}
+
+impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>
+where
+    N: FullNodeTypes,
+    C: Send + Sync + Unpin + 'static,
+    AO: Send + Sync + Unpin + Clone + 'static,
+{
+    type Engine = N::Engine;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>

@@ -17,7 +17,7 @@ use reth_node_builder::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
-    node::{FullNodeTypes, NodeTypes},
+    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, ConfigureEvm, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -48,7 +48,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes,
-        <Node as NodeTypes>::Engine: PayloadTypes<
+        <Node as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -66,8 +66,11 @@ impl EthereumNode {
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+impl NodeTypesWithEngine for EthereumNode {
+    type Engine = EthEngineTypes;
 }
 
 /// Add-ons w.r.t. l1 ethereum.
@@ -215,7 +218,7 @@ where
     Node: FullNodeTypes,
     Evm: ConfigureEvm,
     Pool: TransactionPool + Unpin + 'static,
-    <Node as NodeTypes>::Engine: PayloadTypes<
+    <Node as NodeTypesWithEngine>::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
