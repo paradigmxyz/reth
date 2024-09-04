@@ -30,13 +30,19 @@ pub type StaticFileProducerWithResult<N> = (StaticFileProducer<N>, StaticFilePro
 
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StaticFileProducer<N: NodeTypesWithDB>(Arc<Mutex<StaticFileProducerInner<N>>>);
 
 impl<N: NodeTypesWithDB> StaticFileProducer<N> {
     /// Creates a new [`StaticFileProducer`].
     pub fn new(provider_factory: ProviderFactory<N>, prune_modes: PruneModes) -> Self {
         Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
+    }
+}
+
+impl<N: NodeTypesWithDB> Clone for StaticFileProducer<N> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
