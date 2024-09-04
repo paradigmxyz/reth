@@ -7,8 +7,8 @@ pub trait InvalidBlockHook: Send + Sync {
     /// Invoked when a bad block is encountered.
     fn on_invalid_block(
         &self,
+        parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        header: &SealedHeader,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()>;
@@ -17,8 +17,8 @@ pub trait InvalidBlockHook: Send + Sync {
 impl<F> InvalidBlockHook for F
 where
     F: Fn(
-            &SealedBlockWithSenders,
             &SealedHeader,
+            &SealedBlockWithSenders,
             &BlockExecutionOutput<Receipt>,
             Option<(&TrieUpdates, B256)>,
         ) -> eyre::Result<()>
@@ -27,11 +27,11 @@ where
 {
     fn on_invalid_block(
         &self,
+        parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        header: &SealedHeader,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
-        self(block, header, output, trie_updates)
+        self(parent_header, block, output, trie_updates)
     }
 }

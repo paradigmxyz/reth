@@ -11,8 +11,8 @@ pub struct NoopInvalidBlockHook;
 impl InvalidBlockHook for NoopInvalidBlockHook {
     fn on_invalid_block(
         &self,
+        _parent_header: &SealedHeader,
         _block: &SealedBlockWithSenders,
-        _header: &SealedHeader,
         _output: &BlockExecutionOutput<Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
@@ -32,13 +32,13 @@ impl std::fmt::Debug for InvalidBlockHooks {
 impl InvalidBlockHook for InvalidBlockHooks {
     fn on_invalid_block(
         &self,
+        parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        header: &SealedHeader,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         for hook in &self.0 {
-            hook.on_invalid_block(block, header, output, trie_updates)?;
+            hook.on_invalid_block(parent_header, block, output, trie_updates)?;
         }
 
         Ok(())

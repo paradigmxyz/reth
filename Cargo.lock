@@ -7264,9 +7264,12 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "eyre",
+ "reth-chainspec",
  "reth-engine-primitives",
+ "reth-evm",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-trie",
  "serde_json",
 ]

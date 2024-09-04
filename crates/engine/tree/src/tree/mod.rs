@@ -1958,8 +1958,8 @@ where
         ) {
             // call post-block hook
             if let Err(hook_err) = self.invalid_block_hook.on_invalid_block(
-                &block.seal_slow(),
                 &parent_block,
+                &block.seal_slow(),
                 &output,
                 None,
             ) {
@@ -1976,8 +1976,8 @@ where
         if state_root != block.state_root {
             // call post-block hook
             if let Err(hook_err) = self.invalid_block_hook.on_invalid_block(
-                &block.clone().seal_slow(),
                 &parent_block,
+                &block.clone().seal_slow(),
                 &output,
                 Some((&trie_output, state_root)),
             ) {

@@ -856,6 +856,7 @@ where
                             Box::new(reth_invalid_block_hooks::Witness::new(
                                 output_directory,
                                 self.blockchain_db().clone(),
+                                self.components().evm_config().clone(),
                             )) as Box<dyn InvalidBlockHook>
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
