@@ -192,9 +192,8 @@ impl OpReceiptFieldsBuilder {
 #[cfg(test)]
 mod test {
     use alloy_primitives::hex;
-    use reth_evm_optimism::parse_l1_info;
     use reth_optimism_chainspec::OP_MAINNET;
-    use reth_primitives::{Block, U256};
+    use reth_primitives::Block;
 
     use super::*;
 
