@@ -9,6 +9,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::DashMap;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -22,7 +23,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_nippy_jar::{NippyJar, NippyJarChecker};
+use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
@@ -82,13 +83,71 @@ impl StaticFileProvider {
     }
 
     /// Creates a new [`StaticFileProvider`] with read-only access.
-    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        Self::new(path, StaticFileAccess::RO)
+    ///
+    /// `watch_directory` will keep track of changes on the directory and re-initialize its inner
+    /// index accordingly (eg. node pushes a new block).
+    pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
+        let provider = Self::new(path, StaticFileAccess::RO)?;
+
+        if watch_directory {
+            provider.watch_directory();
+        }
+
+        Ok(provider)
     }
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
     pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
         Self::new(path, StaticFileAccess::RW)
+    }
+
+    /// Watches the directory for changes and manually update the in-memory index when modifications
+    /// are detected.
+    ///
+    /// This may be necessary, since a non-node process that owns a [`StaticFileProvider`] does not
+    /// receive `update_index` notifications from a node that appends/truncates data.
+    pub fn watch_directory(&self) {
+        let provider = self.clone();
+        tokio::spawn(async move {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+            let mut watcher = RecommendedWatcher::new(
+                move |res| tx.blocking_send(res).unwrap(),
+                notify::Config::default(),
+            )
+            .expect("failed to create watcher");
+
+            watcher
+                .watch(&provider.path, RecursiveMode::NonRecursive)
+                .expect("failed to watch path");
+
+            while let Some(res) = rx.recv().await {
+                match res {
+                    Ok(event) => {
+                        if !event.kind.is_modify() {
+                            continue
+                        }
+
+                        // We only trigger a re-initialization if a configuration file was
+                        // modified. This means that a
+                        // static_file_provider.commit() was called on the node after
+                        // appending/truncating rows
+                        if event.paths.iter().any(|segment| {
+                            segment.is_file() &&
+                                segment.ends_with(CONFIG_FILE_EXTENSION) &&
+                                StaticFileSegment::parse_filename(
+                                    &segment.file_stem().expect("qed").to_string_lossy(),
+                                )
+                                .is_some()
+                                && { info!(target: "providers::static_file", file = ?segment.file_stem(), "re-initializing static file provider index"); true}
+                        }) {
+                            provider.initialize_index().expect("failed to re-initialize index");
+                        }
+                    }
+
+                    Err(e) => warn!(target: "providers::watcher", "watch error: {:?}", e),
+                }
+            }
+        });
     }
 }
 
