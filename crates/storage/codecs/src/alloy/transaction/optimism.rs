@@ -1,5 +1,5 @@
 use crate::Compact;
-use alloy_primitives::{Address, Bytes,  TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_alloy_consensus::TxDeposit as AlloyTxDeposit;
 use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
