@@ -12,7 +12,7 @@ use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     MemoryOverlayStateProvider,
 };
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
@@ -33,6 +33,8 @@ use std::{
     time::Instant,
 };
 use tracing::trace;
+
+use super::ProviderNodeTypes;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -57,7 +59,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// Create a new provider using only the database, fetching the latest header from
     /// the database to initialize the provider.
     pub fn new(database: ProviderFactory<N>) -> ProviderResult<Self> {
@@ -239,7 +241,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// Ensures that the given block number is canonical (synced)
     ///
     /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
@@ -259,23 +261,19 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> DatabaseProviderFactory<N::DB>
-    for BlockchainProvider2<N>
-{
+impl<N: ProviderNodeTypes> DatabaseProviderFactory<N::DB> for BlockchainProvider2<N> {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<N::DB>> {
         self.database.provider()
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProviderFactory
-    for BlockchainProvider2<N>
-{
+impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider2<N> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.database.static_file_provider()
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> HeaderProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider2<N> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         if let Some(block_state) = self.canonical_in_memory_state.state_by_hash(*block_hash) {
             return Ok(Some(block_state.block().block().header.header().clone()));
@@ -375,7 +373,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> HeaderProvider for BlockchainPro
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockHashReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider2<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         if let Some(block_state) = self.canonical_in_memory_state.state_by_number(number) {
             return Ok(Some(block_state.hash()));
@@ -402,7 +400,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockHashReader for BlockchainPr
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockNumReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider2<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         Ok(self.canonical_in_memory_state.chain_info())
     }
@@ -424,7 +422,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockNumReader for BlockchainPro
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockIdReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockIdReader for BlockchainProvider2<N> {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
         Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
@@ -438,7 +436,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockIdReader for BlockchainProv
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         match source {
             BlockSource::Any | BlockSource::Canonical => {
@@ -637,7 +635,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BlockReader for BlockchainProvid
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TransactionsProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider2<N> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         // First, check the database
         if let Some(id) = self.database.transaction_id(tx_hash)? {
@@ -827,7 +825,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TransactionsProvider for Blockch
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ReceiptProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider2<N> {
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         let provider = self.database.provider()?;
         let Some((block_state, tx_index)) = self.block_state_by_tx_id(&provider, id)? else {
@@ -889,7 +887,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ReceiptProvider for BlockchainPr
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ReceiptProviderIdExt for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider2<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
@@ -920,7 +918,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ReceiptProviderIdExt for Blockch
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> WithdrawalsProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -952,7 +950,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> WithdrawalsProvider for Blockcha
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> RequestsProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> RequestsProvider for BlockchainProvider2<N> {
     fn requests_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -970,7 +968,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> RequestsProvider for BlockchainP
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StageCheckpointReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
     }
@@ -984,7 +982,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StageCheckpointReader for Blockc
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> EvmEnvProvider for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -1054,7 +1052,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> EvmEnvProvider for BlockchainPro
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PruneCheckpointReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> PruneCheckpointReader for BlockchainProvider2<N> {
     fn get_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -1075,7 +1073,7 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StateProviderFactory for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider2<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -1332,7 +1330,7 @@ impl<N: NodeTypesWithDB> ForkChoiceSubscriptions for BlockchainProvider2<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ChangeSetReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
     fn account_block_changeset(
         &self,
         block_number: BlockNumber,
@@ -1357,7 +1355,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> ChangeSetReader for BlockchainPr
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> AccountReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         // use latest state provider
@@ -1366,7 +1364,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> AccountReader for BlockchainProv
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StateReader for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> StateReader for BlockchainProvider2<N> {
     fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         if let Some(state) = self.canonical_in_memory_state.state_by_number(block) {
             let state = state.block().execution_outcome().clone();

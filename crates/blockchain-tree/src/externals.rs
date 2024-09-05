@@ -1,14 +1,13 @@
 //! Blockchain tree externals.
 
-use reth_chainspec::ChainSpec;
 use reth_consensus::Consensus;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
-    StatsReader,
+    providers::ProviderNodeTypes, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -32,7 +31,7 @@ pub struct TreeExternals<N: NodeTypesWithDB, E> {
     pub(crate) executor_factory: E,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>, E> TreeExternals<N, E> {
+impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     /// Create new tree externals.
     pub fn new(
         provider_factory: ProviderFactory<N>,
@@ -43,7 +42,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>, E> TreeExternals<N, E> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>, E> TreeExternals<N, E> {
+impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers

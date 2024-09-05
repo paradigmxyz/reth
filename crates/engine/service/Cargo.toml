@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-beacon-consensus.workspace = true
-reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
@@ -42,6 +41,7 @@ reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-chainspec.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use reth_chainspec::ChainSpec;
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_downloaders::{
@@ -14,9 +13,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
-use reth_node_api::NodeTypesWithDB;
 use reth_node_core::primitives::{BlockNumber, B256};
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -39,7 +37,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<N>>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     Client: BlockClient + 'static,
     Executor: BlockExecutorProvider,
 {
@@ -85,7 +83,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<N>>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     Executor: BlockExecutorProvider,

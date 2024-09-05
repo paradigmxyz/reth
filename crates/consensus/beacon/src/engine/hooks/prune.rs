@@ -6,11 +6,10 @@ use crate::{
 };
 use futures::FutureExt;
 use metrics::Counter;
-use reth_chainspec::ChainSpec;
 use reth_errors::{RethError, RethResult};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::BlockNumber;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -39,7 +38,7 @@ impl<N: NodeTypesWithDB> fmt::Debug for PruneHook<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PruneHook<N> {
+impl<N: ProviderNodeTypes> PruneHook<N> {
     /// Create a new instance
     pub fn new(
         pruner: Pruner<N::DB, ProviderFactory<N>>,
@@ -118,7 +117,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PruneHook<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> EngineHook for PruneHook<N> {
+impl<N: ProviderNodeTypes> EngineHook for PruneHook<N> {
     fn name(&self) -> &'static str {
         "Prune"
     }

@@ -9,7 +9,6 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
@@ -20,9 +19,10 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
+    ProviderError, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -92,7 +92,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 
 impl<N, E> BlockchainTree<N, E>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
@@ -1424,10 +1424,7 @@ mod tests {
         TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        factory: &ProviderFactory<N>,
-        mut genesis: SealedBlock,
-    ) {
+    fn setup_genesis<N: ProviderNodeTypes>(factory: &ProviderFactory<N>, mut genesis: SealedBlock) {
         // insert genesis to db.
 
         genesis.header.set_block_number(10);

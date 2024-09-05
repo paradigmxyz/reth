@@ -6,12 +6,14 @@ use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_node_api::NodeTypesWithDB;
 use reth_primitives::{
     b256, constants::ETH_TO_WEI, Address, Block, BlockWithSenders, Genesis, GenesisAccount, Header,
     Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
 };
-use reth_provider::{BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
+    ProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use secp256k1::Keypair;
@@ -53,7 +55,7 @@ pub(crate) fn execute_block_and_commit_to_database<N>(
     block: &BlockWithSenders,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
 {
     let provider = provider_factory.provider()?;
 
@@ -156,7 +158,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     key_pair: Keypair,
 ) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
@@ -177,7 +179,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
     key_pair: Keypair,
 ) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 

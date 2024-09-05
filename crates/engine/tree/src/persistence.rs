@@ -2,12 +2,12 @@
 
 use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
 use reth_errors::ProviderError;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::B256;
 use reth_provider::{
-    writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::{
@@ -37,7 +37,7 @@ pub struct PersistenceService<N: NodeTypesWithDB> {
     metrics: PersistenceMetrics,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PersistenceService<N> {
+impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
@@ -59,7 +59,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PersistenceService<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PersistenceService<N> {
+impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -165,7 +165,7 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+    pub fn spawn_service<N: ProviderNodeTypes>(
         provider_factory: ProviderFactory<N>,
         pruner: Pruner<N::DB, ProviderFactory<N>>,
     ) -> Self {

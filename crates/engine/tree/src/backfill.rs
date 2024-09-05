@@ -8,8 +8,8 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_chainspec::ChainSpec;
 use reth_node_types::NodeTypesWithDB;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -89,7 +89,7 @@ pub struct PipelineSync<N: NodeTypesWithDB> {
     pending_pipeline_target: Option<PipelineTarget>,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PipelineSync<N> {
+impl<N: ProviderNodeTypes> PipelineSync<N> {
     /// Create a new instance.
     pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
@@ -178,7 +178,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> PipelineSync<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> BackfillSync for PipelineSync<N> {
+impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
     fn on_action(&mut self, event: BackfillAction) {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),

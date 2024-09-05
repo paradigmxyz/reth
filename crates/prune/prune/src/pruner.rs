@@ -5,11 +5,12 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use alloy_primitives::BlockNumber;
-use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_node_types::NodeTypesWithDB;
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
+use reth_provider::{
+    providers::ProviderNodeTypes, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader,
+};
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
@@ -314,7 +315,7 @@ impl<DB: Database> Pruner<DB, ()> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pruner<N::DB, ProviderFactory<N>> {
+impl<N: ProviderNodeTypes> Pruner<N::DB, ProviderFactory<N>> {
     /// Run the pruner. This will only prune data up to the highest finished ExEx height, if there
     /// are no ExExes.
     ///

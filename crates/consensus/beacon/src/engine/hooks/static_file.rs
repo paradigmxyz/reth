@@ -5,10 +5,10 @@ use crate::{
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
-use reth_chainspec::ChainSpec;
 use reth_errors::RethResult;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
+use reth_provider::providers::ProviderNodeTypes;
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -26,7 +26,7 @@ pub struct StaticFileHook<N: NodeTypesWithDB> {
     task_spawner: Box<dyn TaskSpawner>,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileHook<N> {
+impl<N: ProviderNodeTypes> StaticFileHook<N> {
     /// Create a new instance
     pub fn new(
         static_file_producer: StaticFileProducer<N>,
@@ -127,7 +127,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileHook<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> EngineHook for StaticFileHook<N> {
+impl<N: ProviderNodeTypes> EngineHook for StaticFileHook<N> {
     fn name(&self) -> &'static str {
         "StaticFile"
     }

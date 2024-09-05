@@ -4,7 +4,6 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, PayloadTypes};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
@@ -20,8 +19,8 @@ use reth_primitives::{
     B256,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
-    StageCheckpointReader,
+    providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
+    ChainSpecProvider, ProviderError, StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -226,7 +225,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -1790,14 +1789,14 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     Client: BlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
         + CanonChainTracker
         + StageCheckpointReader
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + Unpin
         + 'static,
 {
@@ -2154,7 +2153,7 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+    fn insert_blocks<'a, N: ProviderNodeTypes>(
         provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {

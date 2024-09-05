@@ -7,7 +7,6 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chainspec::ChainSpec;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
@@ -15,8 +14,8 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
-    ProviderError,
+    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
+    FullExecutionDataProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -38,7 +37,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -109,7 +108,7 @@ where
 
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
@@ -172,7 +171,7 @@ where
 
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn find_pending_state_provider(
@@ -187,7 +186,7 @@ where
 
 impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {

@@ -9,17 +9,15 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
     BlockAttachment, BlockValidationKind,
 };
-use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::{BundleStateProvider, ConsistentDbView},
+    providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
     FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -77,7 +75,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let execution_outcome = ExecutionOutcome::default();
@@ -115,7 +113,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let parent_number =
@@ -178,7 +176,7 @@ impl AppendableChain {
     ) -> Result<(ExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
         EDP: FullExecutionDataProvider,
-        N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         // some checks are done before blocks comes here.
@@ -283,7 +281,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
-        N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let parent_block = self.chain.tip();

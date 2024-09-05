@@ -5,12 +5,12 @@ use crate::{PipelineTarget, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
-use reth_chainspec::ChainSpec;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    writer::UnifiedStorageWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, FinalizedBlockReader,
+    FinalizedBlockWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -81,7 +81,7 @@ pub struct Pipeline<N: NodeTypesWithDB> {
     metrics_tx: Option<MetricEventsSender>,
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
+impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<N::DB> {
         PipelineBuilder::default()
@@ -107,7 +107,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
+impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
@@ -487,7 +487,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> Pipeline<N> {
     }
 }
 
-fn on_stage_error<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn on_stage_error<N: ProviderNodeTypes>(
     factory: &ProviderFactory<N>,
     stage_id: StageId,
     prev_checkpoint: Option<StageCheckpoint>,

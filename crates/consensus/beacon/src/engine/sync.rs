@@ -5,13 +5,13 @@ use crate::{
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
-use reth_chainspec::ChainSpec;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockNumber, SealedBlock, B256};
+use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
@@ -63,7 +63,7 @@ where
 
 impl<N, Client> EngineSyncController<N, Client>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     Client: BlockClient + 'static,
 {
     /// Create a new instance
@@ -412,7 +412,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{BlockBody, Header, SealedHeader};
     use reth_provider::{
@@ -520,7 +520,7 @@ mod tests {
             chain_spec: Arc<ChainSpec>,
         ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
-            N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+            N: ProviderNodeTypes,
             Client: BlockClient + 'static,
         {
             let client = self
