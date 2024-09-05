@@ -238,14 +238,10 @@ where
         match err {
             EVMError::Transaction(invalid_tx) => match invalid_tx {
                 InvalidTransaction::NonceTooLow { tx, state } => {
-                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
-                        tx,
-                        state,
-                    })
+                    Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow { tx, state })
                 }
                 _ => RpcInvalidTransactionError::from(invalid_tx).into(),
             },
-            // {RpcInvalidTransactionError::from(err).into()},
             EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
