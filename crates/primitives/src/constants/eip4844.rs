@@ -8,29 +8,12 @@ pub use alloy_eips::eip4844::{
     TARGET_BLOBS_PER_BLOCK, TARGET_DATA_GAS_PER_BLOCK, VERSIONED_HASH_VERSION_KZG,
 };
 
-// These 2 to silence unused
-#[cfg(all(feature = "c-kzg", not(feature = "std")))]
-use tempfile as _;
+// This to silence unused
 #[cfg(all(not(feature = "c-kzg"), feature = "std"))]
 use thiserror as _;
 
 #[cfg(all(feature = "c-kzg", feature = "std"))]
 mod trusted_setup {
-    use crate::kzg::KzgSettings;
-    use std::io::Write;
-
-    /// Loads the trusted setup parameters from the given bytes and returns the [`KzgSettings`].
-    ///
-    /// This creates a temp file to store the bytes and then loads the [`KzgSettings`] from the file
-    /// via [`KzgSettings::load_trusted_setup_file`].
-    pub fn load_trusted_setup_from_bytes(
-        bytes: &[u8],
-    ) -> Result<KzgSettings, LoadKzgSettingsError> {
-        let mut file = tempfile::NamedTempFile::new().map_err(LoadKzgSettingsError::TempFileErr)?;
-        file.write_all(bytes).map_err(LoadKzgSettingsError::TempFileErr)?;
-        KzgSettings::load_trusted_setup_file(file.path()).map_err(LoadKzgSettingsError::KzgError)
-    }
-
     /// Error type for loading the trusted setup.
     #[derive(Debug, thiserror::Error)]
     pub enum LoadKzgSettingsError {
