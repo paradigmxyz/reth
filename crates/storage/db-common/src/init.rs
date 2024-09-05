@@ -548,7 +548,9 @@ mod tests {
     };
     use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_provider::test_utils::{
+        create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
+    };
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -594,7 +596,7 @@ mod tests {
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::new(
+        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
