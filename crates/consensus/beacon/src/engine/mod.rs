@@ -1246,7 +1246,7 @@ where
                 let event = if attachment.is_canonical() {
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
-                    BeaconConsensusEngineEvent::ForkBlockAdded(block)
+                    BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed)
                 };
                 self.event_sender.notify(event);
                 PayloadStatusEnum::Valid
