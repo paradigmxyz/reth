@@ -12,8 +12,8 @@ use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
 use reth_transaction_pool::error::{
-    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
-    PoolTransactionError,
+    Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    PoolError, PoolErrorKind, PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, OutOfGasError};
 use revm_inspectors::tracing::MuxError;
@@ -605,9 +605,12 @@ pub enum RpcPoolError {
     /// Custom pool error
     #[error(transparent)]
     PoolTransactionError(Box<dyn PoolTransactionError>),
-    /// Eip-4844 related error
+    /// EIP-4844 related error
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
+    /// EIP-7702 related error
+    #[error(transparent)]
+    Eip7702(#[from] Eip7702PoolTransactionError),
     /// Thrown if a conflicting transaction type is already in the pool
     ///
     /// In other words, thrown if a transaction with the same sender that violates the exclusivity
@@ -659,6 +662,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
+            InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
             InvalidPoolTransactionError::Overdraft => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds)
             }
