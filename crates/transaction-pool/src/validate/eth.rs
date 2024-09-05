@@ -359,11 +359,14 @@ where
             }
         }
 
+        let tx_nonce = transaction.nonce();
+
         // Checks for nonce
-        if transaction.nonce() < account.nonce {
+        if tx_nonce < account.nonce {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::NonceNotConsistent.into(),
+                InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
+                    .into(),
             )
         }
 
