@@ -19,10 +19,7 @@ use tokio::sync::{
     mpsc::{self, error::SendError, Receiver, UnboundedReceiver, UnboundedSender},
     watch,
 };
-use tokio_util::{
-    either::Either,
-    sync::{PollSendError, PollSender, ReusableBoxFuture},
-};
+use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
 /// Metrics for an `ExEx`.
 #[derive(Metrics)]
@@ -143,10 +140,7 @@ impl ExExHandle {
     }
 }
 
-/// A stream of [`ExExNotification`]s returned by [`ExExNotificationsSubscriber::subscribe`].
-pub type ExExNotifications = Either<ExExNotificationsWithoutHead, ExExNotificationsWithHead>;
-
-/// A subscriber for [`ExExNotifications`].
+/// A subscriber for a stream of [`ExExNotification`]s.
 #[derive(Debug)]
 pub struct ExExNotificationsSubscriber {
     notifications: Receiver<ExExNotification>,
@@ -160,7 +154,7 @@ impl ExExNotificationsSubscriber {
 
     /// Subscribe to notifications.
     pub fn subscribe(self) -> ExExNotifications {
-        ExExNotifications::Left(ExExNotificationsWithoutHead(self.notifications))
+        ExExNotifications(self.notifications)
     }
 
     // TODO(alexey): uncomment when backfill is implemented in `ExExNotificationsWithHead`
@@ -168,16 +162,16 @@ impl ExExNotificationsSubscriber {
     // ///
     // /// Notifications will be sent starting from the head, not inclusive. For example, if
     // /// `head.number == 10`, then the first notification will be with `block.number == 11`.
-    // pub fn subscribe_with_head(head: ExExHead) -> ExExNotifications {
-    //     ExExNotifications::Right(ExExNotificationsWithHead(self.notifications, head))
+    // pub fn subscribe_with_head(head: ExExHead) -> ExExNotificationsWithHead {
+    //     ExExNotificationsWithHead(self.notifications, head)
     // }
 }
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 #[derive(Debug)]
-pub struct ExExNotificationsWithoutHead(Receiver<ExExNotification>);
+pub struct ExExNotifications(Receiver<ExExNotification>);
 
-impl Stream for ExExNotificationsWithoutHead {
+impl Stream for ExExNotifications {
     type Item = ExExNotification;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
