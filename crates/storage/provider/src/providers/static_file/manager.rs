@@ -108,10 +108,10 @@ impl StaticFileProvider {
     /// receive `update_index` notifications from a node that appends/truncates data.
     pub fn watch_directory(&self) {
         let provider = self.clone();
-        tokio::spawn(async move {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        std::thread::spawn(move || {
+            let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
-                move |res| tx.blocking_send(res).unwrap(),
+                move |res| tx.send(res).unwrap(),
                 notify::Config::default(),
             )
             .expect("failed to create watcher");
@@ -123,7 +123,7 @@ impl StaticFileProvider {
             // Some backends send repeated modified events
             let mut last_event_timestamp = None;
 
-            while let Some(res) = rx.recv().await {
+            while let Ok(res) = rx.recv() {
                 match res {
                     Ok(event) => {
                         // We only care about modified data events
