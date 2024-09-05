@@ -266,10 +266,10 @@ mod tests {
     };
     use alloy_primitives::{B256, U256};
     use assert_matches::assert_matches;
-    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
-        providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
+        ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -277,13 +277,10 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
-    use std::{
-        sync::{mpsc::channel, Arc},
-        time::Duration,
-    };
+    use std::{sync::mpsc::channel, time::Duration};
     use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, TempDir) {
+    fn setup() -> (ProviderFactory<MockNodeTypesWithDB>, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
