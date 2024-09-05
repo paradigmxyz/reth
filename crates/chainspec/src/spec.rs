@@ -522,10 +522,11 @@ impl ChainSpec {
             ForkCondition::Timestamp(timestamp) => {
                 // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
                 // if one exists, and include its block_num in the returned Head
-                if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
-                    return Head { timestamp, number: last_block_num, ..Default::default() }
+                Head {
+                    timestamp,
+                    number: self.last_block_fork_before_merge_or_timestamp().unwrap_or_default(),
+                    ..Default::default()
                 }
-                Head { timestamp, ..Default::default() }
             }
             ForkCondition::TTD { total_difficulty, .. } => {
                 Head { total_difficulty, ..Default::default() }
@@ -695,7 +696,7 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks: ChainHardforks::new(hardforks),
+            hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
             #[cfg(feature = "optimism")]

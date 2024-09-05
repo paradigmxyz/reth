@@ -538,6 +538,13 @@ Debug:
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
+      --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
+          Determines which type of bad block hook to install
+
+          Example: `witness,prestate`
+
+          [possible values: witness, pre-state, opcode]
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build

@@ -7,6 +7,7 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_builder::NodeTypesWithEngine;
 
 pub mod drop;
 pub mod dump;
@@ -40,16 +41,17 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<ChainSpec>) -> E,
     {
         match self.command {
-            Subcommands::Run(command) => command.execute(ctx, executor).await,
-            Subcommands::Drop(command) => command.execute().await,
-            Subcommands::Dump(command) => command.execute(executor).await,
-            Subcommands::Unwind(command) => command.execute().await,
+            Subcommands::Run(command) => command.execute::<N, _, _>(ctx, executor).await,
+            Subcommands::Drop(command) => command.execute::<N>().await,
+            Subcommands::Dump(command) => command.execute::<N, _, _>(executor).await,
+            Subcommands::Unwind(command) => command.execute::<N>().await,
         }
     }
 }

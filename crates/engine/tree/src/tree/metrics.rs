@@ -1,12 +1,22 @@
+use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
 /// Metrics for the `EngineApi`.
+#[derive(Debug, Default)]
+pub(crate) struct EngineApiMetrics {
+    /// Engine API-specific metrics.
+    pub(crate) engine: EngineMetrics,
+    /// Block executor metrics.
+    pub(crate) executor: ExecutorMetrics,
+}
+
+/// Metrics for the `EngineApi`.
 #[derive(Metrics)]
 #[metrics(scope = "consensus.engine.beacon")]
-pub(crate) struct EngineApiMetrics {
+pub(crate) struct EngineMetrics {
     /// How many executed blocks are currently stored.
     pub(crate) executed_blocks: Gauge,
     /// The number of times the pipeline was run.

@@ -301,9 +301,7 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip2930, TxEip4844, Withdrawals,
-    };
+    use reth_primitives::{Account, Header, Receipt, ReceiptWithBloom, SealedHeader, Withdrawals};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
@@ -342,8 +340,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 
@@ -373,8 +369,6 @@ mod tests {
         assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
         assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
         assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
-        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
-        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
         assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }

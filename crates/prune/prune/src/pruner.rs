@@ -7,7 +7,10 @@ use crate::{
 use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
+use reth_node_types::NodeTypesWithDB;
+use reth_provider::{
+    providers::ProviderNodeTypes, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader,
+};
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
@@ -69,11 +72,11 @@ impl<DB> Pruner<DB, ()> {
     }
 }
 
-impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
+impl<N: NodeTypesWithDB> Pruner<N::DB, ProviderFactory<N>> {
     /// Crates a new pruner with the given provider factory.
     pub fn new(
-        provider_factory: ProviderFactory<DB>,
-        segments: Vec<Box<dyn Segment<DB>>>,
+        provider_factory: ProviderFactory<N>,
+        segments: Vec<Box<dyn Segment<N::DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
         timeout: Option<Duration>,
@@ -312,7 +315,7 @@ impl<DB: Database> Pruner<DB, ()> {
     }
 }
 
-impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
+impl<N: ProviderNodeTypes> Pruner<N::DB, ProviderFactory<N>> {
     /// Run the pruner. This will only prune data up to the highest finished ExEx height, if there
     /// are no ExExes.
     ///
