@@ -226,10 +226,10 @@ Networking:
 
           [default: 25600]
 
-      --docker-if <DOCKER>
-          Name of docker non-host interface used to communicate with peers.
+      --net-if <IF_NAME>
+          Name of network interface used to communicate with peers.
 
-          If flags is set, but no value is passed, the default interface `eth0` is tried.
+          If flags is set, but no value is passed, the default interface for docker `eth0` is tried.
 
       --engine-api-store <PATH>
           The path to read engine API messages from
