@@ -11,6 +11,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) engine: EngineMetrics,
     /// Block executor metrics.
     pub(crate) executor: ExecutorMetrics,
+    /// Metrics for block validation
+    pub(crate) block_validation: BlockValidationMetrics,
 }
 
 /// Metrics for the `EngineApi`.
@@ -28,4 +30,22 @@ pub(crate) struct EngineMetrics {
     /// Histogram of persistence operation durations (in seconds)
     pub(crate) persistence_duration: Histogram,
     // TODO add latency metrics
+}
+
+/// Metrics for non-execution related block validation.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation")]
+pub(crate) struct BlockValidationMetrics {
+    /// Histogram of state root duration
+    pub(crate) state_root_histogram: Histogram,
+    /// Latest state root duration
+    pub(crate) state_root_duration: Gauge,
+}
+
+impl BlockValidationMetrics {
+    /// Records a new state root time, updating both the histogram and state root gauge
+    pub(crate) fn record_state_root(&self, elapsed_as_secs: f64) {
+        self.state_root_duration.set(elapsed_as_secs);
+        self.state_root_histogram.record(elapsed_as_secs);
+    }
 }
