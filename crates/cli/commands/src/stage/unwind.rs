@@ -7,10 +7,11 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db_api::database::Database;
+use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
@@ -48,8 +49,10 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db stage unwind` command
-    pub async fn execute(self) -> eyre::Result<()> {
-        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
@@ -112,11 +115,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(())
     }
 
-    fn build_pipeline<DB: Database + 'static>(
+    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         self,
         config: Config,
-        provider_factory: ProviderFactory<Arc<DB>>,
-    ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
+        provider_factory: ProviderFactory<N>,
+    ) -> Result<Pipeline<N>, eyre::Error> {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
@@ -128,13 +131,13 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let executor = NoopBlockExecutorProvider::default();
 
         let builder = if self.offline {
-            Pipeline::builder().add_stages(
+            Pipeline::<N>::builder().add_stages(
                 OfflineStages::new(executor, config.stages, PruneModes::default())
                     .builder()
                     .disable(reth_stages::StageId::SenderRecovery),
             )
         } else {
-            Pipeline::builder().with_tip_sender(tip_tx).add_stages(
+            Pipeline::<N>::builder().with_tip_sender(tip_tx).add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
@@ -185,9 +188,9 @@ impl Subcommands {
     /// Returns the block range to unwind.
     ///
     /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<DB: Database>(
+    fn unwind_range<N: NodeTypesWithDB<ChainSpec = ChainSpec, DB = Arc<DatabaseEnv>>>(
         &self,
-        factory: ProviderFactory<DB>,
+        factory: ProviderFactory<N>,
     ) -> eyre::Result<RangeInclusive<u64>> {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;
