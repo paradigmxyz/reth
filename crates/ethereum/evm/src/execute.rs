@@ -233,7 +233,7 @@ where
             evm.tx_mut().taiko.is_anchor = is_anchor;
             // set the treasury address
             evm.tx_mut().taiko.treasury = taiko_data.clone().unwrap().l2_contract;
-            evm.tx_mut().taiko.basefee_ratio = taiko_data.clone().unwrap().basefee_ratio;
+            evm.tx_mut().taiko.basefee_ratio = taiko_data.clone().unwrap().base_fee_config.sharing_pctg;
 
             // Execute transaction.
             let res = evm.transact().map_err(move |err| {
