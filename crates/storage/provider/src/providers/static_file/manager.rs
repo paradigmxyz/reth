@@ -84,8 +84,8 @@ impl StaticFileProvider {
 
     /// Creates a new [`StaticFileProvider`] with read-only access.
     ///
-    /// `watch_directory` will keep track of changes on the directory and re-initialize its inner
-    /// index accordingly (eg. node pushes a new block).
+    /// Set `watch_directory` to `true` to track the most recent changes in static files. Otherwise,
+    /// new data won't be detected or queryable.
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
         let provider = Self::new(path, StaticFileAccess::RO)?;
 
