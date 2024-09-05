@@ -149,23 +149,22 @@ pub struct NetworkArgs {
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
-    /// Name of docker non-host interface used to communicate with peers.
+    /// Name of network interface used to communicate with peers.
     ///
-    /// If flags is set, but no
-    /// value is passed, the default interface `eth0` is tried.
-    #[arg(long = "docker-if", conflicts_with = "addr")]
-    pub docker: Option<String>,
+    /// If flags is set, but no value is passed, the default interface for docker `eth0` is tried.
+    #[arg(long = "net-if", conflicts_with = "addr")]
+    pub net_if: Option<String>,
 }
 
 impl NetworkArgs {
     /// Returns the resolved IP address.
     pub fn resolved_addr(&self) -> eyre::Result<IpAddr> {
         #[cfg(not(target_os = "windows"))]
-        if let Some(ref if_name) = self.docker {
+        if let Some(ref if_name) = self.net_if {
             if if_name.is_empty() {
-                return Ok(reth_net_nat::net_interface::resolve_net_if_ip(DEFAULT_NET_IF_NAME)?)
+                return Ok(reth_net_nat::net_if::resolve_net_if_ip(DEFAULT_NET_IF_NAME)?)
             }
-            return Ok(reth_net_nat::net_interface::resolve_net_if_ip(if_name)?)
+            return Ok(reth_net_nat::net_if::resolve_net_if_ip(if_name)?)
         }
 
         Ok(self.addr)
@@ -324,7 +323,7 @@ impl Default for NetworkArgs {
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
-            docker: None,
+            net_if: None,
         }
     }
 }
