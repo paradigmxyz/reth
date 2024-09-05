@@ -2850,6 +2850,8 @@ dependencies = [
  "eyre",
  "reth-chainspec",
  "reth-db",
+ "reth-node-ethereum",
+ "reth-node-types",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
