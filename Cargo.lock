@@ -7878,6 +7878,7 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
+ "reth-optimism-chainspec",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
