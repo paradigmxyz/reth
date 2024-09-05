@@ -1,4 +1,4 @@
-//! Loads OP pending block for a RPC response.   
+//! Loads OP pending block for a RPC response.
 
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
