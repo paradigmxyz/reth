@@ -680,9 +680,12 @@ impl From<Genesis> for ChainSpec {
         let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
         for (hardfork, _) in mainnet_order {
             if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
-                ordered_hardforks.push(hardforks[pos].clone());
+                ordered_hardforks.push(hardforks.remove(pos));
             }
         }
+
+        // append the remaining unknown hardforks to ensure we don't filter any out
+        ordered_hardforks.extend(hardforks);
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
