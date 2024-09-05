@@ -22,9 +22,9 @@ use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttribut
 use reth_node_ethereum::EthExecutorProvider;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
-    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
-    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    revm_primitives::KzgSettings, Address, BlobTransaction, BlobTransactionSidecar, Bytes,
+    PooledTransactionsElement, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned,
+    TxEip4844, B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
@@ -107,7 +107,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
+                .wrap_err_with(|| {
+                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+                })?;
             Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
             Ok(EnvKzgSettings::Default)

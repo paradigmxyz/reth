@@ -1,6 +1,6 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
 use reth_consensus::Consensus;
 use reth_engine_tree::{
     backfill::PipelineSync,
@@ -18,10 +18,7 @@ use reth_network_p2p::BlockClient;
 use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_provider::{
-    providers::{BlockchainProvider2, ProviderNodeTypes},
-    ProviderFactory,
-};
+use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
 use reth_prune::Pruner;
 use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
@@ -50,7 +47,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 #[allow(missing_debug_implementations)]
 pub struct EngineService<N, Client, E>
 where
-    N: ProviderNodeTypes,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -60,7 +57,7 @@ where
 
 impl<N, Client, E> EngineService<N, Client, E>
 where
-    N: ProviderNodeTypes,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
@@ -119,7 +116,7 @@ where
 
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
-    N: ProviderNodeTypes,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
 {
