@@ -23,3 +23,4 @@ reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-network-api.workspace = true
+reth-node-types.workspace = true
