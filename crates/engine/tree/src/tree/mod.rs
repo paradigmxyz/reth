@@ -2666,6 +2666,7 @@ mod tests {
             match event {
                 EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
                     block,
+                    _,
                 )) => {
                     assert!(block.hash() == expected_hash);
                 }
