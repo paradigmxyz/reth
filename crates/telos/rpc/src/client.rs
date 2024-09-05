@@ -8,7 +8,9 @@ use antelope::{chain::{Packer, Encoder, Decoder}, name, StructPacker};
 use antelope::chain::action::{Action, PermissionLevel};
 use antelope::chain::checksum::Checksum160;
 use antelope::chain::transaction::{SignedTransaction, Transaction};
+use log::{debug, error};
 use reth_node_telos::TelosArgs;
+use reth_rpc_eth_types::EthApiError;
 
 /// A client to interact with a Sequencer
 #[derive(Debug, Clone)]
@@ -88,7 +90,14 @@ impl TelosClient {
 
         let result = self.inner.api_client.v1_chain.send_transaction(signed_telos_transaction);
 
-        let _trx_id = result.await.unwrap().transaction_id;
+        let trx_response = result.await;
+        if trx_response.is_err() {
+            let err = trx_response.unwrap_err();
+            error!("Error sending transaction to Telos: {:?}", err);
+            return Err(EthApiError::EvmCustom("Error sending transaction to Telos".to_string()));
+        }
+
+        debug!("Transaction sent to Telos: {:?}", trx_response.unwrap().transaction_id);
         Ok(())
     }
 }

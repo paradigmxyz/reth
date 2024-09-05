@@ -16,6 +16,7 @@ reth-rpc-eth-types.workspace = true
 
 antelope-client.workspace = true
 reth-node-telos = { workspace = true, features = ["telos"] }
+log = "0.4.22"
 
 [lints]
 workspace = true
