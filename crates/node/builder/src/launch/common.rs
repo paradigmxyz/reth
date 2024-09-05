@@ -841,11 +841,11 @@ where
     }
 }
 
-impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
+impl<T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>
 where
-    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
     T: FullNodeTypes<
         Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+        Types: NodeTypes<ChainSpec = ChainSpec>,
     >,
     CB: NodeComponentsBuilder<T>,
 {
