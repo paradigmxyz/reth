@@ -3,7 +3,9 @@
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
     blobstore::BlobStore,
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    error::{
+        Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    },
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
@@ -272,6 +274,13 @@ where
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+
+            if transaction.authorization_count() == 0 {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
                 )
             }
         }
