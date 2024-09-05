@@ -2,10 +2,13 @@
 
 use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
-use reth_db::Database;
 use reth_errors::ProviderError;
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::B256;
-use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory,
+    StaticFileProviderFactory,
+};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
@@ -23,23 +26,23 @@ use tracing::{debug, error};
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<DB> {
+pub struct PersistenceService<N: NodeTypesWithDB> {
     /// The provider factory to use
-    provider: ProviderFactory<DB>,
+    provider: ProviderFactory<N>,
     /// Incoming requests
     incoming: Receiver<PersistenceAction>,
     /// The pruner
-    pruner: Pruner<DB, ProviderFactory<DB>>,
+    pruner: Pruner<N::DB, ProviderFactory<N>>,
     /// metrics
     metrics: PersistenceMetrics,
 }
 
-impl<DB: Database> PersistenceService<DB> {
+impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// Create a new persistence service
     pub fn new(
-        provider: ProviderFactory<DB>,
+        provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
     ) -> Self {
         Self { provider, incoming, pruner, metrics: PersistenceMetrics::default() }
     }
@@ -56,10 +59,7 @@ impl<DB: Database> PersistenceService<DB> {
     }
 }
 
-impl<DB> PersistenceService<DB>
-where
-    DB: Database,
-{
+impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
     pub fn run(mut self) -> Result<(), PersistenceError> {
@@ -67,9 +67,9 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
@@ -87,17 +87,18 @@ where
         Ok(())
     }
 
-    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<(), PersistenceError> {
+    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<Option<B256>, PersistenceError> {
         debug!(target: "tree::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.provider_rw()?;
         let sf_provider = self.provider.static_file_provider();
 
+        let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
         UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(())
+        Ok(new_tip_hash)
     }
 
     fn on_save_blocks(&self, blocks: Vec<ExecutedBlock>) -> Result<Option<B256>, PersistenceError> {
@@ -143,7 +144,7 @@ pub enum PersistenceAction {
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, oneshot::Sender<()>),
+    RemoveBlocksAbove(u64, oneshot::Sender<Option<B256>>),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
@@ -164,9 +165,9 @@ impl PersistenceHandle {
     }
 
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
-    pub fn spawn_service<DB: Database + 'static>(
-        provider_factory: ProviderFactory<DB>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+    pub fn spawn_service<N: ProviderNodeTypes>(
+        provider_factory: ProviderFactory<N>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
     ) -> Self {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
@@ -216,11 +217,12 @@ impl PersistenceHandle {
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
-    /// When the operation completes, `()` is returned in the receiver end of the sender argument.
+    /// When the operation completes, the new tip hash is returned in the receiver end of the sender
+    /// argument.
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: oneshot::Sender<()>,
+        tx: oneshot::Sender<Option<B256>>,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }

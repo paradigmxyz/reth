@@ -15,7 +15,8 @@ use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, NodeComponents, NodeTypesWithEngine, RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -116,7 +117,10 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
+type TmpNodeAdapter<N> = FullNodeTypesAdapter<
+    NodeTypesWithDBAdapter<N, TmpDB>,
+    BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>,
+>;
 
 type Adapter<N> = NodeAdapter<
     RethFullAdapter<TmpDB, N>,

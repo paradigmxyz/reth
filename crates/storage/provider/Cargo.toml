@@ -32,6 +32,7 @@ reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true
@@ -56,6 +57,7 @@ strum.workspace = true
 
 # test-utils
 once_cell = { workspace = true, optional = true }
+reth-ethereum-engine-primitives = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -82,4 +84,5 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "once_cell",
+    "reth-ethereum-engine-primitives",
 ]

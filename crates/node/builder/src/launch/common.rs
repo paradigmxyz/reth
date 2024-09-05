@@ -1,6 +1,6 @@
 //! Helper types that can be used by launchers.
 
-use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
+use std::{sync::Arc, thread::available_parallelism};
 
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
@@ -12,13 +12,13 @@ use reth_blockchain_tree::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::Consensus;
-use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::database::Database;
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_node_api::FullNodeTypes;
+use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -35,7 +35,7 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, FullProvider, ProviderFactory, ProviderResult,
+    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderResult,
     StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -65,13 +65,13 @@ pub trait WithTree {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;
 }
 
-impl<DB: Database> WithTree for BlockchainProvider<DB> {
+impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self {
         self.with_tree(tree)
     }
 }
 
-impl<DB: Database> WithTree for BlockchainProvider2<DB> {
+impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
     fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
         self
     }
@@ -386,7 +386,9 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
+    pub async fn create_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
+        &self,
+    ) -> eyre::Result<ProviderFactory<N>> {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -413,7 +415,7 @@ where
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds an unwind-only pipeline
-            let pipeline = Pipeline::builder()
+            let pipeline = Pipeline::<N>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
@@ -447,9 +449,9 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory(
+    pub async fn with_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
         self,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>> {
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<N>>>> {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -460,17 +462,17 @@ where
     }
 }
 
-impl<DB> LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>
+impl<T> LaunchContextWith<Attached<WithConfigs, ProviderFactory<T>>>
 where
-    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    T: NodeTypesWithDB<ChainSpec = ChainSpec>,
 {
     /// Returns access to the underlying database.
-    pub fn database(&self) -> &DB {
+    pub const fn database(&self) -> &T::DB {
         self.right().db_ref()
     }
 
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<T> {
         self.right()
     }
 
@@ -530,7 +532,7 @@ where
     /// prometheus.
     pub fn with_metrics_task(
         self,
-    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
+    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<T>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
         let with_metrics =
@@ -547,12 +549,12 @@ where
     }
 }
 
-impl<DB> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>>
+impl<N> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<N>>>
 where
-    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    N: NodeTypesWithDB,
 {
     /// Returns the configured `ProviderFactory`.
-    const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    const fn provider_factory(&self) -> &ProviderFactory<N> {
         &self.right().provider_factory
     }
 
@@ -567,11 +569,10 @@ where
         create_blockchain_provider: F,
         tree_config: BlockchainTreeConfig,
         canon_state_notification_sender: CanonStateNotificationSender,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<T>>>>
     where
-        T: FullNodeTypes,
-        T::Provider: FullProvider<DB, T::ChainSpec>,
-        F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
+        T: FullNodeTypes<Types = N>,
+        F: FnOnce(ProviderFactory<N>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
 
@@ -583,8 +584,6 @@ where
             blockchain_db,
             tree_config,
             canon_state_notification_sender,
-            // we store here a reference to T.
-            phantom_data: PhantomData,
         };
 
         let ctx = LaunchContextWith {
@@ -596,18 +595,17 @@ where
     }
 }
 
-impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
+impl<T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<T>>>
 where
-    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
+    T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
-    pub fn database(&self) -> &DB {
+    pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
         self.provider_factory().db_ref()
     }
 
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<T::Types> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -647,7 +645,7 @@ where
         on_component_initialized: Box<
             dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
         >,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>>
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -715,14 +713,13 @@ where
     }
 }
 
-impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
+impl<T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>
 where
-    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
+    T: FullNodeTypes<Provider: WithTree, Types: NodeTypes<ChainSpec = ChainSpec>>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
-    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<T::Types> {
         &self.right().db_provider_container.provider_factory
     }
 
@@ -741,7 +738,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<T::Types> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 
@@ -930,37 +927,32 @@ pub struct WithConfigs {
 /// Helper container type to bundle the [`ProviderFactory`] and the metrics
 /// sender.
 #[derive(Debug, Clone)]
-pub struct WithMeteredProvider<DB> {
-    provider_factory: ProviderFactory<DB>,
+pub struct WithMeteredProvider<N: NodeTypesWithDB> {
+    provider_factory: ProviderFactory<N>,
     metrics_sender: UnboundedSender<MetricEvent>,
 }
 
 /// Helper container to bundle the [`ProviderFactory`], [`BlockchainProvider`]
 /// and a metrics sender.
 #[allow(missing_debug_implementations)]
-pub struct WithMeteredProviders<DB, T>
+pub struct WithMeteredProviders<T>
 where
-    DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
+    T: FullNodeTypes,
 {
-    db_provider_container: WithMeteredProvider<DB>,
+    db_provider_container: WithMeteredProvider<T::Types>,
     blockchain_db: T::Provider,
     canon_state_notification_sender: CanonStateNotificationSender,
     tree_config: BlockchainTreeConfig,
-    // this field is used to store a reference to the FullNodeTypes so that we
-    // can build the components in `with_components` method.
-    phantom_data: PhantomData<T>,
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].
 #[allow(missing_debug_implementations)]
-pub struct WithComponents<DB, T, CB>
+pub struct WithComponents<T, CB>
 where
-    DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
+    T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
 {
-    db_provider_container: WithMeteredProvider<DB>,
+    db_provider_container: WithMeteredProvider<T::Types>,
     tree_config: BlockchainTreeConfig,
     blockchain_db: T::Provider,
     node_adapter: NodeAdapter<T, CB::Components>,

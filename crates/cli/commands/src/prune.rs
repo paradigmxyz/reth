@@ -3,6 +3,7 @@ use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
+use reth_node_builder::NodeTypesWithEngine;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;
@@ -16,8 +17,10 @@ pub struct PruneCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> PruneCommand<C> {
     /// Execute the `prune` command
-    pub async fn execute(self) -> eyre::Result<()> {
-        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
+        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
         let prune_config = config.prune.unwrap_or_default();
 
         // Copy data from database to static files
