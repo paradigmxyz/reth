@@ -85,17 +85,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        match self {
-            Self::TTD { fork_block: Some(_), .. } => {
-                self.active_at_block(head.number) &&
-                    self.active_at_ttd(head.total_difficulty, head.difficulty)
-            }
-            _ => {
-                self.active_at_block(head.number) ||
-                    self.active_at_timestamp(head.timestamp) ||
-                    self.active_at_ttd(head.total_difficulty, head.difficulty)
-            }
-        }
+        self.active_at_block(head.number) ||
+            self.active_at_timestamp(head.timestamp) ||
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -281,17 +273,14 @@ mod tests {
         let fork_condition =
             ForkCondition::TTD { fork_block: Some(11), total_difficulty: U256::from(900) };
         assert!(
-            !fork_condition.active_at_head(&head),
-            "The condition should not be active as the block is higher than head"
+            fork_condition.active_at_head(&head),
+            "The condition should be active as the total difficulty is higher"
         );
-
-        // Even if the block number is correct compare to head, the condition should not activate if
-        // the total difficulty is too high
         let fork_condition =
             ForkCondition::TTD { fork_block: Some(10), total_difficulty: U256::from(9000) };
         assert!(
-            !fork_condition.active_at_head(&head),
-            "The condition should not be active as the total difficulty is higher than head"
+            fork_condition.active_at_head(&head),
+            "The condition should be active as the total difficulty is higher than head"
         );
     }
 }
