@@ -704,11 +704,35 @@ pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use revm_primitives::b256;
+
     use super::*;
 
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn header_not_found_message() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::hash(b256!(
+                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+            )))
+            .into();
+        assert_eq!(err.message(), "header not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::number(100000)).into();
+        assert_eq!(err.message(), "header not found: number 100000");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::latest()).into();
+        assert_eq!(err.message(), "header not found: latest");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::safe()).into();
+        assert_eq!(err.message(), "header not found: safe");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::finalized()).into();
+        assert_eq!(err.message(), "header not found: finalized");
     }
 }
