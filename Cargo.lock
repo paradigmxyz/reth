@@ -8061,7 +8061,6 @@ dependencies = [
  "serde",
  "serde_json",
  "test-fuzz",
- "thiserror",
  "zstd",
 ]
 
