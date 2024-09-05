@@ -10,7 +10,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, TreeConfig},
+    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -80,6 +80,7 @@ where
         pruner: Pruner<DB, ProviderFactory<DB>>,
         payload_builder: PayloadBuilderHandle<T>,
         tree_config: TreeConfig,
+        invalid_block_hook: Box<dyn InvalidBlockHook>,
     ) -> Self {
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
@@ -97,6 +98,7 @@ where
             payload_builder,
             canonical_in_memory_state,
             tree_config,
+            invalid_block_hook,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -141,7 +143,7 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_tree::test_utils::TestPipelineBuilder;
+    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
@@ -196,6 +198,7 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
         );
     }
 }

@@ -98,7 +98,7 @@ impl AppendableChain {
             block_validation_kind,
         )?;
 
-        Ok(Self { chain: Chain::new(vec![block], bundle_state, trie_updates) })
+        Ok(Self::new(Chain::new(vec![block], bundle_state, trie_updates)))
     }
 
     /// Create a new chain that forks off of an existing sidechain.
@@ -155,7 +155,7 @@ impl AppendableChain {
         execution_outcome.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, execution_outcome, None) })
+        Ok(Self::new(Chain::from_block(block, execution_outcome, None)))
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its

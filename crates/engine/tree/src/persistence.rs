@@ -5,7 +5,9 @@ use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_errors::ProviderError;
 use reth_primitives::B256;
-use reth_provider::{writer::UnifiedStorageWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
@@ -67,9 +69,9 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    self.on_remove_blocks_above(new_tip_num)?;
+                    let result = self.on_remove_blocks_above(new_tip_num)?;
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
@@ -87,19 +89,22 @@ where
         Ok(())
     }
 
-    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<(), PersistenceError> {
+    fn on_remove_blocks_above(&self, new_tip_num: u64) -> Result<Option<B256>, PersistenceError> {
+        debug!(target: "tree::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.provider_rw()?;
         let sf_provider = self.provider.static_file_provider();
 
+        let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
         UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
-        Ok(())
+        Ok(new_tip_hash)
     }
 
     fn on_save_blocks(&self, blocks: Vec<ExecutedBlock>) -> Result<Option<B256>, PersistenceError> {
+        debug!(target: "tree::persistence", first=?blocks.first().map(|b| b.block.number), last=?blocks.last().map(|b| b.block.number), "Saving range of blocks");
         let start_time = Instant::now();
         let last_block_hash = blocks.last().map(|block| block.block().hash());
 
@@ -141,7 +146,7 @@ pub enum PersistenceAction {
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, oneshot::Sender<()>),
+    RemoveBlocksAbove(u64, oneshot::Sender<Option<B256>>),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
@@ -214,11 +219,12 @@ impl PersistenceHandle {
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
     ///
-    /// When the operation completes, `()` is returned in the receiver end of the sender argument.
+    /// When the operation completes, the new tip hash is returned in the receiver end of the sender
+    /// argument.
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: oneshot::Sender<()>,
+        tx: oneshot::Sender<Option<B256>>,
     ) -> Result<(), SendError<PersistenceAction>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }

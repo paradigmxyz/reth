@@ -20,4 +20,3 @@ eyre.workspace = true
 
 shellexpand.workspace = true
 serde_json.workspace = true
-clap = { workspace = true, features = ["derive", "env"] }

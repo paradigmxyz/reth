@@ -15,6 +15,7 @@ use reth_consensus::Consensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::FullNodeTypes;
@@ -34,7 +35,7 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, FullProvider, ProviderFactory, ProviderResult,
+    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderResult,
     StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
@@ -569,7 +570,6 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where
         T: FullNodeTypes,
-        T::Provider: FullProvider<DB, T::ChainSpec>,
         F: FnOnce(ProviderFactory<DB>) -> eyre::Result<T::Provider>,
     {
         let blockchain_db = create_blockchain_provider(self.provider_factory().clone())?;
@@ -598,7 +598,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
+    T: FullNodeTypes<Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -717,7 +717,7 @@ where
 impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec> + WithTree>,
+    T: FullNodeTypes<Provider: WithTree>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -813,7 +813,7 @@ where
                     inconsistent_stage_checkpoint = stage_checkpoint,
                     "Pipeline sync progress is inconsistent"
                 );
-                return self.blockchain_db().block_hash(first_stage_checkpoint)
+                return self.blockchain_db().block_hash(first_stage_checkpoint);
             }
         }
 
@@ -838,6 +838,31 @@ where
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
+    }
+
+    /// Returns the [`InvalidBlockHook`] to use for the node.
+    pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
+        Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
+            let hooks = hook
+                .iter()
+                .copied()
+                .map(|hook| {
+                    Ok(match hook {
+                        reth_node_core::args::InvalidBlockHook::Witness => {
+                            Box::new(reth_invalid_block_hooks::witness) as Box<dyn InvalidBlockHook>
+                        }
+                        reth_node_core::args::InvalidBlockHook::PreState |
+                        reth_node_core::args::InvalidBlockHook::Opcode => {
+                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                        }
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+
+            Box::new(InvalidBlockHooks(hooks))
+        } else {
+            Box::new(NoopInvalidBlockHook::default())
+        })
     }
 }
 
@@ -915,7 +940,7 @@ pub struct WithMeteredProvider<DB> {
 pub struct WithMeteredProviders<DB, T>
 where
     DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
+    T: FullNodeTypes,
 {
     db_provider_container: WithMeteredProvider<DB>,
     blockchain_db: T::Provider,
@@ -931,7 +956,7 @@ where
 pub struct WithComponents<DB, T, CB>
 where
     DB: Database,
-    T: FullNodeTypes<Provider: FullProvider<DB, T::ChainSpec>>,
+    T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<DB>,
