@@ -1387,7 +1387,10 @@ mod tests {
 
     use crate::{
         providers::BlockchainProvider2,
-        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
@@ -1400,11 +1403,7 @@ mod tests {
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
-    use reth_db::{
-        models::{AccountBeforeTx, StoredBlockBodyIndices},
-        test_utils::TempDatabase,
-        DatabaseEnv,
-    };
+    use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
         BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Receipt, SealedBlock,
@@ -1468,7 +1467,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
+        BlockchainProvider2<MockNodeTypesWithDB>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
@@ -1559,7 +1558,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider2<Arc<TempDatabase<DatabaseEnv>>>,
+        BlockchainProvider2<MockNodeTypesWithDB>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
