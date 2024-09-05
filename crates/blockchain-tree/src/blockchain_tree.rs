@@ -1383,7 +1383,7 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_consensus::test_utils::TestConsensus;
-    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db::tables;
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
@@ -1396,7 +1396,10 @@ mod tests {
         TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
     };
     use reth_provider::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
         ProviderFactory,
     };
     use reth_stages_api::StageCheckpoint;
@@ -1405,7 +1408,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,
-    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
+    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1421,7 +1424,10 @@ mod tests {
         TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
+    fn setup_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+        factory: &ProviderFactory<N>,
+        mut genesis: SealedBlock,
+    ) {
         // insert genesis to db.
 
         genesis.header.set_block_number(10);
@@ -1498,7 +1504,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
+        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider>(self, tree: &BlockchainTree<N, E>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }
