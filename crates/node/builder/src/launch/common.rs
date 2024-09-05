@@ -36,8 +36,9 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
+    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
+    TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -840,7 +841,16 @@ where
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
     }
+}
 
+impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    T: FullNodeTypes<
+        Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    >,
+    CB: NodeComponentsBuilder<T>,
+{
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
         Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
