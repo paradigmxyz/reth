@@ -10,7 +10,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
     BlockClient,
 };
-use reth_node_types::NodeTypesWithDB;
+use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -86,6 +86,11 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
+/// Helper trait expressing requirements for node types to be used in engine.
+pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
+
+impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
 
 /// Represents a pending forkchoice update.
 ///
@@ -169,7 +174,7 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<N, BT, Client>
 where
-    N: NodeTypesWithDB,
+    N: EngineNodeTypes,
     Client: BlockClient,
     BT: BlockchainTreeEngine
         + BlockReader
@@ -225,7 +230,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: ProviderNodeTypes,
+    N: EngineNodeTypes,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -1789,7 +1794,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: ProviderNodeTypes,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
