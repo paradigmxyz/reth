@@ -17,6 +17,7 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::FullNodeTypes;
 use reth_node_core::{
@@ -850,6 +851,7 @@ where
                 .copied()
                 .map(|hook| {
                     let output_directory = output_directory.join(hook.to_string());
+                    fs::create_dir_all(&output_directory)?;
 
                     Ok(match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {

@@ -7558,6 +7558,7 @@ dependencies = [
  "reth-engine-util",
  "reth-evm",
  "reth-exex",
+ "reth-fs-util",
  "reth-invalid-block-hooks",
  "reth-network",
  "reth-network-api",

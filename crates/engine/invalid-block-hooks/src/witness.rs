@@ -42,7 +42,7 @@ where
         &self,
         parent_header: &SealedHeader,
         block: &SealedBlockWithSenders,
-        _output: &BlockExecutionOutput<Receipt>,
+        output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
@@ -142,22 +142,27 @@ where
 
         // Write the witness to the output directory.
         let mut file = File::options()
+            .write(true)
             .create_new(true)
-            .open(self.output_directory.join(format!("{}_{}.jsonl", block.number, block.hash())))?;
+            .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?;
         let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
-        writeln!(&mut file, "{}", serde_json::to_string(&response)?)?;
+        file.write_all(serde_json::to_string(&response)?.as_bytes())?;
+
+        // The bundle state after re-execution should match the original one.
+        if bundle_state != output.state {
+            warn!(target: "engine::invalid_block_hooks::witness", "Bundle state mismatch after re-execution");
+        }
 
         // Calculate the state root and trie updates after re-execution. They should match
         // the original ones.
         let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
-        let new_trie_updates = (&trie_output, state_root);
-        match trie_updates {
-            Some(trie_updates) if new_trie_updates != trie_updates => {
-                warn!(target: "engine::invalid_block_hooks::witness", "Trie updates mismatch after re-execution");
-                writeln!(&mut file, "{}", serde_json::to_string(&trie_updates)?)?;
-                writeln!(&mut file, "{}", serde_json::to_string(&new_trie_updates)?)?;
+        if let Some(trie_updates) = trie_updates {
+            if state_root != trie_updates.1 {
+                warn!(target: "engine::invalid_block_hooks::witness", "State root mismatch after re-execution");
             }
-            _ => {}
+            if &trie_output != trie_updates.0 {
+                warn!(target: "engine::invalid_block_hooks::witness", "Trie updates mismatch after re-execution");
+            }
         }
 
         Ok(())
