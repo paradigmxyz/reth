@@ -1,4 +1,4 @@
-use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
+use crate::{BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight};
 use futures::Stream;
 use metrics::Gauge;
 use reth_exex_types::ExExHead;
@@ -59,10 +59,13 @@ impl ExExHandle {
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
-    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, ExExNotificationsSubscriber) {
+    pub fn new<E, P>(
+        id: String,
+        backfill_job_factory: BackfillJobFactory<E, P>,
+    ) -> (Self, UnboundedSender<ExExEvent>, ExExNotificationsSubscriber<E, P>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications = ExExNotificationsSubscriber::new(notification_rx);
+        let notifications = ExExNotificationsSubscriber::new(notification_rx, backfill_job_factory);
 
         (
             Self {
@@ -142,14 +145,18 @@ impl ExExHandle {
 
 /// A subscriber for a stream of [`ExExNotification`]s.
 #[derive(Debug)]
-pub struct ExExNotificationsSubscriber {
+pub struct ExExNotificationsSubscriber<E, P> {
     notifications: Receiver<ExExNotification>,
+    backfill_job_factory: BackfillJobFactory<E, P>,
 }
 
-impl ExExNotificationsSubscriber {
+impl<E, P> ExExNotificationsSubscriber<E, P> {
     /// Creates a new [`ExExNotificationsSubscriber`].
-    pub const fn new(notifications: Receiver<ExExNotification>) -> Self {
-        Self { notifications }
+    pub const fn new(
+        notifications: Receiver<ExExNotification>,
+        backfill_job_factory: BackfillJobFactory<E, P>,
+    ) -> Self {
+        Self { notifications, backfill_job_factory }
     }
 
     /// Subscribe to notifications.
@@ -182,9 +189,13 @@ impl Stream for ExExNotifications {
 /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
 /// committed or reverted after the given head.
 #[derive(Debug)]
-pub struct ExExNotificationsWithHead(Receiver<ExExNotification>, ExExHead);
+pub struct ExExNotificationsWithHead<E, P>(
+    Receiver<ExExNotification>,
+    ExExHead,
+    BackfillJobFactory<E, P>,
+);
 
-impl Stream for ExExNotificationsWithHead {
+impl<E, P> Stream for ExExNotificationsWithHead<E, P> {
     type Item = ExExNotification;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
