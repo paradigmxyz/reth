@@ -4,6 +4,8 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use reth_node_api::NodeTypesWithEngine;
+use reth_node_ethereum::EthEngineTypes;
 
 mod build_block;
 mod execution;
@@ -35,13 +37,18 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<
+        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
+    >(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
         match self.command {
-            Subcommands::Execution(command) => command.execute(ctx).await,
-            Subcommands::Merkle(command) => command.execute(ctx).await,
-            Subcommands::InMemoryMerkle(command) => command.execute(ctx).await,
-            Subcommands::BuildBlock(command) => command.execute(ctx).await,
-            Subcommands::ReplayEngine(command) => command.execute(ctx).await,
+            Subcommands::Execution(command) => command.execute::<N>(ctx).await,
+            Subcommands::Merkle(command) => command.execute::<N>(ctx).await,
+            Subcommands::InMemoryMerkle(command) => command.execute::<N>(ctx).await,
+            Subcommands::BuildBlock(command) => command.execute::<N>(ctx).await,
+            Subcommands::ReplayEngine(command) => command.execute::<N>(ctx).await,
         }
     }
 }

@@ -2117,10 +2117,11 @@ where
         let finalized = self.state.forkchoice_state_tracker.sync_target_finalized();
 
         // emit insert event
+        let elapsed = start.elapsed();
         let engine_event = if self.is_fork(block_hash, finalized)? {
-            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block)
+            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, start.elapsed())
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2670,6 +2671,7 @@ mod tests {
             match event {
                 EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
                     block,
+                    _,
                 )) => {
                     assert!(block.hash() == expected_hash);
                 }

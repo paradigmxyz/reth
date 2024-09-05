@@ -10,7 +10,6 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockValidationKind,
 };
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
-use reth_db_api::database::Database;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -18,7 +17,7 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::{BundleStateProvider, ConsistentDbView},
+    providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
     FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -66,17 +65,17 @@ impl AppendableChain {
     ///
     /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root
     /// of the block.
-    pub fn new_canonical_fork<DB, E>(
+    pub fn new_canonical_fork<N, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, E>,
+        externals: &TreeExternals<N, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        DB: Database + Clone,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let execution_outcome = ExecutionOutcome::default();
@@ -104,17 +103,17 @@ impl AppendableChain {
     /// Create a new chain that forks off of an existing sidechain.
     ///
     /// This differs from [`AppendableChain::new_canonical_fork`] in that this starts a new fork.
-    pub(crate) fn new_chain_fork<DB, E>(
+    pub(crate) fn new_chain_fork<N, E>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, E>,
+        externals: &TreeExternals<N, E>,
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
-        DB: Database + Clone,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let parent_number =
@@ -167,17 +166,17 @@ impl AppendableChain {
     ///   - [`BlockAttachment`] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
     ///   - [`BlockValidationKind`] determines if the state root __should__ be validated.
-    fn validate_and_execute<EDP, DB, E>(
+    fn validate_and_execute<EDP, N, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         bundle_state_data_provider: EDP,
-        externals: &TreeExternals<DB, E>,
+        externals: &TreeExternals<N, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<(ExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
         EDP: FullExecutionDataProvider,
-        DB: Database + Clone,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         // some checks are done before blocks comes here.
@@ -271,18 +270,18 @@ impl AppendableChain {
     /// __not__ the canonical head.
     #[track_caller]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn append_block<DB, E>(
+    pub(crate) fn append_block<N, E>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        externals: &TreeExternals<DB, E>,
+        externals: &TreeExternals<N, E>,
         canonical_fork: ForkBlock,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
-        DB: Database + Clone,
+        N: ProviderNodeTypes,
         E: BlockExecutorProvider,
     {
         let parent_block = self.chain.tip();

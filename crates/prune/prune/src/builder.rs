@@ -3,6 +3,7 @@ use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
+use reth_node_types::NodeTypesWithDB;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -71,16 +72,14 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration with the given provider factory.
-    pub fn build_with_provider_factory<DB: Database>(
+    pub fn build_with_provider_factory<N: NodeTypesWithDB>(
         self,
-        provider_factory: ProviderFactory<DB>,
-    ) -> Pruner<DB, ProviderFactory<DB>> {
-        let segments = SegmentSet::<DB>::from_components(
-            provider_factory.static_file_provider(),
-            self.segments,
-        );
+        provider_factory: ProviderFactory<N>,
+    ) -> Pruner<N::DB, ProviderFactory<N>> {
+        let segments =
+            SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
 
-        Pruner::<_, ProviderFactory<DB>>::new(
+        Pruner::<_, ProviderFactory<N>>::new(
             provider_factory,
             segments.into_vec(),
             self.block_interval,

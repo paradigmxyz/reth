@@ -1,9 +1,7 @@
 use reth_chainspec::MAINNET;
 use reth_db::{
     tables,
-    test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
-    },
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
 use reth_db_api::{
@@ -21,17 +19,18 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
+    test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path};
 use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
-    pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+    pub factory: ProviderFactory<MockNodeTypesWithDB>,
     pub temp_static_files_dir: TempDir,
 }
 

@@ -46,9 +46,7 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::{cursor::Cursor, RW},
-        tables,
-        test_utils::TempDatabase,
-        AccountsHistory, DatabaseEnv,
+        tables, AccountsHistory,
     };
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
@@ -63,6 +61,7 @@ mod tests {
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
         ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
@@ -140,7 +139,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let check_pruning = |factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+        let check_pruning = |factory: ProviderFactory<MockNodeTypesWithDB>,
                              prune_modes: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,

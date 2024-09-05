@@ -275,8 +275,8 @@ impl NodeState {
 
                 info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(block) => {
-                info!(number=block.number, hash=?block.hash(), "Block added to fork chain");
+            BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
+                info!(number=block.number, hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
         }
     }

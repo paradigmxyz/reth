@@ -103,7 +103,7 @@ impl DefaultNodeLauncher {
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
     Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
-    T: FullNodeTypes<Provider = BlockchainProvider<Types::DB>, Types = Types>,
+    T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
