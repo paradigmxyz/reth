@@ -16,8 +16,8 @@ mod tests {
     // expand the flags field and break backwards compatibility
 
     #[cfg(feature = "optimism")]
-    use super::optimism::TxDeposit;
-    use super::{
+    use crate::alloy::transaction::optimism::TxDeposit;
+    use crate::alloy::transaction::{
         eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
         legacy::TxLegacy,
     };
