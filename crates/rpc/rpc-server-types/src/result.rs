@@ -151,7 +151,6 @@ pub fn rpc_err(
 }
 
 /// Formats a [`BlockId`] into an error message.
-// todo: impl Display for `alloy_eips::eip1898::BlockId`
 pub fn block_id_to_str(id: BlockId) -> String {
     match id {
         BlockId::Hash(h) => {
