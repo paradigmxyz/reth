@@ -7686,7 +7686,6 @@ dependencies = [
  "procfs",
  "reqwest",
  "reth-chainspec",
- "reth-db",
  "reth-db-api",
  "reth-metrics",
  "reth-provider",
