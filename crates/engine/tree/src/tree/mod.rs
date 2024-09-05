@@ -1107,7 +1107,7 @@ where
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
-    fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
+    fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
                 debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block_number, "Removing blocks using persistence task");
@@ -1153,9 +1153,9 @@ where
                     trace!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
                     self.persistence_state
                         .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block();
+                    self.on_new_persisted_block()?;
                 }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
         }
@@ -1460,15 +1460,14 @@ where
     /// height.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) {
+    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        debug!(target: "engine::tree", last_persisted_hash=?self.persistence_state.last_persisted_block_hash, last_persisted_number=?self.persistence_state.last_persisted_block_number, ?finalized, "New persisted block, clearing in memory blocks");
-        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)
-            .expect("todo: error handling");
+        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block_number,
             hash: self.persistence_state.last_persisted_block_hash,
         });
+        Ok(())
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2449,6 +2448,18 @@ where
         );
         Ok(())
     }
+}
+
+/// This is an error that can come from advancing persistence. Either this can be a
+/// [`TryRecvError`], or this can be a [`ProviderError`]
+#[derive(Debug, thiserror::Error)]
+pub enum AdvancePersistenceError {
+    /// An error that can be from failing to receive a value from persistence
+    #[error(transparent)]
+    RecvError(#[from] TryRecvError),
+    /// A provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
 }
 
 /// The state of the persistence task.
