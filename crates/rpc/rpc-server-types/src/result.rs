@@ -4,7 +4,7 @@ use std::fmt;
 
 use jsonrpsee_core::RpcResult;
 use reth_primitives::BlockId;
-use reth_rpc_types::{engine::PayloadError, BlockNumberOrTag};
+use reth_rpc_types::engine::PayloadError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
@@ -160,10 +160,8 @@ pub fn block_id_to_str(id: BlockId) -> String {
                 format!("hash {}", h.block_hash)
             }
         }
-        BlockId::Number(n) => match n {
-            BlockNumberOrTag::Number(n) => format!("number {}", n),
-            _ => format!("{}", n),
-        },
+        BlockId::Number(n) if n.is_number() => format!("number {n}"),
+        BlockId::Number(n) => format!("{n}"),
     }
 }
 
