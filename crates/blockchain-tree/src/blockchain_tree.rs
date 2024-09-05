@@ -1523,8 +1523,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
-    // OP copy of test is in reth_optimism_consensus::proofs::tests::consecutive_reorgs
     fn consecutive_reorgs() {
         let signer = Address::random();
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
