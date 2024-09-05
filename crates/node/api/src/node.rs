@@ -19,7 +19,7 @@ use crate::ConfigureEvm;
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithDB;
+    type Types: NodeTypesWithDB + NodeTypesWithEngine;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::Types>;
 }
@@ -35,7 +35,7 @@ pub struct FullNodeTypesAdapter<Types, Provider> {
 
 impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypesWithDB,
+    Types: NodeTypesWithDB + NodeTypesWithEngine,
     Provider: FullProvider<Types>,
 {
     type Types = Types;

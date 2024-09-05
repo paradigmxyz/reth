@@ -62,7 +62,7 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
