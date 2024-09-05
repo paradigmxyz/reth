@@ -6166,6 +6166,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-downloaders",
  "reth-engine-primitives",
  "reth-errors",

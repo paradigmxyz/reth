@@ -413,11 +413,11 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{BlockBody, Header, SealedHeader};
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
@@ -467,12 +467,12 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
             reth_tracing::init_test_tracing();
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);
 
@@ -514,13 +514,13 @@ mod tests {
         }
 
         /// Builds the sync controller.
-        fn build<DB>(
+        fn build<N>(
             self,
-            pipeline: Pipeline<DB>,
+            pipeline: Pipeline<N>,
             chain_spec: Arc<ChainSpec>,
-        ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
+        ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
-            DB: Database + 'static,
+            N: NodeTypesWithDB<ChainSpec = ChainSpec>,
             Client: BlockClient + 'static,
         {
             let client = self

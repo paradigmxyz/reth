@@ -2154,8 +2154,8 @@ mod tests {
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
-    fn insert_blocks<'a, DB: Database>(
-        provider_factory: ProviderFactory<DB>,
+    fn insert_blocks<'a, N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+        provider_factory: ProviderFactory<N>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let provider = provider_factory.provider_rw().unwrap();
@@ -2174,10 +2174,10 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use generators::BlockParams;
-        use reth_db::{tables, test_utils::create_test_static_files_dir};
+        use reth_db::{tables, test_utils::create_test_static_files_dir, Database};
         use reth_db_api::transaction::DbTxMut;
         use reth_primitives::U256;
-        use reth_provider::providers::StaticFileProvider;
+        use reth_provider::{providers::StaticFileProvider, test_utils::MockNodeTypesWithDB};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
@@ -2246,8 +2246,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2314,8 +2314,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2345,8 +2345,8 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2401,8 +2401,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2484,8 +2484,8 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2545,8 +2545,8 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(temp_dir_path).unwrap(),
                 ),
@@ -2578,7 +2578,8 @@ mod tests {
         use reth_db::test_utils::create_test_static_files_dir;
         use reth_primitives::{EthereumHardfork, U256};
         use reth_provider::{
-            providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
+            providers::StaticFileProvider,
+            test_utils::{blocks::BlockchainTestData, MockNodeTypesWithDB},
         };
         use reth_testing_utils::{generators::random_block, GenesisAllocator};
         #[tokio::test]
@@ -2678,8 +2679,8 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2758,8 +2759,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2808,8 +2809,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
@@ -2879,8 +2880,8 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
-                    env.db.as_ref(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    env.db.clone(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
