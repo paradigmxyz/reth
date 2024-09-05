@@ -58,4 +58,4 @@ alloy = [
     "dep:alloy-trie",
     "dep:serde"
 ]
-optimism = ["dep:op-alloy-consensus"]
+optimism = ["alloy", "dep:op-alloy-consensus"]
