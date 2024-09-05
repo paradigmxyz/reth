@@ -26,7 +26,7 @@ use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, NoopTransactionFilter, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 

@@ -9,9 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-mod filter;
-
-pub use filter::{NoOpTransactionFilter, TransactionFilter};
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
@@ -44,8 +41,8 @@ use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool,
-    pool::BestTransactionFilter, BestTransactions, BestTransactionsAttributes, TransactionPool,
-    ValidPoolTransaction,
+    pool::BestTransactionFilter, BestTransactions, BestTransactionsAttributes,
+    NoopTransactionFilter, TransactionFilter, TransactionPool, ValidPoolTransaction,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -58,15 +55,17 @@ use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+pub struct EthereumPayloadBuilder<TxFilter, EvmConfig = EthEvmConfig> {
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
+    /// The type responsible for filtering pool transactions.
+    tx_filter: TxFilter,
 }
 
-impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
-    /// `EthereumPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { evm_config }
+impl<TxFilter, EvmConfig> EthereumPayloadBuilder<TxFilter, EvmConfig> {
+    /// [`EthereumPayloadBuilder`] constructor.
+    pub const fn new(evm_config: EvmConfig, tx_filter: TxFilter) -> Self {
+        Self { evm_config, tx_filter }
     }
 }
 
@@ -91,11 +90,13 @@ where
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
+impl<TxFilter, EvmConfig, Pool, Client> PayloadBuilder<Pool, Client>
+    for EthereumPayloadBuilder<TxFilter, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
+    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -105,7 +106,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter = NoOpTransactionFilter::new();
+        let tx_filter = self.tx_filter.clone();
         default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)
     }
 
@@ -147,7 +148,7 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>> + Sync,
+    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
 {
     let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 

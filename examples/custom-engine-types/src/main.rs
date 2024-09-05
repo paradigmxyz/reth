@@ -17,9 +17,8 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::convert::Infallible;
-
 use serde::{Deserialize, Serialize};
+use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
 
 use alloy_genesis::Genesis;
@@ -32,7 +31,7 @@ use reth::{
     },
     providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
-    transaction_pool::TransactionPool,
+    transaction_pool::{NoopTransactionFilter, TransactionPool, ValidPoolTransaction},
 };
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
