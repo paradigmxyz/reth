@@ -48,7 +48,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
-        debug!(target: "tree::persistence", ?block_num, "Running pruner");
+        debug!(target: "engine::persistence", ?block_num, "Running pruner");
         let start_time = Instant::now();
         // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
@@ -89,7 +89,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
         &self,
         new_tip_num: u64,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "tree::persistence", ?new_tip_num, "Removing blocks");
+        debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.provider_rw()?;
         let sf_provider = self.provider.static_file_provider();
@@ -98,7 +98,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
         UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
         UnifiedStorageWriter::commit_unwind(provider_rw, sf_provider)?;
 
-        debug!(target: "tree::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
+        debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(new_tip_hash.map(|hash| BlockNumHash { hash, number: new_tip_num }))
     }
@@ -107,7 +107,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
         &self,
         blocks: Vec<ExecutedBlock>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "tree::persistence", first=?blocks.first().map(|b| b.block.num_hash()), last=?blocks.last().map(|b| b.block.num_hash()), "Saving range of blocks");
+        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.block.num_hash()), last=?blocks.last().map(|b| b.block.num_hash()), "Saving range of blocks");
         let start_time = Instant::now();
         let last_block_hash_num = blocks
             .last()
