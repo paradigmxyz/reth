@@ -1,9 +1,8 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{utils::chain_help, LogArgs},
+    args::LogArgs,
     commands::debug_cmd,
-    macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
@@ -18,6 +17,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::args::utils::DefaultChainSpecParser;
+use reth_node_ethereum::EthExecutorProvider;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -45,7 +45,7 @@ pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fm
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = C::help_messge(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser(),
         global = true,
@@ -150,20 +150,13 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute(|chain_spec| block_executor!(chain_spec)),
-            ),
-            #[cfg(feature = "optimism")]
-            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            #[cfg(feature = "optimism")]
-            Commands::ImportReceiptsOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute())
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute(EthExecutorProvider::ethereum))
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
-            }),
+            Commands::Stage(command) => runner
+                .run_command_until_exit(|ctx| command.execute(ctx, EthExecutorProvider::ethereum)),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
@@ -199,14 +192,6 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand<C>),
-    /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
-    #[cfg(feature = "optimism")]
-    #[command(name = "import-op")]
-    ImportOp(reth_optimism_cli::ImportOpCommand<C>),
-    /// This imports RLP encoded receipts from a file.
-    #[cfg(feature = "optimism")]
-    #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(reth_optimism_cli::ImportReceiptsOpCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities

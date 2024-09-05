@@ -15,7 +15,8 @@ use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
-    NodeAdapter, NodeAddOns, NodeComponents, NodeTypes, RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
 use tracing::{span, Level};
@@ -51,7 +52,7 @@ pub async fn setup<N>(
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypes<ChainSpec = ChainSpec>,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesWithEngine<ChainSpec = ChainSpec>,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
@@ -116,7 +117,8 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
+type TmpNodeAdapter<N> =
+    FullNodeTypesAdapter<NodeTypesWithDBAdapter<N, TmpDB>, BlockchainProvider<TmpDB>>;
 
 type Adapter<N> = NodeAdapter<
     RethFullAdapter<TmpDB, N>,

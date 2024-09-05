@@ -213,6 +213,11 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -527,6 +532,13 @@ Debug:
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
+
+      --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
+          Determines which type of bad block hook to install
+
+          Example: `witness,prestate`
+
+          [possible values: witness, pre-state, opcode]
 
 Database:
       --db.log-level <LOG_LEVEL>

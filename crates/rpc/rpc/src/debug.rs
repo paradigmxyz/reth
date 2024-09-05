@@ -22,6 +22,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
+    debug::ExecutionWitness,
     state::EvmOverrides,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
@@ -567,7 +568,8 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<HashMap<B256, Bytes>, Eth::Error> {
+        include_preimages: bool,
+    ) -> Result<ExecutionWitness, Eth::Error> {
         let ((cfg, block_env, _), maybe_block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
@@ -628,6 +630,9 @@ where
                 // Take the bundle state
                 let bundle_state = db.take_bundle();
 
+                // Initialize a map of preimages.
+                let mut state_preimages = HashMap::new();
+
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
@@ -646,9 +651,19 @@ where
                         .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
                     if let Some(account) = account.account {
+                        if include_preimages {
+                            state_preimages
+                                .insert(hashed_address, alloy_rlp::encode(address).into());
+                        }
+
                         for (slot, value) in account.storage {
-                            let hashed_slot = keccak256(B256::from(slot));
+                            let slot = B256::from(slot);
+                            let hashed_slot = keccak256(slot);
                             storage.storage.insert(hashed_slot, value);
+
+                            if include_preimages {
+                                state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                            }
                         }
                     }
                 }
@@ -659,7 +674,11 @@ where
                 let witness = state_provider
                     .witness(HashedPostState::default(), hashed_state)
                     .map_err(Into::into)?;
-                Ok(witness)
+
+                Ok(ExecutionWitness {
+                    witness,
+                    state_preimages: include_preimages.then_some(state_preimages),
+                })
             })
             .await
     }
@@ -931,9 +950,10 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-    ) -> RpcResult<HashMap<B256, Bytes>> {
+        include_preimages: bool,
+    ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into)
+        Self::debug_execution_witness(self, block, include_preimages).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`

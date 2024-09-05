@@ -22,7 +22,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
@@ -112,9 +112,6 @@ pub struct StaticFileProviderInner {
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
-    /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
-    /// won't be able to be queried directly.
-    load_filters: bool,
     /// Maintains a writer set of [`StaticFileSegment`].
     writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
@@ -139,7 +136,6 @@ impl StaticFileProviderInner {
             static_files_max_block: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
-            load_filters: false,
             metrics: None,
             access,
             _lock_file,
@@ -154,14 +150,6 @@ impl StaticFileProviderInner {
 }
 
 impl StaticFileProvider {
-    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
-    pub fn with_filters(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.load_filters = true;
-        Self(Arc::new(provider))
-    }
-
     /// Enables metrics on the [`StaticFileProvider`].
     pub fn with_metrics(self) -> Self {
         let mut provider =
@@ -298,14 +286,8 @@ impl StaticFileProvider {
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let mut jar = NippyJar::<SegmentHeader>::load(
-                &self.path.join(segment.filename(&fixed_block_range)),
-            )
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-            jar
+            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?
         };
 
         jar.delete().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -337,12 +319,7 @@ impl StaticFileProvider {
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
-            let mut jar =
-                NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-
+            let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
@@ -573,7 +550,12 @@ impl StaticFileProvider {
             // * pruning data was interrupted before a config commit, then we have deleted data that
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
-            self.ensure_file_consistency(segment)?;
+            if self.access.is_read_only() {
+                self.check_segment_consistency(segment)?;
+            } else {
+                // Fetching the writer will attempt to heal any file level inconsistency.
+                self.latest_writer(segment)?;
+            }
 
             // Only applies to block-based static files. (Headers)
             //
@@ -653,6 +635,23 @@ impl StaticFileProvider {
         }
 
         Ok(unwind_target.map(PipelineTarget::Unwind))
+    }
+
+    /// Checks consistency of the latest static file segment and throws an error if at fault.
+    /// Read-only.
+    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        if let Some(latest_block) = self.get_highest_static_file_block(segment) {
+            let file_path =
+                self.directory().join(segment.filename(&find_fixed_range(latest_block)));
+
+            let jar = NippyJar::<SegmentHeader>::load(&file_path)
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+
+            NippyJarChecker::new(jar)
+                .check_consistency()
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Check invariants for each corresponding table and static file segment:
@@ -1040,9 +1039,6 @@ pub trait StaticFileWriter {
 
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
-
-    /// Checks consistency of the segment latest file and heals if possible.
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
 impl StaticFileWriter for StaticFileProvider {
@@ -1070,28 +1066,6 @@ impl StaticFileWriter for StaticFileProvider {
 
     fn commit(&self) -> ProviderResult<()> {
         self.writers.commit()
-    }
-
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        match self.access {
-            StaticFileAccess::RO => {
-                let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
-
-                let mut writer = StaticFileProviderRW::new(
-                    segment,
-                    latest_block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-
-                writer.ensure_file_consistency(self.access.is_read_only())?;
-            }
-            StaticFileAccess::RW => {
-                self.latest_writer(segment)?.ensure_file_consistency(self.access.is_read_only())?;
-            }
-        }
-
-        Ok(())
     }
 }
 

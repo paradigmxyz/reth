@@ -2,7 +2,7 @@
 
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
     revm_primitives::BlockEnv, BlockNumber, BlockNumberOrTag, Receipt, SealedBlockWithSenders, B256,
 };
@@ -22,7 +22,7 @@ use crate::OpEthApi;
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
