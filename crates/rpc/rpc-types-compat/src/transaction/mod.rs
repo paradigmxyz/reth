@@ -1,19 +1,16 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-mod signature;
-mod typed;
-
-pub use typed::*;
-
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,
 };
-use reth_primitives::{
-    Address, Header, TransactionSigned, TransactionSignedEcRecovered, TxKind, TxType, B256,
-};
+use reth_primitives::{Address, TransactionSignedEcRecovered, TxKind, TxType};
 use reth_rpc_types::{Transaction, WithOtherFields};
 use signature::from_primitive_signature;
+pub use typed::*;
+
+mod signature;
+mod typed;
 
 /// Create a new rpc transaction result for a mined transaction, using the given [`TransactionInfo`]
 /// to populate the corresponding fields in the rpc result.
@@ -157,30 +154,4 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         sidecar: None,
         authorization_list,
     }
-}
-
-/// Extracts [`Transaction`]s from block parts.
-pub fn from_block_parts(
-    block_hash: Option<B256>,
-    header: &Header,
-    body: Vec<TransactionSigned>,
-    senders: Vec<Address>,
-) -> impl IntoIterator<Item = WithOtherFields<Transaction>> {
-    debug_assert!(body.len() == senders.len());
-
-    let mut tx_info = TransactionInfo {
-        block_hash: Some(block_hash.unwrap_or_else(|| header.hash_slow())),
-        block_number: Some(header.number),
-        base_fee: header.base_fee_per_gas.map(u128::from),
-        ..Default::default()
-    };
-
-    body.into_iter().zip(senders).enumerate().map(move |(idx, (tx, sender))| {
-        let tx_hash = tx.hash();
-        let signed_tx_ec_recovered = tx.with_signer(sender);
-        tx_info.hash = Some(tx_hash);
-        tx_info.index = Some(idx as u64);
-
-        from_recovered_with_block_context(signed_tx_ec_recovered, tx_info)
-    })
 }

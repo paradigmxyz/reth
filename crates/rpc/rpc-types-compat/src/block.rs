@@ -1,17 +1,14 @@
 //! Compatibility functions for rpc `Block` type.
 
-use std::mem;
-
+use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
-use alloy_rpc_types::Transaction;
+use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
     Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, WithOtherFields,
 };
-
-use crate::transaction;
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
@@ -64,16 +61,30 @@ pub fn from_block_full(
     block_hash: Option<B256>,
 ) -> Result<Block<WithOtherFields<Transaction>>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
+    let block_number = block.block.number;
+    let base_fee_per_gas = block.block.base_fee_per_gas;
+
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.block.length();
-    let body = mem::take(&mut block.block.body);
-    let senders = block.senders;
+    let body = std::mem::take(&mut block.block.body);
+    let transactions_with_senders = body.into_iter().zip(block.senders);
+    let transactions = transactions_with_senders
+        .enumerate()
+        .map(|(idx, (tx, sender))| {
+            let tx_hash = tx.hash();
+            let signed_tx_ec_recovered = tx.with_signer(sender);
+            let tx_info = TransactionInfo {
+                hash: Some(tx_hash),
+                block_hash: Some(block_hash),
+                block_number: Some(block_number),
+                base_fee: base_fee_per_gas.map(u128::from),
+                index: Some(idx as u64),
+            };
 
-    let transactions =
-        transaction::from_block_parts(Some(block_hash), &block.block.header, body, senders)
-            .into_iter()
-            .collect();
+            from_recovered_with_block_context(signed_tx_ec_recovered, tx_info)
+        })
+        .collect::<Vec<_>>();
 
     Ok(from_block_with_transactions(
         block_length,
