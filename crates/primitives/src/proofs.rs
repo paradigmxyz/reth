@@ -53,7 +53,7 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [`calculate_receipt_root_optimism`] if you have log blooms memoized.
+/// NOTE: Prefer "calculate_receipt_root_optimism" if you have log blooms memoized.
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
