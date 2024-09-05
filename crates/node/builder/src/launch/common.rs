@@ -467,7 +467,7 @@ where
     T: NodeTypesWithDB<ChainSpec = ChainSpec>,
 {
     /// Returns access to the underlying database.
-    pub fn database(&self) -> &T::DB {
+    pub const fn database(&self) -> &T::DB {
         self.right().db_ref()
     }
 
@@ -600,7 +600,7 @@ where
     T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
-    pub fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
+    pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
         self.provider_factory().db_ref()
     }
 

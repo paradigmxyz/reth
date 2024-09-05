@@ -89,7 +89,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns reference to the underlying database.
-    pub fn db_ref(&self) -> &N::DB {
+    pub const fn db_ref(&self) -> &N::DB {
         &self.db
     }
 
