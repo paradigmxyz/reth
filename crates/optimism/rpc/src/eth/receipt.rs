@@ -1,9 +1,9 @@
-//! Loads and formats OP receipt RPC response.   
+//! Loads and formats OP receipt RPC response.
 
 use op_alloy_rpc_types::{receipt::L1BlockInfo, OptimismTransactionReceiptFields};
 use reth_chainspec::{ChainSpec, OptimismHardforks};
 use reth_evm_optimism::RethL1BlockInfo;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{
@@ -18,7 +18,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: EthApiSpec + LoadTransaction<Error = OpEthApiError>,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache {
@@ -56,7 +56,7 @@ where
 
 impl<N> OpEthApi<N>
 where
-    N: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     /// Builds a receipt w.r.t. chain spec.
     pub fn build_op_receipt_meta(

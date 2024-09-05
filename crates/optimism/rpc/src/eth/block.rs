@@ -1,6 +1,7 @@
-//! Loads and formats OP block RPC response.   
+//! Loads and formats OP block RPC response.
 
-use reth_node_api::FullNodeComponents;
+use reth_chainspec::ChainSpec;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -18,7 +19,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> EthBlocks for OpEthApi<N>
 where
     Self: EthApiSpec + LoadBlock<Error = OpEthApiError> + LoadTransaction,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
