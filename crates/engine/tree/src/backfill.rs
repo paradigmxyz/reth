@@ -234,16 +234,16 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::{BlockNumber, Header, B256};
+    use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
 
     struct TestHarness {
-        pipeline_sync: PipelineSync<Arc<TempDatabase<DatabaseEnv>>>,
+        pipeline_sync: PipelineSync<MockNodeTypesWithDB>,
         tip: B256,
     }
 
