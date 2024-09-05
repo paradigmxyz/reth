@@ -68,6 +68,7 @@ members = [
     "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/node/types",
     "crates/optimism/bin",
     "crates/optimism/chainspec",
     "crates/optimism/cli",
@@ -170,6 +171,7 @@ rustdoc.all = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
 derive_partial_eq_without_eq = "warn"
 doc_markdown = "warn"
 empty_line_after_doc_comments = "warn"
@@ -230,7 +232,6 @@ zero_sized_map_values = "warn"
 # Explicitly listing should make it easier to fix in the future.
 as_ptr_cast_mut = "allow"
 cognitive_complexity = "allow"
-collection_is_never_read = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
@@ -352,6 +353,7 @@ reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-node-types = { path = "crates/node/types" }
 op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
