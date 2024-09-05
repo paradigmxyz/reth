@@ -2179,7 +2179,9 @@ where
             .into())
         }
 
-        debug!(target: "engine", elapsed=?root_time.elapsed(), ?block_number, "Calculated state root");
+        let root_elapsed = root_time.elapsed();
+        self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
+        debug!(target: "engine", ?root_elapsed, ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {
             block: sealed_block.clone(),
