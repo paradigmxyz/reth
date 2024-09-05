@@ -3,7 +3,7 @@
 use std::{fmt, fmt::Debug};
 
 use futures::future;
-use reth_exex::{BackfillJobFactory, ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
@@ -46,15 +46,9 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         let mut exex_handles = Vec::with_capacity(extensions.len());
         let mut exexes = Vec::with_capacity(extensions.len());
 
-        let backfill_job_factory = BackfillJobFactory::new(
-            components.block_executor().clone(),
-            components.provider().clone(),
-        );
-
         for (id, exex) in extensions {
             // create a new exex handle
-            let (handle, events, notifications) =
-                ExExHandle::new(id.clone(), backfill_job_factory.clone());
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
             exex_handles.push(handle);
 
             // create the launch context for the exex
