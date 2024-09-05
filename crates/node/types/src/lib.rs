@@ -46,7 +46,7 @@ pub trait NodeTypesWithEngine: NodeTypes {
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait NodeTypesWithDB: NodeTypesWithEngine {
+pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
 }
@@ -96,7 +96,7 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypesWithEngine,
+    Types: NodeTypes,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;
