@@ -225,7 +225,7 @@ impl InvalidPoolTransactionError {
                 // intentionally caused by the sender
                 match err {
                     InvalidTransactionError::InsufficientFunds { .. } |
-                    InvalidTransactionError::NonceNotConsistent => {
+                    InvalidTransactionError::NonceNotConsistent { .. } => {
                         // transaction could just have arrived late/early
                         false
                     }
@@ -294,7 +294,7 @@ impl InvalidPoolTransactionError {
 
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
-        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent)) ||
+        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
             matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
     }
 }
