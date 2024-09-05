@@ -63,8 +63,6 @@ pub use transaction::{
     PooledTransactionsElementEcRecovered,
 };
 
-#[cfg(feature = "optimism")]
-use reth_codecs as _;
 #[cfg(feature = "c-kzg")]
 pub use transaction::BlobTransactionValidationError;
 
