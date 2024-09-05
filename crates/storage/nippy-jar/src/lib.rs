@@ -59,7 +59,7 @@ const NIPPY_JAR_VERSION: usize = 1;
 
 const INDEX_FILE_EXTENSION: &str = "idx";
 const OFFSETS_FILE_EXTENSION: &str = "off";
-const CONFIG_FILE_EXTENSION: &str = "conf";
+pub const CONFIG_FILE_EXTENSION: &str = "conf";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.

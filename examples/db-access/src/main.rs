@@ -28,7 +28,7 @@ fn main() -> eyre::Result<()> {
             db_path,
             spec.into(),
             Default::default(),
-            StaticFileProvider::read_only(db_path.join("static_files"))?,
+            StaticFileProvider::read_only(db_path.join("static_files"), false)?,
         )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
