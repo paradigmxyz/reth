@@ -1,10 +1,11 @@
 use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 
 use alloy_rpc_types_debug::ExecutionWitness;
+use eyre::OptionExt;
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
     ConfigureEvm,
 };
 use reth_primitives::{keccak256, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256};
@@ -12,10 +13,9 @@ use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactor
 use reth_revm::{
     database::StateProviderDatabase,
     db::states::bundle_state::BundleRetention,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
     DatabaseCommit, StateBuilder,
 };
-use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 
 /// Generates a witness for the given block and saves it to a file.
@@ -58,8 +58,7 @@ where
         // Setup environment for the execution.
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        let evm_config = self.evm_config.clone();
-        evm_config.fill_cfg_and_block_env(
+        self.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
             &self.provider.chain_spec(),
@@ -67,35 +66,43 @@ where
             U256::MAX,
         );
 
+        // Setup EVM
+        let mut evm = self.evm_config.evm_with_env(
+            &mut db,
+            EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
+        );
+
         // Apply pre-block system contract calls.
-        pre_block_beacon_root_contract_call(
-            &mut db,
-            &evm_config,
+        apply_beacon_root_contract_call(
+            &self.evm_config,
             &self.provider.chain_spec(),
-            &cfg,
-            &block_env,
+            block.timestamp,
+            block.number,
             block.parent_beacon_block_root,
+            &mut evm,
         )?;
-        pre_block_blockhashes_contract_call(
-            &mut db,
-            &evm_config,
+        apply_blockhashes_contract_call(
+            &self.evm_config,
             &self.provider.chain_spec(),
-            &cfg,
-            &block_env,
+            block.timestamp,
+            block.number,
             block.parent_hash,
+            &mut evm,
         )?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.clone().into_transactions_ecrecovered() {
-            let env = EnvWithHandlerCfg {
-                env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), evm_config.tx_env(&tx)),
-                handler_cfg: cfg.handler_cfg,
-            };
-
-            let result = self.evm_config.evm_with_env(&mut db, env).transact()?;
-            db.commit(result.state);
+        for tx in block.transactions() {
+            self.evm_config.fill_tx_env(
+                evm.tx_mut(),
+                tx,
+                tx.recover_signer().ok_or_eyre("failed to recover sender")?,
+            );
+            let result = evm.transact()?;
+            evm.db_mut().commit(result.state);
         }
+
+        drop(evm);
 
         // Merge all state transitions
         db.merge_transitions(BundleRetention::Reverts);
@@ -148,20 +155,28 @@ where
         let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
         file.write_all(serde_json::to_string(&response)?.as_bytes())?;
 
-        // The bundle state after re-execution should match the original one.
-        if bundle_state != output.state {
-            warn!(target: "engine::invalid_block_hooks::witness", "Bundle state mismatch after re-execution");
-        }
+        if cfg!(debug_assertions) {
+            // The bundle state after re-execution should match the original one.
+            pretty_assertions::assert_eq!(
+                bundle_state,
+                output.state,
+                "Bundle state mismatch after re-execution"
+            );
 
-        // Calculate the state root and trie updates after re-execution. They should match
-        // the original ones.
-        let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
-        if let Some(trie_updates) = trie_updates {
-            if state_root != trie_updates.1 {
-                warn!(target: "engine::invalid_block_hooks::witness", "State root mismatch after re-execution");
-            }
-            if &trie_output != trie_updates.0 {
-                warn!(target: "engine::invalid_block_hooks::witness", "Trie updates mismatch after re-execution");
+            // Calculate the state root and trie updates after re-execution. They should match
+            // the original ones.
+            let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
+            if let Some(trie_updates) = trie_updates {
+                pretty_assertions::assert_eq!(
+                    state_root,
+                    trie_updates.1,
+                    "State root mismatch after re-execution"
+                );
+                pretty_assertions::assert_eq!(
+                    &trie_output,
+                    trie_updates.0,
+                    "Trie updates mismatch after re-execution"
+                );
             }
         }
 

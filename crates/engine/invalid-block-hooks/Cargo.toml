@@ -27,4 +27,6 @@ alloy-rpc-types-debug.workspace = true
 
 # misc
 eyre.workspace = true
+pretty_assertions = "1.4"
 serde_json.workspace = true
+
