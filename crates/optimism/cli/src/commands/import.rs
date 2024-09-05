@@ -10,6 +10,7 @@ use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_provider::StageCheckpointReader;
@@ -41,7 +42,9 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         info!(target: "reth::cli",
@@ -53,7 +56,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         // we use noop here because we expect the inputs to be valid
         let consensus = Arc::new(NoopConsensus::default());
