@@ -2,8 +2,11 @@
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-version = 2
 yanked = "warn"
+ignore = [
+    # proc-macro-error 1.0.4 unmaintained https://rustsec.org/advisories/RUSTSEC-2024-0370
+    "RUSTSEC-2024-0370"
+]
 
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
