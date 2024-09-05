@@ -7819,18 +7819,12 @@ dependencies = [
 name = "reth-optimism-consensus"
 version = "1.0.6"
 dependencies = [
- "alloy-genesis",
- "reth-blockchain-tree",
- "reth-blockchain-tree-api",
+ "alloy-primitives 0.8.0",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
- "reth-db",
+ "reth-optimism-chainspec",
  "reth-primitives",
- "reth-provider",
- "reth-prune-types",
- "reth-revm",
- "reth-trie",
  "reth-trie-common",
  "tracing",
 ]
