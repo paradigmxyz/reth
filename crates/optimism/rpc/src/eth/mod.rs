@@ -10,7 +10,6 @@ pub mod rpc;
 
 use std::{fmt, sync::Arc};
 
-use crate::eth::rpc::SequencerClient;
 use alloy_primitives::U256;
 use op_alloy_network::AnyNetwork;
 use reth_chainspec::ChainSpec;
@@ -19,8 +18,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
-    StageCheckpointReader, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    HeaderProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -37,7 +36,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::OpEthApiError;
+use crate::{eth::rpc::SequencerClient, OpEthApiError};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -63,7 +62,12 @@ pub struct OpEthApi<N: FullNodeComponents> {
     sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
 }
 
-impl<N: FullNodeComponents> OpEthApi<N> {
+impl<N> OpEthApi<N>
+where
+    N: FullNodeComponents<
+        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
+    >,
+{
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
     pub fn with_spawner(ctx: &EthApiBuilderCtx<N>) -> Self {
