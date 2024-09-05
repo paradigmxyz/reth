@@ -8748,6 +8748,7 @@ dependencies = [
  "reth-db-api",
  "reth-execution-errors",
  "reth-metrics",
+ "reth-node-types",
  "reth-primitives",
  "reth-provider",
  "reth-stages-types",
