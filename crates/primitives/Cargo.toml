@@ -106,7 +106,7 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
-    "reth-codecs/optimism",
+    "reth-codecs?/optimism",
     "dep:reth-optimism-chainspec",
     "dep:op-alloy-consensus",
 ]

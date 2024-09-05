@@ -21,8 +21,6 @@ pub use reth_codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
-#[cfg(feature = "optimism")]
-use op_alloy_consensus as _;
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
