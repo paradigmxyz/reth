@@ -112,9 +112,6 @@ pub struct StaticFileProviderInner {
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
-    /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
-    /// won't be able to be queried directly.
-    load_filters: bool,
     /// Maintains a writer set of [`StaticFileSegment`].
     writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
@@ -139,7 +136,6 @@ impl StaticFileProviderInner {
             static_files_max_block: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
-            load_filters: false,
             metrics: None,
             access,
             _lock_file,
@@ -154,14 +150,6 @@ impl StaticFileProviderInner {
 }
 
 impl StaticFileProvider {
-    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
-    pub fn with_filters(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.load_filters = true;
-        Self(Arc::new(provider))
-    }
-
     /// Enables metrics on the [`StaticFileProvider`].
     pub fn with_metrics(self) -> Self {
         let mut provider =
@@ -298,14 +286,8 @@ impl StaticFileProvider {
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let mut jar = NippyJar::<SegmentHeader>::load(
-                &self.path.join(segment.filename(&fixed_block_range)),
-            )
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-            jar
+            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?
         };
 
         jar.delete().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -337,12 +319,7 @@ impl StaticFileProvider {
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
-            let mut jar =
-                NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-
+            let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 

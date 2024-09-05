@@ -26,6 +26,7 @@ members = [
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
     "crates/e2e-test-utils/",
+    "crates/engine/invalid-block-hooks/",
     "crates/engine/primitives/",
     "crates/engine/service",
     "crates/engine/tree/",
@@ -67,6 +68,7 @@ members = [
     "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/node/types",
     "crates/optimism/bin",
     "crates/optimism/chainspec",
     "crates/optimism/cli",
@@ -169,6 +171,7 @@ rustdoc.all = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
 derive_partial_eq_without_eq = "warn"
 doc_markdown = "warn"
 empty_line_after_doc_comments = "warn"
@@ -229,7 +232,6 @@ zero_sized_map_values = "warn"
 # Explicitly listing should make it easier to fix in the future.
 as_ptr_cast_mut = "allow"
 cognitive_complexity = "allow"
-collection_is_never_read = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
@@ -330,6 +332,7 @@ reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }
+reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
@@ -350,6 +353,7 @@ reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-node-types = { path = "crates/node/types" }
 op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }

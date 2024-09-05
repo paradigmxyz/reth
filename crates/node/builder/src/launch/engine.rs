@@ -10,13 +10,13 @@ use reth_chainspec::ChainSpec;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{NoopInvalidBlockHook, TreeConfig},
+    tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns};
+use reth_node_api::{BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypesWithDB};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -56,12 +56,10 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    T: FullNodeTypes<
-        Provider = BlockchainProvider2<<T as FullNodeTypes>::DB>,
-        ChainSpec = ChainSpec,
-    >,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types::DB>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
@@ -207,8 +205,6 @@ where
             warn!(target: "reth::cli", ?hook_type, "Invalid block hooks are not implemented yet! The `debug.invalid-block-hook` flag will do nothing for now.");
         }
 
-        let invalid_block_hook = Box::new(NoopInvalidBlockHook::default());
-
         // Configure the consensus engine
         let mut eth_service = EngineService::new(
             ctx.consensus(),
@@ -223,7 +219,7 @@ where
             pruner,
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
-            invalid_block_hook,
+            ctx.invalid_block_hook()?,
         );
 
         let event_sender = EventSender::default();
