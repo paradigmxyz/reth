@@ -19,6 +19,7 @@ Generally reth is composed of a few components, with supporting crates. The main
   - [RPC](#rpc)
     - [Transports](#transports)
     - [Common](#common-1)
+    - [Utilities Crates](#utilities-crates)
   - [Payloads](#payloads)
   - [Primitives](#primitives)
   - [Misc](#misc)
@@ -110,6 +111,8 @@ The RPC component mainly lives in [`rpc/rpc`](../../crates/rpc/rpc), which imple
 - `txpool_`
 - `web3_`
 
+These RPC interface is defined in [`rpc/rpc-api`](../../crates/rpc/rpc-api).
+
 The engine API ([`engine_`][engine-spec]) lives in [`rpc/rpc-engine-api`](../../crates/rpc/rpc-engine-api) (this is *not* an interface crate despite the confusing name).
 
 There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../../crates/rpc/rpc-builder).
@@ -126,6 +129,15 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
 - [`rpc/rpc-types`](../../crates/rpc/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
+- [`rpc/rpc-eth-api`](../../crates/rpc/rpc-eth-api/): Reth RPC 'eth' namespace API (including interface and implementation), this crate is re-exported by `rpc/rpc-api`
+- [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting implementation` of 'eth' namespace RPC server API
+- [`rpc/rpc-server-types`](../../crates/rpc/rpc-server-types/): RPC server types and constants
+
+#### Utilities Crates
+
+- [`rpc/rpc-types-compat`](../../crates/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
+- [`rpc/layer`](../../crates/rpc/rpc-layer/): Some RPC middleware layers (e.g. `AuthValidator`, `JwtAuthValidator`)
+- [`rpc/rpc-testing-util`](../../crates/rpc/rpc-testing-util/): Reth RPC testing helpers
 
 ### Payloads
 
