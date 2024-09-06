@@ -23,8 +23,12 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
 pub struct Witness<P, EvmConfig> {
+    /// The directory to write the witness to. Additionally, diff files will be written to this
+    /// directory in case of failed sanity checks.
     output_directory: PathBuf,
+    /// The provider to read the historical state and do the EVM execution.
     provider: P,
+    /// The EVM configuration to use for the execution.
     evm_config: EvmConfig,
 }
 
