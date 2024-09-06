@@ -8,7 +8,7 @@ You can build Reth on Linux, macOS, Windows, and Windows WSL2.
 
 ## Dependencies
 
-First, **install Rust** using [rustup](https://rustup.rs/)：
+First, **install Rust** using [rustup](https://rustup.rs/)： 
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -32,7 +32,7 @@ operating system:
 
 These are needed to build bindings for Reth's database.
 
-The Minimum Supported Rust Version (MSRV) of this project is 1.81.0. If you already have a version of Rust installed,
+The Minimum Supported Rust Version (MSRV) of this project is 1.80.0. If you already have a version of Rust installed,
 you can check your version by running `rustc --version`. To update your version of Rust, run `rustup update`.
 
 ## Build Reth
@@ -147,7 +147,7 @@ _(Thanks to Sigma Prime for this section from [their Lighthouse book](https://li
 
 ### Bus error (WSL2)
 
-In WSL 2 on Windows, the default virtual disk size is set to 1TB.
+In WSL 2 on Windows, the default virtual disk size is set to 1TB. 
 
 You must increase the allocated disk size for your WSL2 instance before syncing reth.
 
