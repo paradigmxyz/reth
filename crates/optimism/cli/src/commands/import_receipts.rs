@@ -13,7 +13,7 @@ use reth_downloaders::{
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
@@ -47,7 +47,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeStorage>(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -87,7 +87,7 @@ pub async fn import_receipts_from_file<N, P, F>(
     filter: F,
 ) -> eyre::Result<()>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -178,7 +178,7 @@ pub async fn import_receipts_from_reader<N, F>(
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let mut total_decoded_receipts = 0;

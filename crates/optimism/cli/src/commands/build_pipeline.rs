@@ -36,7 +36,7 @@ pub(crate) async fn build_import_pipeline<N, C>(
     disable_exec: bool,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     C: Consensus + 'static,
 {
     if !file_client.has_canonical_blocks() {

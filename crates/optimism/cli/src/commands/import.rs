@@ -42,7 +42,7 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeStorage>(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
