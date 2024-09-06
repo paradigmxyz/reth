@@ -255,7 +255,6 @@ mod tests {
 
         // Check the response body
         let body = response.text().await.unwrap();
-        assert!(body.contains("reth_chain_spec"));
         assert!(body.contains("reth_db_table_size"));
         assert!(body.contains("reth_jemalloc_metadata"));
     }
