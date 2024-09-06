@@ -69,6 +69,8 @@ impl Default for EthereumPayloadBuilder {
     }
 }
 
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> where EvmConfig: ConfigureEvm {}
+
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
