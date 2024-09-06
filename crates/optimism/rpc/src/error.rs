@@ -1,5 +1,6 @@
 //! RPC errors specific to OP.
 
+use reth_evm_optimism::OptimismBlockExecutionError;
 use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransaction};
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
@@ -12,6 +13,9 @@ pub enum OpEthApiError {
     /// L1 ethereum error.
     #[error(transparent)]
     Eth(#[from] EthApiError),
+    /// EVM error originating from invalid optimism data.
+    #[error(transparent)]
+    Evm(#[from] OptimismBlockExecutionError),
     /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,
@@ -35,11 +39,10 @@ impl AsEthApiError for OpEthApiError {
 impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: OpEthApiError) -> Self {
         match err {
-            OpEthApiError::Eth(err) => err.into(),
-            OpEthApiError::L1BlockFeeError | OpEthApiError::L1BlockGasError => {
-                internal_rpc_err(err.to_string())
-            }
-            OpEthApiError::InvalidTransaction(err) => err.into(),
+            OpEthApiError::Eth(_) | OpEthApiError::InvalidTransaction(_) => err.into(),
+            OpEthApiError::Evm(_) |
+            OpEthApiError::L1BlockFeeError |
+            OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
         }
     }
 }

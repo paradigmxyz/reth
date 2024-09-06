@@ -165,9 +165,17 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 Self::Eip4844(tx)
             }
 
-            TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
+            TxType::Eip7702 => {
+                let mut tx = TxEip7702::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip7702(tx)
+            }
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
+            TxType::Deposit => {
+                let mut tx = TxDeposit::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Deposit(tx)
+            }
         })
     }
 }
@@ -244,9 +252,9 @@ impl Transaction {
             Self::Eip2930(_) => TxType::Eip2930,
             Self::Eip1559(_) => TxType::Eip1559,
             Self::Eip4844(_) => TxType::Eip4844,
-            Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
+            Self::Eip7702(_) => TxType::Eip7702,
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
+            Self::Deposit(_) => TxType::Deposit,
         }
     }
 
@@ -305,13 +313,13 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub const fn gas_limit(&self) -> u64 {
         match self {
-            Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip1559(TxEip1559 { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip4844(TxEip4844 { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
+            Self::Legacy(TxLegacy { gas_limit, .. }) |
+            Self::Eip1559(TxEip1559 { gas_limit, .. }) |
+            Self::Eip4844(TxEip4844 { gas_limit, .. }) |
+            Self::Eip7702(TxEip7702 { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
+            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit as u64,
         }
     }
 
@@ -546,11 +554,13 @@ impl Transaction {
                 out,
                 with_header,
             ),
-            Self::Eip7702(set_code_tx) => {
-                set_code_tx.encode_with_signature(signature, out, with_header)
-            }
+            Self::Eip7702(set_code_tx) => set_code_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_inner(out, with_header),
         }
     }
 
@@ -561,9 +571,9 @@ impl Transaction {
             Self::Eip2930(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
             Self::Eip4844(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit.into(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.gas_limit = gas_limit,
+            Self::Deposit(tx) => tx.gas_limit = gas_limit.into(),
         }
     }
 
@@ -833,7 +843,7 @@ impl Encodable for Transaction {
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => {
-                deposit_tx.encode(out, true);
+                deposit_tx.encode_inner(out, true);
             }
         }
     }
@@ -846,7 +856,7 @@ impl Encodable for Transaction {
             Self::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
             Self::Eip7702(set_code_tx) => set_code_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Self::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 }
@@ -1232,11 +1242,12 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 true,
             ),
-            Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature(&self.signature)
-            }
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 
@@ -1361,9 +1372,9 @@ impl TransactionSigned {
             TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_fields(data)?),
             TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_fields(data)?),
             TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_fields(data)?),
-            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
+            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_fields(data)?),
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_fields(data)?),
             TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
         };
 
@@ -1443,11 +1454,12 @@ impl TransactionSigned {
                 &self.signature.as_signature_with_boolean_parity(),
                 false,
             ),
-            Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature_without_header(&self.signature)
-            }
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
         }
     }
 }

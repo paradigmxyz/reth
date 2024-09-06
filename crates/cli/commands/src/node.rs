@@ -9,9 +9,8 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        utils::{chain_help, DefaultChainSpecParser},
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        utils::DefaultChainSpecParser, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -35,7 +34,7 @@ pub struct NodeCommand<
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = C::help_messge(),
         default_value = C::SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
         value_parser = C::parser(),

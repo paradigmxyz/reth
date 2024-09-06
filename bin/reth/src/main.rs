@@ -5,9 +5,6 @@
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(all(feature = "optimism", not(test)))]
-compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
-
 /// clap [Args] for Engine related arguments.
 use clap::Args;
 
@@ -20,7 +17,6 @@ pub struct EngineArgs {
     pub experimental: bool,
 }
 
-#[cfg(not(feature = "optimism"))]
 fn main() {
     use clap::Parser;
     use reth::{args::utils::DefaultChainSpecParser, cli::Cli};

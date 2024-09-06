@@ -10,6 +10,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, PlatformPath},
@@ -87,12 +88,13 @@ macro_rules! handle_stage {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `dump-stage` command
-    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<ChainSpec>) -> E,
     {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
@@ -111,11 +113,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
 /// Sets up the database and initial state on [`tables::BlockBodyIndices`]. Also returns the tip
 /// block number.
-pub(crate) fn setup<DB: Database>(
+pub(crate) fn setup<N: NodeTypesWithDB>(
     from: u64,
     to: u64,
     output_db: &PathBuf,
-    db_tool: &DbTool<DB>,
+    db_tool: &DbTool<N>,
 ) -> eyre::Result<(DatabaseEnv, u64)> {
     assert!(from < to, "FROM block should be bigger than TO block.");
 

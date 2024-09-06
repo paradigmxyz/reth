@@ -168,6 +168,15 @@ pub enum Eip4844PoolTransactionError {
     Eip4844NonceGap,
 }
 
+/// Represents all errors that can happen when validating transactions for the pool for EIP-7702
+/// transactions
+#[derive(Debug, thiserror::Error)]
+pub enum Eip7702PoolTransactionError {
+    /// Thrown if the transaction has no items in its authorization list
+    #[error("no items in authorization list for EIP7702 transaction")]
+    MissingEip7702AuthorizationList,
+}
+
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [`TransactionValidator`](crate::TransactionValidator).
@@ -195,9 +204,12 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's would require an account to be overdrawn
     #[error("transaction overdraws from account")]
     Overdraft,
-    /// Eip-4844 related errors
+    /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
+    /// EIP-7702 related errors
+    #[error(transparent)]
+    Eip7702(#[from] Eip7702PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error(transparent)]
     Other(Box<dyn PoolTransactionError>),
@@ -225,7 +237,7 @@ impl InvalidPoolTransactionError {
                 // intentionally caused by the sender
                 match err {
                     InvalidTransactionError::InsufficientFunds { .. } |
-                    InvalidTransactionError::NonceNotConsistent => {
+                    InvalidTransactionError::NonceNotConsistent { .. } => {
                         // transaction could just have arrived late/early
                         false
                     }
@@ -289,12 +301,15 @@ impl InvalidPoolTransactionError {
                     }
                 }
             }
+            Self::Eip7702(eip7702_err) => match eip7702_err {
+                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
+            },
         }
     }
 
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
-        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent)) ||
+        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
             matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
     }
 }

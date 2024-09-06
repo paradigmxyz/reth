@@ -32,6 +32,7 @@ reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
+reth-node-types.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true
@@ -50,12 +51,14 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
+notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
 once_cell = { workspace = true, optional = true }
+reth-ethereum-engine-primitives = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
@@ -82,4 +85,5 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "once_cell",
+    "reth-ethereum-engine-primitives",
 ]

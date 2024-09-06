@@ -4,7 +4,6 @@ use std::sync::Arc;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_node_core::args::utils::chain_help;
 
 /// Dumps genesis block JSON configuration to stdout
 #[derive(Debug, Parser)]
@@ -15,7 +14,7 @@ pub struct DumpGenesisCommand<C: ChainSpecParser> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
+        long_help = C::help_messge(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser()
     )]
