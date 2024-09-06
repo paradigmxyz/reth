@@ -46,3 +46,8 @@ reth-primitives.workspace = true
 reth-prune-types.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
+
+[features]
+telos = [
+    "reth-engine-tree/telos",
+]

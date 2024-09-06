@@ -8,6 +8,8 @@ use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
 };
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -35,6 +37,9 @@ pub enum StoredEngineApiMessage<Attributes> {
         payload: ExecutionPayload,
         /// The Cancun-specific fields sent in the persisted call, if any.
         cancun_fields: Option<CancunPayloadFields>,
+        #[cfg(feature = "telos")]
+        /// Telos Engine APi Extra Fields
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     },
 }
 
@@ -76,7 +81,7 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx: _tx, #[cfg(feature = "telos")] telos_extra_fields } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
@@ -84,6 +89,8 @@ impl EngineMessageStore {
                         &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
                             payload: payload.clone(),
                             cancun_fields: cancun_fields.clone(),
+                            #[cfg(feature = "telos")]
+                            telos_extra_fields: telos_extra_fields.clone(),
                         },
                     )?,
                 )?;

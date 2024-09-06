@@ -28,6 +28,8 @@ use reth_rpc_types::engine::{
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use reth_tokio_util::EventSender;
 use std::{
     pin::Pin,
@@ -1227,6 +1229,8 @@ where
     fn try_insert_new_payload(
         &mut self,
         block: SealedBlock,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<PayloadStatus, InsertBlockError> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
@@ -1234,7 +1238,7 @@ where
         let start = Instant::now();
         let status = self
             .blockchain
-            .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive)?;
+            .insert_block_without_senders(block.clone(), BlockValidationKind::Exhaustive, #[cfg(feature = "telos")] telos_extra_fields)?;
 
         let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
@@ -1627,13 +1631,13 @@ where
                     }
                 };
             }
-            BlockchainTreeAction::InsertNewPayload { block, tx } => {
+            BlockchainTreeAction::InsertNewPayload { block, tx, #[cfg(feature = "telos")] telos_extra_fields } => {
                 let block_hash = block.hash();
                 let block_num_hash = block.num_hash();
                 let result = if self.sync.is_pipeline_idle() {
                     // we can only insert new payloads if the pipeline is _not_ running, because it
                     // holds exclusive access to the database
-                    self.try_insert_new_payload(block)
+                    self.try_insert_new_payload(block, #[cfg(feature = "telos")] telos_extra_fields)
                 } else {
                     self.try_buffer_payload(block)
                 };
@@ -1728,6 +1732,8 @@ where
                 match self.blockchain.insert_block_without_senders(
                     block,
                     BlockValidationKind::SkipStateRootValidation,
+                    #[cfg(feature = "telos")]
+                    None
                 ) {
                     Ok(status) => {
                         match status {
@@ -1858,11 +1864,11 @@ where
                         BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx, #[cfg(feature = "telos")] telos_extra_fields } => {
                             match this.on_new_payload(payload, cancun_fields) {
                                 Ok(Either::Right(block)) => {
                                     this.set_blockchain_tree_action(
-                                        BlockchainTreeAction::InsertNewPayload { block, tx },
+                                        BlockchainTreeAction::InsertNewPayload { block, tx, #[cfg(feature = "telos")] telos_extra_fields },
                                     );
                                 }
                                 Ok(Either::Left(status)) => {
@@ -1934,6 +1940,8 @@ enum BlockchainTreeAction<EngineT: EngineTypes> {
     InsertNewPayload {
         block: SealedBlock,
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     },
     MakeNewPayloadCanonical {
         payload_num_hash: BlockNumHash,

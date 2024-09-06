@@ -32,6 +32,8 @@ use reth_stages_api::{MetricEvent, MetricEventsSender};
 #[cfg(not(feature = "telos"))]
 use reth_storage_errors::provider::RootMismatch;
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use std::{
@@ -330,6 +332,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         debug_assert!(self.validate_block(&block).is_ok(), "Block must be validated");
 
@@ -343,7 +347,7 @@ where
 
         // if not found, check if the parent can be found inside canonical chain.
         if self.is_block_hash_canonical(&parent.hash)? {
-            return self.try_append_canonical_chain(block.clone(), block_validation_kind)
+            return self.try_append_canonical_chain(block.clone(), block_validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -395,6 +399,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         let parent = block.parent_num_hash();
         let block_num_hash = block.num_hash();
@@ -444,6 +450,8 @@ where
             &self.externals,
             block_attachment,
             block_validation_kind,
+            #[cfg(feature = "telos")]
+            telos_extra_fields,
         )?;
 
         self.insert_chain(chain);
@@ -683,9 +691,11 @@ where
     pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
-            Ok(block) => self.insert_block(block, BlockValidationKind::Exhaustive),
+            Ok(block) => self.insert_block(block, BlockValidationKind::Exhaustive, #[cfg(feature = "telos")] telos_extra_fields),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
@@ -780,6 +790,8 @@ where
         &mut self,
         block: SealedBlockWithSenders,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         // check if we already have this block
         match self.is_block_known(block.num_hash()) {
@@ -794,7 +806,7 @@ where
         }
 
         let status = self
-            .try_insert_validated_block(block.clone(), block_validation_kind)
+            .try_insert_validated_block(block.clone(), block_validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
             .map_err(|kind| InsertBlockError::new(block.block, kind))?;
         Ok(InsertPayloadOk::Inserted(status))
     }
@@ -937,7 +949,7 @@ where
         for block in include_blocks {
             // don't fail on error, just ignore the block.
             let _ = self
-                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
+                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation, #[cfg(feature = "telos")] None)
                 .map_err(|err| {
                     debug!(target: "blockchain_tree", %err, "Failed to insert buffered block");
                     err

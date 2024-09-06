@@ -28,6 +28,9 @@ revm-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
@@ -38,3 +41,6 @@ serde_json.workspace = true
 [features]
 default = ["std"]
 std = []
+telos = [
+    "dep:reth-telos-rpc-engine-api",
+]
