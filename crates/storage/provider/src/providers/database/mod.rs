@@ -326,8 +326,6 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
-        <<N as NodeTypesWithStorage>::Storage as NodeStorage>::new()
-            .read_block(id, self.provider()?);
         self.provider()?.block(id)
     }
 
