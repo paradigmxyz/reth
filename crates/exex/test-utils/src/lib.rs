@@ -22,7 +22,8 @@ use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithEngine, NodeTypesWithStorage,
+    NodeTypesWithStorageAdapter,
 };
 use reth_node_builder::{
     components::{
@@ -40,7 +41,7 @@ use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
-    BlockReader, ProviderFactory,
+    BlockReader, NodeStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -122,6 +123,26 @@ impl NodeTypesWithEngine for TestNode {
     type Engine = EthEngineTypes;
 }
 
+impl NodeStorage for TestNode {
+    type Types = Self;
+
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read_block<TX: reth_db::transaction::DbTx>(
+        &self,
+        _id: reth_primitives::BlockHashOrNumber,
+        _provider: reth_provider::DatabaseProvider<TX>,
+    ) -> <<Self::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block {
+        todo!()
+    }
+}
+
+impl NodeTypesWithStorage for TestNode {
+    type Storage = Self;
+}
+
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
@@ -155,8 +176,8 @@ pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<
         FullNodeTypesAdapter<
-            NodeTypesWithDBAdapter<TestNode, TmpDB>,
-            BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
+            NodeTypesWithStorageAdapter<TestNode, TmpDB>,
+            BlockchainProvider<NodeTypesWithStorageAdapter<TestNode, TmpDB>>,
         >,
     >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
 >;
@@ -169,7 +190,7 @@ pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
     pub genesis: SealedBlockWithSenders,
     /// Provider Factory for accessing the emphemeral storage of the host node
-    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
+    pub provider_factory: ProviderFactory<NodeTypesWithStorageAdapter<TestNode, TmpDB>>,
     /// Channel for receiving events from the Execution Extension
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
@@ -266,18 +287,19 @@ pub async fn test_exex_context_with_chain_spec(
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
-        components: Components {
-            transaction_pool,
-            evm_config,
-            executor,
-            consensus,
-            network,
-            payload_builder,
-        },
-        task_executor,
-        provider,
-    };
+    let components =
+        NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithStorageAdapter<TestNode, _>, _>, _> {
+            components: Components {
+                transaction_pool,
+                evm_config,
+                executor,
+                consensus,
+                network,
+                payload_builder,
+            },
+            task_executor,
+            provider,
+        };
 
     let genesis = provider_factory
         .block_by_hash(genesis_hash)?
