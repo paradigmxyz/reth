@@ -19,7 +19,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    test_utils::MockNodeTypesWithDB,
+    test_utils::MockNodeTypesWithStorage,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -30,7 +30,7 @@ use tempfile::TempDir;
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
-    pub factory: ProviderFactory<MockNodeTypesWithDB>,
+    pub factory: ProviderFactory<MockNodeTypesWithStorage>,
     pub temp_static_files_dir: TempDir,
 }
 

@@ -393,7 +393,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
-        use reth_provider::{test_utils::MockNodeTypesWithDB, BlockNumReader};
+        use reth_provider::{test_utils::MockNodeTypesWithStorage, BlockNumReader};
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -425,7 +425,7 @@ mod tests {
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
+            type S = HeaderStage<ProviderFactory<MockNodeTypesWithStorage>, D>;
 
             fn db(&self) -> &TestStageDB {
                 &self.db

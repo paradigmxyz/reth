@@ -61,7 +61,7 @@ mod tests {
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::MockNodeTypesWithDB,
+        test_utils::MockNodeTypesWithStorage,
         AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
         ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
@@ -139,7 +139,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let check_pruning = |factory: ProviderFactory<MockNodeTypesWithDB>,
+        let check_pruning = |factory: ProviderFactory<MockNodeTypesWithStorage>,
                              prune_modes: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
