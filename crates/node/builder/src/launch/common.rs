@@ -28,6 +28,7 @@ use reth_node_core::{
     },
 };
 use reth_node_metrics::{
+    chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
@@ -504,6 +505,7 @@ where
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                ChainSpecInfo { name: format!("{}", self.left().config.chain.chain) },
                 self.task_executor().clone(),
                 Hooks::new(self.database().clone(), self.static_file_provider()),
             );
