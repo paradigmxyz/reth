@@ -60,12 +60,12 @@ mod tests {
 
     fn noop_eth_api() -> EthApi<NoopProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let provider = NoopProvider::default();
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
 
-        let cache =
-            EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(provider, Default::default(), evm_config.clone());
         EthApi::new(
-            NoopProvider::default(),
+            provider,
             pool,
             (),
             cache.clone(),
