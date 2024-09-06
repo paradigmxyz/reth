@@ -15,8 +15,7 @@ impl InvalidBlockHook for NoopInvalidBlockHook {
         _block: &SealedBlockWithSenders,
         _output: &BlockExecutionOutput<Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()> {
-        Ok(())
+    ) {
     }
 }
 
@@ -36,11 +35,9 @@ impl InvalidBlockHook for InvalidBlockHooks {
         block: &SealedBlockWithSenders,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()> {
+    ) {
         for hook in &self.0 {
-            hook.on_invalid_block(parent_header, block, output, trie_updates)?;
+            hook.on_invalid_block(parent_header, block, output, trie_updates);
         }
-
-        Ok(())
     }
 }

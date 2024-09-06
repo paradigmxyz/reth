@@ -6825,7 +6825,6 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "1.0.6"
 dependencies = [
- "eyre",
  "reth-chainspec",
  "reth-execution-types",
  "reth-payload-primitives",
@@ -6870,7 +6869,6 @@ version = "1.0.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
- "eyre",
  "futures",
  "metrics",
  "rand 0.8.5",

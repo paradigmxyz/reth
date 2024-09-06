@@ -11,7 +11,7 @@ pub trait InvalidBlockHook: Send + Sync {
         block: &SealedBlockWithSenders,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()>;
+    );
 }
 
 impl<F> InvalidBlockHook for F
@@ -21,8 +21,7 @@ where
             &SealedBlockWithSenders,
             &BlockExecutionOutput<Receipt>,
             Option<(&TrieUpdates, B256)>,
-        ) -> eyre::Result<()>
-        + Send
+        ) + Send
         + Sync,
 {
     fn on_invalid_block(
@@ -31,7 +30,7 @@ where
         block: &SealedBlockWithSenders,
         output: &BlockExecutionOutput<Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()> {
+    ) {
         self(parent_header, block, output, trie_updates)
     }
 }

@@ -19,5 +19,4 @@ reth-primitives.workspace = true
 reth-trie.workspace = true
 
 # misc
-eyre.workspace = true
 serde.workspace = true

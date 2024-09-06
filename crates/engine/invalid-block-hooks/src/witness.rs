@@ -39,27 +39,7 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
     }
 }
 
-impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
-    /// Saves the diff of two values.
-    fn save_diff<T: PartialEq + Debug>(
-        &self,
-        filename: String,
-        original: &T,
-        new: &T,
-    ) -> eyre::Result<PathBuf> {
-        let path = self.output_directory.join(filename);
-        let diff = Comparison::new(original, new);
-        File::options()
-            .write(true)
-            .create_new(true)
-            .open(&path)?
-            .write_all(diff.to_string().as_bytes())?;
-
-        Ok(path)
-    }
-}
-
-impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
+impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
     EvmConfig: ConfigureEvm,
@@ -227,5 +207,41 @@ where
         }
 
         Ok(())
+    }
+
+    /// Saves the diff of two values.
+    fn save_diff<T: PartialEq + Debug>(
+        &self,
+        filename: String,
+        original: &T,
+        new: &T,
+    ) -> eyre::Result<PathBuf> {
+        let path = self.output_directory.join(filename);
+        let diff = Comparison::new(original, new);
+        File::options()
+            .write(true)
+            .create_new(true)
+            .open(&path)?
+            .write_all(diff.to_string().as_bytes())?;
+
+        Ok(path)
+    }
+}
+
+impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
+where
+    P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
+    EvmConfig: ConfigureEvm,
+{
+    fn on_invalid_block(
+        &self,
+        parent_header: &SealedHeader,
+        block: &SealedBlockWithSenders,
+        output: &BlockExecutionOutput<Receipt>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
+    ) {
+        if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
+            warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
+        }
     }
 }

@@ -2061,14 +2061,12 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         ) {
             // call post-block hook
-            if let Err(hook_err) = self.invalid_block_hook.on_invalid_block(
+            self.invalid_block_hook.on_invalid_block(
                 &parent_block,
                 &block.seal_slow(),
                 &output,
                 None,
-            ) {
-                error!(target: "engine::tree", %err, %hook_err, "Failed to invoke invalid block hook after execution");
-            }
+            );
             return Err(err.into())
         }
 
@@ -2079,14 +2077,12 @@ where
             state_provider.state_root_with_updates(hashed_state.clone())?;
         if state_root != block.state_root {
             // call post-block hook
-            if let Err(hook_err) = self.invalid_block_hook.on_invalid_block(
+            self.invalid_block_hook.on_invalid_block(
                 &parent_block,
                 &block.clone().seal_slow(),
                 &output,
                 Some((&trie_output, state_root)),
-            ) {
-                error!(target: "engine::tree", %hook_err, "Failed to invoke invalid block hook on state root mismatch");
-            }
+            );
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.state_root }.into(),
             )
