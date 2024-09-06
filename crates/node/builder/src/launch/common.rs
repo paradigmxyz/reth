@@ -979,8 +979,29 @@ mod tests {
     fn test_save_prune_config() {
         with_tempdir("prune-store-test", |config_path| {
             let mut reth_config = Config::default();
-            let node_config =
-                NodeConfig { pruning: PruningArgs { full: true }, ..NodeConfig::test() };
+            let node_config = NodeConfig {
+                pruning: PruningArgs {
+                    full: true,
+                    block_interval: 0,
+                    sender_recovery_full: false,
+                    sender_recovery_distance: None,
+                    sender_recovery_before: None,
+                    transaction_lookup_full: false,
+                    transaction_lookup_distance: None,
+                    transaction_lookup_before: None,
+                    receipts_full: false,
+                    receipts_distance: None,
+                    receipts_before: None,
+                    account_history_full: false,
+                    account_history_distance: None,
+                    account_history_before: None,
+                    storage_history_full: false,
+                    storage_history_distance: None,
+                    storage_history_before: None,
+                    receipts_log_filter: vec![],
+                },
+                ..NodeConfig::test()
+            };
             LaunchContext::save_pruning_config_if_full_node(
                 &mut reth_config,
                 &node_config,
