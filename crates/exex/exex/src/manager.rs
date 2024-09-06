@@ -165,6 +165,21 @@ impl<Node> ExExNotifications<Node> {
         Self { components, notifications }
     }
 
+    /// Receives the next value for this receiver.
+    ///
+    /// This method returns `None` if the channel has been closed and there are
+    /// no remaining messages in the channel's buffer. This indicates that no
+    /// further values can ever be received from this `Receiver`. The channel is
+    /// closed when all senders have been dropped, or when [`Receiver::close`] is called.
+    ///
+    /// For full documentation, see [`Receiver::recv`].
+    #[deprecated(
+        note = "use `ExExNotifications::poll_next` and its `Stream` implementation instead"
+    )]
+    pub async fn recv(&mut self) -> Option<ExExNotification> {
+        self.notifications.recv().await
+    }
+
     // TODO(alexey): make it public when backfill is implemented in [`ExExNotificationsWithHead`]
     /// Subscribe to notifications with the given head.
     ///
