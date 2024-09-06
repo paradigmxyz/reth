@@ -19,10 +19,15 @@ use reth_engine_primitives::EngineTypes;
 
 /// Configures all the primitive types of the node.
 // TODO(mattsse): this is currently a placeholder
-pub trait NodePrimitives {}
+pub trait NodePrimitives {
+    /// Block
+    type Block;
+}
 
 // TODO(mattsse): Placeholder
-impl NodePrimitives for () {}
+impl NodePrimitives for () {
+    type Block = ();
+}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///
@@ -49,57 +54,6 @@ pub trait NodeTypesWithEngine: NodeTypes {
 pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
-}
-
-/// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
-#[derive(Debug)]
-pub struct NodeTypesWithDBAdapter<Types, DB> {
-    types: PhantomData<Types>,
-    db: PhantomData<DB>,
-}
-
-impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
-    /// Create a new adapter with the configured types.
-    pub fn new() -> Self {
-        Self { types: Default::default(), db: Default::default() }
-    }
-}
-
-impl<Types, DB> Default for NodeTypesWithDBAdapter<Types, DB> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
-    fn clone(&self) -> Self {
-        Self { types: self.types, db: self.db }
-    }
-}
-
-impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
-where
-    Types: NodeTypes,
-    DB: Send + Sync + Unpin + 'static,
-{
-    type Primitives = Types::Primitives;
-    type ChainSpec = Types::ChainSpec;
-}
-
-impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
-where
-    Types: NodeTypesWithEngine,
-    DB: Send + Sync + Unpin + 'static,
-{
-    type Engine = Types::Engine;
-}
-
-impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
-where
-    Types: NodeTypes,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-{
-    type DB = DB;
 }
 
 /// A [`NodeTypes`] type builder.
