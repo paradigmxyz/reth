@@ -555,7 +555,7 @@ impl Clone for ExExManagerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::{FutureExt, StreamExt};
+    use futures::StreamExt;
     use reth_primitives::{SealedBlockWithSenders, B256};
     use reth_provider::Chain;
 
@@ -877,7 +877,7 @@ mod tests {
                     // The notification should be skipped, so nothing should be sent.
                     // Check that the receiver channel is indeed empty
                     assert_eq!(
-                        notifications.next().poll_unpin(cx),
+                        notifications.poll_next_unpin(cx),
                         Poll::Pending,
                         "Receiver channel should be empty"
                     );
