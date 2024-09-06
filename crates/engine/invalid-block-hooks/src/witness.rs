@@ -22,7 +22,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
-pub struct Witness<P, EvmConfig> {
+pub struct InvalidBlockWitnessHook<P, EvmConfig> {
     /// The directory to write the witness to. Additionally, diff files will be written to this
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
@@ -32,42 +32,34 @@ pub struct Witness<P, EvmConfig> {
     evm_config: EvmConfig,
 }
 
-impl<P, EvmConfig> Witness<P, EvmConfig> {
+impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
     /// Creates a new witness hook.
     pub const fn new(output_directory: PathBuf, provider: P, evm_config: EvmConfig) -> Self {
         Self { output_directory, provider, evm_config }
     }
 }
 
-impl<P, EvmConfig> Witness<P, EvmConfig> {
-    /// Compares two values and saves the diff if they are different.
-    ///
-    /// Returns the path of the saved diff file if the values are different.
-    fn compare_and_save_diff<T: PartialEq + Debug>(
+impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
+    /// Saves the diff of two values.
+    fn save_diff<T: PartialEq + Debug>(
         &self,
         filename: String,
         original: &T,
         new: &T,
-    ) -> Option<PathBuf> {
-        if original == new {
-            return None
-        }
-
+    ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
         File::options()
             .write(true)
             .create_new(true)
-            .open(&path)
-            .unwrap()
-            .write_all(diff.to_string().as_bytes())
-            .unwrap();
+            .open(&path)?
+            .write_all(diff.to_string().as_bytes())?;
 
-        Some(path)
+        Ok(path)
     }
 }
 
-impl<P, EvmConfig> InvalidBlockHook for Witness<P, EvmConfig>
+impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
     EvmConfig: ConfigureEvm,
@@ -190,11 +182,16 @@ where
         file.write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
-        if let Some(path) = self.compare_and_save_diff(
-            format!("{}_{}.bundle_state.diff", block.number, block.hash()),
-            &bundle_state,
-            &output.state,
-        ) {
+        if let Some(path) = (bundle_state != output.state)
+            .then(|| {
+                self.save_diff(
+                    format!("{}_{}.bundle_state.diff", block.number, block.hash()),
+                    &bundle_state,
+                    &output.state,
+                )
+            })
+            .transpose()?
+        {
             warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Bundle state mismatch after re-execution");
         }
 
@@ -202,19 +199,29 @@ where
         // the original ones.
         let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
         if let Some(trie_updates) = trie_updates {
-            if let Some(path) = self.compare_and_save_diff(
-                format!("{}_{}.state_root.diff", block.number, block.hash()),
-                &state_root,
-                &trie_updates.1,
-            ) {
+            if let Some(path) = (state_root != trie_updates.1)
+                .then(|| {
+                    self.save_diff(
+                        format!("{}_{}.state_root.diff", block.number, block.hash()),
+                        &state_root,
+                        &trie_updates.1,
+                    )
+                })
+                .transpose()?
+            {
                 warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "State root mismatch after re-execution");
             }
 
-            if let Some(path) = self.compare_and_save_diff(
-                format!("{}_{}.trie_updates.diff", block.number, block.hash()),
-                &trie_output,
-                trie_updates.0,
-            ) {
+            if let Some(path) = (&trie_output != trie_updates.0)
+                .then(|| {
+                    self.save_diff(
+                        format!("{}_{}.trie_updates.diff", block.number, block.hash()),
+                        &trie_output,
+                        trie_updates.0,
+                    )
+                })
+                .transpose()?
+            {
                 warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Trie updates mismatch after re-execution");
             }
         }

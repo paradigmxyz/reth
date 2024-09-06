@@ -18,6 +18,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
+use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
@@ -862,7 +863,7 @@ where
 
                     Ok(match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {
-                            Box::new(reth_invalid_block_hooks::Witness::new(
+                            Box::new(InvalidBlockWitnessHook::new(
                                 output_directory,
                                 self.blockchain_db().clone(),
                                 self.components().evm_config().clone(),

@@ -2,4 +2,4 @@
 
 mod witness;
 
-pub use witness::Witness;
+pub use witness::InvalidBlockWitnessHook;
