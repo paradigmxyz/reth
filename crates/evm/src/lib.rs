@@ -15,7 +15,6 @@ extern crate alloc;
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
@@ -133,7 +132,6 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     );
@@ -165,11 +163,10 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        self.fill_cfg_env(cfg, chain_spec, header, total_difficulty);
+        self.fill_cfg_env(cfg, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         self.fill_block_env(block_env, header, after_merge);
     }

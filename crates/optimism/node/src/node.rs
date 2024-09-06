@@ -137,7 +137,7 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
         let evm_config = OptimismEvmConfig::default();
-        let executor = OpExecutorProvider::new(chain_spec, evm_config);
+        let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
 
         Ok((evm_config, executor))
     }

@@ -35,7 +35,7 @@ pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec, Default::default())
+        Self::new(chain_spec.clone(), OptimismEvmConfig::new(chain_spec))
     }
 }
 
@@ -269,7 +269,6 @@ where
         self.executor.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
-            self.chain_spec(),
             header,
             total_difficulty,
         );
