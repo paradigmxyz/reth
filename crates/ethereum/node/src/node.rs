@@ -6,12 +6,13 @@ use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
+use reth_db_api::transaction::DbTx;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::{FullNodeComponents, NodeAddOns, NodePrimitives};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -21,7 +22,7 @@ use reth_node_builder::{
     BuilderContext, ConfigureEvm, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{CanonStateSubscriptions, NodeStorage, NodeTypesWithStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -64,13 +65,45 @@ impl EthereumNode {
     }
 }
 
+/// Placeholder for Ethereum primitive types.
+#[derive(Debug)]
+pub struct EthPrimitives;
+
+/// Placeholder.
+#[derive(Debug)]
+pub struct EthStorage;
+
+impl NodePrimitives for EthPrimitives {
+    type Block = reth_primitives::Block;
+}
+
 impl NodeTypes for EthereumNode {
-    type Primitives = ();
+    type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
 }
 
 impl NodeTypesWithEngine for EthereumNode {
     type Engine = EthEngineTypes;
+}
+
+impl NodeTypesWithStorage for EthereumNode {
+    type Storage = EthStorage;
+}
+
+impl NodeStorage for EthStorage {
+    type Types = EthereumNode;
+
+    fn new() -> Self {
+        Self {}
+    }
+
+    fn read_block<TX: DbTx>(
+        &self,
+        _id: reth_primitives::BlockHashOrNumber,
+        _provider: reth_provider::DatabaseProvider<TX>,
+    ) -> reth_primitives::Block {
+        reth_primitives::Block::default()
+    }
 }
 
 /// Add-ons w.r.t. l1 ethereum.
