@@ -8,7 +8,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;
-use reth_db_api::{database::Database, transaction::DbTx};
+use reth_db_api::transaction::DbTx;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
@@ -19,6 +19,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::B256;
@@ -57,10 +58,11 @@ pub struct ImportCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
     /// Execute `import` command
-    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider,
-        F: FnOnce(Arc<ChainSpec>) -> E,
+        F: FnOnce(Arc<N::ChainSpec>) -> E,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
@@ -73,7 +75,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let executor = executor(provider_factory.chain_spec());
         let consensus = Arc::new(EthBeaconConsensus::new(self.env.chain.clone()));
@@ -156,17 +158,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub fn build_import_pipeline<DB, C, E>(
+pub fn build_import_pipeline<N, C, E>(
     config: &Config,
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
-    static_file_producer: StaticFileProducer<DB>,
+    static_file_producer: StaticFileProducer<N>,
     disable_exec: bool,
     executor: E,
-) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
+) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    DB: Database + Clone + Unpin + 'static,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
 {
@@ -201,7 +203,7 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let pipeline = Pipeline::builder()
+    let pipeline = Pipeline::<N>::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)

@@ -12,7 +12,10 @@ use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{
+    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    DatabaseEnv,
+};
 use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
@@ -36,7 +39,7 @@ use reth_node_ethereum::{
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
 };
 use reth_tasks::TaskManager;
@@ -151,7 +154,10 @@ pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<
-        FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, TmpDB>, BlockchainProvider<TmpDB>>,
+        FullNodeTypesAdapter<
+            NodeTypesWithDBAdapter<TestNode, TmpDB>,
+            BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
+        >,
     >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
 >;
 /// An [`ExExContext`] using the [`Adapter`] type.
@@ -163,7 +169,7 @@ pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
     pub genesis: SealedBlockWithSenders,
     /// Provider Factory for accessing the emphemeral storage of the host node
-    pub provider_factory: ProviderFactory<TmpDB>,
+    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
     /// Channel for receiving events from the Execution Extension
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
@@ -236,7 +242,14 @@ pub async fn test_exex_context_with_chain_spec(
     let executor = MockExecutorProvider::default();
     let consensus = Arc::new(TestConsensus::default());
 
-    let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+    let (static_dir, _) = create_test_static_files_dir();
+    let db = create_test_rw_db();
+    let provider_factory = ProviderFactory::new(
+        db,
+        chain_spec,
+        StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+    );
+
     let genesis_hash = init_genesis(provider_factory.clone())?;
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;

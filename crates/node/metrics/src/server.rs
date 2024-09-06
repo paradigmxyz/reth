@@ -204,26 +204,10 @@ const fn describe_io_stats() {}
 mod tests {
     use super::*;
     use reqwest::Client;
-    use reth_chainspec::MAINNET;
-    use reth_db::{
-        test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
-        DatabaseEnv,
-    };
-    use reth_provider::{
-        providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory,
-    };
+    use reth_provider::{test_utils::create_test_provider_factory, StaticFileProviderFactory};
     use reth_tasks::TaskManager;
     use socket2::{Domain, Socket, Type};
     use std::net::{SocketAddr, TcpListener};
-
-    fn create_test_db() -> ProviderFactory<Arc<TempDatabase<DatabaseEnv>>> {
-        let (_, static_dir_path) = create_test_static_files_dir();
-        ProviderFactory::new(
-            create_test_rw_db(),
-            MAINNET.clone(),
-            StaticFileProvider::read_write(static_dir_path).unwrap(),
-        )
-    }
 
     fn get_random_available_addr() -> SocketAddr {
         let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
@@ -249,7 +233,7 @@ mod tests {
         let tasks = TaskManager::current();
         let executor = tasks.executor();
 
-        let factory = create_test_db();
+        let factory = create_test_provider_factory();
         let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
 
         let listen_addr = get_random_available_addr();
