@@ -22,6 +22,7 @@ Generally reth is composed of a few components, with supporting crates. The main
     - [Utilities Crates](#utilities-crates)
   - [Payloads](#payloads)
   - [Primitives](#primitives)
+  - [Optimism](#optimism)
   - [Misc](#misc)
 
 The supporting crates are split into two categories: [primitives](#primitives) and [miscellaneous](#misc).
@@ -88,7 +89,10 @@ Different consensus mechanisms.
 
 Crates related to transaction execution.
 
-- [`revm`](../../crates/revm): An implementation of an executor using `revm`
+- [`revm`](../../crates/revm): Revm utils and implementations specific to reth.
+- [`evm`](../../crates/evm): Traits for configuring an EVM specifics.
+- [`execution-types`](../../crates/evm/execution-types): Commonly used types for (EVM) block execution.
+- [`execution-errors`](../../crates/evm/execution-errors): Commonly used error types used when doing block execution.
 
 ### Sync
 
@@ -119,7 +123,7 @@ There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../
 
 #### Transports
 
-The RPC component is based on the `jsonrpsee` crate which provides JSONRPC over WebSockets and HTTP.
+The RPC component is based on the [`jsonrpsee`][jsonrpsee] crate which provides JSONRPC over WebSockets and HTTP.
 
 The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 
@@ -152,7 +156,12 @@ Crates related to building and validating payloads (blocks).
 These crates define primitive types or algorithms.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
+- [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
+
+### Optimism
+
+Crates related to the Optimism rollup are lives in [optimism](../../crates/optimism/).
 
 ### Misc
 
