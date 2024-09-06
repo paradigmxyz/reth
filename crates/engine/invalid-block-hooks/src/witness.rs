@@ -162,16 +162,9 @@ where
         file.write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
-        if let Some(path) = (bundle_state != output.state)
-            .then(|| {
-                self.save_diff(
-                    format!("{}_{}.bundle_state.diff", block.number, block.hash()),
-                    &bundle_state,
-                    &output.state,
-                )
-            })
-            .transpose()?
-        {
+        if bundle_state != output.state {
+            let filename = format!("{}_{}.bundle_state.diff", block.number, block.hash());
+            let path = self.save_diff(filename, &bundle_state, &output.state)?;
             warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Bundle state mismatch after re-execution");
         }
 
@@ -179,29 +172,15 @@ where
         // the original ones.
         let (state_root, trie_output) = state_provider.state_root_with_updates(hashed_state)?;
         if let Some(trie_updates) = trie_updates {
-            if let Some(path) = (state_root != trie_updates.1)
-                .then(|| {
-                    self.save_diff(
-                        format!("{}_{}.state_root.diff", block.number, block.hash()),
-                        &state_root,
-                        &trie_updates.1,
-                    )
-                })
-                .transpose()?
-            {
+            if state_root != trie_updates.1 {
+                let filename = format!("{}_{}.state_root.diff", block.number, block.hash());
+                let path = self.save_diff(filename, &state_root, &trie_updates.1)?;
                 warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "State root mismatch after re-execution");
             }
 
-            if let Some(path) = (&trie_output != trie_updates.0)
-                .then(|| {
-                    self.save_diff(
-                        format!("{}_{}.trie_updates.diff", block.number, block.hash()),
-                        &trie_output,
-                        trie_updates.0,
-                    )
-                })
-                .transpose()?
-            {
+            if &trie_output != trie_updates.0 {
+                let filename = format!("{}_{}.trie_updates.diff", block.number, block.hash());
+                let path = self.save_diff(filename, &trie_output, trie_updates.0)?;
                 warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Trie updates mismatch after re-execution");
             }
         }
