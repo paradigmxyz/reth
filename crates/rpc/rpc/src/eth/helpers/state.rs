@@ -43,6 +43,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, Address, StorageKey, StorageValue, KECCAK_EMPTY, U256,
@@ -59,7 +60,7 @@ mod tests {
 
     fn noop_eth_api() -> EthApi<NoopProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::default();
+        let evm_config = EthEvmConfig::new(MAINNET.clone());
 
         let cache =
             EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config.clone());
@@ -82,7 +83,7 @@ mod tests {
         accounts: HashMap<Address, ExtendedAccount>,
     ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::default();
+        let evm_config = EthEvmConfig::new(MAINNET.clone());
 
         let mock_provider = MockEthProvider::default();
         mock_provider.extend_accounts(accounts);

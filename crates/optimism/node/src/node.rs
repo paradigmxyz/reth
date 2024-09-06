@@ -16,6 +16,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, Node, PayloadBuilderConfig,
 };
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -68,7 +69,7 @@ impl OptimismNode {
             .pool(OptimismPoolBuilder::default())
             .payload(OptimismPayloadBuilder::new(
                 compute_pending_block,
-                OptimismEvmConfig::default(),
+                OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: Default::default() })),
             ))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
@@ -136,7 +137,8 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config =
+            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() }));
         let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
 
         Ok((evm_config, executor))

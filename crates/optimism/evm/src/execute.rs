@@ -1,6 +1,8 @@
 //! Optimism block executor.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{
+    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
+};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
@@ -35,7 +37,10 @@ pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec, Default::default())
+        Self::new(
+            chain_spec.clone(),
+            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
+        )
     }
 }
 
@@ -478,7 +483,12 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider { chain_spec, evm_config: Default::default() }
+        OpExecutorProvider {
+            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
+                inner: (*chain_spec).clone(),
+            })),
+            chain_spec,
+        }
     }
 
     #[test]

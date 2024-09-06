@@ -9,14 +9,15 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -30,20 +31,20 @@ pub use error::OptimismBlockExecutionError;
 use revm_primitives::{Bytes, Env, OptimismFields, TxKind};
 
 /// Optimism-related EVM configuration.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct OptimismEvmConfig {
-    chain_spec: ChainSpec,
+    chain_spec: Arc<OpChainSpec>,
 }
 
 impl OptimismEvmConfig {
     /// Creates a new [`OptimismEvmConfig`] with the given chain spec.
-    pub const fn new(chain_spec: ChainSpec) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
         Self { chain_spec }
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub const fn chain_spec(&self) -> &ChainSpec {
+    pub fn chain_spec(&self) -> &OpChainSpec {
         &self.chain_spec
     }
 }
@@ -153,7 +154,7 @@ mod tests {
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, B256, KECCAK_EMPTY, U256,
+        Genesis, Header, B256, BASE_MAINNET, KECCAK_EMPTY, U256,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
@@ -161,7 +162,11 @@ mod tests {
         JournaledState,
     };
     use revm_primitives::{CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HandlerCfg};
-    use std::collections::HashSet;
+    use std::{collections::HashSet, sync::Arc};
+
+    fn test_evm_config() -> OptimismEvmConfig {
+        OptimismEvmConfig::new(Arc::new(Arc::unwrap_or_clone(BASE_MAINNET.clone())))
+    }
 
     #[test]
     fn test_fill_cfg_and_block_env() {
@@ -189,7 +194,7 @@ mod tests {
 
         // Use the `OptimismEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        OptimismEvmConfig::default().fill_cfg_and_block_env(
+        test_evm_config().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &header,
@@ -204,7 +209,7 @@ mod tests {
     #[test]
     fn test_evm_configure() {
         // Create a default `OptimismEvmConfig`
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         // Initialize an empty database wrapped in CacheDB
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -244,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_default_spec() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -264,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_cfg() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -294,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -327,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_spec_id() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -346,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_inspector() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -390,7 +395,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_and_default_inspector() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let env_with_handler = EnvWithHandlerCfg::default();
@@ -409,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_cfg() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let cfg = CfgEnv::default().with_chain_id(111);
@@ -433,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_block_tx() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create custom block and tx environment
@@ -464,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_spec_id() {
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let handler_cfg = HandlerCfg { spec_id: SpecId::ECOTONE, ..Default::default() };
