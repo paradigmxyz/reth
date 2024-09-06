@@ -8,12 +8,12 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
-use reth_db_api::database::Database;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
@@ -47,7 +47,9 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         debug!(target: "reth::cli",
@@ -55,7 +57,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
             "Chunking receipts import"
         );
 
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         import_receipts_from_file(
             provider_factory,
@@ -78,14 +80,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
 }
 
 /// Imports receipts to static files from file in chunks. See [`import_receipts_from_reader`].
-pub async fn import_receipts_from_file<DB, P, F>(
-    provider_factory: ProviderFactory<DB>,
+pub async fn import_receipts_from_file<N, P, F>(
+    provider_factory: ProviderFactory<N>,
     path: P,
     chunk_len: Option<u64>,
     filter: F,
 ) -> eyre::Result<()>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -170,13 +172,13 @@ where
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
 /// indices in the [`Receipts`] list, to map to sequential block numbers.
-pub async fn import_receipts_from_reader<DB, F>(
-    provider_factory: &ProviderFactory<DB>,
+pub async fn import_receipts_from_reader<N, F>(
+    provider_factory: &ProviderFactory<N>,
     mut reader: ChunkedFileReader,
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let mut total_decoded_receipts = 0;

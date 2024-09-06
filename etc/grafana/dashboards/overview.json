@@ -2648,7 +2648,7 @@
       "panels": [],
       "repeat": "instance",
       "repeatDirection": "h",
-      "title": "Stage: Execution",
+      "title": "Execution",
       "type": "row"
     },
     {
@@ -2656,7 +2656,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The amount of gas processed by the executor per second.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
+      "description": "The throughput of the node's executor. The metric is the amount of gas processed in a block, divided by the time it took to process the block.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2699,12 +2699,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
-          "unit": "gas/s",
-          "unitScale": true
+          "unit": "si: gas/s"
         },
         "overrides": []
       },
@@ -2734,49 +2734,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30s])",
-          "legendFormat": "Gas/s (30s)",
+          "expr": "reth_sync_execution_gas_per_second{instance=~\"$instance\"}",
+          "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
-          "hide": false,
-          "legendFormat": "Gas/s (1m)",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
-          "hide": false,
-          "legendFormat": "Gas/s (5m)",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
-          "hide": false,
-          "legendFormat": "Gas/s (10m)",
-          "range": true,
-          "refId": "D"
         }
       ],
-      "title": "Gas processed",
+      "title": "Execution throughput",
       "type": "timeseries"
     },
     {

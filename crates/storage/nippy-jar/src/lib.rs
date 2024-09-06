@@ -21,6 +21,11 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
 };
+
+// Windows specific extension for std::fs
+#[cfg(windows)]
+use std::os::windows::prelude::OpenOptionsExt;
+
 use tracing::*;
 
 pub mod compression;
@@ -54,7 +59,7 @@ const NIPPY_JAR_VERSION: usize = 1;
 
 const INDEX_FILE_EXTENSION: &str = "idx";
 const OFFSETS_FILE_EXTENSION: &str = "off";
-const CONFIG_FILE_EXTENSION: &str = "conf";
+pub const CONFIG_FILE_EXTENSION: &str = "conf";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
 /// memory-mapped file.
@@ -261,6 +266,16 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
         // fsync() dir
         if let Some(parent) = tmp_path.parent() {
+            //custom_flags() is only available on Windows
+            #[cfg(windows)]
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+                .open(parent)?
+                .sync_all()?;
+
+            #[cfg(not(windows))]
             OpenOptions::new().read(true).open(parent)?.sync_all()?;
         }
         Ok(())

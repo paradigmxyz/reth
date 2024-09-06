@@ -8,6 +8,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     transaction::DbTx,
 };
+use reth_node_builder::NodeTypesWithEngine;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -22,8 +23,11 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `storage-tries` recovery command
-    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        _ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider = provider_factory.provider_rw()?;
         let best_block = provider.best_block_number()?;

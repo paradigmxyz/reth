@@ -343,6 +343,13 @@ impl<D> ChainPath<D> {
     pub fn jwt(&self) -> PathBuf {
         self.data_dir().join("jwt.hex")
     }
+
+    /// Returns the path to the invalid block hooks directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/invalid_block_hooks`
+    pub fn invalid_block_hooks(&self) -> PathBuf {
+        self.data_dir().join("invalid_block_hooks")
+    }
 }
 
 impl<D> AsRef<Path> for ChainPath<D> {

@@ -9,6 +9,7 @@ use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
@@ -52,7 +53,10 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {
+    pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        &self,
+        access: AccessRights,
+    ) -> eyre::Result<Environment<N>> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -83,7 +87,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
             ),
             AccessRights::RO => (
                 Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
-                StaticFileProvider::read_only(sf_path)?,
+                StaticFileProvider::read_only(sf_path, false)?,
             ),
         };
 
@@ -101,17 +105,21 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory(
+    fn create_provider_factory<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider,
-    ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
         let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
-        let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider)
-            .with_prune_modes(prune_modes.clone());
+        let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+            db,
+            self.chain.clone(),
+            static_file_provider,
+        )
+        .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
         if let Some(unwind_target) = factory
@@ -132,7 +140,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds and executes an unwind-only pipeline
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
@@ -156,11 +164,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
 
 /// Environment built from [`EnvironmentArgs`].
 #[derive(Debug)]
-pub struct Environment {
+pub struct Environment<N: NodeTypesWithEngine> {
     /// Configuration for reth node
     pub config: Config,
     /// Provider factory.
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     /// Datadir path.
     pub data_dir: ChainPath<DataDirPath>,
 }

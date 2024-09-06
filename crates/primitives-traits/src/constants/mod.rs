@@ -131,6 +131,9 @@ pub const EMPTY_ROOT_HASH: B256 =
 /// From address from Optimism system txs: `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
 pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
+/// To address from Optimism system txs: `0x4200000000000000000000000000000000000015`
+pub const OP_SYSTEM_TX_TO_ADDR: Address = address!("4200000000000000000000000000000000000015");
+
 /// Transactions root of empty receipts set.
 pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
 
