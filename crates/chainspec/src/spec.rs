@@ -124,7 +124,8 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (
                 Hardfork::Ontake,
                 ForkCondition::Block(
-                    std::env::var("ONTAKE_HEIGHT").map_or(2000, |h| h.parse().unwrap_or(2000)),
+                    std::env::var("HEKLA_ONTAKE_HEIGHT")
+                        .map_or(2000, |h| h.parse().unwrap_or(2000)),
                 ),
             ),
         ]),
@@ -162,7 +163,12 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
             #[cfg(feature = "taiko")]
-            (Hardfork::Ontake, ForkCondition::Block(20)), //todo
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("DEV_ONTAKE_HEIGHT").map_or(2000, |h| h.parse().unwrap_or(2000)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -197,6 +203,14 @@ pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("MAINNET_ONTAKE_HEIGHT")
+                        .map_or(2000, |h| h.parse().unwrap_or(2000)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -681,14 +695,14 @@ impl ChainSpec {
         matches!(
             self.chain.kind(),
             ChainKind::Named(
-                NamedChain::Mainnet
-                    | NamedChain::Morden
-                    | NamedChain::Ropsten
-                    | NamedChain::Rinkeby
-                    | NamedChain::Goerli
-                    | NamedChain::Kovan
-                    | NamedChain::Holesky
-                    | NamedChain::Sepolia
+                NamedChain::Mainnet |
+                    NamedChain::Morden |
+                    NamedChain::Ropsten |
+                    NamedChain::Rinkeby |
+                    NamedChain::Goerli |
+                    NamedChain::Kovan |
+                    NamedChain::Holesky |
+                    NamedChain::Sepolia
             )
         )
     }
@@ -991,8 +1005,8 @@ impl ChainSpec {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
-                ForkCondition::Block(block)
-                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block) |
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -1010,8 +1024,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block)
-            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
