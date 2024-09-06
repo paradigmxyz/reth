@@ -145,11 +145,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::default().fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        EthEvmConfig::default().fill_cfg_env(cfg_env, header, total_difficulty)
     }
 
     fn fill_tx_env_system_contract_call(

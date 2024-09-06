@@ -30,9 +30,23 @@ pub use error::OptimismBlockExecutionError;
 use revm_primitives::{Bytes, Env, OptimismFields, TxKind};
 
 /// Optimism-related EVM configuration.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct OptimismEvmConfig;
+pub struct OptimismEvmConfig {
+    chain_spec: ChainSpec,
+}
+
+impl OptimismEvmConfig {
+    /// Creates a new [`OptimismEvmConfig`] with the given chain spec.
+    pub const fn new(chain_spec: ChainSpec) -> Self {
+        Self { chain_spec }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
+}
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
@@ -87,12 +101,11 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
         let spec_id = revm_spec(
-            chain_spec,
+            self.chain_spec(),
             &Head {
                 number: header.number,
                 timestamp: header.timestamp,
@@ -102,11 +115,11 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             },
         );
 
-        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
-        cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
+        cfg_env.handler_cfg.is_optimism = self.chain_spec.is_optimism();
     }
 }
 
@@ -179,7 +192,6 @@ mod tests {
         OptimismEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
-            &chain_spec,
             &header,
             total_difficulty,
         );

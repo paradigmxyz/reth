@@ -32,20 +32,33 @@ pub mod dao_fork;
 pub mod eip6110;
 
 /// Ethereum-related EVM configuration.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct EthEvmConfig;
+pub struct EthEvmConfig {
+    chain_spec: ChainSpec,
+}
+
+impl EthEvmConfig {
+    /// Creates a new Ethereum EVM configuration with the given chain spec.
+    pub const fn new(chain_spec: ChainSpec) -> Self {
+        Self { chain_spec }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
+}
 
 impl ConfigureEvmEnv for EthEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
         let spec_id = config::revm_spec(
-            chain_spec,
+            self.chain_spec(),
             &Head {
                 number: header.number,
                 timestamp: header.timestamp,
@@ -55,7 +68,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             },
         );
 
-        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
@@ -158,7 +171,6 @@ mod tests {
         EthEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
-            &chain_spec,
             &header,
             total_difficulty,
         );

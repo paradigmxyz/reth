@@ -64,13 +64,7 @@ where
         // Setup environment for the execution.
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(
-            &mut cfg,
-            &mut block_env,
-            &self.provider.chain_spec(),
-            block.header(),
-            U256::MAX,
-        );
+        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, block.header(), U256::MAX);
 
         // Setup EVM
         let mut evm = self.evm_config.evm_with_env(

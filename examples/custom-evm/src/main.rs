@@ -34,9 +34,23 @@ use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
 /// Custom EVM configuration
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct MyEvmConfig;
+pub struct MyEvmConfig {
+    chain_spec: ChainSpec,
+}
+
+impl MyEvmConfig {
+    /// Creates a new instance of the custom EVM configuration
+    pub fn new(chain_spec: ChainSpec) -> Self {
+        Self { chain_spec }
+    }
+
+    /// Returns the chain spec associated with this configuration
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
+}
 
 impl MyEvmConfig {
     /// Sets the precompiles to the EVM handler
@@ -73,12 +87,11 @@ impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
         let spec_id = reth_evm_ethereum::revm_spec(
-            chain_spec,
+            self.chain_spec(),
             &Head {
                 number: header.number,
                 timestamp: header.timestamp,
@@ -88,7 +101,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
             },
         );
 
-        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
