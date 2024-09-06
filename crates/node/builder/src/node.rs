@@ -10,7 +10,7 @@ use reth_node_core::{
     rpc::api::EngineApiClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::ChainSpecProvider;
+use reth_provider::{ChainSpecProvider, NodeTypesWithStorage};
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 
@@ -23,7 +23,7 @@ use crate::{
 /// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
+pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + NodeTypesWithStorage + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
@@ -70,6 +70,15 @@ where
     AO: Send + Sync + Unpin + Clone + 'static,
 {
     type Engine = <N::Types as NodeTypesWithEngine>::Engine;
+}
+
+impl<N, C, AO> NodeTypesWithStorage for AnyNode<N, C, AO>
+where
+    N: FullNodeTypes,
+    C: Send + Sync + Unpin + 'static,
+    AO: Send + Sync + Unpin + Clone + 'static,
+{
+    type Storage = <N::Types as NodeTypesWithStorage>::Storage;
 }
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>

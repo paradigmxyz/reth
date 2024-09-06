@@ -16,14 +16,11 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
-use reth_chainspec::ChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
-};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -32,7 +29,7 @@ use reth_node_core::{
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::{providers::BlockchainProvider, ProviderNodeTypes};
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
@@ -104,7 +101,7 @@ impl DefaultNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine,
+    Types: ProviderNodeTypes + NodeTypesWithEngine,
     T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<

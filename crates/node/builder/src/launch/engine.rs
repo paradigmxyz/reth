@@ -28,7 +28,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::{providers::BlockchainProvider2, NodeTypesWithStorage};
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
@@ -62,7 +62,7 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine + NodeTypesWithStorage,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<

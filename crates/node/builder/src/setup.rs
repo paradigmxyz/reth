@@ -14,7 +14,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_core::primitives::{BlockNumber, B256};
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_provider::{ProviderFactory, ProviderNodeTypes};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;

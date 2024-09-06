@@ -35,8 +35,8 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
+    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderNodeTypes,
+    ProviderResult, StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -65,13 +65,13 @@ pub trait WithTree {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self;
 }
 
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider<N> {
+impl<N: ProviderNodeTypes> WithTree for BlockchainProvider<N> {
     fn set_tree(self, tree: Arc<dyn TreeViewer>) -> Self {
         self.with_tree(tree)
     }
 }
 
-impl<N: NodeTypesWithDB> WithTree for BlockchainProvider2<N> {
+impl<N: ProviderNodeTypes> WithTree for BlockchainProvider2<N> {
     fn set_tree(self, _tree: Arc<dyn TreeViewer>) -> Self {
         self
     }
@@ -386,7 +386,7 @@ where
     /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
-    pub async fn create_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
+    pub async fn create_provider_factory<N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>>(
         &self,
     ) -> eyre::Result<ProviderFactory<N>> {
         let factory = ProviderFactory::new(
@@ -449,7 +449,7 @@ where
     }
 
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N: NodeTypesWithDB<DB = DB, ChainSpec = ChainSpec>>(
+    pub async fn with_provider_factory<N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>>(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<N>>>> {
         let factory = self.create_provider_factory().await?;
@@ -464,7 +464,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs, ProviderFactory<T>>>
 where
-    T: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    T: ProviderNodeTypes,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
@@ -551,7 +551,7 @@ where
 
 impl<N> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<N>>>
 where
-    N: NodeTypesWithDB,
+    N: ProviderNodeTypes,
 {
     /// Returns the configured `ProviderFactory`.
     const fn provider_factory(&self) -> &ProviderFactory<N> {
@@ -597,7 +597,7 @@ where
 
 impl<T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<T>>>
 where
-    T: FullNodeTypes<Types: NodeTypesWithDB<ChainSpec = ChainSpec>, Provider: WithTree>,
+    T: FullNodeTypes<Types: ProviderNodeTypes, Provider: WithTree>,
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &<T::Types as NodeTypesWithDB>::DB {
@@ -927,7 +927,7 @@ pub struct WithConfigs {
 /// Helper container type to bundle the [`ProviderFactory`] and the metrics
 /// sender.
 #[derive(Debug, Clone)]
-pub struct WithMeteredProvider<N: NodeTypesWithDB> {
+pub struct WithMeteredProvider<N: ProviderNodeTypes> {
     provider_factory: ProviderFactory<N>,
     metrics_sender: UnboundedSender<MetricEvent>,
 }

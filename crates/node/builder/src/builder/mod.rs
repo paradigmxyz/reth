@@ -22,8 +22,8 @@ use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithEngine,
+    NodeTypesWithStorageAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -33,7 +33,9 @@ use reth_node_core::{
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
+use reth_provider::{
+    providers::BlockchainProvider, ChainSpecProvider, FullProvider, NodeTypesWithStorage,
+};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
@@ -50,8 +52,8 @@ use crate::{
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
-    NodeTypesWithDBAdapter<Types, DB>,
-    BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
+    NodeTypesWithStorageAdapter<Types, DB>,
+    BlockchainProvider<NodeTypesWithStorageAdapter<Types, DB>>,
 >;
 
 #[allow(clippy::doc_markdown)]
@@ -214,7 +216,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage,
     {
         self.with_types_and_provider()
     }
@@ -222,10 +224,10 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithStorageAdapter<T, DB>, P>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage,
+        P: FullProvider<NodeTypesWithStorageAdapter<T, DB>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
@@ -272,7 +274,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -281,11 +283,11 @@ where
     pub fn with_types_and_provider<T, P>(
         self,
     ) -> WithLaunchContext<
-        NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>,
+        NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithStorageAdapter<T, DB>, P>>,
     >
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage,
+        P: FullProvider<NodeTypesWithStorageAdapter<T, DB>>,
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
@@ -483,7 +485,7 @@ where
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: NodeAddOns<
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
