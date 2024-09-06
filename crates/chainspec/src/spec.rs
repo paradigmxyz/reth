@@ -120,6 +120,13 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("ONTAKE_HEIGHT").map_or(2000, |h| h.parse().unwrap_or(2000)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
