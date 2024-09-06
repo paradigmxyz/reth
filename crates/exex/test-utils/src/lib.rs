@@ -16,7 +16,7 @@ use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
-use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotificationsSubscriber};
+use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_builder::{
@@ -278,7 +278,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
-    let notifications = ExExNotificationsSubscriber::new(notifications_rx);
+    let notifications = ExExNotifications::new(components.clone(), notifications_rx);
 
     let ctx = ExExContext {
         head,
