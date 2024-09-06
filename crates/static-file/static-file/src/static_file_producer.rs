@@ -4,10 +4,8 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth_chainspec::ChainSpec;
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
+    providers::StaticFileWriter, ProviderFactory, ProviderNodeTypes, StageCheckpointReader as _,
     StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
@@ -31,22 +29,22 @@ pub type StaticFileProducerWithResult<N> = (StaticFileProducer<N>, StaticFilePro
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
 #[derive(Debug)]
-pub struct StaticFileProducer<N: NodeTypesWithDB>(Arc<Mutex<StaticFileProducerInner<N>>>);
+pub struct StaticFileProducer<N: ProviderNodeTypes>(Arc<Mutex<StaticFileProducerInner<N>>>);
 
-impl<N: NodeTypesWithDB> StaticFileProducer<N> {
+impl<N: ProviderNodeTypes> StaticFileProducer<N> {
     /// Creates a new [`StaticFileProducer`].
     pub fn new(provider_factory: ProviderFactory<N>, prune_modes: PruneModes) -> Self {
         Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
     }
 }
 
-impl<N: NodeTypesWithDB> Clone for StaticFileProducer<N> {
+impl<N: ProviderNodeTypes> Clone for StaticFileProducer<N> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<N: NodeTypesWithDB> Deref for StaticFileProducer<N> {
+impl<N: ProviderNodeTypes> Deref for StaticFileProducer<N> {
     type Target = Arc<Mutex<StaticFileProducerInner<N>>>;
 
     fn deref(&self) -> &Self::Target {
@@ -57,7 +55,7 @@ impl<N: NodeTypesWithDB> Deref for StaticFileProducer<N> {
 /// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
 /// description.
 #[derive(Debug)]
-pub struct StaticFileProducerInner<N: NodeTypesWithDB> {
+pub struct StaticFileProducerInner<N: ProviderNodeTypes> {
     /// Provider factory
     provider_factory: ProviderFactory<N>,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
@@ -101,13 +99,13 @@ impl StaticFileTargets {
     }
 }
 
-impl<N: NodeTypesWithDB> StaticFileProducerInner<N> {
+impl<N: ProviderNodeTypes> StaticFileProducerInner<N> {
     fn new(provider_factory: ProviderFactory<N>, prune_modes: PruneModes) -> Self {
         Self { provider_factory, prune_modes, event_sender: Default::default() }
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
+impl<N: ProviderNodeTypes> StaticFileProducerInner<N> {
     /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
         self.event_sender.new_listener()
@@ -268,7 +266,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
-        providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
+        providers::StaticFileWriter, test_utils::MockNodeTypesWithStorage, ProviderError,
         ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
@@ -280,7 +278,7 @@ mod tests {
     use std::{sync::mpsc::channel, time::Duration};
     use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<MockNodeTypesWithDB>, TempDir) {
+    fn setup() -> (ProviderFactory<MockNodeTypesWithStorage>, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
