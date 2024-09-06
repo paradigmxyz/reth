@@ -792,10 +792,10 @@ pub trait TransactionFilter: Send + Sync + Clone {
 #[derive(Debug, Clone)]
 pub struct NoopTransactionFilter<T>(std::marker::PhantomData<T>);
 
-impl<T> NoopTransactionFilter<T> {
-    /// Creates a new [`NoopTransactionFilter`].
-    #[allow(clippy::new_without_default)]
-    pub const fn new() -> Self {
+// We can't derive Default because this forces T to be
+// Default as well, which isn't necessary.
+impl<T> Default for NoopTransactionFilter<T> {
+    fn default() -> Self {
         Self(std::marker::PhantomData)
     }
 }

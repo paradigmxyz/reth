@@ -55,17 +55,23 @@ use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EthereumPayloadBuilder<TxFilter, EvmConfig = EthEvmConfig> {
+pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
-    /// The type responsible for filtering pool transactions.
-    tx_filter: TxFilter,
 }
 
-impl<TxFilter, EvmConfig> EthereumPayloadBuilder<TxFilter, EvmConfig> {
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     /// [`EthereumPayloadBuilder`] constructor.
-    pub const fn new(evm_config: EvmConfig, tx_filter: TxFilter) -> Self {
-        Self { evm_config, tx_filter }
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { evm_config }
+    }
+
+    /// Returns a new [`EthereumPayloadBuilderWithFilter`].
+    pub const fn with_filter<TxFilter>(
+        self,
+        tx_filter: TxFilter,
+    ) -> EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter> {
+        EthereumPayloadBuilderWithFilter { ethereum_payload_builder: self, tx_filter }
     }
 }
 
@@ -89,14 +95,12 @@ where
     }
 }
 
-// Default implementation of [PayloadBuilder] for unit type
-impl<TxFilter, EvmConfig, Pool, Client> PayloadBuilder<Pool, Client>
-    for EthereumPayloadBuilder<TxFilter, EvmConfig>
+/// Default implementation of [PayloadBuilder] for unit type
+impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -106,7 +110,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        let tx_filter = self.tx_filter.clone();
+        let tx_filter =  NoopTransactionFilter::default();
         default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)
     }
 
@@ -128,6 +132,52 @@ where
         default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
+    }
+}
+
+/// Ethereum payload builder with a transaction filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter> {
+    /// An Ethereum payload builder.
+    ethereum_payload_builder: EthereumPayloadBuilder<EvmConfig>,
+    /// The type responsible for filtering transactions.
+    tx_filter: TxFilter,
+}
+
+/// Implementation of the [`PayloadBuilder`] for an Ethereum payload builder
+/// with a filter on the transactions included in the block.
+impl<EvmConfig, Pool, Client, TxFilter> PayloadBuilder<Pool, Client>
+    for EthereumPayloadBuilderWithFilter<EvmConfig, TxFilter>
+where
+    EvmConfig: ConfigureEvm,
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+    TxFilter: TransactionFilter<Transaction = Arc<ValidPoolTransaction<Pool::Transaction>>>,
+{
+    type Attributes = EthPayloadBuilderAttributes;
+    type BuiltPayload = EthBuiltPayload;
+
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
+        default_ethereum_payload(
+            self.ethereum_payload_builder.evm_config.clone(),
+            args,
+            self.tx_filter.clone(),
+        )
+    }
+
+    fn build_empty_payload(
+        &self,
+        client: &Client,
+        config: PayloadConfig<Self::Attributes>,
+    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        <EthereumPayloadBuilder<EvmConfig> as PayloadBuilder<Pool, Client>>::build_empty_payload(
+            &self.ethereum_payload_builder,
+            client,
+            config,
+        )
     }
 }
 
