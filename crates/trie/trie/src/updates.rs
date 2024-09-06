@@ -1,5 +1,5 @@
 use crate::{walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles};
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use std::collections::{HashMap, HashSet};
 
 /// The aggregation of trie updates.
