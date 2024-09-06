@@ -6,7 +6,10 @@ use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use jsonrpsee::{server::{Server, ServerHandle}, Methods, RpcModule};
+use jsonrpsee::{
+    server::{Server, ServerHandle},
+    Methods, RpcModule,
+};
 use rand::RngCore;
 use reth::args::RpcServerArgs;
 use reth_consensus::Consensus;
@@ -32,15 +35,16 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
 
     let eth_server = EthImpl::new();
     let gas_price = eth_server.gas_price;
-    let (_server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) = start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
 
     // Act
     let gas_price_result = reth_client.gas_price().await;
 
     // Assert
     assert_eq!(gas_price_result.unwrap().as_u128(), gas_price);
-
 }
 
 #[tokio::test]
@@ -50,15 +54,16 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
 
     let eth_server = EthImpl::new();
     let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
-    let (_server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) = start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
 
     // Act
     let result = reth_client.max_priority_fee_per_gas().await;
 
     // Assert
     assert_eq!(result.unwrap().as_u128(), max_priority_fee_per_gas);
-
 }
 
 #[tokio::test]
@@ -67,58 +72,98 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let _log = init_logs();
 
     let eth_server = EthImpl::new();
-    let (_server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) = start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
 
     // Create a random transaction
     let mut tx = [0u8; 256];
     rand::thread_rng().fill_bytes(&mut tx);
-    let expected_tx_hash = keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(&tx)).as_bytes());
+    let expected_tx_hash =
+        keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
 
     // Act
     let result = reth_client.send_raw_transaction_bytes(&tx).await;
 
     // Assert
     assert_eq!(result.unwrap(), expected_tx_hash.0);
-
 }
 
 /// Start a local reth node
-async fn start_reth_testing_node(bitfinity_evm_url: Option<String>) -> (EthJsonRpcClient<ReqwestClient>, NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider, std::sync::Arc<dyn Consensus>>>>) {
+async fn start_reth_testing_node(
+    bitfinity_evm_url: Option<String>,
+) -> (
+    EthJsonRpcClient<ReqwestClient>,
+    NodeHandle<
+        reth_node_builder::NodeAdapter<
+            reth_node_api::FullNodeTypesAdapter<
+                EthereumNode,
+                std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>,
+                reth_provider::providers::BlockchainProvider<
+                    std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>,
+                >,
+            >,
+            reth_node_builder::components::Components<
+                reth_node_api::FullNodeTypesAdapter<
+                    EthereumNode,
+                    std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>,
+                    reth_provider::providers::BlockchainProvider<
+                        std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>,
+                    >,
+                >,
+                reth_transaction_pool::Pool<
+                    reth_transaction_pool::TransactionValidationTaskExecutor<
+                        reth_transaction_pool::EthTransactionValidator<
+                            reth_provider::providers::BlockchainProvider<
+                                std::sync::Arc<
+                                    reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>,
+                                >,
+                            >,
+                            reth_transaction_pool::EthPooledTransaction,
+                        >,
+                    >,
+                    reth_transaction_pool::CoinbaseTipOrdering<
+                        reth_transaction_pool::EthPooledTransaction,
+                    >,
+                    reth_transaction_pool::blobstore::DiskFileBlobStore,
+                >,
+                reth_node_ethereum::EthEvmConfig,
+                reth_node_ethereum::EthExecutorProvider,
+                std::sync::Arc<dyn Consensus>,
+            >,
+        >,
+    >,
+) {
     let tasks = TaskManager::current();
 
     // create node config
-    let node_config = NodeConfig::test()
-        .dev()
-        .with_rpc(RpcServerArgs::default().with_http())
-        .with_unused_ports();
+    let node_config =
+        NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
 
     let mut chain = node_config.chain.as_ref().clone();
     chain.bitfinity_evm_url = bitfinity_evm_url;
 
     let node_config = node_config.with_chain(chain);
 
-    let node_handle  = NodeBuilder::new(node_config)
+    let node_handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()
-        .await.unwrap();
+        .await
+        .unwrap();
 
     let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
 
-    let client: EthJsonRpcClient<ReqwestClient> = EthJsonRpcClient::new(
-        ReqwestClient::new(format!("http://{}", reth_address)),
-    );
-    
+    let client: EthJsonRpcClient<ReqwestClient> =
+        EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
+
     (client, node_handle)
 }
 
-/// Start a local Eth server. 
+/// Start a local Eth server.
 /// Reth requests will be forwarded to this server
-async fn mock_eth_server_start(
-    methods: impl Into<Methods>,
-) -> (ServerHandle, SocketAddr) {
-
+async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, SocketAddr) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let server = Server::builder().build(addr).await.unwrap();
 
@@ -148,21 +193,23 @@ pub mod eth_server {
 
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
-        
     }
 
     #[derive(Debug)]
-    pub struct EthImpl{
+    pub struct EthImpl {
         pub gas_price: u128,
         pub max_priority_fee_per_gas: u128,
     }
 
-    impl EthImpl{
+    impl EthImpl {
         pub fn new() -> Self {
-            Self {
-                gas_price: rand::random(),
-                max_priority_fee_per_gas: rand::random(),
-            }
+            Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
+        }
+    }
+
+    impl Default for EthImpl {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -181,5 +228,4 @@ pub mod eth_server {
             Ok(hash.into())
         }
     }
-
 }

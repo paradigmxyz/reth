@@ -40,10 +40,10 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
-                return Ok(None)
+                return Ok(None);
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(code_hash)
+            return self.bytecode_by_hash(code_hash);
         }
 
         // Return `None` if no code hash is set
@@ -122,20 +122,8 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
         number_or_tag: BlockNumberOrTag,
     ) -> ProviderResult<StateProviderBox> {
         match number_or_tag {
-            BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Finalized => {
-                // we can only get the finalized state by hash, not by num
-                let hash =
-                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
-
-                // only look at historical state
-                self.history_by_block_hash(hash)
-            }
-            BlockNumberOrTag::Safe => {
-                // we can only get the safe state by hash, not by num
-                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
-
-                self.history_by_block_hash(hash)
+            BlockNumberOrTag::Latest | BlockNumberOrTag::Finalized | BlockNumberOrTag::Safe => {
+                self.latest()
             }
             BlockNumberOrTag::Earliest => self.history_by_block_number(0),
             BlockNumberOrTag::Pending => self.pending(),
