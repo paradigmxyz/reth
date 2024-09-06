@@ -6947,6 +6947,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-engine-local"
+version = "1.0.6"
+
+[[package]]
 name = "reth-engine-primitives"
 version = "1.0.7"
 dependencies = [
