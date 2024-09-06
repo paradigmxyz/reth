@@ -7,18 +7,15 @@ use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
-    errors::provider::ProviderResult,
-    providers::{StaticFileProvider, StaticFileWriter},
-    writer::UnifiedStorageWriter,
+    errors::provider::ProviderResult, providers::StaticFileProvider, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
     ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    TrieWriter,
+    ProviderFactory, ProviderNodeTypes, RevertsInit, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StaticFileWriter, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -82,7 +79,7 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_genesis<N: ProviderNodeTypes>(
     factory: ProviderFactory<N>,
 ) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
@@ -320,7 +317,7 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_from_state_dump<N: ProviderNodeTypes>(
     mut reader: impl BufRead,
     factory: ProviderFactory<N>,
     etl_config: EtlConfig,
@@ -549,7 +546,7 @@ mod tests {
     use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::{
-        create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
+        create_test_provider_factory_with_chain_spec, MockNodeTypesWithStorage,
     };
 
     fn collect_table_entries<DB, T>(
@@ -596,7 +593,7 @@ mod tests {
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
+        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithStorage>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
