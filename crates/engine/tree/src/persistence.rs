@@ -4,7 +4,7 @@ use reth_errors::ProviderError;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::BlockNumHash;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory,
+    writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory, ProviderNodeTypes,
     StaticFileProviderFactory,
 };
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
