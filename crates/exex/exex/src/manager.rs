@@ -172,12 +172,47 @@ impl<Node> ExExNotifications<Node> {
     /// further values can ever be received from this `Receiver`. The channel is
     /// closed when all senders have been dropped, or when [`Receiver::close`] is called.
     ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe. If `recv` is used as the event in a
+    /// [`tokio::select!`] statement and some other branch
+    /// completes first, it is guaranteed that no messages were received on this
+    /// channel.
+    ///
     /// For full documentation, see [`Receiver::recv`].
+    #[deprecated(note = "use `ExExNotifications::next` and its `Stream` implementation instead")]
+    pub async fn recv(&mut self) -> Option<ExExNotification> {
+        self.notifications.recv().await
+    }
+
+    /// Polls to receive the next message on this channel.
+    ///
+    /// This method returns:
+    ///
+    ///  * `Poll::Pending` if no messages are available but the channel is not closed, or if a
+    ///    spurious failure happens.
+    ///  * `Poll::Ready(Some(message))` if a message is available.
+    ///  * `Poll::Ready(None)` if the channel has been closed and all messages sent before it was
+    ///    closed have been received.
+    ///
+    /// When the method returns `Poll::Pending`, the `Waker` in the provided
+    /// `Context` is scheduled to receive a wakeup when a message is sent on any
+    /// receiver, or when the channel is closed.  Note that on multiple calls to
+    /// `poll_recv` or `poll_recv_many`, only the `Waker` from the `Context`
+    /// passed to the most recent call is scheduled to receive a wakeup.
+    ///
+    /// If this method returns `Poll::Pending` due to a spurious failure, then
+    /// the `Waker` will be notified when the situation causing the spurious
+    /// failure has been resolved. Note that receiving such a wakeup does not
+    /// guarantee that the next call will succeed — it could fail with another
+    /// spurious failure.
+    ///
+    /// For full documentation, see [`Receiver::poll_recv`].
     #[deprecated(
         note = "use `ExExNotifications::poll_next` and its `Stream` implementation instead"
     )]
-    pub async fn recv(&mut self) -> Option<ExExNotification> {
-        self.notifications.recv().await
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<ExExNotification>> {
+        self.notifications.poll_recv(cx)
     }
 
     // TODO(alexey): make it public when backfill is implemented in [`ExExNotificationsWithHead`]
