@@ -14,8 +14,8 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
-    FullExecutionDataProvider, ProviderError,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
+    ProviderError, ProviderNodeTypes,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};

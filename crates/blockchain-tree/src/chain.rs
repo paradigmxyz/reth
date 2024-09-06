@@ -17,8 +17,8 @@ use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider,
+    providers::{BundleStateProvider, ConsistentDbView},
+    FullExecutionDataProvider, ProviderError, ProviderNodeTypes, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{updates::TrieUpdates, HashedPostState};

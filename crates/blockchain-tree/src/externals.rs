@@ -6,7 +6,7 @@ use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    providers::ProviderNodeTypes, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, ProviderNodeTypes,
     StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;

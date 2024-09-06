@@ -19,10 +19,10 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
+    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, ProviderNodeTypes,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -1398,7 +1398,7 @@ mod tests {
     use reth_provider::{
         test_utils::{
             blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
-            MockNodeTypesWithDB,
+            MockNodeTypesWithStorage,
         },
         ProviderFactory,
     };
@@ -1408,7 +1408,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,
-    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider> {
+    ) -> TreeExternals<MockNodeTypesWithStorage, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
