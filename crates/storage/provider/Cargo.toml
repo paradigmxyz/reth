@@ -59,12 +59,14 @@ strum.workspace = true
 # test-utils
 once_cell = { workspace = true, optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
+reth-engine-primitives = { workspace = true, optional = true }
 
 # parallel utils
 rayon.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-engine-primitives.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -86,4 +88,5 @@ test-utils = [
     "reth-chain-state/test-utils",
     "once_cell",
     "reth-ethereum-engine-primitives",
+    "reth-engine-primitives",
 ]

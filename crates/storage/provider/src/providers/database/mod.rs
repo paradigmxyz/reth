@@ -1,7 +1,7 @@
 use crate::{
     providers::{state::latest::LatestStateProvider, StaticFileProvider},
     to_range,
-    traits::{BlockSource, ReceiptProvider},
+    traits::{BlockSource, NodeStorage, NodeTypesWithStorage, ProviderNodeTypes, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
@@ -34,8 +34,6 @@ use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-
-use super::ProviderNodeTypes;
 
 mod metrics;
 
@@ -328,6 +326,8 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+        <<N as NodeTypesWithStorage>::Storage as NodeStorage>::new()
+            .read_block(id, self.provider()?);
         self.provider()?.block(id)
     }
 
@@ -621,7 +621,7 @@ mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithStorage},
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
     use assert_matches::assert_matches;
@@ -669,13 +669,14 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
-            tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
-            Arc::new(chain_spec),
-            DatabaseArguments::new(Default::default()),
-            StaticFileProvider::read_write(static_dir_path).unwrap(),
-        )
-        .unwrap();
+        let factory =
+            ProviderFactory::<MockNodeTypesWithStorage<DatabaseEnv>>::new_with_database_path(
+                tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+                Arc::new(chain_spec),
+                DatabaseArguments::new(Default::default()),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            )
+            .unwrap();
 
         let provider = factory.provider().unwrap();
         provider.block_hash(0).unwrap();

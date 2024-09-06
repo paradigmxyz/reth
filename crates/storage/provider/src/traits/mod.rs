@@ -46,3 +46,6 @@ pub use tree_viewer::TreeViewer;
 
 mod finalized_block;
 pub use finalized_block::{FinalizedBlockReader, FinalizedBlockWriter};
+
+mod node;
+pub use node::{NodeStorage, NodeTypesWithStorage, NodeTypesWithStorageAdapter, ProviderNodeTypes};

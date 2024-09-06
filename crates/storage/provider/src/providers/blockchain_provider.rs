@@ -1387,7 +1387,7 @@ mod tests {
         providers::BlockchainProvider2,
         test_utils::{
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
-            MockNodeTypesWithDB,
+            MockNodeTypesWithStorage,
         },
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
@@ -1465,7 +1465,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider2<MockNodeTypesWithDB>,
+        BlockchainProvider2<MockNodeTypesWithStorage>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,
@@ -1556,7 +1556,7 @@ mod tests {
         in_memory_blocks: usize,
         block_range_params: BlockRangeParams,
     ) -> eyre::Result<(
-        BlockchainProvider2<MockNodeTypesWithDB>,
+        BlockchainProvider2<MockNodeTypesWithStorage>,
         Vec<SealedBlock>,
         Vec<SealedBlock>,
         Vec<Vec<Receipt>>,

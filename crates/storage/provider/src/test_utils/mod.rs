@@ -1,11 +1,9 @@
-use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
-use reth_chainspec::{ChainSpec, MAINNET};
-use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
-    DatabaseEnv,
+use crate::{
+    providers::StaticFileProvider, HashingWriter, ProviderFactory, ProviderNodeTypes, TrieWriter,
 };
+use reth_chainspec::{ChainSpec, MAINNET};
+use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_errors::ProviderResult;
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_primitives::{Account, StorageEntry, B256};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -13,32 +11,23 @@ use std::sync::Arc;
 
 pub mod blocks;
 mod mock;
+mod node;
 mod noop;
+pub use node::*;
 
 pub use mock::{ExtendedAccount, MockEthProvider};
 pub use noop::NoopProvider;
 pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
-/// Mock [`reth_node_types::NodeTypes`] for testing.
-pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    (),
-    reth_ethereum_engine_primitives::EthEngineTypes,
-    reth_chainspec::ChainSpec,
->;
-
-/// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
-pub type MockNodeTypesWithDB<DB = TempDatabase<DatabaseEnv>> =
-    NodeTypesWithDBAdapter<MockNodeTypes, Arc<DB>>;
-
 /// Creates test provider factory with mainnet chain spec.
-pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
+pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithStorage> {
     create_test_provider_factory_with_chain_spec(MAINNET.clone())
 }
 
 /// Creates test provider factory with provided chain spec.
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
-) -> ProviderFactory<MockNodeTypesWithDB> {
+) -> ProviderFactory<MockNodeTypesWithStorage> {
     let (static_dir, _) = create_test_static_files_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(
@@ -49,7 +38,7 @@ pub fn create_test_provider_factory_with_chain_spec(
 }
 
 /// Inserts the genesis alloc from the provided chain spec into the trie.
-pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn insert_genesis<N: ProviderNodeTypes>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderResult<B256> {

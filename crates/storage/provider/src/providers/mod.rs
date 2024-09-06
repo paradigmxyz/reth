@@ -3,9 +3,10 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     EvmEnvProvider, FinalizedBlockReader, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    ProviderNodeTypes, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
+    WithdrawalsProvider,
 };
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
@@ -13,7 +14,7 @@ use reth_blockchain_tree_api::{
     InsertPayloadOk,
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
@@ -59,11 +60,6 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 
 mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
-
-/// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
-pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec = ChainSpec> {}
-
-impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec = ChainSpec> {}
 
 /// The main type for interacting with the blockchain.
 ///
