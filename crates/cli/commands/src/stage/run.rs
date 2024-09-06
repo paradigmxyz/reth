@@ -131,7 +131,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
-                ChainSpecInfo { name: format!("{}", provider_factory.chain_spec().chain) },
+                ChainSpecInfo { name: provider_factory.chain_spec().chain.to_string() },
                 ctx.task_executor,
                 Hooks::new(
                     provider_factory.db_ref().clone(),
