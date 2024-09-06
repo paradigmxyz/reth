@@ -1,10 +1,10 @@
 use reth_chainspec::ChainSpecBuilder;
 use reth_node_ethereum::EthereumNode;
-use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives::{Address, B256};
 use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
-    ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
+    NodeTypesWithStorageAdapter, providers::{ StaticFileProvider},
+    AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
+    StateProvider, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use std::path::Path;
@@ -24,7 +24,7 @@ fn main() -> eyre::Result<()> {
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
     let factory =
-        ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, _>>::new_with_database_path(
+        ProviderFactory::<NodeTypesWithStorageAdapter<EthereumNode, _>>::new_with_database_path(
             db_path,
             spec.into(),
             Default::default(),
