@@ -4,6 +4,7 @@ use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_builder::NodeTypesWithEngine;
+use reth_provider::NodeTypesWithStorage;
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;
@@ -17,7 +18,9 @@ pub struct PruneCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> PruneCommand<C> {
     /// Execute the `prune` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;

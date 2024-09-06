@@ -5,7 +5,8 @@ use reth_chainspec::ChainSpec;
 use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
 use reth_db_api::{cursor::DbCursorRO, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypesWithEngine, NodeTypesWithStorageAdapter};
+use reth_provider::{NodeTypesWithStorage, ProviderNodeTypes};
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,
@@ -35,9 +36,9 @@ pub struct Command {
 
 impl Command {
     /// Execute `db checksum` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec = ChainSpec>>(
+    pub fn execute<N: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithStorageAdapter<N, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
@@ -50,22 +51,20 @@ impl Command {
     }
 }
 
-pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
+pub(crate) struct ChecksumViewer<'a, N: ProviderNodeTypes> {
     tool: &'a DbTool<N>,
     start_key: Option<String>,
     end_key: Option<String>,
     limit: Option<usize>,
 }
 
-impl<N: NodeTypesWithDB> ChecksumViewer<'_, N> {
+impl<N: ProviderNodeTypes> ChecksumViewer<'_, N> {
     pub(crate) const fn new(tool: &'_ DbTool<N>) -> ChecksumViewer<'_, N> {
         ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> TableViewer<(u64, Duration)>
-    for ChecksumViewer<'_, N>
-{
+impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {

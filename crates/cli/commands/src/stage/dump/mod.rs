@@ -10,11 +10,12 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, PlatformPath},
 };
+use reth_provider::{NodeTypesWithStorage, ProviderNodeTypes};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -90,7 +91,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `dump-stage` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<ChainSpec>) -> E,
     {
@@ -113,7 +114,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
 /// Sets up the database and initial state on [`tables::BlockBodyIndices`]. Also returns the tip
 /// block number.
-pub(crate) fn setup<N: NodeTypesWithDB>(
+pub(crate) fn setup<N: ProviderNodeTypes>(
     from: u64,
     to: u64,
     output_db: &PathBuf,

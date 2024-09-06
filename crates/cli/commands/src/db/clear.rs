@@ -5,8 +5,7 @@ use reth_db_api::{
     table::Table,
     transaction::{DbTx, DbTxMut},
 };
-use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{ProviderFactory, ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// The arguments for the `reth db clear` command
@@ -18,7 +17,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db clear` command
-    pub fn execute<N: NodeTypesWithDB>(
+    pub fn execute<N: ProviderNodeTypes>(
         self,
         provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {

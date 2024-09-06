@@ -1,12 +1,14 @@
 use clap::Parser;
+use reth_chainspec::ChainSpec;
 use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
-use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypesWithEngine, NodeTypesWithStorageAdapter};
 use reth_node_core::{
     args::DatabaseArgs,
     dirs::{DataDirPath, PlatformPath},
 };
+use reth_provider::NodeTypesWithStorage;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -52,9 +54,9 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute<T: NodeTypesWithEngine>(
+    pub fn execute<T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage>(
         self,
-        tool: &DbTool<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithStorageAdapter<T, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db

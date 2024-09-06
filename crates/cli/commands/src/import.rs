@@ -19,13 +19,13 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::B256;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
-    StageCheckpointReader,
+    BlockNumReader, ChainSpecProvider, HeaderProvider, NodeTypesWithStorage, ProviderError,
+    ProviderFactory, ProviderNodeTypes, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
@@ -60,7 +60,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportCommand<C> {
     /// Execute `import` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<N::ChainSpec>) -> E,
     {
@@ -168,7 +168,7 @@ pub fn build_import_pipeline<N, C, E>(
     executor: E,
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     C: Consensus + 'static,
     E: BlockExecutorProvider,
 {

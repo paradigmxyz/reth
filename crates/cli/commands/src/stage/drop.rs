@@ -12,7 +12,9 @@ use reth_db_common::{
 };
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
-use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
+use reth_provider::{
+    writer::UnifiedStorageWriter, NodeTypesWithStorage, StaticFileProviderFactory,
+};
 use reth_stages::StageId;
 use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
@@ -27,7 +29,9 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;

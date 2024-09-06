@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use super::setup;
-use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
 };
 use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
+use reth_node_builder::NodeTypesWithStorageAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, ProviderNodeTypes};
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
@@ -23,7 +22,7 @@ pub(crate) async fn dump_execution_stage<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
@@ -34,7 +33,7 @@ where
 
     if should_run {
         dry_run(
-            ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+            ProviderFactory::<NodeTypesWithStorageAdapter<N, Arc<DatabaseEnv>>>::new(
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
@@ -49,7 +48,7 @@ where
 }
 
 /// Imports all the tables that can be copied over a range.
-fn import_tables_with_range<N: NodeTypesWithDB>(
+fn import_tables_with_range<N: ProviderNodeTypes>(
     output_db: &DatabaseEnv,
     db_tool: &DbTool<N>,
     from: u64,
@@ -129,7 +128,7 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 /// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
-fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: u64,
     tip_block_number: u64,
@@ -166,7 +165,7 @@ fn dry_run<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");

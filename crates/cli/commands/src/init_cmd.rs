@@ -5,7 +5,7 @@ use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_builder::NodeTypesWithEngine;
-use reth_provider::BlockHashReader;
+use reth_provider::{BlockHashReader, NodeTypesWithStorage};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -17,7 +17,9 @@ pub struct InitCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitCommand<C> {
     /// Execute the `init` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");

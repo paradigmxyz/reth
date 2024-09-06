@@ -9,9 +9,9 @@ use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Ta
 use reth_db_api::database::Database;
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypesWithEngine, NodeTypesWithStorageAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::providers::StaticFileProvider;
+use reth_provider::{providers::StaticFileProvider, NodeTypesWithStorage, ProviderNodeTypes};
 use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
 use std::{sync::Arc, time::Duration};
 
@@ -38,10 +38,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec = ChainSpec>>(
+    pub fn execute<N: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesWithStorage>(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        tool: &DbTool<NodeTypesWithStorageAdapter<N, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -60,7 +60,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>>(
+    fn db_stats_table<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         tool: &DbTool<N>,
     ) -> eyre::Result<ComfyTable> {
@@ -311,10 +311,7 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        &self,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<ComfyTable> {
+    fn checksum_report<N: ProviderNodeTypes>(&self, tool: &DbTool<N>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);

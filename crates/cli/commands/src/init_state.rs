@@ -6,9 +6,9 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
 use reth_db_common::init::init_from_state_dump;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_primitives::B256;
-use reth_provider::ProviderFactory;
+use reth_provider::{NodeTypesWithStorage, ProviderFactory, ProviderNodeTypes};
 
 use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
@@ -42,7 +42,9 @@ pub struct InitStateCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
     /// Execute the `init` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
@@ -59,7 +61,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 }
 
 /// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_at_state<N: ProviderNodeTypes>(
     state_dump_path: PathBuf,
     factory: ProviderFactory<N>,
     etl_config: EtlConfig,

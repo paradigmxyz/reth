@@ -9,7 +9,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_node_builder::NodeTypesWithEngine;
-use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
+use reth_provider::{BlockNumReader, HeaderProvider, NodeTypesWithStorage, ProviderError};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use tracing::*;
@@ -23,7 +23,9 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `storage-tries` recovery command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
         _ctx: CliContext,
     ) -> eyre::Result<()> {

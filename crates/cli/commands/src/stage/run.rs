@@ -33,8 +33,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    writer::UnifiedStorageWriter, ChainSpecProvider, NodeTypesWithStorage, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -105,7 +105,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
         E: BlockExecutorProvider,
         F: FnOnce(Arc<ChainSpec>) -> E,
     {

@@ -11,12 +11,13 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    FinalizedBlockWriter, NodeTypesWithStorage, ProviderFactory, ProviderNodeTypes,
+    StaticFileProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -49,7 +50,9 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db stage unwind` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
@@ -115,7 +118,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(())
     }
 
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,
@@ -188,7 +191,7 @@ impl Subcommands {
     /// Returns the block range to unwind.
     ///
     /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<N: NodeTypesWithDB<ChainSpec = ChainSpec, DB = Arc<DatabaseEnv>>>(
+    fn unwind_range<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         factory: ProviderFactory<N>,
     ) -> eyre::Result<RangeInclusive<u64>> {
