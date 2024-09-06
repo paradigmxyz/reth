@@ -668,7 +668,7 @@ where
         for block in blocks.drain(..batch) {
             if let Some(event) = self.on_downloaded_block(block)? {
                 let needs_backfill = event.is_backfill_action();
-                self.on_tree_event(event);
+                self.on_tree_event(event)?;
                 if needs_backfill {
                     // can exit early if backfill is needed
                     return Ok(None)
@@ -1199,7 +1199,7 @@ where
                                     ));
 
                                     // handle the event if any
-                                    self.on_maybe_tree_event(res.event.take());
+                                    self.on_maybe_tree_event(res.event.take())?;
                                 }
 
                                 if let Err(err) =
@@ -1230,7 +1230,7 @@ where
             }
             FromEngine::DownloadedBlocks(blocks) => {
                 if let Some(event) = self.on_downloaded(blocks)? {
-                    self.on_tree_event(event);
+                    self.on_tree_event(event)?;
                 }
             }
         }
@@ -1341,27 +1341,29 @@ where
     /// Attempts to make the given target canonical.
     ///
     /// This will update the tracked canonical in memory state and do the necessary housekeeping.
-    fn make_canonical(&mut self, target: B256, finalized: Option<B256>) {
-        // TODO: propagate errors, after https://github.com/paradigmxyz/reth/pull/10276 is merged,
-        // since it makes it easier
-        if let Ok(Some(chain_update)) = self.on_new_head(target, finalized) {
+    fn make_canonical(&mut self, target: B256, finalized: Option<B256>) -> ProviderResult<()> {
+        if let Some(chain_update) = self.on_new_head(target, finalized)? {
             self.on_canonical_chain_update(chain_update);
         }
+
+        Ok(())
     }
 
     /// Convenience function to handle an optional tree event.
-    fn on_maybe_tree_event(&mut self, event: Option<TreeEvent>) {
+    fn on_maybe_tree_event(&mut self, event: Option<TreeEvent>) -> ProviderResult<()> {
         if let Some(event) = event {
-            self.on_tree_event(event);
+            self.on_tree_event(event)?;
         }
+
+        Ok(())
     }
 
     /// Handles a tree event.
-    fn on_tree_event(&mut self, event: TreeEvent) {
+    fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
                 TreeAction::MakeCanonical { sync_target_head, sync_target_finalized } => {
-                    self.make_canonical(sync_target_head, sync_target_finalized);
+                    self.make_canonical(sync_target_head, sync_target_finalized)?;
                 }
             },
             TreeEvent::BackfillAction(action) => {
@@ -1371,6 +1373,8 @@ where
                 self.emit_event(EngineApiEvent::Download(action));
             }
         }
+
+        Ok(())
     }
 
     /// Emits an outgoing event to the engine.
@@ -1735,7 +1739,7 @@ where
                         let sync_target_finalized =
                             self.state.forkchoice_state_tracker.sync_target_finalized();
 
-                        self.make_canonical(child_num_hash.hash, sync_target_finalized);
+                        self.make_canonical(child_num_hash.hash, sync_target_finalized)?;
                     }
                 }
                 Err(err) => {
