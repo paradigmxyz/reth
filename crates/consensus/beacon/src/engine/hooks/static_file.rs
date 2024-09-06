@@ -6,9 +6,8 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_errors::RethResult;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::ProviderNodeTypes;
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
@@ -19,7 +18,7 @@ use tracing::trace;
 ///
 /// This type controls the [`StaticFileProducer`].
 #[derive(Debug)]
-pub struct StaticFileHook<N: NodeTypesWithDB> {
+pub struct StaticFileHook<N: ProviderNodeTypes> {
     /// The current state of the `static_file_producer`.
     state: StaticFileProducerState<N>,
     /// The type that can spawn the `static_file_producer` task.
@@ -163,7 +162,7 @@ impl<N: ProviderNodeTypes> EngineHook for StaticFileHook<N> {
 /// [`StaticFileProducerState::Idle`] means that the static file producer is currently idle.
 /// [`StaticFileProducerState::Running`] means that the static file producer is currently running.
 #[derive(Debug)]
-enum StaticFileProducerState<N: NodeTypesWithDB> {
+enum StaticFileProducerState<N: ProviderNodeTypes> {
     /// [`StaticFileProducer`] is idle.
     Idle(Option<StaticFileProducer<N>>),
     /// [`StaticFileProducer`] is running and waiting for a response

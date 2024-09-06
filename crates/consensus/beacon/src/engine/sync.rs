@@ -9,9 +9,8 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockNumber, SealedBlock, B256};
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
@@ -33,7 +32,7 @@ use tracing::trace;
 /// database while the pipeline is still active.
 pub(crate) struct EngineSyncController<N, Client>
 where
-    N: NodeTypesWithDB,
+    N: ProviderNodeTypes,
     Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
@@ -393,14 +392,14 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<N: NodeTypesWithDB> {
+enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
     Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<N: NodeTypesWithDB> PipelineState<N> {
+impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -416,7 +415,7 @@ mod tests {
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{BlockBody, Header, SealedHeader};
     use reth_provider::{
-        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithStorage},
         ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
@@ -467,12 +466,12 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithStorage> {
             reth_tracing::init_test_tracing();
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            let mut pipeline = Pipeline::<MockNodeTypesWithStorage>::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);
 

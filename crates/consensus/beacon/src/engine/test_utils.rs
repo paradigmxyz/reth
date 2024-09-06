@@ -23,7 +23,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithStorage},
     ExecutionOutcome, ProviderFactory,
 };
 use reth_prune::Pruner;
@@ -40,8 +40,8 @@ use tokio::sync::{oneshot, watch};
 type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
-    MockNodeTypesWithDB,
-    BlockchainProvider<MockNodeTypesWithDB>,
+    MockNodeTypesWithStorage,
+    BlockchainProvider<MockNodeTypesWithStorage>,
     Arc<Either<Client, NoopFullBlockClient>>,
 >;
 
@@ -355,7 +355,7 @@ where
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());
         let mut pipeline = match self.base_config.pipeline_config {
-            TestPipelineConfig::Test(outputs) => Pipeline::<MockNodeTypesWithDB>::builder()
+            TestPipelineConfig::Test(outputs) => Pipeline::<MockNodeTypesWithStorage>::builder()
                 .add_stages(TestStages::new(outputs, Default::default()))
                 .with_tip_sender(tip_tx),
             TestPipelineConfig::Real => {
@@ -367,7 +367,7 @@ where
                     .build(client.clone(), consensus.clone(), provider_factory.clone())
                     .into_task();
 
-                Pipeline::<MockNodeTypesWithDB>::builder().add_stages(DefaultStages::new(
+                Pipeline::<MockNodeTypesWithStorage>::builder().add_stages(DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx.clone(),
                     Arc::clone(&consensus),
