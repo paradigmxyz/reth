@@ -4,6 +4,8 @@ Debug in-memory state root calculation
 
 ```bash
 $ reth debug in-memory-merkle --help
+```
+```txt
 Usage: reth debug in-memory-merkle [OPTIONS]
 
 Options:
