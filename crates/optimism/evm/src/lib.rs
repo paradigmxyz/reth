@@ -194,12 +194,8 @@ mod tests {
 
         // Use the `OptimismEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        test_evm_config().fill_cfg_and_block_env(
-            &mut cfg_env,
-            &mut block_env,
-            &header,
-            total_difficulty,
-        );
+        OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+            .fill_cfg_and_block_env(&mut cfg_env, &mut block_env, &header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
