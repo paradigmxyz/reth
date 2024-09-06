@@ -1,5 +1,5 @@
 use reth_primitives::{Request, U256};
-use revm::db::BundleState;
+use revm::{db::BundleState, CacheState};
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
 #[derive(Debug)]
@@ -30,6 +30,8 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
+    /// cache state of the block after execution.
+    pub cache: CacheState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
     /// All the EIP-7685 requests of the transactions in the block.

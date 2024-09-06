@@ -3,10 +3,13 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+use reth_provider::{
+    test_utils::{NoopProvider, TestCanonStateSubscriptions},
+    ChainSpecProvider,
+};
 use reth_rpc::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
@@ -123,12 +126,15 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TokioTaskExecutor,
     TestCanonStateSubscriptions,
     EthEvmConfig,
+    EthExecutorProvider<EthEvmConfig>,
 > {
+    let provider = NoopProvider::default();
     RpcModuleBuilder::default()
-        .with_provider(NoopProvider::default())
+        .with_provider(provider)
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
         .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
+        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
 }

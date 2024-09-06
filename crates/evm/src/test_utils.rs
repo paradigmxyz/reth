@@ -55,6 +55,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
+            cache: Default::default(),
             receipts: receipts.into_iter().flatten().flatten().collect(),
             requests: requests.into_iter().flatten().collect(),
             gas_used: 0,

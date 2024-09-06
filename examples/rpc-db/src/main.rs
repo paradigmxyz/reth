@@ -33,8 +33,8 @@ use reth::rpc::builder::{
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
-use reth_provider::test_utils::TestCanonStateSubscriptions;
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_provider::{test_utils::TestCanonStateSubscriptions, ChainSpecProvider};
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -67,7 +67,9 @@ async fn main() -> eyre::Result<()> {
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::new(spec))
-        .with_events(TestCanonStateSubscriptions::default());
+        .with_events(TestCanonStateSubscriptions::default())
+        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()));
+>>>>>>> 7d9b7e746 (Add block_executor to debug_execution_witness to execute blocks)
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);

@@ -31,7 +31,7 @@ use reth_revm::{
         BundleAccount, State,
     },
     state_change::post_block_balance_increments,
-    Evm,
+    Evm, State
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -379,10 +379,14 @@ where
         let EthExecuteOutput { receipts, requests, gas_used } =
             self.execute_without_verification(block, total_difficulty)?;
 
-        // NOTE: we need to merge keep the reverts for the bundle retention
-        self.state.merge_transitions(BundleRetention::Reverts);
-
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        let cache = core::mem::take(&mut self.state.cache);
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            cache,
+            receipts,
+            requests,
+            gas_used,
+        })
     }
 }
 
