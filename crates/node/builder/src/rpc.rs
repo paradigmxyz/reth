@@ -6,7 +6,8 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
+use reth_chainspec::ChainSpec;
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
@@ -22,6 +23,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types::WithOtherFields;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -283,7 +285,9 @@ where
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+    pub fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
         self.node.payload_builder()
     }
 }
@@ -297,8 +301,8 @@ pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    Node: FullNodeComponents + Clone,
-    Engine: EngineApiServer<Node::Engine>,
+    Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
+    Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
     EthApi: EthApiBuilderProvider<Node>
         + FullEthApiServer<
             TransactionCompat: TransactionCompat<

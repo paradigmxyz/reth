@@ -13,7 +13,7 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment, StorageKey, StorageValue,
     B256,
 };
-use reth_storage_api::StateProofProvider;
+use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
@@ -81,12 +81,12 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
-    fn hashed_state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx, hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_from_nodes(
+    fn state_root_from_nodes(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -96,7 +96,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -104,7 +104,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn hashed_state_root_from_nodes_with_updates(
+    fn state_root_from_nodes_with_updates(
         &self,
         nodes: TrieUpdates,
         hashed_state: HashedPostState,
@@ -113,8 +113,10 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         StateRoot::overlay_root_from_nodes_with_updates(self.tx, nodes, hashed_state, prefix_sets)
             .map_err(|err| ProviderError::Database(err.into()))
     }
+}
 
-    fn hashed_storage_root(
+impl<'b, TX: DbTx> StorageRootProvider for LatestStateProviderRef<'b, TX> {
+    fn storage_root(
         &self,
         address: Address,
         hashed_storage: HashedStorage,
@@ -125,7 +127,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
-    fn hashed_proof(
+    fn proof(
         &self,
         hashed_state: HashedPostState,
         address: Address,

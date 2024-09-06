@@ -6,6 +6,7 @@ pub mod transaction;
 mod block;
 mod call;
 mod pending_block;
+pub mod rpc;
 
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -15,11 +16,11 @@ use op_alloy_network::{Network, Optimism};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes};
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
-    StageCheckpointReader, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    HeaderProvider, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -38,6 +39,7 @@ use reth_tasks::{
 use reth_transaction_pool::TransactionPool;
 
 use crate::{OpEthApiError, OpTxBuilder};
+use crate::{eth::rpc::SequencerClient, OpEthApiError};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -61,6 +63,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 pub struct OpEthApi<N: FullNodeComponents, Eth> {
     #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
+    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
     /// L1 RPC type builders.
     _eth_ty_builders: PhantomData<Eth>,
 }
@@ -84,11 +87,10 @@ impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
             ctx.executor.clone(),
-            None,
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), _eth_ty_builders: PhantomData }
+        Self { inner: Arc::new(inner),sequencer_client: Arc::new(parking_lot::RwLock::new(None)),  _eth_ty_builders: PhantomData }
     }
 }
 
@@ -107,7 +109,7 @@ where
 impl<N, Eth> EthApiSpec for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
@@ -158,7 +160,7 @@ where
 impl<N, Eth> LoadFee for OpEthApi<N, Eth>
 where
     Self: LoadBlock,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
@@ -186,7 +188,7 @@ where
 impl<N, Eth> LoadState for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
-    N: FullNodeComponents,
+N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
     Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
@@ -234,7 +236,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents, Eth> AddDevSigners for OpEthApi<N, Eth> {
+impl<N, Eth> AddDevSigners for OpEthApi<N, Eth> where N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>> {
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }

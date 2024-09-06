@@ -259,9 +259,9 @@ pub trait EthCall: Call + LoadPendingBlock {
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
-        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
+        let (result, mut env) = self.inspect(&mut db, env, &mut inspector)?;
         let access_list = inspector.into_access_list();
-
+        env.tx.access_list = access_list.to_vec();
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
@@ -275,15 +275,24 @@ pub trait EthCall: Call + LoadPendingBlock {
             ExecutionResult::Success { .. } => {}
         };
 
-        let cfg_with_spec_id =
-            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
+        // transact again to get the exact gas used
+        let (result, env) = self.transact(&mut db, env)?;
+        let res = match result.result {
+            ExecutionResult::Halt { reason, gas_used } => {
+                let error =
+                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Revert { output, gas_used } => {
+                let error = Some(RevertError::new(output).to_string());
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+            }
+            ExecutionResult::Success { gas_used, .. } => {
+                AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
+            }
+        };
 
-        // calculate the gas used using the access list
-        request.access_list = Some(access_list.clone());
-        let gas_used =
-            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
-
-        Ok(AccessListResult { access_list, gas_used, error: None })
+        Ok(res)
     }
 }
 
@@ -844,7 +853,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            // authorization_list,
+            authorization_list,
             ..
         } = request;
 
@@ -883,7 +892,7 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             // EIP-7702 fields
-            // authorization_list: TODO
+            authorization_list: authorization_list.map(Into::into),
             ..Default::default()
         };
 

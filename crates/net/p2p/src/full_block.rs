@@ -184,12 +184,12 @@ where
                             let (peer, maybe_header) =
                                 maybe_header.map(|h| h.map(|h| h.seal_slow())).split();
                             if let Some(header) = maybe_header {
-                                if header.hash() != this.hash {
+                                if header.hash() == this.hash {
+                                    this.header = Some(header);
+                                } else {
                                     debug!(target: "downloaders", expected=?this.hash, received=?header.hash(), "Received wrong header");
                                     // received a different header than requested
                                     this.client.report_bad_message(peer)
-                                } else {
-                                    this.header = Some(header);
                                 }
                             }
                         }
@@ -491,10 +491,7 @@ where
             headers_falling.sort_unstable_by_key(|h| Reverse(h.number));
 
             // check the starting hash
-            if headers_falling[0].hash() != self.start_hash {
-                // received a different header than requested
-                self.client.report_bad_message(peer);
-            } else {
+            if headers_falling[0].hash() == self.start_hash {
                 let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
                 // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
@@ -516,6 +513,9 @@ where
 
                 // set the headers response
                 self.headers = Some(headers_falling);
+            } else {
+                // received a different header than requested
+                self.client.report_bad_message(peer);
             }
         }
     }

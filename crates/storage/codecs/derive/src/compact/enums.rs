@@ -57,10 +57,10 @@ impl<'a> EnumHandler<'a> {
                 FieldTypes::EnumUnnamedField((next_ftype, use_alt_impl)) => {
                     // This variant is of the type `EnumVariant(UnnamedField)`
                     let field_type = format_ident!("{next_ftype}");
-                    let from_compact_ident = if !use_alt_impl {
-                        format_ident!("from_compact")
-                    } else {
+                    let from_compact_ident = if *use_alt_impl {
                         format_ident!("specialized_from_compact")
+                    } else {
+                        format_ident!("from_compact")
                     };
 
                     // Unnamed type
@@ -98,10 +98,10 @@ impl<'a> EnumHandler<'a> {
         if let Some(next_field) = self.fields_iterator.peek() {
             match next_field {
                 FieldTypes::EnumUnnamedField((_, use_alt_impl)) => {
-                    let to_compact_ident = if !use_alt_impl {
-                        format_ident!("to_compact")
-                    } else {
+                    let to_compact_ident = if *use_alt_impl {
                         format_ident!("specialized_to_compact")
+                    } else {
+                        format_ident!("to_compact")
                     };
 
                     // Unnamed type

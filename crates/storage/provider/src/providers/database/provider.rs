@@ -11,8 +11,8 @@ use crate::{
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
-    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateWriter, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
+    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -259,9 +259,8 @@ where
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
-        } else {
-            return Ok(list.iter().collect::<Vec<_>>())
         }
+        return Ok(list.iter().collect::<Vec<_>>())
     }
 
     Ok(Vec::new())
@@ -646,10 +645,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -778,12 +777,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
+    ///
+    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<ExecutionOutcome> {
+    ) -> ProviderResult<Option<ExecutionOutcome>> {
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(None)
         }
         let start_block_number = *range.start();
 
@@ -791,10 +792,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
 
         // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
-        let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+        let Some(from_transaction_num) = block_bodies.first().map(|bodies| bodies.1.first_tx_num())
+        else {
+            return Ok(None)
+        };
+        let Some(to_transaction_num) = block_bodies.last().map(|bodies| bodies.1.last_tx_num())
+        else {
+            return Ok(None)
+        };
 
         let storage_range = BlockNumberAddress::range(range.clone());
 
@@ -831,14 +836,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(ExecutionOutcome::new_init(
+        Ok(Some(ExecutionOutcome::new_init(
             state,
             reverts,
             Vec::new(),
             receipts.into(),
             start_block_number,
             Vec::new(),
-        ))
+        )))
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
@@ -1292,10 +1297,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1495,7 +1500,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(deleted)
     }
 
-    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
+    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table.
+    ///
+    /// Note: Range is inclusive and first key in the range is removed.
     pub fn unwind_table_by_walker<T1, T2>(
         &self,
         range: impl RangeBounds<T1::Key>,
@@ -1591,9 +1598,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
             if done {
                 break true
-            } else {
-                deleted_entries += 1;
             }
+            deleted_entries += 1;
         };
 
         Ok((deleted_entries, done))
@@ -3225,9 +3231,15 @@ impl<TX: DbTx> BlockExecutionReader for DatabaseProvider<TX> {
         let blocks = self.get_block_range(range.clone())?;
 
         // get execution res
-        let execution_state = self.get_state(range)?;
+        let execution_state = self.get_state(range)?.unwrap_or_default();
 
         Ok(Chain::new(blocks, execution_state, None))
+    }
+}
+
+impl<TX: DbTx> StateReader for DatabaseProvider<TX> {
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        self.get_state(block..=block)
     }
 }
 

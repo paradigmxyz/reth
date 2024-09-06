@@ -245,9 +245,8 @@ mod tests {
     use reth_primitives::{BlockNumber, SealedBlock, B256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, random_block_range},
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
     use std::ops::Sub;
 
@@ -273,11 +272,10 @@ mod tests {
                 random_block(
                     &mut rng,
                     number,
-                    None,
-                    Some((number == non_empty_block_number) as u8),
-                    None,
-                    None,
-                    None,
+                    BlockParams {
+                        tx_count: Some((number == non_empty_block_number) as u8),
+                        ..Default::default()
+                    },
                 )
             })
             .collect::<Vec<_>>();
@@ -323,10 +321,7 @@ mod tests {
         let seed = random_block_range(
             &mut rng,
             stage_progress + 1..=previous_stage,
-            B256::ZERO,
-            0..2,
-            None,
-            None,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
         );
         runner
             .db
@@ -361,7 +356,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10, None, None);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=100,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..10, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
@@ -490,10 +489,7 @@ mod tests {
             let blocks = random_block_range(
                 &mut rng,
                 stage_progress + 1..=end,
-                B256::ZERO,
-                0..2,
-                None,
-                None,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
             );
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)

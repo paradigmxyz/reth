@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, TransactionSignedEcRecovered};
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_types::txpool::{
-    TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
+use reth_rpc_types::{
+    txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
+    Transaction, WithOtherFields,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
@@ -34,7 +35,7 @@ where
     // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
     Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
 {
-    fn content(&self) -> TxpoolContent {
+    fn content(&self) -> TxpoolContent<WithOtherFields<Transaction>> {
         #[inline]
         fn insert<Tx, Eth>(
             tx: &Tx,
@@ -126,7 +127,10 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_contentFrom) for more details
     /// Handler for `txpool_contentFrom`
-    async fn txpool_content_from(&self, from: Address) -> Result<TxpoolContentFrom> {
+    async fn txpool_content_from(
+        &self,
+        from: Address,
+    ) -> Result<TxpoolContentFrom<WithOtherFields<Transaction>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }
@@ -136,7 +140,7 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> Result<TxpoolContent> {
+    async fn txpool_content(&self) -> Result<TxpoolContent<WithOtherFields<Transaction>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }

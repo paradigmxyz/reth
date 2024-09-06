@@ -136,7 +136,6 @@
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -166,13 +165,14 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{
-        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt, UpdateRawTxForwarder,
+        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt,
     },
     EthApiServer, EthApiTypes, FullEthApiServer, RawTransactionForwarder, RpcBlock, RpcTransaction,
     TransactionCompat,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
+use reth_rpc_types::WithOtherFields;
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -757,20 +757,6 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
     RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
-    EthApi: EthApiTypes + UpdateRawTxForwarder,
-{
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
-        self.eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
-    }
-}
-
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
-where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
     Provider: ChainSpecProvider<ChainSpec = ChainSpec>,
@@ -821,7 +807,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer<RpcTransaction<EthApi::NetworkTypes>, RpcBlock<EthApi::NetworkTypes>>,
+        EthApi: EthApiServer<RpcTransaction<EthApi::NetworkTypes>, RpcBlock<EthApi::NetworkTypes>, reth_rpc_types::AnyTransactionReceipt>,
     {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -835,7 +821,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: EthApiServer<RpcTransaction<EthApi::NetworkTypes>, RpcBlock<EthApi::NetworkTypes>>
+        EthApi: EthApiServer<RpcTransaction<EthApi::NetworkTypes>, RpcBlock<EthApi::NetworkTypes>, reth_rpc_types::AnyTransactionReceipt>
             + TraceExt,
     {
         let otterscan_api = self.otterscan_api();
@@ -945,7 +931,12 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn otterscan_api(&self) -> OtterscanApi<EthApi>
     where
-        EthApi: EthApiServer<reth_rpc_types::Transaction, reth_rpc_types::Block>,
+        EthApi: EthApiServer<
+                WithOtherFields<reth_rpc_types::Transaction>,
+                reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
+                reth_rpc_types::AnyTransactionReceipt,
+            > + TraceExt
+            + EthTransactions,
     {
         let eth_api = self.eth_api().clone();
         OtterscanApi::new(eth_api)

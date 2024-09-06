@@ -2,7 +2,7 @@
 //!
 //! Transaction wrapper that labels transaction with its origin.
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_rpc_types::TransactionInfo;
+use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
     TransactionCompat,
@@ -61,16 +61,7 @@ impl TransactionSource {
         match self {
             Self::Pool(tx) => {
                 let hash = tx.hash();
-                (
-                    tx,
-                    TransactionInfo {
-                        hash: Some(hash),
-                        index: None,
-                        block_hash: None,
-                        block_number: None,
-                        base_fee: None,
-                    },
-                )
+                (tx, TransactionInfo { hash: Some(hash), ..Default::default() })
             }
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.hash();

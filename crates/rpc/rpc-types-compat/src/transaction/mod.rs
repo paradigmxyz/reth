@@ -96,7 +96,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let chain_id = tx.transaction.chain_id();
     let access_list = tx.transaction.access_list().cloned();
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
-    let _authorization_list = tx.transaction.authorization_list();
+    let authorization_list = tx.transaction.authorization_list().map(|l| l.to_vec());
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
 
@@ -124,5 +124,6 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         blob_versioned_hashes,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
+        authorization_list,
     }
 }

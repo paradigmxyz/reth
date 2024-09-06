@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
-    PendingTransactionFilterKind, Transaction,
+    PendingTransactionFilterKind, Transaction, WithOtherFields,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_tasks::TaskSpawner;
@@ -115,7 +115,10 @@ where
     /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + self.inner.stale_filter_ttl,
+            self.inner.stale_filter_ttl,
+        );
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -144,7 +147,7 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
-    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields< reth_rpc_types::Transaction>>,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
@@ -244,7 +247,7 @@ impl<Provider, Pool, Eth> EthFilterApiServer<Eth::Transaction> for EthFilter<Pro
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction> + Clone + 'static,
+    Eth: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>> + Clone + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {

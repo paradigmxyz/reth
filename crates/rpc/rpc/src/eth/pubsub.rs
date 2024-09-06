@@ -17,7 +17,7 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log,
+    FilteredParams, Header, Log, Transaction, WithOtherFields,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -113,9 +113,11 @@ where
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub
-                .new_headers_stream()
-                .map(|block| EthSubscriptionResult::Header(Box::new(block.into())));
+            let stream = pubsub.new_headers_stream().map(|header| {
+                EthSubscriptionResult::<WithOtherFields<Transaction>>::Header(Box::new(
+                    header.into(),
+                ))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
@@ -127,8 +129,9 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream =
-                pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
+            let stream = pubsub.log_stream(filter).map(|log| {
+                EthSubscriptionResult::<WithOtherFields<Transaction>>::Log(Box::new(log))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -156,7 +159,7 @@ where
 
             let stream = pubsub
                 .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::TransactionHash);
+                .map(EthSubscriptionResult::<WithOtherFields<Transaction>>::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {

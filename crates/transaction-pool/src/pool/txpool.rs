@@ -146,10 +146,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
-            (Ordering::Equal, Ordering::Equal) | (Ordering::Equal, Ordering::Greater) => {
+            (Ordering::Equal, Ordering::Equal | Ordering::Greater) => {
                 // fee unchanged, nothing to update
             }
-            (Ordering::Greater, Ordering::Equal) | (Ordering::Greater, Ordering::Greater) => {
+            (Ordering::Greater, Ordering::Equal | Ordering::Greater) => {
                 // increased blob fee: recheck pending pool and remove all that are no longer valid
                 let removed =
                     self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
@@ -1235,7 +1235,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1246,7 +1246,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_inclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1257,7 +1257,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 

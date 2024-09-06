@@ -7,6 +7,7 @@ use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
@@ -81,7 +82,9 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+    factory: ProviderFactory<N>,
+) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -160,10 +163,17 @@ pub fn insert_state<'a, 'b, DB: Database>(
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            let bytecode = Bytecode::new_raw(code.clone());
-            let hash = bytecode.hash_slow();
-            contracts.insert(hash, bytecode);
-            Some(hash)
+            match Bytecode::new_raw_checked(code.clone()) {
+                Ok(bytecode) => {
+                    let hash = bytecode.hash_slow();
+                    contracts.insert(hash, bytecode);
+                    Some(hash)
+                }
+                Err(err) => {
+                    error!(%address, %err, "Failed to decode genesis bytecode.");
+                    return Err(DatabaseError::Other(err.to_string()).into());
+                }
+            }
         } else {
             None
         };
@@ -310,9 +320,9 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<DB: Database>(
+pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;
@@ -336,7 +346,12 @@ pub fn init_from_state_dump<DB: Database>(
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
-    if computed_state_root != expected_state_root {
+    if computed_state_root == expected_state_root {
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
+    } else {
         error!(target: "reth::cli",
             ?computed_state_root,
             ?expected_state_root,
@@ -344,11 +359,6 @@ pub fn init_from_state_dump<DB: Database>(
         );
 
         Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
-    } else {
-        info!(target: "reth::cli",
-            ?computed_state_root,
-            "Computed state root matches state root in state dump"
-        );
     }
 
     // insert sync stages for stages that require state
@@ -538,7 +548,9 @@ mod tests {
     };
     use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_provider::test_utils::{
+        create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
+    };
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -584,7 +596,7 @@ mod tests {
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::new(
+        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,

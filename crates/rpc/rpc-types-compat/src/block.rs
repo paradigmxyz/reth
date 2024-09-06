@@ -5,7 +5,7 @@ use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
-    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
+    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,  WithOtherFields,
 };
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
@@ -127,7 +127,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
     } = header;
 
     Header {
-        hash: Some(hash),
+        hash,
         parent_hash,
         uncles_hash: ommers_hash,
         miner: beneficiary,
@@ -135,7 +135,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         transactions_root,
         receipts_root,
         withdrawals_root,
-        number: Some(number),
+        number,
         gas_used: gas_used as u128,
         gas_limit: gas_limit as u128,
         extra_data,
@@ -171,14 +171,7 @@ fn from_block_with_transactions<T>(
         .then(|| block.withdrawals.map(Withdrawals::into_inner))
         .flatten();
 
-    Block {
-        header,
-        uncles,
-        transactions,
-        size: Some(U256::from(block_length)),
-        withdrawals,
-        other: Default::default(),
-    }
+    Block { header, uncles, transactions, size: Some(U256::from(block_length)), withdrawals }
 }
 
 /// Build an RPC block response representing
@@ -194,6 +187,5 @@ pub fn uncle_block_from_header<T>(header: PrimitiveHeader) -> Block<T> {
         transactions: BlockTransactions::Uncle,
         withdrawals: Some(vec![]),
         size,
-        other: Default::default(),
     }
 }

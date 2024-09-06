@@ -13,7 +13,8 @@ use jsonrpsee::{
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256, B64, U256, U64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, Receipt, TxHash, B256, B64, U256,
+    U64,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -22,8 +23,8 @@ use reth_rpc_api::{
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_rpc_types::{
-    trace::filter::TraceFilter, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind,
-    RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
+    trace::filter::TraceFilter, Block, FeeHistory, Filter, Index, Log,
+    PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -173,21 +174,28 @@ where
     .unwrap();
 
     // Implemented
-    EthApiClient::<Transaction, RichBlock>::protocol_version(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::chain_id(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::accounts(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::get_account(client, address, block_number.into())
+    EthApiClient::<Transaction, Block, Receipt>::protocol_version(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::chain_id(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::accounts(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::get_account(client, address, block_number.into())
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_number(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::get_code(client, address, None).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::fee_history(client, U64::from(0), block_number, None)
+    EthApiClient::<Transaction, Block, Receipt>::block_number(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::get_code(client, address, None).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::send_raw_transaction(client, tx).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::fee_history(
+        client,
+        U64::from(0),
+        block_number,
+        None,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::balance(client, address, None).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::transaction_count(client, address, None)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::balance(client, address, None).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::transaction_count(client, address, None).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::storage_at(
+    EthApiClient::<Transaction, Block, Receipt>::storage_at(
         client,
         address,
         U256::default().into(),
@@ -195,55 +203,64 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_by_hash(client, hash, false).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_by_number(client, block_number, false)
+    EthApiClient::<Transaction, Block, Receipt>::block_by_hash(client, hash, false).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::block_by_number(client, block_number, false)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_transaction_count_by_number(client, block_number)
+    EthApiClient::<Transaction, Block, Receipt>::block_transaction_count_by_number(
+        client,
+        block_number,
+    )
+    .await
+    .unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::block_transaction_count_by_hash(client, hash)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_transaction_count_by_hash(client, hash)
+    EthApiClient::<Transaction, Block, Receipt>::block_uncles_count_by_hash(client, hash)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_uncles_count_by_hash(client, hash).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::block_uncles_count_by_number(client, block_number)
+    EthApiClient::<Transaction, Block, Receipt>::block_uncles_count_by_number(client, block_number)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::uncle_by_block_hash_and_index(client, hash, index)
+    EthApiClient::<Transaction, Block, Receipt>::uncle_by_block_hash_and_index(client, hash, index)
         .await
         .unwrap();
-    EthApiClient::<Transaction, RichBlock>::uncle_by_block_number_and_index(
+    EthApiClient::<Transaction, Block, Receipt>::uncle_by_block_number_and_index(
         client,
         block_number,
         index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::sign(client, address, bytes.clone()).await.unwrap_err();
-    EthApiClient::<Transaction, RichBlock>::sign_typed_data(client, address, typed_data)
+    EthApiClient::<Transaction, Block, Receipt>::sign(client, address, bytes.clone())
         .await
         .unwrap_err();
-    EthApiClient::<Transaction, RichBlock>::transaction_by_hash(client, tx_hash).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::transaction_by_block_hash_and_index(
+    EthApiClient::<Transaction, Block, Receipt>::sign_typed_data(client, address, typed_data)
+        .await
+        .unwrap_err();
+    EthApiClient::<Transaction, Block, Receipt>::transaction_by_hash(client, tx_hash)
+        .await
+        .unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::transaction_by_block_hash_and_index(
         client, hash, index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::transaction_by_block_number_and_index(
+    EthApiClient::<Transaction, Block, Receipt>::transaction_by_block_number_and_index(
         client,
         block_number,
         index,
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::create_access_list(
+    EthApiClient::<Transaction, Block, Receipt>::create_access_list(
         client,
         call_request.clone(),
         Some(block_number.into()),
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::estimate_gas(
+    EthApiClient::<Transaction, Block, Receipt>::estimate_gas(
         client,
         call_request.clone(),
         Some(block_number.into()),
@@ -251,7 +268,7 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::call(
+    EthApiClient::<Transaction, Block, Receipt>::call(
         client,
         call_request.clone(),
         Some(block_number.into()),
@@ -260,34 +277,38 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::syncing(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::send_transaction(client, transaction_request)
+    EthApiClient::<Transaction, Block, Receipt>::syncing(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::send_transaction(client, transaction_request)
         .await
         .unwrap_err();
-    EthApiClient::<Transaction, RichBlock>::hashrate(client).await.unwrap();
-    EthApiClient::<Transaction, RichBlock>::submit_hashrate(
+    EthApiClient::<Transaction, Block, Receipt>::hashrate(client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::submit_hashrate(
         client,
         U256::default(),
         B256::default(),
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, RichBlock>::gas_price(client).await.unwrap_err();
-    EthApiClient::<Transaction, RichBlock>::max_priority_fee_per_gas(client).await.unwrap_err();
-    EthApiClient::<Transaction, RichBlock>::get_proof(client, address, vec![], None).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::gas_price(client).await.unwrap_err();
+    EthApiClient::<Transaction, Block, Receipt>::max_priority_fee_per_gas(client)
+        .await
+        .unwrap_err();
+    EthApiClient::<Transaction, Block, Receipt>::get_proof(client, address, vec![], None)
+        .await
+        .unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, RichBlock>::author(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt>::author(client).await.err().unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, RichBlock>::is_mining(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt>::is_mining(client).await.err().unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, RichBlock>::get_work(client).await.err().unwrap()
+        EthApiClient::<Transaction, Block, Receipt>::get_work(client).await.err().unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, RichBlock>::submit_work(
+        EthApiClient::<Transaction, Block, Receipt>::submit_work(
             client,
             B64::default(),
             B256::default(),
@@ -298,7 +319,7 @@ where
         .unwrap()
     ));
     assert!(is_unimplemented(
-        EthApiClient::<Transaction, RichBlock>::sign_transaction(client, call_request.clone())
+        EthApiClient::<Transaction, Block, Receipt>::sign_transaction(client, call_request.clone())
             .await
             .err()
             .unwrap()
@@ -643,7 +664,7 @@ async fn test_eth_get_block_by_number_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block by number with proper fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getBlockByNumber",
         rpc_params!["0x1b4", true], // Block number and full transaction object flag
@@ -651,7 +672,7 @@ async fn test_eth_get_block_by_number_rpc_call() {
     .await;
 
     // Requesting block by number with wrong fields
-    test_rpc_call_err::<Option<RichBlock>>(
+    test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getBlockByNumber",
         rpc_params!["0x1b4", "0x1b4"],
@@ -659,8 +680,7 @@ async fn test_eth_get_block_by_number_rpc_call() {
     .await;
 
     // Requesting block by number with missing fields
-    test_rpc_call_err::<Option<RichBlock>>(&client, "eth_getBlockByNumber", rpc_params!["0x1b4"])
-        .await;
+    test_rpc_call_err::<Option<Block>>(&client, "eth_getBlockByNumber", rpc_params!["0x1b4"]).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -672,7 +692,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting block by hash with proper fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", false],
@@ -680,7 +700,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     .await;
 
     // Requesting block by hash with wrong fields
-    test_rpc_call_err::<Option<RichBlock>>(
+    test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae", "0x1b4"],
@@ -688,7 +708,7 @@ async fn test_eth_get_block_by_hash_rpc_call() {
     .await;
 
     // Requesting block by hash with missing fields
-    test_rpc_call_err::<Option<RichBlock>>(
+    test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getBlockByHash",
         rpc_params!["0xdc0818cf78f21a8e70579cb46a43643f78291264dda342ae31049421c82d21ae"],
@@ -1072,7 +1092,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting uncle by block hash and index with proper fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
         rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
@@ -1080,7 +1100,7 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block hash and index with additional fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
         rpc_params![
@@ -1092,15 +1112,11 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block hash and index with missing fields
-    test_rpc_call_err::<Option<RichBlock>>(
-        &client,
-        "eth_getUncleByBlockHashAndIndex",
-        rpc_params![],
-    )
-    .await;
+    test_rpc_call_err::<Option<Block>>(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![])
+        .await;
 
     // Requesting uncle by block hash and index with wrong fields
-    test_rpc_call_err::<Option<RichBlock>>(
+    test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getUncleByBlockHashAndIndex",
         rpc_params![true],
@@ -1117,7 +1133,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
     let client = handle.http_client().unwrap();
 
     // Requesting uncle by block number and index with proper fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0"],
@@ -1125,7 +1141,7 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block number and index with additional fields
-    test_rpc_call_ok::<Option<RichBlock>>(
+    test_rpc_call_ok::<Option<Block>>(
         &client,
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params!["0x29c", "0x0", true],
@@ -1133,15 +1149,11 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
     .await;
 
     // Requesting uncle by block number and index with missing fields
-    test_rpc_call_err::<Option<RichBlock>>(
-        &client,
-        "eth_getUncleByBlockNumberAndIndex",
-        rpc_params![],
-    )
-    .await;
+    test_rpc_call_err::<Option<Block>>(&client, "eth_getUncleByBlockNumberAndIndex", rpc_params![])
+        .await;
 
     // Requesting uncle by block number and index with wrong fields
-    test_rpc_call_err::<Option<RichBlock>>(
+    test_rpc_call_err::<Option<Block>>(
         &client,
         "eth_getUncleByBlockNumberAndIndex",
         rpc_params![true],
