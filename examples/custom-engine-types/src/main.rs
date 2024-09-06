@@ -19,6 +19,8 @@
 
 use std::convert::Infallible;
 
+use reth_db_api::transaction::DbTx;
+use reth_provider::NodeStorage;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,7 +44,8 @@ use reth_basic_payload_builder::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
+    validate_version_specific_fields, EngineTypes, NodeTypesWithStorage, PayloadAttributes,
+    PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
@@ -200,6 +203,28 @@ impl NodeTypes for MyCustomNode {
 /// Configure the node types with the custom engine types
 impl NodeTypesWithEngine for MyCustomNode {
     type Engine = CustomEngineTypes;
+}
+
+/// Configure the node types with the custom storage methods types
+impl NodeTypesWithStorage for MyCustomNode {
+    type Storage = Self;
+}
+
+/// Configure the node types with the custom storage methods types
+impl NodeStorage for MyCustomNode {
+    type Types = Self;
+
+    fn new() -> Self {
+        todo!()
+    }
+
+    fn read_block<TX: DbTx>(
+        &self,
+        _id: reth_primitives::BlockHashOrNumber,
+        _provider: reth_provider::DatabaseProvider<TX>,
+    ) -> <<Self::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block {
+        todo!()
+    }
 }
 
 /// Implement the Node trait for the custom node
