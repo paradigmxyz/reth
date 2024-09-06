@@ -13,6 +13,7 @@ use reth_node_core::{
     rpc::{
         api::EngineApiServer,
         eth::{EthApiTypes, FullEthApiServer},
+        types::AnyTransactionReceipt,
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
@@ -306,6 +307,7 @@ where
         + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         >,
 {

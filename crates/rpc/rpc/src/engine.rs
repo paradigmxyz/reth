@@ -6,8 +6,8 @@ use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_types::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
-    SyncStatus, TransactionRequest, WithOtherFields,
+    state::StateOverride, AnyTransactionReceipt, BlockOverrides, EIP1186AccountProofResponse,
+    Filter, JsonStorageKey, Log, SyncStatus, TransactionRequest, WithOtherFields,
 };
 use tracing_futures::Instrument;
 
@@ -43,6 +43,7 @@ where
         > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         >,
     EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,

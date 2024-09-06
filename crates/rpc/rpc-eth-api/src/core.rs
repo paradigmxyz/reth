@@ -1,8 +1,8 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
-
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
+use alloy_network::Network;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
     transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
@@ -12,8 +12,8 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
-    Index, StateContext, SyncStatus, TransactionRequest, Work,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
 use tracing::trace;
 
@@ -370,6 +370,7 @@ impl<T>
     > for T
 where
     T: FullEthApi,
+    T::NetworkTypes: Network<ReceiptResponse = AnyTransactionReceipt>,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`

@@ -44,14 +44,17 @@ impl<Eth> OtterscanApi<Eth> {
 impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+        NetworkTypes: Network<
+            TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            ReceiptResponse = AnyTransactionReceipt,
+        >,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
         block: Option<RpcBlock<Eth::NetworkTypes>>,
-        receipts: Option<Vec<AnyTransactionReceipt>>,
+        receipts: Option<Vec<RpcReceipt<Eth::NetworkTypes>>>,
     ) -> RpcResult<BlockDetails> {
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -76,6 +79,7 @@ where
         > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + TraceExt
         + EthTransactions

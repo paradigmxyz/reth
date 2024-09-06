@@ -8306,6 +8306,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "1.0.6"
 dependencies = [
+ "alloy-network",
  "clap",
  "http",
  "jsonrpsee",
