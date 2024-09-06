@@ -8654,6 +8654,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "auto_impl",
  "reth-chainspec",
  "reth-db-models",
