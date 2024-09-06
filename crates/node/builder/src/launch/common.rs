@@ -17,6 +17,8 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_fs_util as fs;
+use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
@@ -35,8 +37,9 @@ use reth_node_metrics::{
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
-    BlockHashReader, CanonStateNotificationSender, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderFactory, TreeViewer,
+    BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
+    TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -837,17 +840,34 @@ where
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
     }
+}
 
+impl<T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<T, CB>>>
+where
+    T: FullNodeTypes<
+        Provider: WithTree + StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+        Types: NodeTypes<ChainSpec = ChainSpec>,
+    >,
+    CB: NodeComponentsBuilder<T>,
+{
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
         Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
+            let output_directory = self.data_dir().invalid_block_hooks();
             let hooks = hook
                 .iter()
                 .copied()
                 .map(|hook| {
+                    let output_directory = output_directory.join(hook.to_string());
+                    fs::create_dir_all(&output_directory)?;
+
                     Ok(match hook {
                         reth_node_core::args::InvalidBlockHook::Witness => {
-                            Box::new(reth_invalid_block_hooks::witness) as Box<dyn InvalidBlockHook>
+                            Box::new(InvalidBlockWitnessHook::new(
+                                output_directory,
+                                self.blockchain_db().clone(),
+                                self.components().evm_config().clone(),
+                            )) as Box<dyn InvalidBlockHook>
                         }
                         reth_node_core::args::InvalidBlockHook::PreState |
                         reth_node_core::args::InvalidBlockHook::Opcode => {

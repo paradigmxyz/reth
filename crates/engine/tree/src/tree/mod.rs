@@ -63,7 +63,8 @@ mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
-pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
+pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
+pub use reth_engine_primitives::InvalidBlockHook;
 
 /// Keeps track of the state of the tree.
 ///
@@ -490,7 +491,7 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
-    /// A bad block hook.
+    /// An invalid block hook.
     invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
@@ -2156,8 +2157,8 @@ where
         ) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
-                &block.seal_slow(),
                 &parent_block,
+                &block.seal_slow(),
                 &output,
                 None,
             );
@@ -2172,8 +2173,8 @@ where
         if state_root != block.state_root {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
-                &block.clone().seal_slow(),
                 &parent_block,
+                &block.clone().seal_slow(),
                 &output,
                 Some((&trie_output, state_root)),
             );
