@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-cli.workspace = true
 reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -39,6 +40,7 @@ reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-optimism-chainspec = { workspace = true, optional = true }
+reth-node-types.workspace = true
 
 # ethereum
 alloy-genesis.workspace = true
@@ -54,6 +56,8 @@ rand.workspace = true
 derive_more.workspace = true
 toml.workspace = true
 serde.workspace = true
+strum = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 
 # io
 dirs-next = "2.0.0"

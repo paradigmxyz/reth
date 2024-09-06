@@ -46,6 +46,9 @@ pub use alloy_rpc_types_beacon as beacon;
 // re-export txpool
 pub use alloy_rpc_types_txpool as txpool;
 
+// re-export debug
+pub use alloy_rpc_types_debug as debug;
+
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 #[cfg(feature = "jsonrpsee-types")]
 pub use eth::error::ToRpcError;
@@ -57,3 +60,9 @@ pub use eth::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
 };
+
+/// Optimism specific rpc types.
+pub mod optimism {
+    pub use op_alloy_rpc_types::*;
+    pub use op_alloy_rpc_types_engine::*;
+}

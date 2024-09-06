@@ -4,18 +4,18 @@ use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
-use reth_chainspec::ChainSpec;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
+    proofs,
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -94,12 +94,7 @@ where
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
         let extra_data = config.extra_data();
-        let PayloadConfig {
-            parent_block,
-            attributes,
-            chain_spec,
-            ..
-        } = config;
+        let PayloadConfig { parent_block, attributes, chain_spec, .. } = config;
 
         debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
 
@@ -209,6 +204,8 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
+        let receipts = Vec::new();
+
         Ok(OptimismBuiltPayload::new(
             attributes.payload_attributes.payload_id(),
             sealed_block,
@@ -216,6 +213,7 @@ where
             chain_spec,
             attributes,
             None,
+            receipts,
         ))
     }
 
@@ -266,12 +264,7 @@ where
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
     let extra_data = config.extra_data();
-    let PayloadConfig {
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, attributes, chain_spec, .. } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
@@ -533,8 +526,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome =
-        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let execution_outcome = ExecutionOutcome::new(
+        db.take_bundle(),
+        vec![receipts.clone()].into(),
+        block_number,
+        Vec::new(),
+    );
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -619,6 +616,7 @@ where
         trie: Arc::new(trie_output),
     };
 
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -626,6 +624,7 @@ where
         chain_spec,
         attributes,
         Some(executed),
+        receipts_pay,
     );
 
     // extend the payload with the blob sidecars from the executed txs

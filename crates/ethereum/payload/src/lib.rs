@@ -104,6 +104,7 @@ where
             );
             err
         })?;
+
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(state))
             .with_bundle_update()
@@ -249,7 +250,7 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, Vec::new()))
     }
 
     fn cfg_and_block_env(
@@ -498,7 +499,7 @@ where
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts.clone()].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -572,7 +573,8 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees);
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay);
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);

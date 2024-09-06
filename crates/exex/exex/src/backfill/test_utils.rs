@@ -10,7 +10,10 @@ use reth_primitives::{
     b256, constants::ETH_TO_WEI, Address, Block, BlockWithSenders, Genesis, GenesisAccount, Header,
     Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
 };
-use reth_provider::{BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
+    ProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use secp256k1::Keypair;
@@ -46,13 +49,13 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     )
 }
 
-pub(crate) fn execute_block_and_commit_to_database<DB>(
-    provider_factory: &ProviderFactory<DB>,
+pub(crate) fn execute_block_and_commit_to_database<N>(
+    provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     block: &BlockWithSenders,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let provider = provider_factory.provider()?;
 
@@ -149,13 +152,13 @@ fn blocks(
     Ok((block1, block2))
 }
 
-pub(crate) fn blocks_and_execution_outputs<DB>(
-    provider_factory: ProviderFactory<DB>,
+pub(crate) fn blocks_and_execution_outputs<N>(
+    provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
 ) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
@@ -170,13 +173,13 @@ where
     Ok(vec![(block1, block_output1), (block2, block_output2)])
 }
 
-pub(crate) fn blocks_and_execution_outcome<DB>(
-    provider_factory: ProviderFactory<DB>,
+pub(crate) fn blocks_and_execution_outcome<N>(
+    provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
 ) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 

@@ -28,7 +28,7 @@ use derive_more::{Constructor, Deref, Into};
 use reth_chainspec::ChainSpec;
 
 /// OP stack chain spec type.
-#[derive(Debug, Deref, Into, Constructor)]
+#[derive(Debug, Clone, Deref, Into, Constructor)]
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,

@@ -9,12 +9,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod compression;
-mod filters;
 mod segment;
 
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
-pub use filters::{Filters, InclusionFilter, PerfectHashingFunction};
 pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
 /// Default static file block count.

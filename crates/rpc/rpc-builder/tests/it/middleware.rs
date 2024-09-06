@@ -8,7 +8,7 @@ use reth_rpc::EthApi;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_rpc_types::{Block, Transaction};
+use reth_rpc_types::{Block, Receipt, Transaction};
 use std::{
     future::Future,
     pin::Pin,
@@ -75,7 +75,7 @@ async fn test_rpc_middleware() {
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<Transaction, Block>::protocol_version(&client).await.unwrap();
+    EthApiClient::<Transaction, Block, Receipt>::protocol_version(&client).await.unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
 }

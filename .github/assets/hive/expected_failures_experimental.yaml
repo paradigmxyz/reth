@@ -38,7 +38,6 @@ engine-withdrawals:
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
 engine-api:
-  - Re-org to Previously Validated Sidechain Payload (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P10 (Paris) (reth)
@@ -54,7 +53,6 @@ engine-cancun:
   - Invalid NewPayload, BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, Blob Count on BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Re-org to Previously Validated Sidechain Payload (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P10 (Cancun) (reth)

@@ -1,13 +1,13 @@
-use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
-use reth_primitives::{Address, SealedBlock, Withdrawals, B256, U256};
-use reth_rpc_types::{
-    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
-    Withdrawal,
-};
-
 use crate::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
+};
+use reth_chain_state::ExecutedBlock;
+use reth_chainspec::ChainSpec;
+use reth_primitives::{Address, Receipt, SealedBlock, Withdrawals, B256, U256};
+use reth_rpc_types::{
+    engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
+    optimism::OptimismPayloadAttributes,
+    Withdrawal,
 };
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
@@ -18,6 +18,9 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
+
+    /// Returns the Receipts
+    fn receipts(&self) -> &[Receipt];
 
     /// Returns the entire execution data for the built block, if available.
     fn executed_block(&self) -> Option<ExecutedBlock> {

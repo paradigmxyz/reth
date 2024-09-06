@@ -11,14 +11,14 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     transaction::WithEncoded,
-    Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
-    U256,
+    Address, BlobTransactionSidecar, Header, Receipt, SealedBlock, TransactionSigned, Withdrawals,
+    B256, U256,
 };
 /// Re-export for use in downstream arguments.
-pub use reth_rpc_types::engine::OptimismPayloadAttributes;
-use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
-    OptimismExecutionPayloadEnvelopeV4, PayloadId,
+pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
+use reth_rpc_types::{
+    engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId},
+    optimism::{OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4},
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
@@ -126,6 +126,8 @@ pub struct OptimismBuiltPayload {
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
+    /// The receipts of the block
+    pub(crate) receipts: Vec<Receipt>,
 }
 
 // === impl BuiltPayload ===
@@ -139,8 +141,18 @@ impl OptimismBuiltPayload {
         chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
+        receipts: Vec<Receipt>,
     ) -> Self {
-        Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
+        Self {
+            id,
+            block,
+            executed_block,
+            fees,
+            sidecars: Vec::new(),
+            chain_spec,
+            attributes,
+            receipts,
+        }
     }
 
     /// Returns the identifier of the payload.
@@ -176,6 +188,10 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
+
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
+    }
 }
 
 impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
@@ -189,6 +205,10 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
+    }
+
+    fn receipts(&self) -> &[Receipt] {
+        &self.receipts
     }
 }
 
