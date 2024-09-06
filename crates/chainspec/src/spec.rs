@@ -597,7 +597,7 @@ impl ChainSpec {
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
-        let hardfork_opts = vec![
+        let hardfork_opts = [
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
@@ -612,18 +612,18 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
         ];
-        let mut hardforks = into_forks(hardfork_opts);
+        let block_hardforks = into_block_forks(hardfork_opts.into_iter());
 
         // Time-based hardforks
-        let time_hardfork_opts = vec![
+        let time_hardfork_opts = [
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
         ];
 
-        let time_hardforks = into_forks(time_hardfork_opts);
+        let time_hardforks = into_time_forks(time_hardfork_opts.into_iter());
 
-        hardforks.extend(time_hardforks);
+        let mut hardforks: Vec<_> = block_hardforks.chain(time_hardforks).collect();
 
         // Paris
         let paris_block_and_final_difficulty =
@@ -671,7 +671,8 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
-/// Orders the hardforks based on the mainnet order and adds the remaining hardforks to the end.
+/// Orders the hardforks based on the mainnet hardfork order. Any additional hardforks are appended
+/// to the end of the list.
 fn order_hardforks(
     mut hardforks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
     mainnet_hardforks: ChainHardforks,
@@ -691,14 +692,22 @@ fn order_hardforks(
     ordered_hardforks
 }
 
-/// Convert the provided fork options into a Vec of hardforks and their activation conditions.
-fn into_forks(
-    fork_opts: Vec<(Box<dyn Hardfork>, Option<u64>)>,
-) -> Vec<(Box<dyn Hardfork>, ForkCondition)> {
-    fork_opts
-        .into_iter()
-        .filter_map(|(hardfork, opt)| opt.map(|time| (hardfork, ForkCondition::Timestamp(time))))
-        .collect()
+/// Convert the provided fork options into fork timestamp activation.
+fn into_time_forks(
+    fork_opts: impl Iterator<Item = (Box<dyn Hardfork>, Option<u64>)>,
+) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)> {
+    fork_opts.into_iter().filter_map(|(hardfork, opt)| {
+        opt.map(|time_or_block| (hardfork, ForkCondition::Timestamp(time_or_block)))
+    })
+}
+
+/// Convert the provided fork options into fork block number activation.
+fn into_block_forks(
+    fork_opts: impl Iterator<Item = (Box<dyn Hardfork>, Option<u64>)>,
+) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)> {
+    fork_opts.into_iter().filter_map(|(hardfork, opt)| {
+        opt.map(|time_or_block| (hardfork, ForkCondition::Block(time_or_block)))
+    })
 }
 
 /// Convert the given [`Genesis`] into an ethereum [`ChainSpec`].
@@ -748,7 +757,7 @@ fn into_optimism_chain_spec(
         (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
         (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
     ];
-    let optimism_time_hardforks = into_forks(optimism_time_hardfork_opts);
+    let optimism_time_hardforks = into_time_forks(optimism_time_hardfork_opts.into_iter());
     hardforks.extend(optimism_time_hardforks);
 
     // Ordered Hardforks
@@ -1467,7 +1476,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn mainnet_forkids() {
+    fn mainnet_fork_ids() {
         test_fork_ids(
             &MAINNET,
             &[
@@ -1543,7 +1552,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn holesky_forkids() {
+    fn holesky_fork_ids() {
         test_fork_ids(
             &HOLESKY,
             &[
@@ -1581,7 +1590,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn sepolia_forkids() {
+    fn sepolia_fork_ids() {
         test_fork_ids(
             &SEPOLIA,
             &[
@@ -1621,7 +1630,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn dev_forkids() {
+    fn dev_fork_ids() {
         test_fork_ids(
             &DEV,
             &[(
