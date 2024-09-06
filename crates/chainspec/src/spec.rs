@@ -612,7 +612,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
         ];
-        let block_hardforks = into_block_forks(hardfork_opts.into_iter());
+        let block_hardforks = into_forks(hardfork_opts.into_iter(), ForkCondition::Block);
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -621,7 +621,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
         ];
 
-        let time_hardforks = into_time_forks(time_hardfork_opts.into_iter());
+        let time_hardforks = into_forks(time_hardfork_opts.into_iter(), ForkCondition::Timestamp);
 
         let mut hardforks: Vec<_> = block_hardforks.chain(time_hardforks).collect();
 
@@ -692,21 +692,17 @@ fn order_hardforks(
     ordered_hardforks
 }
 
-/// Convert the provided fork options into fork timestamp activation.
-fn into_time_forks(
+/// Convert the provided fork options into fork conditions using a provided fork type
+/// ([`ForkCondition::Block`] or [`ForkCondition::Timestamp`]).
+fn into_forks<F>(
     fork_opts: impl Iterator<Item = (Box<dyn Hardfork>, Option<u64>)>,
-) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)> {
-    fork_opts.into_iter().filter_map(|(hardfork, opt)| {
-        opt.map(|time_or_block| (hardfork, ForkCondition::Timestamp(time_or_block)))
-    })
-}
-
-/// Convert the provided fork options into fork block number activation.
-fn into_block_forks(
-    fork_opts: impl Iterator<Item = (Box<dyn Hardfork>, Option<u64>)>,
-) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)> {
-    fork_opts.into_iter().filter_map(|(hardfork, opt)| {
-        opt.map(|time_or_block| (hardfork, ForkCondition::Block(time_or_block)))
+    fork_variant: F,
+) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)>
+where
+    F: Fn(u64) -> ForkCondition,
+{
+    fork_opts.into_iter().filter_map(move |(hardfork, opt)| {
+        opt.map(|time_or_block| (hardfork, fork_variant(time_or_block)))
     })
 }
 
@@ -757,7 +753,8 @@ fn into_optimism_chain_spec(
         (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
         (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
     ];
-    let optimism_time_hardforks = into_time_forks(optimism_time_hardfork_opts.into_iter());
+    let optimism_time_hardforks =
+        into_forks(optimism_time_hardfork_opts.into_iter(), ForkCondition::Timestamp);
     hardforks.extend(optimism_time_hardforks);
 
     // Ordered Hardforks
