@@ -596,14 +596,8 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
-        #[cfg(feature = "optimism")]
-        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
-        #[cfg(feature = "optimism")]
-        let genesis_info =
-            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
-
         // Block-based hardforks
-        let hardfork_opts = [
+        let hardfork_opts = vec![
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
@@ -617,13 +611,19 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::London.boxed(), genesis.config.london_block),
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
-        let mut hardforks = hardfork_opts
-            .into_iter()
-            .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
-            .collect::<Vec<_>>();
+        let mut hardforks = into_forks(hardfork_opts);
+
+        // Time-based hardforks
+        let time_hardfork_opts = vec![
+            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
+            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
+            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
+        ];
+
+        let time_hardforks = into_forks(time_hardfork_opts);
+
+        hardforks.extend(time_hardforks);
 
         // Paris
         let paris_block_and_final_difficulty =
@@ -641,52 +641,6 @@ impl From<Genesis> for ChainSpec {
                 None
             };
 
-        // Time-based hardforks
-        let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
-            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            #[cfg(feature = "optimism")]
-            (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
-        ];
-
-        let time_hardforks = time_hardfork_opts
-            .into_iter()
-            .filter_map(|(hardfork, opt)| {
-                opt.map(|time| (hardfork, ForkCondition::Timestamp(time)))
-            })
-            .collect::<Vec<_>>();
-
-        hardforks.extend(time_hardforks);
-
-        // Uses ethereum or optimism main chains to find proper order
-        #[cfg(not(feature = "optimism"))]
-        let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
-        #[cfg(not(feature = "optimism"))]
-        let mainnet_order = mainnet_hardforks.forks_iter();
-        #[cfg(feature = "optimism")]
-        let mainnet_hardforks = OptimismHardfork::op_mainnet();
-        #[cfg(feature = "optimism")]
-        let mainnet_order = mainnet_hardforks.forks_iter();
-
-        let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
-        for (hardfork, _) in mainnet_order {
-            if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
-                ordered_hardforks.push(hardforks.remove(pos));
-            }
-        }
-
-        // append the remaining unknown hardforks to ensure we don't filter any out
-        ordered_hardforks.extend(hardforks);
-
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
@@ -695,17 +649,121 @@ impl From<Genesis> for ChainSpec {
             DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
         });
 
-        Self {
-            chain: genesis.config.chain_id.into(),
-            genesis,
-            genesis_hash: None,
-            hardforks: ChainHardforks::new(ordered_hardforks),
-            paris_block_and_final_difficulty,
-            deposit_contract,
-            #[cfg(feature = "optimism")]
-            base_fee_params: optimism_genesis_info.base_fee_params,
-            ..Default::default()
+        #[cfg(not(feature = "optimism"))]
+        {
+            into_ethereum_chain_spec(
+                genesis,
+                hardforks,
+                paris_block_and_final_difficulty,
+                deposit_contract,
+            )
         }
+
+        #[cfg(feature = "optimism")]
+        {
+            into_optimism_chain_spec(
+                genesis,
+                hardforks,
+                paris_block_and_final_difficulty,
+                deposit_contract,
+            )
+        }
+    }
+}
+
+/// Orders the hardforks based on the mainnet order and adds the remaining hardforks to the end.
+fn order_hardforks(
+    mut hardforks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
+    mainnet_hardforks: ChainHardforks,
+) -> Vec<(Box<dyn Hardfork>, ForkCondition)> {
+    let mainnet_order = mainnet_hardforks.forks_iter();
+
+    let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
+    for (hardfork, _) in mainnet_order {
+        if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
+            ordered_hardforks.push(hardforks.remove(pos));
+        }
+    }
+
+    // append the remaining unknown hardforks to ensure we don't filter any out
+    ordered_hardforks.extend(hardforks);
+
+    ordered_hardforks
+}
+
+/// Convert the provided fork options into a Vec of hardforks and their activation conditions.
+fn into_forks(
+    fork_opts: Vec<(Box<dyn Hardfork>, Option<u64>)>,
+) -> Vec<(Box<dyn Hardfork>, ForkCondition)> {
+    fork_opts
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|time| (hardfork, ForkCondition::Timestamp(time))))
+        .collect()
+}
+
+/// Convert the given [`Genesis`] into an ethereum [`ChainSpec`].
+#[cfg_attr(feature = "optimism", allow(dead_code))]
+fn into_ethereum_chain_spec(
+    genesis: Genesis,
+    hardfork_opts: Vec<(Box<dyn Hardfork>, ForkCondition)>,
+    paris_block_and_final_difficulty: Option<(u64, U256)>,
+    deposit_contract: Option<DepositContract>,
+) -> ChainSpec {
+    // Ordered Hardforks
+    let mainnet_hardforks = EthereumHardfork::mainnet().into();
+    let ordered_hardforks = order_hardforks(hardfork_opts, mainnet_hardforks);
+
+    ChainSpec {
+        chain: genesis.config.chain_id.into(),
+        genesis,
+        genesis_hash: None,
+        hardforks: ChainHardforks::new(ordered_hardforks),
+        paris_block_and_final_difficulty,
+        deposit_contract,
+        ..Default::default()
+    }
+}
+
+#[cfg(feature = "optimism")]
+/// Convert the given [`Genesis`] into an optimism [`ChainSpec`].
+fn into_optimism_chain_spec(
+    genesis: Genesis,
+    mut hardforks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
+    paris_block_and_final_difficulty: Option<(u64, U256)>,
+    deposit_contract: Option<DepositContract>,
+) -> ChainSpec {
+    let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+    let genesis_info = optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
+
+    // Block-based hardforks
+    if let Some(bedrock_block) = genesis_info.bedrock_block {
+        hardforks.push((OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(bedrock_block)));
+    };
+
+    // Time-based hardforks
+    let optimism_time_hardfork_opts = vec![
+        (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
+        (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
+        (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
+        (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
+        (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
+    ];
+    let optimism_time_hardforks = into_forks(optimism_time_hardfork_opts);
+    hardforks.extend(optimism_time_hardforks);
+
+    // Ordered Hardforks
+    let mainnet_hardforks = OptimismHardfork::op_mainnet();
+    let ordered_hardforks = order_hardforks(hardforks, mainnet_hardforks);
+
+    ChainSpec {
+        chain: genesis.config.chain_id.into(),
+        genesis,
+        genesis_hash: None,
+        hardforks: ChainHardforks::new(ordered_hardforks),
+        paris_block_and_final_difficulty,
+        deposit_contract,
+        base_fee_params: optimism_genesis_info.base_fee_params,
+        ..Default::default()
     }
 }
 
