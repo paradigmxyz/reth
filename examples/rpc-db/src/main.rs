@@ -15,7 +15,7 @@
 use std::{path::Path, sync::Arc};
 
 use reth::{
-    api::NodeTypesWithDBAdapter,
+    api::NodeTypesWithStorageAdapter,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
@@ -50,11 +50,12 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
-        db.clone(),
-        spec.clone(),
-        StaticFileProvider::read_only(db_path.join("static_files"), true)?,
-    );
+    let factory =
+        ProviderFactory::<NodeTypesWithStorageAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
+            db.clone(),
+            spec.clone(),
+            StaticFileProvider::read_only(db_path.join("static_files"), true)?,
+        );
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
