@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
 use crate::{transaction::util::secp256k1, Address, B256, U256};
-use alloy_consensus::EncodableSignature;
 use alloy_primitives::{Bytes, Parity};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use serde::{Deserialize, Serialize};
@@ -23,7 +22,7 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
 ///
 /// This type is unaware of the chain id, and thus shouldn't be used when encoding or decoding
-/// legacy transactions. Use `SignatureWithParity` instead.
+/// legacy transactions. Use alloy `Signature` instead.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
@@ -184,14 +183,14 @@ impl Signature {
     pub(crate) fn as_signature_with_eip155_parity(
         &self,
         chain_id: Option<u64>,
-    ) -> SignatureWithParity {
-        SignatureWithParity::new(self.r, self.s, self.legacy_parity(chain_id))
+    ) -> alloy_primitives::Signature {
+        alloy_primitives::Signature::new(self.r, self.s, self.legacy_parity(chain_id))
     }
 
     /// Returns a signature with a boolean parity flag. This is useful when we want to encode
     /// the `v` value as 0 or 1.
-    pub(crate) const fn as_signature_with_boolean_parity(&self) -> SignatureWithParity {
-        SignatureWithParity::new(self.r, self.s, Parity::Parity(self.odd_y_parity))
+    pub(crate) fn as_signature_with_boolean_parity(&self) -> alloy_primitives::Signature {
+        alloy_primitives::Signature::new(self.r, self.s, Parity::Parity(self.odd_y_parity))
     }
 
     /// Returns the signature for the optimism deposit transactions, which don't include a
@@ -223,53 +222,6 @@ pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> 
         let odd_y_parity = ((v - 35) % 2) != 0;
         let chain_id = (v - 35) >> 1;
         Ok((odd_y_parity, Some(chain_id)))
-    }
-}
-
-/// A signature with full parity included.
-// TODO: replace by alloy Signature when there will be an easy way to instantiate them.
-pub(crate) struct SignatureWithParity {
-    /// The R field of the signature; the point on the curve.
-    r: U256,
-    /// The S field of the signature; the point on the curve.
-    s: U256,
-    /// Signature parity
-    parity: Parity,
-}
-
-impl SignatureWithParity {
-    /// Creates a new [`SignatureWithParity`].
-    pub(crate) const fn new(r: U256, s: U256, parity: Parity) -> Self {
-        Self { r, s, parity }
-    }
-}
-
-impl EncodableSignature for SignatureWithParity {
-    fn from_rs_and_parity<
-        P: TryInto<Parity, Error = E>,
-        E: Into<alloy_primitives::SignatureError>,
-    >(
-        r: U256,
-        s: U256,
-        parity: P,
-    ) -> Result<Self, alloy_primitives::SignatureError> {
-        Ok(Self { r, s, parity: parity.try_into().map_err(Into::into)? })
-    }
-
-    fn r(&self) -> U256 {
-        self.r
-    }
-
-    fn s(&self) -> U256 {
-        self.s
-    }
-
-    fn v(&self) -> Parity {
-        self.parity
-    }
-
-    fn with_parity<T: Into<Parity>>(self, parity: T) -> Self {
-        Self { r: self.r, s: self.s, parity: parity.into() }
     }
 }
 
