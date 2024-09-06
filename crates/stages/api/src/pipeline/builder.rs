@@ -1,8 +1,7 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::database::Database;
-use reth_node_types::NodeTypesWithDB;
-use reth_provider::ProviderFactory;
+use reth_provider::{ProviderFactory, ProviderNodeTypes};
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
 
@@ -69,7 +68,7 @@ where
     }
 
     /// Builds the final [`Pipeline`] using the given database.
-    pub fn build<N: NodeTypesWithDB<DB = DB>>(
+    pub fn build<N: ProviderNodeTypes<DB = DB>>(
         self,
         provider_factory: ProviderFactory<N>,
         static_file_producer: StaticFileProducer<N>,
