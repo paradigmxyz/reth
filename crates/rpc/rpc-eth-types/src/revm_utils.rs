@@ -125,13 +125,13 @@ impl CallFees {
                         max_fee < block_base_fee
                     {
                         // `base_fee_per_gas` is greater than the `max_fee_per_gas`
-                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into())
+                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into());
                     }
                     if max_fee < max_priority_fee_per_gas {
                         return Err(
                             // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                        )
+                        );
                     }
                     Ok(min(
                         max_fee,
@@ -185,7 +185,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into());
                 }
 
                 Ok(Self {

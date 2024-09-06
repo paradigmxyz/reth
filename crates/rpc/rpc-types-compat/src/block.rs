@@ -5,7 +5,7 @@ use reth_primitives::{
     Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
-    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,  WithOtherFields,
+    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 
 use crate::{transaction::from_recovered_with_block_context, TransactionCompat};

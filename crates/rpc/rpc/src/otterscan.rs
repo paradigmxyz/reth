@@ -20,6 +20,7 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
 };
+use reth_rpc_types_compat::TransactionCompat;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -77,6 +78,7 @@ where
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
             >,
+            TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
         > + TraceExt
         + EthTransactions
         + 'static,
@@ -211,7 +213,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ))
+            ));
         }
 
         // make sure the block is full

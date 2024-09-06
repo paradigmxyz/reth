@@ -84,7 +84,7 @@ pub trait EthBlocks: LoadBlock {
                 return Ok(LoadBlock::provider(self)
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.len()))
+                    .map(|block| block.body.len()));
             }
 
             let block_hash = match LoadBlock::provider(self)
@@ -144,7 +144,7 @@ pub trait EthBlocks: LoadBlock {
                             .map_err(Self::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Self::Error>>();
-                return receipts.map(Some)
+                return receipts.map(Some);
             }
 
             Ok(None)
@@ -183,7 +183,7 @@ pub trait EthBlocks: LoadBlock {
                 return LoadReceipt::cache(self)
                     .get_block_and_receipts(block_hash)
                     .await
-                    .map_err(Self::Error::from_eth_err)
+                    .map_err(Self::Error::from_eth_err);
             }
 
             Ok(None)

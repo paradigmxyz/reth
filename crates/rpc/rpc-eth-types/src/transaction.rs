@@ -2,7 +2,7 @@
 //!
 //! Transaction wrapper that labels transaction with its origin.
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
+use reth_rpc_types::TransactionInfo;
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
     TransactionCompat,

@@ -19,10 +19,13 @@ use reth_rpc_types::{
     },
     AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
-use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionCompat};
+use reth_rpc_types_compat::{
+    transaction::{from_recovered, from_recovered_with_block_context},
+    TransactionCompat,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{FromEthApiError, IntoEthApiError, RpcTransaction};
+use crate::{EthApiTypes, FromEthApiError, IntoEthApiError, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
@@ -103,7 +106,7 @@ pub trait EthTransactions: LoadTransaction {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
             {
-                return Ok(Some(tx))
+                return Ok(Some(tx));
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -211,7 +214,7 @@ pub trait EthTransactions: LoadTransaction {
 
                     return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
                         tx, tx_info,
-                    )))
+                    )));
                 }
             }
 
@@ -227,7 +230,13 @@ pub trait EthTransactions: LoadTransaction {
         include_pending: bool,
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadState,
+        Self: LoadBlock
+            + LoadState
+            + EthApiTypes<
+                TransactionCompat: TransactionCompat<
+                    Transaction = RpcTransaction<Self::NetworkTypes>,
+                >,
+            >,
     {
         async move {
             // Check the pool first
@@ -236,7 +245,7 @@ pub trait EthTransactions: LoadTransaction {
                     LoadState::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone().into_consensus();
-                    return Ok(Some(from_recovered(transaction)));
+                    return Ok(Some(from_recovered::<Self::TransactionCompat>(transaction)));
                 }
             }
 
@@ -286,7 +295,9 @@ pub trait EthTransactions: LoadTransaction {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context(tx, tx_info)
+                            from_recovered_with_block_context::<Self::TransactionCompat>(
+                                tx, tx_info,
+                            )
                         })
                 })
                 .ok_or(EthApiError::UnknownBlockNumber.into())
@@ -308,7 +319,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 if let Some(tx) = block.transactions().nth(index) {
-                    return Ok(Some(tx.envelope_encoded()))
+                    return Ok(Some(tx.envelope_encoded()));
                 }
             }
 
@@ -559,7 +570,7 @@ pub trait EthTransactions: LoadTransaction {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into_eth_err()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature.into())

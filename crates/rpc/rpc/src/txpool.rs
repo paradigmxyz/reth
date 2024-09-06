@@ -33,16 +33,20 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
     // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
-    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+    Eth: TransactionCompat<
+        Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+    >,
 {
-    fn content(&self) -> TxpoolContent<WithOtherFields<Transaction>> {
+    fn content(&self) -> TxpoolContent<Eth::Transaction> {
         #[inline]
         fn insert<Tx, Eth>(
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
         ) where
             Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
-            Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+            Eth: TransactionCompat<
+                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         {
             content
                 .entry(tx.sender())
@@ -52,7 +56,7 @@ where
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent::default();
+        let mut content = TxpoolContent::<WithOtherFields<_>>::default();
         for pending in pending {
             insert::<_, Eth>(&pending.transaction, &mut content.pending);
         }
@@ -68,7 +72,7 @@ where
 impl<Pool, Eth> TxPoolApiServer for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction> + 'static,
+    Eth: TransactionCompat<Transaction = WithOtherFields<reth_rpc_types::Transaction>> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -130,7 +134,7 @@ where
     async fn txpool_content_from(
         &self,
         from: Address,
-    ) -> Result<TxpoolContentFrom<WithOtherFields<Transaction>>> {
+    ) -> Result<TxpoolContentFrom<Eth::Transaction>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }

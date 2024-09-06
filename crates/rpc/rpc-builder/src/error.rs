@@ -79,7 +79,7 @@ impl RpcError {
     /// Converts an [`io::Error`] to a more descriptive `RpcError`.
     pub fn server_error(io_error: io::Error, kind: ServerKind) -> Self {
         if io_error.kind() == ErrorKind::AddrInUse {
-            return Self::AddressAlreadyInUse { kind, error: io_error }
+            return Self::AddressAlreadyInUse { kind, error: io_error };
         }
         Self::ServerError { kind, error: io_error }
     }

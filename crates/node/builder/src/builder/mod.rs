@@ -488,7 +488,9 @@ where
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
                     + FullEthApiServer<
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>>,
+            TransactionCompat: TransactionCompat<
+                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         > + AddDevSigners,
     >,
 {

@@ -18,7 +18,7 @@ use reth_rpc_types::{
 async fn trace_many_blocks() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 
@@ -105,7 +105,7 @@ async fn trace_call() {
 async fn debug_trace_block_entire_chain() {
     let url = parse_env_url("RETH_RPC_TEST_NODE_URL");
     if url.is_err() {
-        return
+        return;
     }
     let url = url.unwrap();
 

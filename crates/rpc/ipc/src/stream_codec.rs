@@ -117,7 +117,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                     return match String::from_utf8(bts.into()) {
                         Ok(val) => Ok(Some(val)),
                         Err(_) => Ok(None),
-                    }
+                    };
                 }
             }
             Ok(None)

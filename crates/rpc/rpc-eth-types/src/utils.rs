@@ -10,7 +10,7 @@ use super::{EthApiError, EthResult};
 /// See [`PooledTransactionsElement::decode_enveloped`]
 pub fn recover_raw_transaction(data: Bytes) -> EthResult<PooledTransactionsElementEcRecovered> {
     if data.is_empty() {
-        return Err(EthApiError::EmptyRawTransactionData)
+        return Err(EthApiError::EmptyRawTransactionData);
     }
 
     let transaction = PooledTransactionsElement::decode_enveloped(&mut data.as_ref())

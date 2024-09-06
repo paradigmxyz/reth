@@ -26,13 +26,13 @@ pub trait EthApiTypes: Send + Sync + Clone {
         HeaderResponse = reth_rpc_types::Header,
         ReceiptResponse = AnyTransactionReceipt,
     >;
-        /// Conversion methods for transaction RPC type.
-        type TransactionCompat: Send + Sync + Clone + fmt::Debug;
+    /// Conversion methods for transaction RPC type.
+    type TransactionCompat: Send + Sync + Clone + fmt::Debug;
 }
 
 impl EthApiTypes for () {
     type Error = EthApiError;
-    type NetworkTypes = Ethereum;
+    type NetworkTypes = AnyNetwork;
     type TransactionCompat = ();
 }
 

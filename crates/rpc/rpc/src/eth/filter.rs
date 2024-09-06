@@ -40,7 +40,7 @@ const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500k
 /// `Eth` filter RPC implementation.
 pub struct EthFilter<Provider, Pool, Eth> {
     /// All nested fields bundled together
-    inner: Arc<EthFilterInner<Provider, Pool, Transaction>>,
+    inner: Arc<EthFilterInner<Provider, Pool, WithOtherFields<Transaction>>>,
     /// Assembles response data w.r.t. network.
     _tx_resp_builder: PhantomData<Eth>,
 }
@@ -55,7 +55,9 @@ impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
 where
     Provider: Send + Sync + 'static,
     Pool: Send + Sync + 'static,
-    Eth: Send + Sync + 'static,
+    Eth: TransactionCompat<
+            Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+        > + 'static,
 {
     /// Creates a new, shareable instance.
     ///
@@ -100,15 +102,9 @@ where
 
         eth_filter
     }
-}
 
-impl<Provider, Pool, Eth> EthFilter<Provider, Pool, Eth>
-where
-    Provider: Send + Sync + 'static,
-    Pool: Send + Sync + 'static,
-{
     /// Returns all currently active filters
-    pub fn active_filters(&self) -> &ActiveFilters<Transaction> {
+    pub fn active_filters(&self) -> &ActiveFilters<Eth::Transaction> {
         &self.inner.active_filters
     }
 
@@ -147,7 +143,9 @@ where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     <Pool as TransactionPool>::Transaction: 'static,
-    Eth: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields< reth_rpc_types::Transaction>>,
+    Eth: TransactionCompat<
+        Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+    >,
 {
     /// Returns all the filter changes for the given id, if any
     pub async fn filter_changes(
@@ -165,7 +163,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -234,7 +232,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id))
+                return Err(EthFilterError::FilterNotFound(id));
             }
         };
 
@@ -247,7 +245,10 @@ impl<Provider, Pool, Eth> EthFilterApiServer<Eth::Transaction> for EthFilter<Pro
 where
     Provider: BlockReader + BlockIdReader + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>> + Clone + 'static,
+    Eth: TransactionCompat<
+            Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+        > + Clone
+        + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -449,11 +450,11 @@ where
         let best_number = chain_info.best_number;
 
         if to_block < from_block {
-            return Err(EthFilterError::InvalidBlockRangeParams)
+            return Err(EthFilterError::InvalidBlockRangeParams);
         }
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+            return Err(EthFilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
         }
 
         let mut all_logs = Vec::new();
@@ -477,7 +478,7 @@ where
                     block.header.timestamp,
                 )?;
             }
-            return Ok(all_logs)
+            return Ok(all_logs);
         }
 
         // derive bloom filters from filter input, so we can check headers for matching logs
@@ -523,7 +524,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(EthFilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ))
+                            ));
                         }
                     }
                 }
@@ -673,7 +674,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }

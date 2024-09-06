@@ -68,7 +68,6 @@ where
             max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
             blob_versioned_hashes,
             authorization_list,
-            other: Default::default(),
         }
     }
 }

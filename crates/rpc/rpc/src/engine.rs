@@ -6,7 +6,7 @@ pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
-    SyncStatus, TransactionRequest, WithOtherFields,
+    SyncStatus, TransactionRequest,
 };
 use reth_rpc_types_compat::TransactionCompat;
 use tracing_futures::Instrument;
@@ -36,8 +36,11 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
     for EngineEthApi<Eth, EthFilter>
 where
-    Eth: EthApiServer<RpcTransaction<Eth::NetworkTypes>, RpcBlock<Eth::NetworkTypes>>
-        + EthApiTypes<
+    Eth: EthApiServer<
+            RpcTransaction<Eth::NetworkTypes>,
+            RpcBlock<Eth::NetworkTypes>,
+            RpcReceipt<Eth::NetworkTypes>,
+        > + EthApiTypes<
             TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
         >,
     EthFilter: EthFilterApiServer<<Eth::TransactionCompat as TransactionCompat>::Transaction>,

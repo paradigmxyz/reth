@@ -125,7 +125,8 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    type NetworkTypes = Ethereum;
+    // todo: replace with alloy_network::Ethereum
+    type NetworkTypes = AnyNetwork;
     type TransactionCompat = EthTxBuilder;
 }
 

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use reth_evm::ConfigureEvm;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
-use reth_rpc_eth_api::EthApiTypes;
+use reth_rpc_eth_api::{EthApiTypes, TransactionCompat};
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, EthApiBuilderCtx, EthConfig, EthStateCache,
 };
@@ -86,7 +86,11 @@ where
     Network: Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: EthApiTypes + 'static,
+    EthApi: EthApiTypes<
+            TransactionCompat: TransactionCompat<
+                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + 'static,
 {
     /// Returns a new instance with handlers for `eth` namespace.
     pub fn build(self) -> EthHandlers<Provider, Pool, Network, Events, EthApi> {
@@ -144,7 +148,11 @@ impl EthFilterApiBuilder {
         Provider: Send + Sync + Clone + 'static,
         Pool: Send + Sync + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        Eth: EthApiTypes + 'static,
+        Eth: EthApiTypes<
+                TransactionCompat: TransactionCompat<
+                    Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+                >,
+            > + 'static,
     {
         EthFilter::new(
             ctx.provider.clone(),

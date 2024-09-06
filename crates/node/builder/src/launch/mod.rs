@@ -34,8 +34,8 @@ use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_types_compat::TransactionCompat;
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
+use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -113,7 +113,9 @@ where
         NodeAdapter<T, CB::Components>,
         EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>
                     + FullEthApiServer<
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>>,
+            TransactionCompat: TransactionCompat<
+                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         > + AddDevSigners,
     >,
 {
