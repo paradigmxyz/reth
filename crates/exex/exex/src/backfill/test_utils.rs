@@ -11,8 +11,7 @@ use reth_primitives::{
     Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
 };
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
-    ProviderFactory,
+    BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory, ProviderNodeTypes,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
