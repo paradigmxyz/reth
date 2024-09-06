@@ -4,6 +4,7 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
+use reth_node_builder::NodeTypesWithEngine;
 use std::io::{self, Write};
 
 mod checksum;
@@ -54,8 +55,8 @@ pub enum Subcommands {
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
-    ($env:expr, $tool:ident, $command:block) => {
-        let Environment { provider_factory, .. } = $env.init(AccessRights::RO)?;
+    ($env:expr, $tool:ident, $N:ident, $command:block) => {
+        let Environment { provider_factory, .. } = $env.init::<$N>(AccessRights::RO)?;
 
         let $tool = DbTool::new(provider_factory.clone())?;
         $command;
@@ -64,7 +65,9 @@ macro_rules! db_ro_exec {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain);
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
@@ -82,27 +85,27 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                db_ro_exec!(self.env, tool, {
+                db_ro_exec!(self.env, tool, N, {
                     command.execute(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
-                db_ro_exec!(self.env, tool, {
+                db_ro_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
-                db_ro_exec!(self.env, tool, {
+                db_ro_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Diff(command) => {
-                db_ro_exec!(self.env, tool, {
+                db_ro_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
-                db_ro_exec!(self.env, tool, {
+                db_ro_exec!(self.env, tool, N, {
                     command.execute(&tool)?;
                 });
             }
@@ -122,12 +125,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     }
                 }
 
-                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 let tool = DbTool::new(provider_factory)?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
-                let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {

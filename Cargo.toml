@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.0.6"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.81"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -68,6 +68,7 @@ members = [
     "crates/node/core/",
     "crates/node/events/",
     "crates/node/metrics",
+    "crates/node/types",
     "crates/optimism/bin",
     "crates/optimism/chainspec",
     "crates/optimism/cli",
@@ -170,6 +171,7 @@ rustdoc.all = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
 derive_partial_eq_without_eq = "warn"
 doc_markdown = "warn"
 empty_line_after_doc_comments = "warn"
@@ -230,7 +232,6 @@ zero_sized_map_values = "warn"
 # Explicitly listing should make it easier to fix in the future.
 as_ptr_cast_mut = "allow"
 cognitive_complexity = "allow"
-collection_is_never_read = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
@@ -352,6 +353,7 @@ reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-node-types = { path = "crates/node/types" }
 op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
@@ -451,9 +453,10 @@ alloy-transport-ipc = { version = "0.3.1", default-features = false }
 alloy-transport-ws = { version = "0.3.1", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.2.5"
-op-alloy-rpc-types-engine = "0.2"
-op-alloy-network = "0.2"
+op-alloy-rpc-types = "0.2.8"
+op-alloy-rpc-types-engine = "0.2.8"
+op-alloy-network = "0.2.8"
+op-alloy-consensus = "0.2.8"
 
 # misc
 aquamarine = "0.5"
@@ -475,6 +478,7 @@ humantime-serde = "1.1"
 itertools = "0.13"
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
+notify = { version = "6.1.1", default-features = false, features = ["macos_fsevent"] }
 nybbles = "0.2.1"
 once_cell = "1.19"
 parking_lot = "0.12"

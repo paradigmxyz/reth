@@ -12,10 +12,10 @@ use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
 use reth_transaction_pool::error::{
-    Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
-    PoolTransactionError,
+    Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    PoolError, PoolErrorKind, PoolTransactionError,
 };
-use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
+use revm::primitives::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, OutOfGasError};
 use revm_inspectors::tracing::MuxError;
 use tracing::error;
 
@@ -236,7 +236,12 @@ where
 {
     fn from(err: EVMError<T>) -> Self {
         match err {
-            EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
+            EVMError::Transaction(invalid_tx) => match invalid_tx {
+                InvalidTransaction::NonceTooLow { tx, state } => {
+                    Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow { tx, state })
+                }
+                _ => RpcInvalidTransactionError::from(invalid_tx).into(),
+            },
             EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
@@ -263,8 +268,13 @@ where
 #[derive(thiserror::Error, Debug)]
 pub enum RpcInvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
-    #[error("nonce too low")]
-    NonceTooLow,
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
+    NonceTooLow {
+        /// The nonce of the transaction.
+        tx: u64,
+        /// The current state of the nonce in the local chain.
+        state: u64,
+    },
     /// returned if the nonce of a transaction is higher than the next one expected based on the
     /// local chain.
     #[error("nonce too high")]
@@ -456,7 +466,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
             InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
             InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
-            InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
+            InvalidTransaction::NonceTooLow { tx, state } => Self::NonceTooLow { tx, state },
             InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
             InvalidTransaction::MaxFeePerBlobGasNotSupported => Self::MaxFeePerBlobGasNotSupported,
             InvalidTransaction::BlobVersionedHashesNotSupported => {
@@ -494,7 +504,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
             InvalidTransactionError::InsufficientFunds { .. } => Self::InsufficientFunds,
-            InvalidTransactionError::NonceNotConsistent => Self::NonceTooLow,
+            InvalidTransactionError::NonceNotConsistent { tx, state } => {
+                Self::NonceTooLow { tx, state }
+            }
             InvalidTransactionError::OldLegacyChainId => {
                 // Note: this should be unreachable since Spurious Dragon now enabled
                 Self::OldLegacyChainId
@@ -593,9 +605,12 @@ pub enum RpcPoolError {
     /// Custom pool error
     #[error(transparent)]
     PoolTransactionError(Box<dyn PoolTransactionError>),
-    /// Eip-4844 related error
+    /// EIP-4844 related error
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
+    /// EIP-7702 related error
+    #[error(transparent)]
+    Eip7702(#[from] Eip7702PoolTransactionError),
     /// Thrown if a conflicting transaction type is already in the pool
     ///
     /// In other words, thrown if a transaction with the same sender that violates the exclusivity
@@ -647,6 +662,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
+            InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
             InvalidPoolTransactionError::Overdraft => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds)
             }

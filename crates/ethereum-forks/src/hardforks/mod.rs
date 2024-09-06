@@ -68,7 +68,7 @@ impl ChainHardforks {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     pub fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
-        self.get(fork).unwrap_or(ForkCondition::Never)
+        self.get(fork).unwrap_or_default()
     }
 
     /// Retrieves [`ForkCondition`] from `fork` if it exists, otherwise `None`.

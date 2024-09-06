@@ -288,10 +288,23 @@ impl CanonicalInMemoryState {
     ///
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
-    pub fn remove_persisted_blocks(&self, persisted_height: u64) {
+    pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
+        // if the persisted hash is not in the canonical in memory state, do nothing, because it
+        // means canonical blocks were not actually persisted.
+        //
+        // This can happen if the persistence task takes a long time, while a reorg is happening.
+        {
+            if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
+                // do nothing
+                return
+            }
+        }
+
         {
             let mut blocks = self.inner.in_memory_state.blocks.write();
             let mut numbers = self.inner.in_memory_state.numbers.write();
+
+            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
             // clear all numbers
             numbers.clear();

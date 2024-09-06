@@ -204,10 +204,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     to: TxKind::from(tx.to),
                     mint: fields.mint.filter(|n| *n != 0),
                     value: tx.value,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    gas_limit: tx.gas,
                     is_system_transaction: fields.is_system_tx.unwrap_or(false),
                     input: tx.input,
                 }))

@@ -79,12 +79,12 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_chainspec::{MAINNET, ChainSpecProvider};
-//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+//! use reth_chainspec::MAINNET;
+//! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! async fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static{
+//! async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
@@ -278,7 +278,7 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + reth_storage_api::BlockReaderIdExt + Clone + 'static,
+    Client: StateProviderFactory + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
@@ -288,12 +288,12 @@ where
     ///
     /// ```
     /// use reth_chainspec::MAINNET;
-    /// use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+    /// use reth_storage_api::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
-    /// # fn t<C>(client: C)  where C: StateProviderFactory + BlockReaderIdExt + Clone + 'static {
+    /// # fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static {
     /// let blob_store = InMemoryBlobStore::default();
     /// let pool = Pool::eth_pool(
     ///     TransactionValidationTaskExecutor::eth(
