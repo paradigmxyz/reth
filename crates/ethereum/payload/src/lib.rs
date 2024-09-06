@@ -95,7 +95,7 @@ where
     }
 }
 
-/// Default implementation of [PayloadBuilder] for unit type
+/// Default implementation of [`PayloadBuilder`] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
