@@ -209,7 +209,7 @@ where
         Ok(())
     }
 
-    /// Saves the diff of two values.
+    /// Saves the diff of two values into a file with the given name in the output directory.
     fn save_diff<T: PartialEq + Debug>(
         &self,
         filename: String,
