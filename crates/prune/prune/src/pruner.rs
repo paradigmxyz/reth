@@ -9,7 +9,7 @@ use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_node_types::NodeTypesWithDB;
 use reth_provider::{
-    providers::ProviderNodeTypes, DatabaseProviderRW, ProviderFactory, PruneCheckpointReader,
+    DatabaseProviderRW, ProviderFactory, ProviderNodeTypes, PruneCheckpointReader,
 };
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
