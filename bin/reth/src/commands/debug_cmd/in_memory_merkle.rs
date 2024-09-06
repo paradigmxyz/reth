@@ -17,13 +17,14 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StorageReader,
+    HeaderProvider, LatestStateProviderRef, NodeTypesWithStorage, OriginalValuesKnown,
+    ProviderFactory, ProviderNodeTypes, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -55,7 +56,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -77,7 +78,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

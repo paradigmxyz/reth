@@ -20,11 +20,12 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_api::{NodeTypesWithEngine, NodeTypesWithStorageAdapter};
 use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
-    BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
+    BlockExecutionWriter, ChainSpecProvider, NodeTypesWithStorage, ProviderFactory,
+    ProviderNodeTypes, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -57,7 +58,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>, Client>(
+    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>, Client>(
         &self,
         config: &Config,
         client: Client,
@@ -115,11 +116,13 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(pipeline)
     }
 
-    async fn build_network<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+        provider_factory: ProviderFactory<NodeTypesWithStorageAdapter<N, Arc<DatabaseEnv>>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -156,7 +159,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

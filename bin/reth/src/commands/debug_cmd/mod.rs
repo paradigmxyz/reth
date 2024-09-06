@@ -6,6 +6,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::EthEngineTypes;
+use reth_provider::NodeTypesWithStorage;
 
 mod build_block;
 mod execution;
@@ -38,7 +39,8 @@ pub enum Subcommands<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
     pub async fn execute<
-        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
+        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>
+            + NodeTypesWithStorage,
     >(
         self,
         ctx: CliContext,

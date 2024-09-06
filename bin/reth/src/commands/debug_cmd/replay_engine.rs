@@ -18,11 +18,12 @@ use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage}
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_api::{NodeTypesWithEngine, NodeTypesWithStorageAdapter};
 use reth_node_ethereum::{EthEngineTypes, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
-    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider,
+    NodeTypesWithStorage, ProviderFactory, ProviderNodeTypes,
 };
 use reth_prune::PruneModes;
 use reth_stages::Pipeline;
@@ -54,7 +55,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
+    async fn build_network<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -77,7 +78,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
     /// Execute `debug replay-engine` command
     pub async fn execute<
-        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>,
+        N: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>
+            + NodeTypesWithStorage,
     >(
         self,
         ctx: CliContext,
@@ -137,7 +139,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let network_client = network.fetch_client().await?;
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
             network_client,
-            Pipeline::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::builder().build(
+            Pipeline::<NodeTypesWithStorageAdapter<N, Arc<DatabaseEnv>>>::builder().build(
                 provider_factory.clone(),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),
