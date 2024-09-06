@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives::{keccak256, Address, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };

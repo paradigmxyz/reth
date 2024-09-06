@@ -1,5 +1,5 @@
 use crate::Nibbles;
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,

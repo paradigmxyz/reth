@@ -8772,6 +8772,7 @@ dependencies = [
 name = "reth-trie"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "auto_impl",
  "criterion",
