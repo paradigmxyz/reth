@@ -4,9 +4,9 @@ use std::marker::PhantomData;
 
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::FullProvider;
+use reth_provider::{FullProvider, ProviderNodeTypes};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
@@ -19,7 +19,7 @@ use crate::ConfigureEvm;
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithDB + NodeTypesWithEngine;
+    type Types: ProviderNodeTypes + NodeTypesWithEngine;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::Types>;
 }
@@ -35,7 +35,7 @@ pub struct FullNodeTypesAdapter<Types, Provider> {
 
 impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypesWithDB + NodeTypesWithEngine,
+    Types: ProviderNodeTypes + NodeTypesWithEngine,
     Provider: FullProvider<Types>,
 {
     type Types = Types;
