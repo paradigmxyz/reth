@@ -174,7 +174,7 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [`InvalidTransactionError`](alloy_primitives::InvalidTransactionError) for common errors
+    /// See [`InvalidTransactionError`](reth_primitives::InvalidTransactionError) for common errors
     /// variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction
