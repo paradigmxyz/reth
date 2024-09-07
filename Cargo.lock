@@ -2550,6 +2550,7 @@ dependencies = [
 name = "ef-tests"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "rayon",
  "reth-chainspec",
@@ -8698,6 +8699,7 @@ version = "1.0.6"
 dependencies = [
  "alloy-eips",
  "alloy-genesis",
+ "alloy-primitives",
  "rand 0.8.5",
  "reth-primitives",
  "secp256k1",
