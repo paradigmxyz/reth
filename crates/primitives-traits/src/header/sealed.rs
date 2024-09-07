@@ -67,7 +67,8 @@ impl SealedHeader {
 impl Default for SealedHeader {
     fn default() -> Self {
         let sealed = Header::default().seal_slow();
-        Self { hash: sealed.seal(), header: sealed.inner().clone() }
+        let (header, hash) = sealed.into_parts();
+        Self { header, hash }
     }
 }
 

@@ -54,8 +54,9 @@ impl Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
         let sealed = self.header.seal_slow();
+        let (header, seal) = sealed.into_parts();
         SealedBlock {
-            header: SealedHeader::new(sealed.inner().clone(), sealed.seal()),
+            header: SealedHeader::new(header, seal),
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,

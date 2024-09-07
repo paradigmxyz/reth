@@ -118,7 +118,8 @@ impl FileClient {
     pub fn tip_header(&self) -> Option<SealedHeader> {
         self.headers.get(&self.max_block()?).map(|h| {
             let sealed = h.clone().seal_slow();
-            SealedHeader::new(sealed.inner().clone(), sealed.seal())
+            let (header, seal) = sealed.into_parts();
+            SealedHeader::new(header, seal)
         })
     }
 

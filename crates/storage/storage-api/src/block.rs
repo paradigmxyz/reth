@@ -247,7 +247,8 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
                 || Ok(None),
                 |h| {
                     let sealed = h.seal_slow();
-                    Ok(Some(SealedHeader::new(sealed.inner().clone(), sealed.seal())))
+                    let (header, seal) = sealed.into_parts();
+                    Ok(Some(SealedHeader::new(header, seal)))
                 },
             )
     }

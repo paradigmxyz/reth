@@ -254,7 +254,9 @@ where
             .into_par_iter()
             .map(|h| {
                 let sealed = h.seal_slow();
-                SealedHeader::new(sealed.inner().clone(), sealed.seal())
+                let (header, seal) = sealed.into_parts();
+
+                SealedHeader::new(header, seal)
             })
             .collect::<Vec<_>>();
         for parent in sealed_headers {
@@ -383,7 +385,8 @@ where
                 }
 
                 let sealed_target = headers.remove(0).seal_slow();
-                let target = SealedHeader::new(sealed_target.inner().clone(), sealed_target.seal());
+                let (header, seal) = sealed_target.into_parts();
+                let target = SealedHeader::new(header, seal);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
