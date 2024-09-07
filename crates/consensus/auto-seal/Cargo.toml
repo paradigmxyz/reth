@@ -12,6 +12,7 @@ description = "A consensus impl for local testing purposes"
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true

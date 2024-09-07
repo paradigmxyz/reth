@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 # reth
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true

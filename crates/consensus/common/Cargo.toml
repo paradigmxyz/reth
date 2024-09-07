@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
