@@ -2550,6 +2550,7 @@ dependencies = [
 name = "ef-tests"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "rayon",
  "reth-chainspec",
