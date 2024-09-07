@@ -7,8 +7,8 @@ use crate::{
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
 };
-use rand::Rng;
 use alloy_primitives::{Address, U256};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
