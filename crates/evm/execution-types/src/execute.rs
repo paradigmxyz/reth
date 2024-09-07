@@ -26,8 +26,6 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
 /// The output of an ethereum block.
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
-///
-/// TODO(mattsse): combine with `ExecutionOutcome`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.

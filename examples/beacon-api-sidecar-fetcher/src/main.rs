@@ -21,13 +21,16 @@ use std::{
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::{builder::NodeHandle, cli::Cli, primitives::B256, providers::CanonStateSubscriptions};
+use reth::{
+    args::utils::DefaultChainSpecParser, builder::NodeHandle, cli::Cli, primitives::B256,
+    providers::CanonStateSubscriptions,
+};
 use reth_node_ethereum::EthereumNode;
 
 pub mod mined_sidecar;
 
 fn main() {
-    Cli::<BeaconSidecarConfig>::parse()
+    Cli::<DefaultChainSpecParser, BeaconSidecarConfig>::parse()
         .run(|builder, beacon_config| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

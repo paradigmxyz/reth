@@ -9,9 +9,10 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
 };
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
+use reth_primitives::constants::EMPTY_ROOT_HASH;
 use tracing::trace;
 
 #[cfg(feature = "metrics")]

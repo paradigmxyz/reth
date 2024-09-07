@@ -10,18 +10,19 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
+    ProviderError, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -58,13 +59,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [`BlockchainTree::make_canonical`]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB, E> {
+pub struct BlockchainTree<N: NodeTypesWithDB, E> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, E>,
+    externals: TreeExternals<N, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -75,7 +76,7 @@ pub struct BlockchainTree<DB, E> {
     metrics: TreeMetrics,
 }
 
-impl<DB, E> BlockchainTree<DB, E> {
+impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are emitted by the tree.
@@ -89,9 +90,9 @@ impl<DB, E> BlockchainTree<DB, E> {
     }
 }
 
-impl<DB, E> BlockchainTree<DB, E>
+impl<N, E> BlockchainTree<N, E>
 where
-    DB: Database + Clone,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
@@ -115,7 +116,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        mut externals: TreeExternals<DB, E>,
+        mut externals: TreeExternals<N, E>,
         config: BlockchainTreeConfig,
         prune_modes: PruneModes,
     ) -> ProviderResult<Self> {
@@ -1382,24 +1383,23 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_consensus::test_utils::TestConsensus;
-    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db::tables;
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    #[cfg(not(feature = "optimism"))]
-    use reth_primitives::proofs::calculate_receipt_root;
-    #[cfg(feature = "optimism")]
-    use reth_primitives::proofs::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         keccak256,
-        proofs::calculate_transaction_root,
+        proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
         Account, Address, Header, Signature, Transaction, TransactionSigned,
         TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
     };
     use reth_provider::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
         ProviderFactory,
     };
     use reth_stages_api::StageCheckpoint;
@@ -1408,7 +1408,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,
-    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
+    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1424,7 +1424,7 @@ mod tests {
         TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
+    fn setup_genesis<N: ProviderNodeTypes>(factory: &ProviderFactory<N>, mut genesis: SealedBlock) {
         // insert genesis to db.
 
         genesis.header.set_block_number(10);
@@ -1501,7 +1501,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
+        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider>(self, tree: &BlockchainTree<N, E>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }
@@ -1598,11 +1598,8 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            #[cfg(not(feature = "optimism"))]
+            // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
-
-            #[cfg(feature = "optimism")]
-            let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
                 SealedBlock {

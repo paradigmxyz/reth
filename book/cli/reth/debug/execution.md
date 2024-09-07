@@ -4,6 +4,8 @@ Debug the roundtrip execution of blocks as well as the generated data
 
 ```bash
 $ reth debug execution --help
+```
+```txt
 Usage: reth debug execution [OPTIONS] --to <TO>
 
 Options:
@@ -220,6 +222,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
       --to <TO>
           The maximum block height

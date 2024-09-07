@@ -14,4 +14,4 @@ pub use pubsub::EthPubSub;
 
 pub use helpers::signer::DevSigner;
 
-pub use reth_rpc_eth_api::{EthApiServer, RawTransactionForwarder};
+pub use reth_rpc_eth_api::EthApiServer;

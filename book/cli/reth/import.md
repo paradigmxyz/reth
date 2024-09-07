@@ -4,6 +4,8 @@ This syncs RLP encoded blocks from a file
 
 ```bash
 $ reth import --help
+```
+```txt
 Usage: reth import [OPTIONS] <IMPORT_PATH>
 
 Options:

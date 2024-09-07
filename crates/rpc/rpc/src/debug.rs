@@ -2,7 +2,10 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmEnv};
+use reth_evm::{
+    system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
+    ConfigureEvmEnv,
+};
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
@@ -10,7 +13,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
@@ -19,12 +22,13 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
+    debug::ExecutionWitness,
     state::EvmOverrides,
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
+    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
@@ -564,7 +568,8 @@ where
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
-    ) -> Result<HashMap<B256, Bytes>, Eth::Error> {
+        include_preimages: bool,
+    ) -> Result<ExecutionWitness, Eth::Error> {
         let ((cfg, block_env, _), maybe_block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_id.into()),
             self.inner.eth_api.block_with_senders(block_id.into()),
@@ -588,18 +593,17 @@ where
                     &this.inner.provider.chain_spec(),
                     &cfg,
                     &block_env,
-                    block.timestamp,
-                    block.number,
                     block.parent_beacon_block_root,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 // apply eip-2935 blockhashes update
-                apply_blockhashes_update(
+                pre_block_blockhashes_contract_call(
                     &mut db,
+                    &evm_config,
                     &this.inner.provider.chain_spec(),
-                    block.timestamp,
-                    block.number,
+                    &cfg,
+                    &block_env,
                     block.parent_hash,
                 )
                 .map_err(|err| EthApiError::Internal(err.into()))?;
@@ -626,6 +630,9 @@ where
                 // Take the bundle state
                 let bundle_state = db.take_bundle();
 
+                // Initialize a map of preimages.
+                let mut state_preimages = HashMap::new();
+
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
@@ -644,9 +651,19 @@ where
                         .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
                     if let Some(account) = account.account {
+                        if include_preimages {
+                            state_preimages
+                                .insert(hashed_address, alloy_rlp::encode(address).into());
+                        }
+
                         for (slot, value) in account.storage {
-                            let hashed_slot = keccak256(B256::from(slot));
+                            let slot = B256::from(slot);
+                            let hashed_slot = keccak256(slot);
                             storage.storage.insert(hashed_slot, value);
+
+                            if include_preimages {
+                                state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                            }
                         }
                     }
                 }
@@ -657,7 +674,11 @@ where
                 let witness = state_provider
                     .witness(HashedPostState::default(), hashed_state)
                     .map_err(Into::into)?;
-                Ok(witness)
+
+                Ok(ExecutionWitness {
+                    witness,
+                    state_preimages: include_preimages.then_some(state_preimages),
+                })
             })
             .await
     }
@@ -864,7 +885,7 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
+    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -929,9 +950,10 @@ where
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-    ) -> RpcResult<HashMap<B256, Bytes>> {
+        include_preimages: bool,
+    ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block).await.map_err(Into::into)
+        Self::debug_execution_witness(self, block, include_preimages).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`

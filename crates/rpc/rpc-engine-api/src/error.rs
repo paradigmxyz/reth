@@ -117,10 +117,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
-                _,
-            )) |
             EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other

@@ -9,34 +9,30 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use alloy_chains::{Chain, ChainKind, NamedChain};
-pub use info::ChainInfo;
-pub use spec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
-};
-#[cfg(feature = "optimism")]
-pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
-
 #[cfg(not(feature = "std"))]
 extern crate alloc;
-
-// /// The config info module namely spec id.
-// pub mod config;
-/// The chain info module.
-mod info;
-
-/// The chain spec module.
-mod spec;
-
-mod api;
-pub use api::EthChainSpec;
 
 /// Chain specific constants
 pub(crate) mod constants;
 
+mod api;
+/// The chain info module.
+mod info;
+/// The chain spec module.
+mod spec;
+
+pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
+
+pub use api::EthChainSpec;
+pub use info::ChainInfo;
+#[cfg(feature = "test-utils")]
+pub use spec::test_fork_ids;
+pub use spec::{
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
+    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
+};
 
 #[cfg(test)]
 mod tests {

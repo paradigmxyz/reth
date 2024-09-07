@@ -45,9 +45,9 @@ impl From<EthFilterError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee_types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
-            err @ EthFilterError::InvalidBlockRangeParams |
-            err @ EthFilterError::QueryExceedsMaxBlocks(_) |
-            err @ EthFilterError::QueryExceedsMaxResults(_) => {
+            err @ (EthFilterError::InvalidBlockRangeParams |
+            EthFilterError::QueryExceedsMaxBlocks(_) |
+            EthFilterError::QueryExceedsMaxResults(_)) => {
                 rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }

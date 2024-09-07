@@ -24,6 +24,13 @@
 //! When the node receives a block with an unknown parent, or cannot find a certain block hash, it
 //! needs to download and validate the part of the chain that is missing.
 //!
+//! This can happen during a live sync when the node receives a forkchoice update from the consensus
+//! layer which causes the node to have to walk back from the received head, downloading the block's
+//! parents until it reaches a known block.
+//!
+//! This can also technically happen when a finalized block is fetched, before checking distance,
+//! but this is a very unlikely case.
+//!
 //! There are two mutually-exclusive ways the node can bring itself in sync with the chain:
 //! * Backfill sync: downloading and validating large ranges of blocks in a structured manner,
 //!   performing different parts of the validation process in sequence.
@@ -32,7 +39,7 @@
 //!
 //! To determine which sync type to use, the node checks how many blocks it needs to execute to
 //! catch up to the tip of the chain. If this range is large, backfill sync will be used. Otherwise,
-//! life sync will be used.
+//! live sync will be used.
 //!
 //! The backfill sync is driven by components which implement the
 //! [`BackfillSync`](backfill::BackfillSync) trait, like [`PipelineSync`](backfill::PipelineSync).
@@ -59,14 +66,14 @@
 //! ## Persistence model
 //!
 //! Because the node minimizes database writes in the critical path for handling consensus messages,
-//! it must perform in the background.
+//! it must perform database writes in the background.
 //!
 //! Performing writes in the background has two advantages:
 //! 1. As mentioned, writes are not in the critical path of request processing.
 //! 2. Writes can be larger and done at a lower frequency, allowing for more efficient writes.
 //!
 //! This is achieved by spawning a separate thread which is sent different commands corresponding to
-//! different types of writes, for example a command to write a list of transaction, or remove a
+//! different types of writes, for example a command to write a list of transactions, or remove a
 //! specific range of blocks.
 //!
 //! The persistence service must also respond to these commands, to ensure that any in-memory state

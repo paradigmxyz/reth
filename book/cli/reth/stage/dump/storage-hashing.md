@@ -4,6 +4,8 @@
 
 ```bash
 $ reth stage dump storage-hashing --help
+```
+```txt
 Usage: reth stage dump storage-hashing [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:

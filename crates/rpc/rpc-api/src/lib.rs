@@ -72,6 +72,7 @@ pub mod clients {
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
+        reth::RethApiClient,
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,

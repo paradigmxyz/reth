@@ -344,7 +344,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
                                 })
                         } else {
-                            tx.try_into().ok()
+
+                            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -588,7 +589,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            tx.try_into().ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
         })
         .collect::<Vec<_>>();
 

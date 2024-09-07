@@ -266,10 +266,8 @@ impl StateFetcher {
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
 
-        let is_likely_bad_response = resp
-            .as_ref()
-            .map(|r| res.is_likely_bad_headers_response(&r.request))
-            .unwrap_or_default();
+        let is_likely_bad_response =
+            resp.as_ref().is_some_and(|r| res.is_likely_bad_headers_response(&r.request));
 
         if let Some(resp) = resp {
             // delegate the response

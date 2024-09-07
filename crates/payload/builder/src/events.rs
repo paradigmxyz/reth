@@ -12,41 +12,41 @@ use tracing::debug;
 
 /// Payload builder events.
 #[derive(Clone, Debug)]
-pub enum Events<Engine: PayloadTypes> {
+pub enum Events<T: PayloadTypes> {
     /// The payload attributes as
     /// they are received from the CL through the engine api.
-    Attributes(Engine::PayloadBuilderAttributes),
+    Attributes(T::PayloadBuilderAttributes),
     /// The built payload that has been just built.
     /// Triggered by the CL whenever it asks for an execution payload.
     /// This event is only thrown if the CL is a validator.
-    BuiltPayload(Engine::BuiltPayload),
+    BuiltPayload(T::BuiltPayload),
 }
 
 /// Represents a receiver for various payload events.
 #[derive(Debug)]
-pub struct PayloadEvents<Engine: PayloadTypes> {
+pub struct PayloadEvents<T: PayloadTypes> {
     /// The receiver for the payload events.
-    pub receiver: broadcast::Receiver<Events<Engine>>,
+    pub receiver: broadcast::Receiver<Events<T>>,
 }
 
-impl<Engine: PayloadTypes + 'static> PayloadEvents<Engine> {
+impl<T: PayloadTypes + 'static> PayloadEvents<T> {
     /// Convert this receiver into a stream of `PayloadEvents`.
-    pub fn into_stream(self) -> BroadcastStream<Events<Engine>> {
+    pub fn into_stream(self) -> BroadcastStream<Events<T>> {
         BroadcastStream::new(self.receiver)
     }
     /// Asynchronously receives the next payload event.
-    pub async fn recv(self) -> Option<Result<Events<Engine>, BroadcastStreamRecvError>> {
+    pub async fn recv(self) -> Option<Result<Events<T>, BroadcastStreamRecvError>> {
         let mut event_stream = self.into_stream();
         event_stream.next().await
     }
 
     /// Returns a new stream that yields all built payloads.
-    pub fn into_built_payload_stream(self) -> BuiltPayloadStream<Engine> {
+    pub fn into_built_payload_stream(self) -> BuiltPayloadStream<T> {
         BuiltPayloadStream { st: self.into_stream() }
     }
 
     /// Returns a new stream that yields received payload attributes
-    pub fn into_attributes_stream(self) -> PayloadAttributeStream<Engine> {
+    pub fn into_attributes_stream(self) -> PayloadAttributeStream<T> {
         PayloadAttributeStream { st: self.into_stream() }
     }
 }

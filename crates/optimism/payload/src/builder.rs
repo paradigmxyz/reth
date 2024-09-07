@@ -113,7 +113,6 @@ where
             .build();
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
         let block_gas_limit: u64 =
             initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
@@ -124,8 +123,6 @@ where
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            block_number,
-            attributes.payload_attributes.timestamp,
             attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
@@ -158,7 +155,8 @@ where
 
         // calculate the state root
         let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
+        let hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        let state_root = db.database.state_root(hashed_state).map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_block.hash(),
                 %err,
@@ -211,6 +209,8 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
+        let receipts = Vec::new();
+
         Ok(OptimismBuiltPayload::new(
             attributes.payload_attributes.payload_id(),
             sealed_block,
@@ -218,6 +218,7 @@ where
             chain_spec,
             attributes,
             None,
+            receipts,
         ))
     }
 }
@@ -289,8 +290,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.payload_attributes.timestamp,
         attributes.payload_attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -519,8 +518,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome =
-        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let execution_outcome = ExecutionOutcome::new(
+        db.take_bundle(),
+        vec![receipts.clone()].into(),
+        block_number,
+        Vec::new(),
+    );
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -534,15 +537,13 @@ where
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.hashed_state_root_with_updates(hashed_state.clone()).inspect_err(
-            |err| {
-                warn!(target: "payload_builder",
-                    parent_hash=%parent_block.hash(),
-                    %err,
-                    "failed to calculate state root for empty payload"
-                );
-            },
-        )?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header
@@ -607,6 +608,7 @@ where
         trie: Arc::new(trie_output),
     };
 
+    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -614,6 +616,7 @@ where
         chain_spec,
         attributes,
         Some(executed),
+        receipts_pay,
     );
 
     // extend the payload with the blob sidecars from the executed txs

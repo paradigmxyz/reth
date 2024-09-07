@@ -34,10 +34,10 @@ tikv-jemalloc-ctl = { version = "0.5.0", optional = true }
 procfs = "0.16.0"
 
 [dev-dependencies]
-reth-db = { workspace = true, features = ["test-utils"] }
 reqwest.workspace = true
 reth-chainspec.workspace = true
 socket2 = { version = "0.4", default-features = false }
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true

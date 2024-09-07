@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
-use alloy_network::Ethereum;
+use alloy_network::AnyNetwork;
 use derive_more::Deref;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
-    helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
-    EthApiTypes, RawTransactionForwarder,
+    helpers::{EthSigner, SpawnBlocking},
+    EthApiTypes,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
@@ -60,7 +60,6 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
         proof_permits: usize,
     ) -> Self {
         let inner = EthApiInner::new(
@@ -75,7 +74,6 @@ where
             fee_history_cache,
             evm_config,
             TokioTaskExecutor::default(),
-            raw_transaction_forwarder,
             proof_permits,
         );
 
@@ -113,7 +111,6 @@ where
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
             ctx.executor.clone(),
-            None,
             ctx.config.proof_permits,
         );
 
@@ -126,7 +123,7 @@ where
     Self: Send + Sync,
 {
     type Error = EthApiError;
-    type NetworkTypes = Ethereum;
+    type NetworkTypes = AnyNetwork;
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
@@ -202,8 +199,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     fee_history_cache: FeeHistoryCache,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
-    /// Allows forwarding received raw transactions
-    raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
+
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
 }
@@ -226,7 +222,6 @@ where
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
         task_spawner: impl TaskSpawner + 'static,
-        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
         proof_permits: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -255,7 +250,6 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
         }
     }
@@ -304,12 +298,6 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
         &self.pool
     }
 
-    /// Returns a handle to the transaction forwarder.
-    #[inline]
-    pub fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
-        self.raw_transaction_forwarder.read().clone()
-    }
-
     /// Returns the gas cap.
     #[inline]
     pub const fn gas_cap(&self) -> u64 {
@@ -356,14 +344,6 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
-    }
-}
-
-impl<Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder
-    for EthApiInner<Provider, Pool, Network, EvmConfig>
-{
-    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.raw_transaction_forwarder.write().replace(forwarder);
     }
 }
 
@@ -419,7 +399,6 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
-            None,
             DEFAULT_PROOF_PERMITS,
         )
     }
@@ -511,7 +490,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -533,7 +512,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -556,7 +535,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -579,7 +558,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

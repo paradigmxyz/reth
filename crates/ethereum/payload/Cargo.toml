@@ -23,6 +23,7 @@ reth-basic-payload-builder.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
+reth-trie.workspace = true
 
 # ethereum
 revm.workspace = true

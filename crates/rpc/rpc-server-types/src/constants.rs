@@ -48,8 +48,9 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
-/// Maximum eth historical proof window. Equivalent to roughly one month of data.
-pub const MAX_ETH_PROOF_WINDOW: u64 = 216_000;
+/// Maximum eth historical proof window. Equivalent to roughly one and a half months of data on a 12
+/// second block time, and a week on a 2 second block time.
+pub const MAX_ETH_PROOF_WINDOW: u64 = 7 * 24 * 60 * 60 / 2;
 
 /// GPO specific constants
 pub mod gas_oracle {

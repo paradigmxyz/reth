@@ -2,9 +2,11 @@
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
-use reth_db_api::database::Database;
 use reth_db_common::init::init_from_state_dump;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 
@@ -13,9 +15,9 @@ use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct InitStateCommand {
+pub struct InitStateCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// JSONL file with state dump.
     ///
@@ -38,12 +40,14 @@ pub struct InitStateCommand {
     state: PathBuf,
 }
 
-impl InitStateCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
     /// Execute the `init` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         info!(target: "reth::cli", "Initiating state dump");
 
@@ -55,9 +59,9 @@ impl InitStateCommand {
 }
 
 /// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<DB: Database>(
+pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     state_dump_path: PathBuf,
-    factory: ProviderFactory<DB>,
+    factory: ProviderFactory<N>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     info!(target: "reth::cli",

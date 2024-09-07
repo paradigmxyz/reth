@@ -1,0 +1,42 @@
+[package]
+name = "op-reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-node-builder.workspace = true
+reth-cli-util.workspace = true
+reth-optimism-cli.workspace = true
+reth-provider.workspace = true
+reth-optimism-rpc.workspace = true
+reth-node-optimism.workspace = true
+
+clap = { workspace = true, features = ["derive", "env"] }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[features]
+default = ["jemalloc"]
+
+jemalloc = ["dep:tikv-jemallocator"]
+jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+
+asm-keccak = ["reth-node-optimism/asm-keccak"]
+
+optimism = [
+    "reth-optimism-cli/optimism",
+    "reth-node-optimism/optimism",
+]
+
+[[bin]]
+name = "op-reth"
+path = "src/main.rs"

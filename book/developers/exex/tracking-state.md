@@ -25,6 +25,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use futures_util::StreamExt;
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
@@ -40,7 +41,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
+        while let Some(notification) = ready!(this.ctx.notifications.poll_next_unpin(cx)) {
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
@@ -101,6 +102,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
+use futures_util::StreamExt;
 use reth::{api::FullNodeComponents, primitives::BlockNumber};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
@@ -130,7 +132,7 @@ impl<Node: FullNodeComponents> Future for MyExEx<Node> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        while let Some(notification) = ready!(this.ctx.notifications.poll_recv(cx)) {
+        while let Some(notification) = ready!(this.ctx.notifications.poll_next_unpin(cx)) {
             if let Some(reverted_chain) = notification.reverted_chain() {
                 this.transactions = this.transactions.saturating_sub(
                     reverted_chain

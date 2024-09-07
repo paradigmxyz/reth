@@ -101,11 +101,19 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
         evm_config: Evm,
         payload_validator: ExecutionPayloadValidator,
         frequency: usize,
+        depth: Option<usize>,
     ) -> EngineReorg<Self, Engine, Provider, Evm>
     where
         Self: Sized,
     {
-        EngineReorg::new(self, provider, evm_config, payload_validator, frequency)
+        EngineReorg::new(
+            self,
+            provider,
+            evm_config,
+            payload_validator,
+            frequency,
+            depth.unwrap_or_default(),
+        )
     }
 
     /// If frequency is [Some], returns the stream that creates reorgs with
@@ -116,6 +124,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
         evm_config: Evm,
         payload_validator: ExecutionPayloadValidator,
         frequency: Option<usize>,
+        depth: Option<usize>,
     ) -> Either<EngineReorg<Self, Engine, Provider, Evm>, Self>
     where
         Self: Sized,
@@ -127,6 +136,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
                 evm_config,
                 payload_validator,
                 frequency,
+                depth.unwrap_or_default(),
             ))
         } else {
             Either::Right(self)

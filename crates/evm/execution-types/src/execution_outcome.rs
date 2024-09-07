@@ -1,3 +1,4 @@
+use crate::BlockExecutionOutput;
 use reth_primitives::{
     logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
     StorageEntry, B256, U256,
@@ -352,6 +353,17 @@ impl ExecutionOutcome {
         self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
             |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
         )
+    }
+}
+
+impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
+    fn from(value: (BlockExecutionOutput<Receipt>, BlockNumber)) -> Self {
+        Self {
+            bundle: value.0.state,
+            receipts: Receipts::from(value.0.receipts),
+            first_block: value.1,
+            requests: vec![Requests::from(value.0.requests)],
+        }
     }
 }
 

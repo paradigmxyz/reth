@@ -17,7 +17,7 @@ use reth_node_builder::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
-    node::{FullNodeTypes, NodeTypes},
+    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, ConfigureEvm, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -47,8 +47,8 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes,
-        <Node as NodeTypes>::Engine: PayloadTypes<
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -66,8 +66,11 @@ impl EthereumNode {
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+impl NodeTypesWithEngine for EthereumNode {
+    type Engine = EthEngineTypes;
 }
 
 /// Add-ons w.r.t. l1 ethereum.
@@ -78,9 +81,10 @@ impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
     type EthApi = EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>;
 }
 
-impl<N> Node<N> for EthereumNode
+impl<Types, N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>,
+    N: FullNodeTypes<Types = Types>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -103,9 +107,10 @@ where
 #[non_exhaustive]
 pub struct EthereumExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
+impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;
@@ -132,9 +137,10 @@ pub struct EthereumPoolBuilder {
     // TODO add options for txpool args
 }
 
-impl<Node> PoolBuilder<Node> for EthereumPoolBuilder
+impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Node: FullNodeTypes,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -210,12 +216,13 @@ impl<EVM> EthereumPayloadBuilder<EVM> {
     }
 }
 
-impl<Node, Evm, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder<Evm>
+impl<Types, Node, Evm, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder<Evm>
 where
-    Node: FullNodeTypes,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
     Evm: ConfigureEvm,
     Pool: TransactionPool + Unpin + 'static,
-    <Node as NodeTypes>::Engine: PayloadTypes<
+    Types::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -225,7 +232,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>> {
         let payload_builder =
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(self.evm_config);
         let conf = ctx.payload_builder_config();
@@ -284,7 +291,7 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type Consensus = Arc<dyn reth_consensus::Consensus>;
 

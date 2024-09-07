@@ -125,9 +125,6 @@ pub enum TrieWitnessError {
     Proof(StateProofError),
     /// RLP decoding error.
     Rlp(alloy_rlp::Error),
-    /// Missing storage multiproof.
-    #[display("missing storage multiproof for {_0}")]
-    MissingStorageMultiProof(B256),
     /// Missing account.
     #[display("missing account {_0}")]
     MissingAccount(B256),

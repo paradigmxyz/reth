@@ -4,6 +4,8 @@ Recover the node by deleting dangling storage tries
 
 ```bash
 $ reth recover storage-tries --help
+```
+```txt
 Usage: reth recover storage-tries [OPTIONS]
 
 Options:

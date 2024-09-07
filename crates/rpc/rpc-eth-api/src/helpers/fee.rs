@@ -229,7 +229,7 @@ pub trait EthFees: LoadFee {
         // Calculate the index in the precomputed rewards array
         let index = (clamped_percentile / (1.0 / resolution as f64)).round() as usize;
         // Fetch the reward from the FeeHistoryEntry
-        entry.rewards.get(index).cloned().unwrap_or_default()
+        entry.rewards.get(index).copied().unwrap_or_default()
     }
 }
 

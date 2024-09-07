@@ -13,8 +13,8 @@ use reth_evm::{
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::{
-        apply_beacon_root_contract_call, apply_consolidation_requests_contract_call,
-        apply_withdrawal_requests_contract_call,
+        apply_beacon_root_contract_call, apply_blockhashes_contract_call,
+        apply_consolidation_requests_contract_call, apply_withdrawal_requests_contract_call,
     },
     ConfigureEvm,
 };
@@ -24,10 +24,8 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::BlockBatchRecord,
-    db::states::bundle_state::BundleRetention,
-    state_change::{apply_blockhashes_update, post_block_balance_increments},
-    Evm, State,
+    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
+    state_change::post_block_balance_increments, Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -156,12 +154,13 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        apply_blockhashes_update(
-            evm.db_mut(),
+        apply_blockhashes_contract_call(
+            &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_hash,
+            &mut evm,
         )?;
 
         // execute transactions
@@ -467,7 +466,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::{
-        eip2935::HISTORY_STORAGE_ADDRESS,
+        eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
@@ -868,11 +867,26 @@ mod tests {
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
     }
 
+    /// Create a state provider with blockhashes and the EIP-2935 system contract.
     fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
         let mut db = StateProviderTest::default();
         for block_number in 0..=latest_block {
             db.insert_block_hash(block_number, keccak256(block_number.to_string()));
         }
+
+        let blockhashes_contract_account = Account {
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(HISTORY_STORAGE_CODE.clone())),
+            nonce: 1,
+        };
+
+        db.insert_account(
+            HISTORY_STORAGE_ADDRESS,
+            blockhashes_contract_account,
+            Some(HISTORY_STORAGE_CODE.clone()),
+            HashMap::new(),
+        );
+
         db
     }
 
@@ -918,9 +932,9 @@ mod tests {
         // ensure that the block hash was *not* written to storage, since this is before the fork
         // was activated
         //
-        // we load the account first, which should also not exist, because revm expects it to be
+        // we load the account first, because revm expects it to be
         // loaded
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
@@ -968,9 +982,9 @@ mod tests {
         // ensure that the block hash was *not* written to storage, since there are no blocks
         // preceding genesis
         //
-        // we load the account first, which should also not exist, because revm expects it to be
+        // we load the account first, because revm expects it to be
         // loaded
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
@@ -1140,7 +1154,10 @@ mod tests {
             );
 
         // nothing should be written as the genesis has no ancestors
-        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        //
+        // we load the account first, because revm expects it to be
+        // loaded
+        executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap();
         assert!(executor
             .state_mut()
             .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)

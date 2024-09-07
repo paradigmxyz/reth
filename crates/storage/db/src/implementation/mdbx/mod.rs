@@ -147,7 +147,7 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -155,7 +155,7 @@ impl Database for DatabaseEnv {
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }

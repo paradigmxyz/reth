@@ -6,18 +6,18 @@ use crate::{
     StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainSpec, EthChainSpec};
-use reth_db_api::database::Database;
+use reth_chainspec::ChainSpec;
+use reth_node_types::NodeTypesWithDB;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database, ChainSpec: EthChainSpec>:
-    DatabaseProviderFactory<DB>
+pub trait FullProvider<N: NodeTypesWithDB>:
+    DatabaseProviderFactory<N::DB>
     + StaticFileProviderFactory
     + BlockReaderIdExt
     + AccountReader
     + StateProviderFactory
     + EvmEnvProvider
-    + ChainSpecProvider<ChainSpec = ChainSpec>
+    + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
     + ForkChoiceSubscriptions
@@ -28,14 +28,14 @@ pub trait FullProvider<DB: Database, ChainSpec: EthChainSpec>:
 {
 }
 
-impl<T, DB: Database, ChainSpec: EthChainSpec> FullProvider<DB, ChainSpec> for T where
-    T: DatabaseProviderFactory<DB>
+impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
+    T: DatabaseProviderFactory<N::DB>
         + StaticFileProviderFactory
         + BlockReaderIdExt
         + AccountReader
         + StateProviderFactory
         + EvmEnvProvider
-        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions

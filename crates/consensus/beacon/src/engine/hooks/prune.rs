@@ -6,14 +6,14 @@ use crate::{
 };
 use futures::FutureExt;
 use metrics::Counter;
-use reth_db_api::database::Database;
 use reth_errors::{RethError, RethResult};
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::BlockNumber;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
-    fmt,
+    fmt::{self, Debug},
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -21,15 +21,15 @@ use tokio::sync::oneshot;
 /// Manages pruning under the control of the engine.
 ///
 /// This type controls the [Pruner].
-pub struct PruneHook<DB> {
+pub struct PruneHook<N: NodeTypesWithDB> {
     /// The current state of the pruner.
-    pruner_state: PrunerState<DB>,
+    pruner_state: PrunerState<N>,
     /// The type that can spawn the pruner task.
     pruner_task_spawner: Box<dyn TaskSpawner>,
     metrics: Metrics,
 }
 
-impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
+impl<N: NodeTypesWithDB> fmt::Debug for PruneHook<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PruneHook")
             .field("pruner_state", &self.pruner_state)
@@ -38,10 +38,10 @@ impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> PruneHook<DB> {
+impl<N: ProviderNodeTypes> PruneHook<N> {
     /// Create a new instance
     pub fn new(
-        pruner: Pruner<DB, ProviderFactory<DB>>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
         pruner_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self {
@@ -117,7 +117,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
     }
 }
 
-impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
+impl<N: ProviderNodeTypes> EngineHook for PruneHook<N> {
     fn name(&self) -> &'static str {
         "Prune"
     }
@@ -152,12 +152,23 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-#[derive(Debug)]
-enum PrunerState<DB> {
+enum PrunerState<N: NodeTypesWithDB> {
     /// Pruner is idle.
-    Idle(Option<Pruner<DB, ProviderFactory<DB>>>),
+    Idle(Option<Pruner<N::DB, ProviderFactory<N>>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<DB, ProviderFactory<DB>>>),
+    Running(oneshot::Receiver<PrunerWithResult<N::DB, ProviderFactory<N>>>),
+}
+
+impl<N> fmt::Debug for PrunerState<N>
+where
+    N: NodeTypesWithDB<DB: Debug, ChainSpec: Debug>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Idle(f0) => f.debug_tuple("Idle").field(&f0).finish(),
+            Self::Running(f0) => f.debug_tuple("Running").field(&f0).finish(),
+        }
+    }
 }
 
 #[derive(reth_metrics::Metrics)]

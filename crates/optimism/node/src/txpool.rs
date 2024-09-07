@@ -252,7 +252,7 @@ mod tests {
             to: TxKind::Create,
             mint: None,
             value: U256::ZERO,
-            gas_limit: 0u64,
+            gas_limit: 0,
             is_system_transaction: false,
             input: Default::default(),
         });

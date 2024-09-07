@@ -37,10 +37,9 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
                 }
 
                 match request.start {
-                    BlockHashOrNumber::Number(block_number) => headers
-                        .first()
-                        .map(|header| block_number != header.number)
-                        .unwrap_or_default(),
+                    BlockHashOrNumber::Number(block_number) => {
+                        headers.first().is_some_and(|header| block_number != header.number)
+                    }
                     BlockHashOrNumber::Hash(_) => {
                         // we don't want to hash the header
                         false

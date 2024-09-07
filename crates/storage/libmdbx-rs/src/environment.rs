@@ -41,6 +41,8 @@ impl Environment {
             flags: EnvironmentFlags::default(),
             max_readers: None,
             max_dbs: None,
+            sync_bytes: None,
+            sync_period: None,
             rp_augment_limit: None,
             loose_limit: None,
             dp_reserve_limit: None,
@@ -566,6 +568,8 @@ pub struct EnvironmentBuilder {
     flags: EnvironmentFlags,
     max_readers: Option<u64>,
     max_dbs: Option<u64>,
+    sync_bytes: Option<u64>,
+    sync_period: Option<u64>,
     rp_augment_limit: Option<u64>,
     loose_limit: Option<u64>,
     dp_reserve_limit: Option<u64>,
@@ -639,6 +643,8 @@ impl EnvironmentBuilder {
                 }
                 for (opt, v) in [
                     (ffi::MDBX_opt_max_db, self.max_dbs),
+                    (ffi::MDBX_opt_sync_bytes, self.sync_bytes),
+                    (ffi::MDBX_opt_sync_period, self.sync_period),
                     (ffi::MDBX_opt_rp_augment_limit, self.rp_augment_limit),
                     (ffi::MDBX_opt_loose_limit, self.loose_limit),
                     (ffi::MDBX_opt_dp_reserve_limit, self.dp_reserve_limit),
@@ -764,6 +770,23 @@ impl EnvironmentBuilder {
     /// does a linear search of the opened slots.
     pub fn set_max_dbs(&mut self, v: usize) -> &mut Self {
         self.max_dbs = Some(v as u64);
+        self
+    }
+
+    /// Sets the interprocess/shared threshold to force flush the data buffers to disk, if
+    /// [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is used.
+    pub fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
+        self.sync_bytes = Some(v as u64);
+        self
+    }
+
+    /// Sets the interprocess/shared relative period since the last unsteady commit to force flush
+    /// the data buffers to disk, if [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is
+    /// used.
+    pub fn set_sync_period(&mut self, v: Duration) -> &mut Self {
+        // For this option, mdbx uses units of 1/65536 of a second.
+        let as_mdbx_units = (v.as_secs_f64() * 65536f64) as u64;
+        self.sync_period = Some(as_mdbx_units);
         self
     }
 

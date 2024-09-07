@@ -4,6 +4,8 @@ Execution stage
 
 ```bash
 $ reth stage dump execution --help
+```
+```txt
 Usage: reth stage dump execution [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
 
 Options:

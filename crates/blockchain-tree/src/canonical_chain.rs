@@ -25,7 +25,7 @@ impl CanonicalChain {
     /// Returns the block hash of the (non-finalized) canonical block with the given number.
     #[inline]
     pub(crate) fn canonical_hash(&self, number: &BlockNumber) -> Option<BlockHash> {
-        self.chain.get(number).cloned()
+        self.chain.get(number).copied()
     }
 
     /// Returns the block number of the (non-finalized) canonical block with the given hash.

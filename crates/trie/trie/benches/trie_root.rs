@@ -1,8 +1,9 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_primitives::B256;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::{ReceiptWithBloom, B256};
+use reth_primitives::ReceiptWithBloom;
 use reth_trie::triehash::KeccakHasher;
 
 /// Benchmarks different implementations of the root calculation.

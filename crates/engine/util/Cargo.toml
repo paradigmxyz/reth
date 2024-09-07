@@ -25,6 +25,7 @@ reth-revm.workspace = true
 reth-provider.workspace = true
 reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
+reth-trie.workspace = true
 
 # async
 tokio = { workspace = true, default-features = false }

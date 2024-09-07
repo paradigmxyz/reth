@@ -618,7 +618,7 @@ mod tests {
             },
         };
         use futures_util::Stream;
-        use reth_db::{static_file::HeaderMask, tables, test_utils::TempDatabase, DatabaseEnv};
+        use reth_db::{static_file::HeaderMask, tables};
         use reth_db_api::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
@@ -636,19 +636,17 @@ mod tests {
             StaticFileSegment, TxNumber, B256,
         };
         use reth_provider::{
-            providers::StaticFileWriter, HeaderProvider, ProviderFactory,
-            StaticFileProviderFactory, TransactionsProvider,
+            providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
+            ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
-        use reth_testing_utils::{
-            generators,
-            generators::{random_block_range, random_signed_tx},
+        use reth_testing_utils::generators::{
+            self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
             pin::Pin,
-            sync::Arc,
             task::{Context, Poll},
         };
 
@@ -719,7 +717,15 @@ mod tests {
                 let mut rng = generators::rng();
 
                 // Static files do not support gaps in headers, so we need to generate 0 to end
-                let blocks = random_block_range(&mut rng, 0..=end, GENESIS_HASH, 0..2, None, None);
+                let blocks = random_block_range(
+                    &mut rng,
+                    0..=end,
+                    BlockRangeParams {
+                        parent: Some(GENESIS_HASH),
+                        tx_count: 0..2,
+                        ..Default::default()
+                    },
+                );
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
@@ -885,7 +891,7 @@ mod tests {
         /// A [`BodyDownloader`] that is backed by an internal [`HashMap`] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+            provider_factory: ProviderFactory<MockNodeTypesWithDB>,
             responses: HashMap<B256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -893,7 +899,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+                provider_factory: ProviderFactory<MockNodeTypesWithDB>,
                 responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {

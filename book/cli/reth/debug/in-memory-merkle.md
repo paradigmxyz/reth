@@ -4,6 +4,8 @@ Debug in-memory state root calculation
 
 ```bash
 $ reth debug in-memory-merkle --help
+```
+```txt
 Usage: reth debug in-memory-merkle [OPTIONS]
 
 Options:
@@ -220,6 +222,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
       --retries <RETRIES>
           The number of retries per request

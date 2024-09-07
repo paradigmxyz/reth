@@ -7,15 +7,15 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
-    ProviderError,
+    providers::ProviderNodeTypes, BlockchainTreePendingStateProvider, CanonStateSubscriptions,
+    FullExecutionDataProvider, ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -23,21 +23,21 @@ use tracing::trace;
 
 /// Shareable blockchain tree that is behind a `RwLock`
 #[derive(Clone, Debug)]
-pub struct ShareableBlockchainTree<DB, E> {
+pub struct ShareableBlockchainTree<N: NodeTypesWithDB, E> {
     /// `BlockchainTree`
-    pub tree: Arc<RwLock<BlockchainTree<DB, E>>>,
+    pub tree: Arc<RwLock<BlockchainTree<N, E>>>,
 }
 
-impl<DB, E> ShareableBlockchainTree<DB, E> {
+impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
     /// Create a new shareable database.
-    pub fn new(tree: BlockchainTree<DB, E>) -> Self {
+    pub fn new(tree: BlockchainTree<N, E>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
 }
 
-impl<DB, E> BlockchainTreeEngine for ShareableBlockchainTree<DB, E>
+impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
-    DB: Database + Clone,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -106,9 +106,9 @@ where
     }
 }
 
-impl<DB, E> BlockchainTreeViewer for ShareableBlockchainTree<DB, E>
+impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
-    DB: Database + Clone,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
@@ -169,9 +169,9 @@ where
     }
 }
 
-impl<DB, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<DB, E>
+impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
-    DB: Database + Clone,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     fn find_pending_state_provider(
@@ -184,9 +184,9 @@ where
     }
 }
 
-impl<DB, E> CanonStateSubscriptions for ShareableBlockchainTree<DB, E>
+impl<N, E> CanonStateSubscriptions for ShareableBlockchainTree<N, E>
 where
-    DB: Send + Sync,
+    N: ProviderNodeTypes,
     E: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {

@@ -25,6 +25,8 @@ use revm_primitives::{
 pub mod builder;
 pub mod either;
 pub mod execute;
+#[cfg(feature = "std")]
+pub mod metrics;
 pub mod noop;
 pub mod provider;
 pub mod system_calls;

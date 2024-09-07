@@ -22,12 +22,9 @@ pub mod types;
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use filter::EthFilterApiServer;
-pub use helpers::{
-    error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError},
-    transaction::RawTransactionForwarder,
-};
+pub use helpers::error::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 pub use pubsub::EthPubSubApiServer;
-pub use types::{EthApiTypes, RpcBlock, RpcTransaction};
+pub use types::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 
 #[cfg(feature = "client")]
 pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};

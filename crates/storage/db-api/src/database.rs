@@ -8,7 +8,7 @@ use std::{fmt::Debug, sync::Arc};
 /// Main Database trait that can open read-only and read-write transactions.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
-pub trait Database: Send + Sync {
+pub trait Database: Send + Sync + Debug {
     /// Read-Only database transaction
     type TX: DbTx + Send + Sync + Debug + 'static;
     /// Read-Write database transaction

@@ -168,7 +168,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn get_senders_by_submission_id(
         &self,
     ) -> impl Iterator<Item = SubmissionSenderId> + '_ {
-        self.last_sender_submission.iter().cloned()
+        self.last_sender_submission.iter().copied()
     }
 
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.

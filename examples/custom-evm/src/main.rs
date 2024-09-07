@@ -20,7 +20,7 @@ use reth::{
 };
 use reth_chainspec::{Chain, ChainSpec, Head};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
@@ -144,7 +144,7 @@ pub struct MyExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = MyEvmConfig;
     type Executor = EthExecutorProvider<Self::EVM>;

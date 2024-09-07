@@ -16,10 +16,13 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 
 # eth
 alloy-consensus = { workspace = true, optional = true }
-alloy-eips = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true, features = ["serde"] }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
+
+# optimism
+op-alloy-consensus = { workspace = true, optional = true }
 
 # misc
 bytes.workspace = true
@@ -31,7 +34,11 @@ alloy-eips = { workspace = true, default-features = false, features = [
     "arbitrary",
     "serde",
 ] }
-alloy-primitives = { workspace = true, features = ["arbitrary", "serde", "rand"] }
+alloy-primitives = { workspace = true, features = [
+    "arbitrary",
+    "serde",
+    "rand",
+] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 test-fuzz.workspace = true
 serde_json.workspace = true
@@ -51,3 +58,4 @@ alloy = [
     "dep:alloy-trie",
     "dep:serde"
 ]
+optimism = ["alloy", "dep:op-alloy-consensus"]

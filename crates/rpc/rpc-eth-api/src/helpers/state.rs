@@ -8,13 +8,11 @@ use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider,
 };
 use reth_rpc_eth_types::{EthApiError, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, Account, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::db::BundleState;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{EthApiTypes, FromEthApiError};
@@ -44,14 +42,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)?
-                .account_code(address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default()
-                .original_bytes())
-        })
+        LoadState::get_code(self, address, block_id)
     }
 
     /// Returns balance of given account, at given blocknumber.
@@ -122,7 +113,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
                 let proof = state
-                    .proof(&BundleState::default(), address, &storage_keys)
+                    .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
                 Ok(from_primitive_account_proof(proof))
             })
@@ -149,7 +140,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             // Provide a default `HashedStorage` value in order to
             // get the storage root hash of the current state.
             let storage_root = state
-                .hashed_storage_root(address, Default::default())
+                .storage_root(address, Default::default())
                 .map_err(Self::Error::from_eth_err)?;
 
             Ok(Some(Account { balance, nonce, code_hash, storage_root }))
@@ -295,6 +286,25 @@ pub trait LoadState: EthApiTypes {
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default(),
             ))
+        })
+    }
+
+    /// Returns code of given account, at the given identifier.
+    fn get_code(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            Ok(this
+                .state_at_block_id_or_latest(block_id)?
+                .account_code(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default()
+                .original_bytes())
         })
     }
 }

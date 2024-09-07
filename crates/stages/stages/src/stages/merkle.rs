@@ -316,7 +316,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         // Unwind trie only if there are transitions
-        if !range.is_empty() {
+        if range.is_empty() {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
+        } else {
             let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -330,8 +332,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             provider.write_trie_updates(&updates)?;
 
             // TODO(alexey): update entities checkpoint
-        } else {
-            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
@@ -370,11 +370,9 @@ mod tests {
     use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
-    use reth_testing_utils::{
-        generators,
-        generators::{
-            random_block, random_block_range, random_changeset_range, random_contract_account_range,
-        },
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_changeset_range,
+        random_contract_account_range, BlockParams, BlockRangeParams,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
@@ -499,10 +497,11 @@ mod tests {
                 preblocks.append(&mut random_block_range(
                     &mut rng,
                     0..=stage_progress - 1,
-                    B256::ZERO,
-                    0..1,
-                    None,
-                    None,
+                    BlockRangeParams {
+                        parent: Some(B256::ZERO),
+                        tx_count: 0..1,
+                        ..Default::default()
+                    },
                 ));
                 self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
@@ -519,11 +518,7 @@ mod tests {
             let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
                 stage_progress,
-                preblocks.last().map(|b| b.hash()),
-                Some(0),
-                None,
-                None,
-                None,
+                BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             );
             let mut header = header.unseal();
 
@@ -538,7 +533,11 @@ mod tests {
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-            blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3, None, None));
+            blocks.extend(random_block_range(
+                &mut rng,
+                start..=end,
+                BlockRangeParams { parent: Some(head_hash), tx_count: 0..3, ..Default::default() },
+            ));
             let last_block = blocks.last().cloned().unwrap();
             self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
@@ -638,7 +637,7 @@ mod tests {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();
-                            if storage_entry.map(|v| v.key == hashed_slot).unwrap_or_default() {
+                            if storage_entry.is_some_and(|v| v.key == hashed_slot) {
                                 storage_cursor.delete_current().unwrap();
                             }
 

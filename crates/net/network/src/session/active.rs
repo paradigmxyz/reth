@@ -599,10 +599,9 @@ impl Future for ActiveSession {
                     Poll::Ready(None) => {
                         if this.is_disconnecting() {
                             break
-                        } else {
-                            debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "eth stream completed");
-                            return this.emit_disconnect(cx)
                         }
+                        debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "eth stream completed");
+                        return this.emit_disconnect(cx)
                     }
                     Poll::Ready(Some(res)) => {
                         match res {

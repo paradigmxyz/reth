@@ -45,17 +45,8 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
                 let block = block_res.unwrap().unwrap();
-                let block = match block.header.hash {
-                    Some(block_hash) => {
-                        // we can reuse the hash in the response
-                        Block::try_from(block).unwrap().seal(block_hash)
-                    }
-                    None => {
-                        // we don't have the hash, so let's just hash it
-                        Block::try_from(block).unwrap().seal_slow()
-                    }
-                };
-
+                let block_hash = block.header.hash;
+                let block = Block::try_from(block.inner).unwrap().seal(block_hash);
                 let head_block_hash = block.hash();
                 let safe_block_hash = block_provider
                     .get_block_by_number(block.number.saturating_sub(32).into(), false);
@@ -65,18 +56,9 @@ impl Command {
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
-                let safe_block_hash = safe
-                    .unwrap()
-                    .expect("finalized block exists")
-                    .header
-                    .hash
-                    .expect("finalized block has hash");
-                let finalized_block_hash = finalized
-                    .unwrap()
-                    .expect("finalized block exists")
-                    .header
-                    .hash
-                    .expect("finalized block has hash");
+                let safe_block_hash = safe.unwrap().expect("finalized block exists").header.hash;
+                let finalized_block_hash =
+                    finalized.unwrap().expect("finalized block exists").header.hash;
 
                 next_block += 1;
                 sender

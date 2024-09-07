@@ -20,31 +20,23 @@ pub const fn generate_valid_header(
     excess_blob_gas: u64,
     parent_beacon_block_root: B256,
 ) -> Header {
-    // EIP-1559 logic
+    // Clear all related fields if EIP-1559 is inactive
     if header.base_fee_per_gas.is_none() {
-        // If EIP-1559 is not active, clear related fields
         header.withdrawals_root = None;
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if header.withdrawals_root.is_none() {
-        // If EIP-4895 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if eip_4844_active {
-        // Set fields based on EIP-4844 being active
+    }
+
+    // Set fields based on EIP-4844 being active
+    if eip_4844_active {
         header.blob_gas_used = Some(blob_gas_used);
         header.excess_blob_gas = Some(excess_blob_gas);
         header.parent_beacon_block_root = Some(parent_beacon_block_root);
     } else {
-        // If EIP-4844 is not active, clear related fields
         header.blob_gas_used = None;
         header.excess_blob_gas = None;
         header.parent_beacon_block_root = None;
     }
 
-    // todo(onbjerg): adjust this for eip-7589
+    // Placeholder for future EIP adjustments
     header.requests_root = None;
 
     header

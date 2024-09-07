@@ -9,9 +9,10 @@ use reth_node_api::{
 };
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3,
-        OptimismExecutionPayloadEnvelopeV4, OptimismPayloadAttributes,
+    engine::ExecutionPayloadEnvelopeV2,
+    optimism::{
+        OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4,
+        OptimismPayloadAttributes,
     },
     ExecutionPayloadV1,
 };

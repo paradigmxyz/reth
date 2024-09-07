@@ -39,7 +39,7 @@ impl<'a> StaticFileCursor<'a> {
         }
 
         let row = match key_or_num {
-            KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
+            KeyOrNumber::Key(_) => unimplemented!(),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {

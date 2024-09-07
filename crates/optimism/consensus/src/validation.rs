@@ -1,8 +1,8 @@
+use crate::proof::calculate_receipt_root_optimism;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
-    gas_spent_by_transactions, proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom,
-    GotExpected, Receipt, B256,
+    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, B256,
 };
 
 /// Validate a block with regard to execution results:

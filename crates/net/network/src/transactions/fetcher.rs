@@ -134,6 +134,8 @@ impl TransactionFetcher {
             .metrics
             .capacity_inflight_requests
             .increment(tx_fetcher.info.max_inflight_requests as u64);
+        tx_fetcher.info.max_capacity_cache_txns_pending_fetch =
+            config.max_capacity_cache_txns_pending_fetch;
 
         tx_fetcher
     }
@@ -275,9 +277,8 @@ impl TransactionFetcher {
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
                 return hashes_from_announcement_iter.collect::<RequestTxHashes>()
-            } else {
-                acc_size_response = size;
             }
+            acc_size_response = size;
         }
 
         let mut surplus_hashes = RequestTxHashes::with_capacity(hashes_from_announcement_len - 1);
@@ -692,14 +693,9 @@ impl TransactionFetcher {
                     Some(new_announced_hashes)
                 }
             }
-        } else {
-            // stores a new request future for the request
-            self.inflight_requests.push(GetPooledTxRequestFut::new(
-                peer_id,
-                new_announced_hashes,
-                rx,
-            ))
         }
+        // stores a new request future for the request
+        self.inflight_requests.push(GetPooledTxRequestFut::new(peer_id, new_announced_hashes, rx));
 
         None
     }
@@ -1297,6 +1293,10 @@ pub struct TransactionFetcherInfo {
     /// Soft limit for the byte size of a [`PooledTransactions`] response, upon assembling the
     /// response. Spec'd at 2 MiB, but can be adjusted for research purpose.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
+    /// Max capacity of the cache of transaction hashes, for transactions that weren't yet fetched.
+    /// A transaction is pending fetch if its hash didn't fit into a [`GetPooledTransactions`] yet,
+    /// or it wasn't returned upon request to peers.
+    pub max_capacity_cache_txns_pending_fetch: u32,
 }
 
 impl TransactionFetcherInfo {
@@ -1305,11 +1305,13 @@ impl TransactionFetcherInfo {
         max_inflight_requests: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,
+        max_capacity_cache_txns_pending_fetch: u32,
     ) -> Self {
         Self {
             max_inflight_requests,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             soft_limit_byte_size_pooled_transactions_response,
+            max_capacity_cache_txns_pending_fetch,
         }
     }
 }
@@ -1319,7 +1321,8 @@ impl Default for TransactionFetcherInfo {
         Self::new(
             DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize * DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER as usize,
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
+            SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+            DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
         )
     }
 }

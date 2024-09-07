@@ -72,10 +72,10 @@ async fn test_4844_tx_gossip_penalization() {
     // peer 0 will be penalised for sending txs[0] over gossip
     let txs = vec![gen.gen_eip4844_pooled(), gen.gen_eip1559_pooled()];
 
-    txs.iter().for_each(|tx| {
+    for tx in &txs {
         let sender = tx.sender();
         provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
-    });
+    }
 
     let signed_txs: Vec<Arc<TransactionSigned>> =
         txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_signed())).collect();

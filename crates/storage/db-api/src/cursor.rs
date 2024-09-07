@@ -132,10 +132,6 @@ pub trait DbDupCursorRW<T: DupSort> {
 }
 
 /// Provides an iterator to `Cursor` when handling `Table`.
-///
-/// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
-/// and inherited `'tx` lifetime. If there is only one, rust would short circle
-/// the Cursor lifetime and it wouldn't be possible to use Walker.
 pub struct Walker<'cursor, T: Table, CURSOR: DbCursorRO<T>> {
     /// Cursor to be used to walk through the table.
     cursor: &'cursor mut CURSOR,

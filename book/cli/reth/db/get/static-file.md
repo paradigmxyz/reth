@@ -4,6 +4,8 @@ Gets the content of a static file segment for the given key
 
 ```bash
 $ reth db get static-file --help
+```
+```txt
 Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY>
 
 Arguments:

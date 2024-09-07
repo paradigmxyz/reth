@@ -27,11 +27,11 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod cli;
 pub mod commands;
-mod macros;
 
 /// Re-exported utils.
 pub mod utils {
@@ -88,6 +88,11 @@ pub mod builder {
 /// the `reth_node_core::args` re-export for more details.
 pub mod dirs {
     pub use reth_node_core::dirs::*;
+}
+
+/// Re-exported from `reth_chainspec`
+pub mod chainspec {
+    pub use reth_chainspec::*;
 }
 
 /// Re-exported from `reth_provider`.

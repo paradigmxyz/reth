@@ -352,7 +352,7 @@ i.e. keep the data for the last `100_000` blocks
 # Minimum pruning interval measured in blocks
 block_interval = 5
 
-[prune.parts]
+[prune.segments]
 # Sender Recovery pruning configuration
 sender_recovery = { distance = 100_000 } # Prune all transaction senders before the block `head-100000`, i.e. keep transaction senders for the last 100001 blocks
 
@@ -373,7 +373,7 @@ We can also prune receipts more granular, using the logs filtering:
 ```toml
 # Receipts pruning configuration by retaining only those receipts that contain logs emitted
 # by the specified addresses, discarding all others. This setting is overridden by `receipts`.
-[prune.parts.receipts_log_filter]
+[prune.segments.receipts_log_filter]
 # Prune all receipts, leaving only those which:
 # - Contain logs from address `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, starting from the block 17000000
 # - Contain logs from address `0xdac17f958d2ee523a2206206994597c13d831ec7` in the last 1001 blocks

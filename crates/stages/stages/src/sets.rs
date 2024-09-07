@@ -16,7 +16,7 @@
 //! # use reth_prune_types::PruneModes;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::StaticFileProviderFactory;
-//! # use reth_provider::test_utils::create_test_provider_factory;
+//! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
@@ -27,7 +27,7 @@
 //! let static_file_producer =
 //!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.
-//! let pipeline = Pipeline::builder()
+//! let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
 //!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
 //!     .build(provider_factory, static_file_producer);
 //!

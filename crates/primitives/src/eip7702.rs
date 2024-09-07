@@ -2,4 +2,4 @@
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
-pub use alloy_eips::eip7702::{Authorization, OptionalNonce, SignedAuthorization};
+pub use alloy_eips::eip7702::{Authorization, SignedAuthorization};

@@ -4,6 +4,8 @@ Deletes all static file segment entries
 
 ```bash
 $ reth db clear static-file --help
+```
+```txt
 Usage: reth db clear static-file [OPTIONS] <SEGMENT>
 
 Arguments:

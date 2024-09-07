@@ -47,7 +47,6 @@ pub fn to_primitive_transaction(
             gas_limit: tx.gas_limit.to(),
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
-            placeholder: Some(()),
             to: tx.to,
             value: tx.value,
             access_list: tx.access_list,

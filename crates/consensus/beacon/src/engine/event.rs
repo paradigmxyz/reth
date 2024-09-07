@@ -8,14 +8,14 @@ use std::{sync::Arc, time::Duration};
 pub enum BeaconConsensusEngineEvent {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
+    /// A block was added to the fork chain.
+    ForkBlockAdded(Arc<SealedBlock>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
     CanonicalBlockAdded(Arc<SealedBlock>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
-    /// A block was added to the fork chain.
-    ForkBlockAdded(Arc<SealedBlock>),
 }
 
 impl BeaconConsensusEngineEvent {
