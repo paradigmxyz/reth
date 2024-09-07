@@ -1,9 +1,10 @@
 //! Storage for blob data of EIP4844 transactions.
 
+use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
-use reth_primitives::{BlobTransactionSidecar, B256};
+use reth_primitives::BlobTransactionSidecar;
 use std::{
     fmt,
     sync::atomic::{AtomicUsize, Ordering},

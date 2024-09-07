@@ -21,7 +21,9 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB};
+use reth_node_api::{
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
+};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -34,7 +36,7 @@ use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info, warn};
+use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -102,8 +104,8 @@ impl DefaultNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    Types: NodeTypesWithDB<ChainSpec = ChainSpec>,
-    T: FullNodeTypes<Provider = BlockchainProvider<Types::DB>, Types = Types>,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine,
+    T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
@@ -207,10 +209,6 @@ where
 
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
-
-        if let Some(ref hook_type) = ctx.node_config().debug.invalid_block_hook {
-            warn!(target: "reth::cli", ?hook_type, "Bad block hooks are not implemented yet! The `debug.bad-block-hook` flag will do nothing for now.");
-        }
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();

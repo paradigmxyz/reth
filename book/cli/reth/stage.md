@@ -4,6 +4,8 @@ Manipulate individual stages
 
 ```bash
 $ reth stage --help
+```
+```txt
 Usage: reth stage [OPTIONS] <COMMAND>
 
 Commands:

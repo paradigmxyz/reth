@@ -21,6 +21,9 @@ alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
 
+# optimism
+op-alloy-consensus = { workspace = true, optional = true }
+
 # misc
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
@@ -55,3 +58,4 @@ alloy = [
     "dep:alloy-trie",
     "dep:serde"
 ]
+optimism = ["alloy", "dep:op-alloy-consensus"]

@@ -3,7 +3,9 @@
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
     blobstore::BlobStore,
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    error::{
+        Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    },
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
@@ -274,6 +276,13 @@ where
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 )
             }
+
+            if transaction.authorization_count() == 0 {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
+                )
+            }
         }
 
         if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
@@ -359,11 +368,14 @@ where
             }
         }
 
+        let tx_nonce = transaction.nonce();
+
         // Checks for nonce
-        if transaction.nonce() < account.nonce {
+        if tx_nonce < account.nonce {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::NonceNotConsistent.into(),
+                InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
+                    .into(),
             )
         }
 
@@ -821,8 +833,9 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, CoinbaseTipOrdering,
         EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
-    use reth_primitives::{hex, PooledTransactionsElement, U256};
+    use reth_primitives::PooledTransactionsElement;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {
