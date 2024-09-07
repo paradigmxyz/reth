@@ -12,7 +12,6 @@ description = "A consensus impl for local testing purposes"
 workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
@@ -31,6 +30,9 @@ reth-rpc-types.workspace = true
 reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
 reth-trie.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 
 # async
 futures-util.workspace = true

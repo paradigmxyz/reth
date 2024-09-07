@@ -11,7 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 # reth
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
@@ -30,6 +29,9 @@ reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
