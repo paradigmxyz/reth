@@ -2926,7 +2926,6 @@ dependencies = [
  "reth",
  "reth-chainspec",
  "reth-db",
- "reth-db-models",
  "reth-node-ethereum",
  "reth-provider",
  "tokio",

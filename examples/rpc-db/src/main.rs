@@ -24,8 +24,7 @@ use reth::{
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::{mdbx::DatabaseArguments, DatabaseEnv};
-use reth_db_models::ClientVersion;
+use reth_db::{mdbx::DatabaseArguments, ClientVersion, DatabaseEnv};
 
 // Bringing up the RPC
 use reth::rpc::builder::{
