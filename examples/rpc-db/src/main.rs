@@ -25,7 +25,7 @@ use reth::{
 };
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{mdbx::DatabaseArguments, DatabaseEnv};
-use reth_db_api::models::ClientVersion;
+use reth_db_models::ClientVersion;
 
 // Bringing up the RPC
 use reth::rpc::builder::{
