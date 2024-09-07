@@ -6,7 +6,7 @@ use crate::{
     PoolTransaction, ValidPoolTransaction,
 };
 use futures_util::Stream;
-use reth_primitives::{TxHash, B256};
+use alloy_primitives::{TxHash, B256};
 use std::{
     collections::{hash_map::Entry, HashMap},
     pin::Pin,

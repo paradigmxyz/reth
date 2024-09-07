@@ -5,11 +5,11 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
+use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, SealedBlock, TransactionSignedEcRecovered, TxHash, B256,
-    U256,
+    BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    SealedBlock, TransactionSignedEcRecovered,
 };
 use std::{fmt, future::Future, time::Instant};
 
@@ -174,7 +174,7 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [`InvalidTransactionError`](reth_primitives::InvalidTransactionError) for common errors
+    /// See [`InvalidTransactionError`](alloy_primitives::InvalidTransactionError) for common errors
     /// variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction

@@ -8,7 +8,7 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
-use reth_primitives::{hex_literal::hex, Address};
+use alloy_primitives::{hex_literal::hex, Address};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
