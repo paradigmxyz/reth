@@ -7674,7 +7674,6 @@ dependencies = [
  "reth-config",
  "reth-consensus-common",
  "reth-db",
- "reth-db-models",
  "reth-discv4",
  "reth-discv5",
  "reth-fs-util",
