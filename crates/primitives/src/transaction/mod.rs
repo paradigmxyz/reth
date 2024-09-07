@@ -17,15 +17,12 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 pub use access_list::{AccessList, AccessListItem, AccessListResult};
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
-pub use eip7702::TxEip7702;
+
+pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
-pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
@@ -44,12 +41,7 @@ pub use variant::TransactionSignedVariant;
 
 pub(crate) mod access_list;
 mod compat;
-mod eip1559;
-mod eip2930;
-mod eip4844;
-mod eip7702;
 mod error;
-mod legacy;
 mod meta;
 mod pooled;
 mod sidecar;
@@ -59,10 +51,7 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-mod optimism;
-
-#[cfg(feature = "optimism")]
-pub use optimism::TxDeposit;
+pub use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
