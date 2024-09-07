@@ -257,13 +257,7 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
-        Ok(EthBuiltPayload::new(
-            attributes.payload_id(),
-            sealed_block,
-            U256::ZERO,
-            Vec::new(),
-            None,
-        ))
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, None))
     }
 }
 
@@ -580,8 +574,6 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
-
     // create the executed block data
     let executed = ExecutedBlock {
         block: Arc::new(sealed_block.clone()),
@@ -591,8 +583,7 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let mut payload =
-        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay, Some(executed));
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);
