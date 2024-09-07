@@ -706,8 +706,8 @@ where
     })
 }
 
-/// Convert the given [`Genesis`] into an ethereum [`ChainSpec`].
-#[cfg_attr(feature = "optimism", allow(dead_code))]
+/// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
+#[cfg(not(feature = "optimism"))]
 fn into_ethereum_chain_spec(
     genesis: Genesis,
     hardfork_opts: Vec<(Box<dyn Hardfork>, ForkCondition)>,
@@ -730,7 +730,7 @@ fn into_ethereum_chain_spec(
 }
 
 #[cfg(feature = "optimism")]
-/// Convert the given [`Genesis`] into an optimism [`ChainSpec`].
+/// Convert the given [`Genesis`] into an Optimism [`ChainSpec`].
 fn into_optimism_chain_spec(
     genesis: Genesis,
     mut hardforks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
