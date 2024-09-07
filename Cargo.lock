@@ -6667,6 +6667,7 @@ name = "reth-db-common"
 version = "1.0.6"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "boyer-moore-magiclen",
  "eyre",
  "reth-chainspec",
@@ -8655,6 +8656,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "auto_impl",
  "reth-chainspec",
  "reth-db-models",
@@ -8670,6 +8672,7 @@ dependencies = [
 name = "reth-storage-errors"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "derive_more 1.0.0",
  "reth-fs-util",

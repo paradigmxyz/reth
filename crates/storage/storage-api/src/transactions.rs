@@ -1,7 +1,7 @@
 use crate::{BlockNumReader, BlockReader};
+use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
 use reth_primitives::{
-    Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber,
+    BlockHashOrNumber, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::{Range, RangeBounds, RangeInclusive};
