@@ -355,7 +355,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
                 Some(node_prune_config)
             }
             None => {
-                // If CLI PruneConfig isn't set, use the one from toml 
+                // If CLI PruneConfig isn't set, use the one from toml
                 self.toml_config().prune.clone()
             }
         }
