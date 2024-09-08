@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::setup;
+use alloy_primitives::BlockNumber;
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
@@ -8,7 +9,6 @@ use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::BlockNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
