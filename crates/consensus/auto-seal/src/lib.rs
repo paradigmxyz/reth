@@ -632,16 +632,20 @@ mod tests {
     #[test]
     fn test_blob_gas_calculation_cancun() {
         let storage = StorageInner::default();
-        let mut chain_spec = ChainSpec::default();
-        chain_spec.hardforks = ChainHardforks::new(vec![(
-            EthereumHardfork::Cancun.boxed(),
-            ForkCondition::Timestamp(25),
-        )]);
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                EthereumHardfork::Cancun.boxed(),
+                ForkCondition::Timestamp(25),
+            )]),
+            ..Default::default()
+        };
         let timestamp = 26;
 
         // Set up a transaction with blob gas
-        let mut blob_tx = TransactionSigned::default();
-        blob_tx.transaction = Transaction::Eip4844(Default::default());
+        let blob_tx = TransactionSigned {
+            transaction: Transaction::Eip4844(Default::default()),
+            ..Default::default()
+        };
         let transactions = vec![blob_tx];
 
         // Build header template
