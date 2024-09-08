@@ -347,8 +347,18 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns the configured [`PruneConfig`]
+    /// Any configuration set in CLI will take precedence over those set in toml
     pub fn prune_config(&self) -> Option<PruneConfig> {
-        self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
+        match self.node_config().prune_config() {
+            Some(mut node_prune_config) => {
+                node_prune_config.merge(self.toml_config().prune.clone());
+                Some(node_prune_config)
+            }
+            None => {
+                // If CLI PruneConfig isn't set, use the one from toml 
+                self.toml_config().prune.clone()
+            }
+        }
     }
 
     /// Returns the configured [`PruneModes`], returning the default if no config was available.
