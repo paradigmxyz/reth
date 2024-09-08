@@ -14,5 +14,4 @@ pub mod error;
 pub mod eth;
 
 pub use error::OpEthApiError;
-pub use eth::transaction::OpTxBuilder;
-pub use eth::OpEthApi;
+pub use eth::{transaction::OpTxBuilder, OpEthApi};

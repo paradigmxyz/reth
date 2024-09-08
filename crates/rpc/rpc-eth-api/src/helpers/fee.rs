@@ -82,12 +82,10 @@ pub trait EthFees: LoadFee {
                 block_count = block_count.saturating_sub(1);
             }
 
-            let Some(end_block) = LoadFee::provider(self)
+            let end_block = LoadFee::provider(self)
                 .block_number_for_id(newest_block.into())
                 .map_err(Self::Error::from_eth_err)?
-            else {
-                return Err(EthApiError::UnknownBlockNumber.into());
-            };
+                .ok_or(EthApiError::HeaderNotFound(newest_block.into()))?;
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
@@ -299,13 +297,11 @@ pub trait LoadFee: LoadBlock {
                     let base_fee = self
                         .block(BlockNumberOrTag::Pending.into())
                         .await?
-                        .ok_or(EthApiError::UnknownBlockNumber)?
+                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
                         .base_fee_per_gas
-                        .ok_or_else(|| {
-                            EthApiError::InvalidTransaction(
-                                RpcInvalidTransactionError::TxTypeNotSupported,
-                            )
-                        })?;
+                        .ok_or(EthApiError::InvalidTransaction(
+                            RpcInvalidTransactionError::TxTypeNotSupported,
+                        ))?;
                     U256::from(base_fee)
                 }
             };

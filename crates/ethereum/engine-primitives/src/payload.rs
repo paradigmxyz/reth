@@ -1,6 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_evm_ethereum::revm_spec_by_timestamp_after_merge;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -30,6 +31,8 @@ pub struct EthBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: SealedBlock,
+    /// Block execution data for the payload, if any.
+    pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -48,8 +51,9 @@ impl EthBuiltPayload {
         block: SealedBlock,
         fees: U256,
         receipts: Vec<Receipt>,
+        executed_block: Option<ExecutedBlock>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), receipts }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), receipts }
     }
 
     /// Returns the identifier of the payload.
@@ -87,6 +91,10 @@ impl BuiltPayload for EthBuiltPayload {
         self.fees
     }
 
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
+    }
+
     fn receipts(&self) -> &[Receipt] {
         &self.receipts
     }
@@ -99,6 +107,10 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 
     fn fees(&self) -> U256 {
         (**self).fees()
+    }
+
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
     }
 
     fn receipts(&self) -> &[Receipt] {

@@ -24,6 +24,7 @@ reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
 reth-trie.workspace = true
+reth-chain-state.workspace = true
 
 # ethereum
 revm.workspace = true

@@ -60,7 +60,9 @@ where
     N::AddOns: NodeAddOns<
         Adapter<N>,
         EthApi: FullEthApiServer<
-            TransactionCompat: TransactionCompat<Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>>,
+            TransactionCompat: TransactionCompat<
+                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
         > + AddDevSigners
                     + EthApiBuilderProvider<Adapter<N>>,
     >,

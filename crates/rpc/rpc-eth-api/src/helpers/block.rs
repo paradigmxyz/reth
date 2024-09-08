@@ -50,15 +50,12 @@ pub trait EthBlocks: LoadBlock {
             TransactionCompat<Transaction = RpcTransaction<Self::NetworkTypes>>,
     {
         async move {
-            let block = match self.block_with_senders(block_id).await? {
-                Some(block) => block,
-                None => return Ok(None),
-            };
+            let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
             let total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let block = from_block::<Self::TransactionCompat>(
                 block.unseal(),
                 total_difficulty,
@@ -66,7 +63,6 @@ pub trait EthBlocks: LoadBlock {
                 Some(block_hash),
             )
             .map_err(Self::Error::from_eth_err)?;
-
             Ok(Some(block))
         }
     }

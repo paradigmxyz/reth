@@ -38,8 +38,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::{OpEthApiError, OpTxBuilder};
-use crate::{eth::rpc::SequencerClient, OpEthApiError};
+use crate::{eth::rpc::SequencerClient, OpEthApiError, OpTxBuilder};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -90,7 +89,11 @@ impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner),sequencer_client: Arc::new(parking_lot::RwLock::new(None)),  _eth_ty_builders: PhantomData }
+        Self {
+            inner: Arc::new(inner),
+            sequencer_client: Arc::new(parking_lot::RwLock::new(None)),
+            _eth_ty_builders: PhantomData,
+        }
     }
 }
 
@@ -188,7 +191,7 @@ where
 impl<N, Eth> LoadState for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
-N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
     Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
@@ -236,7 +239,10 @@ where
     }
 }
 
-impl<N, Eth> AddDevSigners for OpEthApi<N, Eth> where N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>> {
+impl<N, Eth> AddDevSigners for OpEthApi<N, Eth>
+where
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
+{
     fn with_dev_accounts(&self) {
         *self.signers().write() = DevSigner::random_signers(20)
     }

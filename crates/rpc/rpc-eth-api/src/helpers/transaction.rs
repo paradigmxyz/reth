@@ -17,7 +17,8 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, BlockNumberOrTag, TransactionInfo, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
@@ -263,7 +264,7 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             let Ok(high) = LoadBlock::provider(self).best_block_number() else {
-                return Err(EthApiError::UnknownBlockNumber.into());
+                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 
             // Perform a binary search over the block range to find the block in which the sender's
@@ -276,7 +277,8 @@ pub trait EthTransactions: LoadTransaction {
             })
             .await?;
 
-            self.block_with_senders(num.into())
+            let block_id = num.into();
+            self.block_with_senders(block_id)
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
@@ -300,7 +302,7 @@ pub trait EthTransactions: LoadTransaction {
                             )
                         })
                 })
-                .ok_or(EthApiError::UnknownBlockNumber.into())
+                .ok_or(EthApiError::HeaderNotFound(block_id).into())
                 .map(Some)
         }
     }

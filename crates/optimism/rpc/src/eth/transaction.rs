@@ -9,13 +9,13 @@ use reth_node_api::FullNodeComponents;
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, RawTransactionForwarder, TransactionCompat, FromEthApiError,
+    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    EthApiTypes, FromEthApiError, RawTransactionForwarder, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_rpc_types::TransactionInfo;
-use revm::L1BlockInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use revm::L1BlockInfo;
 
 use crate::{eth::rpc::SequencerClient, OpEthApi};
 
