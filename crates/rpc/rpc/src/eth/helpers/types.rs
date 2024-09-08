@@ -1,8 +1,8 @@
 //! L1 `eth` API types.
 
-use alloy_network::{Ethereum, Network};
+use alloy_network::{AnyNetwork, Network};
 use reth_primitives::{Address, TransactionSignedEcRecovered, TxKind};
-use reth_rpc_types::TransactionInfo;
+use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
 use reth_rpc_types_compat::{
     transaction::{from_primitive_signature, GasPrice},
     TransactionCompat,
@@ -16,7 +16,7 @@ impl TransactionCompat for EthTxBuilder
 where
     Self: Send + Sync,
 {
-    type Transaction = <Ethereum as Network>::TransactionResponse;
+    type Transaction = <AnyNetwork as Network>::TransactionResponse;
 
     fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
         let signer = tx.signer();
@@ -45,29 +45,33 @@ where
             signed_tx.chain_id(),
         );
 
-        Self::Transaction {
-            hash: signed_tx.hash(),
-            nonce: signed_tx.nonce(),
-            from: signer,
-            to,
-            value: signed_tx.value(),
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
-            signature: Some(signature),
-            gas: signed_tx.gas_limit() as u128,
-            input: signed_tx.input().clone(),
-            chain_id,
-            access_list,
-            transaction_type: Some(signed_tx.tx_type() as u8),
-            // These fields are set to None because they are not stored as part of the transaction
-            block_hash,
-            block_number,
-            transaction_index,
-            // EIP-4844 fields
-            max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
-            blob_versioned_hashes,
-            authorization_list,
+        WithOtherFields {
+            inner: Transaction {
+                hash: signed_tx.hash(),
+                nonce: signed_tx.nonce(),
+                from: signer,
+                to,
+                value: signed_tx.value(),
+                gas_price,
+                max_fee_per_gas,
+                max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
+                signature: Some(signature),
+                gas: signed_tx.gas_limit() as u128,
+                input: signed_tx.input().clone(),
+                chain_id,
+                access_list,
+                transaction_type: Some(signed_tx.tx_type() as u8),
+                // These fields are set to None because they are not stored as part of the
+                // transaction
+                block_hash,
+                block_number,
+                transaction_index,
+                // EIP-4844 fields
+                max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
+                blob_versioned_hashes,
+                authorization_list,
+            },
+            ..Default::default()
         }
     }
 }

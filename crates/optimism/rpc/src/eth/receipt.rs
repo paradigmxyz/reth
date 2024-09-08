@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<N> OpEthApi<N>
+impl<N, Eth> OpEthApi<N, Eth>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {

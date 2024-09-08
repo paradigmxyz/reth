@@ -112,7 +112,9 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
     // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
-    Eth: TransactionCompat<Transaction = reth_rpc_types::Transaction>,
+    Eth: TransactionCompat<
+        Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+    >,
 {
     match kind {
         SubscriptionKind::NewHeads => {

@@ -19,8 +19,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -101,7 +101,6 @@ impl<N, Eth> EthApiTypes for OpEthApi<N, Eth>
 where
     Self: Send + Sync,
     N: FullNodeComponents,
-    // todo: replace constraint when op and l1 don't use same tx type in alloy
     Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     type Error = OpEthApiError;

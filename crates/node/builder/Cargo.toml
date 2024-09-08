@@ -58,9 +58,6 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
-## ethereum
-alloy-network.workspace = true
-
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = [

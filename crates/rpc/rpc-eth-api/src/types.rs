@@ -4,7 +4,7 @@ use std::{error::Error, fmt};
 
 use alloy_network::{AnyNetwork, Network};
 use reth_rpc_eth_types::EthApiError;
-use reth_rpc_types::{AnyTransactionReceipt, Block, Transaction, WithOtherFields};
+use reth_rpc_types::{Block, Transaction, WithOtherFields};
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -24,7 +24,6 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: Network<
         TransactionResponse = WithOtherFields<Transaction>,
         HeaderResponse = reth_rpc_types::Header,
-        ReceiptResponse = AnyTransactionReceipt,
     >;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;

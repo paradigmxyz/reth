@@ -7602,7 +7602,6 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.0.6"
 dependencies = [
- "alloy-network",
  "aquamarine",
  "eyre",
  "fdlimit",
@@ -7964,7 +7963,7 @@ name = "reth-optimism-rpc"
 version = "1.0.6"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-types",
+ "derive_more 1.0.0",
  "jsonrpsee-types",
  "op-alloy-network",
  "op-alloy-rpc-types",

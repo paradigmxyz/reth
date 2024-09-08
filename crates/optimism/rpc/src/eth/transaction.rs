@@ -1,16 +1,17 @@
 //! Loads and formats OP transaction RPC response.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
-use alloy_rpc_types::optimism::OptimismTransactionFields;
+use alloy_primitives::{Bytes, B256};
 use op_alloy_network::{Network, Optimism};
+use op_alloy_rpc_types::OptimismTransactionFields;
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, FromEthApiError, RawTransactionForwarder, TransactionCompat,
+    FromEthApiError, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_rpc_types::TransactionInfo;

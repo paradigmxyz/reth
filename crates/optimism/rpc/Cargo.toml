@@ -32,7 +32,6 @@ reth-chainspec.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types.workspace = true
 op-alloy-network.workspace = true
 revm.workspace = true
 op-alloy-rpc-types.workspace = true
@@ -49,6 +48,7 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+derive_more = { workspace = true, default-features = false, features = ["deref"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

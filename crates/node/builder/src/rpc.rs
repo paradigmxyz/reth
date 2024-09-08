@@ -22,7 +22,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_rpc_types::WithOtherFields;
 use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};

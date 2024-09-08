@@ -5,7 +5,6 @@
 pub mod add_ons;
 mod states;
 
-use reth_rpc_types::WithOtherFields;
 pub use states::*;
 
 use std::sync::Arc;
