@@ -1,6 +1,7 @@
 //! This includes download client implementations for auto sealing miners.
 
 use crate::Storage;
+use alloy_primitives::B256;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -8,7 +9,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
 use std::fmt::Debug;
 use tracing::{trace, warn};
 

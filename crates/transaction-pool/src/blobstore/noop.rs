@@ -1,5 +1,5 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionSidecar};
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use reth_rpc_types::BlobAndProofV1;
 
 /// A blobstore implementation that does nothing

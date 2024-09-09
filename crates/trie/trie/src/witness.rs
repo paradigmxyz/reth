@@ -2,10 +2,11 @@ use crate::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
     trie_cursor::TrieCursorFactory, HashedPostState,
 };
+use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::Either;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
+use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };

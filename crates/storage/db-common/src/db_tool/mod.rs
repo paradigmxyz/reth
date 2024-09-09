@@ -12,28 +12,21 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_fs_util as fs;
+use reth_node_types::NodeTypesWithDB;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
-pub struct DbTool<DB: Database> {
+pub struct DbTool<N: NodeTypesWithDB> {
     /// The provider factory that the db tool will use.
-    pub provider_factory: ProviderFactory<DB>,
+    pub provider_factory: ProviderFactory<N>,
 }
 
-impl<DB: Database> DbTool<DB> {
-    /// Takes a DB where the tables have already been created.
-    pub fn new(provider_factory: ProviderFactory<DB>) -> eyre::Result<Self> {
-        // Disable timeout because we are entering a TUI which might read for a long time. We
-        // disable on the [`DbTool`] level since it's only used in the CLI.
-        provider_factory.provider()?.disable_long_read_transaction_safety();
-        Ok(Self { provider_factory })
-    }
-
+impl<N: NodeTypesWithDB> DbTool<N> {
     /// Get an [`Arc`] to the [`ChainSpec`].
-    pub fn chain(&self) -> Arc<ChainSpec> {
+    pub fn chain(&self) -> Arc<N::ChainSpec> {
         self.provider_factory.chain_spec()
     }
 
@@ -114,6 +107,16 @@ impl<DB: Database> DbTool<DB> {
         })?;
 
         Ok((data.map_err(|e: DatabaseError| eyre::eyre!(e))?, hits))
+    }
+}
+
+impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> DbTool<N> {
+    /// Takes a DB where the tables have already been created.
+    pub fn new(provider_factory: ProviderFactory<N>) -> eyre::Result<Self> {
+        // Disable timeout because we are entering a TUI which might read for a long time. We
+        // disable on the [`DbTool`] level since it's only used in the CLI.
+        provider_factory.provider()?.disable_long_read_transaction_safety();
+        Ok(Self { provider_factory })
     }
 
     /// Grabs the content of the table for the given key

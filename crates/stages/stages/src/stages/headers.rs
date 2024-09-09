@@ -317,8 +317,9 @@ where
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
+        // unwind from the next block number since the unwind_to block is exclusive
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to..,
+            (input.unwind_to + 1)..,
         )?;
         provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
@@ -389,12 +390,11 @@ mod tests {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
         use reth_consensus::test_utils::TestConsensus;
-        use reth_db::{test_utils::TempDatabase, DatabaseEnv};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
-        use reth_provider::BlockNumReader;
+        use reth_provider::{test_utils::MockNodeTypesWithDB, BlockNumReader};
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
@@ -426,7 +426,7 @@ mod tests {
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, D>;
+            type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
 
             fn db(&self) -> &TestStageDB {
                 &self.db

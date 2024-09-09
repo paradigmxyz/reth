@@ -3,14 +3,14 @@
 use alloy_eips::{
     eip6110::DepositRequest, eip7002::WithdrawalRequest, eip7251::ConsolidationRequest,
 };
+use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, Request,
-    Requests, SealedBlock, SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind,
-    TxLegacy, Withdrawal, Withdrawals, B256, U256,
+    proofs, sign_message, Account, Header, Log, Receipt, Request, Requests, SealedBlock,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxLegacy, Withdrawal, Withdrawals,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{

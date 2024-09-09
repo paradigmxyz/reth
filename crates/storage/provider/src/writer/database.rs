@@ -18,11 +18,9 @@ where
         _: BlockNumber,
         receipts: Vec<Option<Receipt>>,
     ) -> ProviderResult<()> {
-        if !receipts.is_empty() {
-            for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                if let Some(receipt) = receipt {
-                    self.0.append(first_tx_index + tx_idx as u64, receipt)?;
-                }
+        for (tx_idx, receipt) in receipts.into_iter().enumerate() {
+            if let Some(receipt) = receipt {
+                self.0.append(first_tx_index + tx_idx as u64, receipt)?;
             }
         }
         Ok(())

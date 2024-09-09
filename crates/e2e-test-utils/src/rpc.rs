@@ -7,9 +7,10 @@ use reth::{
         DebugApiServer,
     },
 };
-use reth_node_builder::EthApiTypes;
+use reth_chainspec::ChainSpec;
+use reth_node_builder::{EthApiTypes, NodeTypes};
 use reth_primitives::{Bytes, B256};
-use reth_rpc_types::WithOtherFields;
+use reth_rpc_types::{AnyTransactionReceipt, WithOtherFields};
 
 #[allow(missing_debug_implementations)]
 pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
@@ -18,11 +19,12 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
-    Node: FullNodeComponents,
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
     EthApi: EthApiSpec
         + EthTransactions<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + TraceExt,
 {

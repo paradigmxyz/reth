@@ -1,16 +1,13 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-use reth_chainspec::ChainSpec;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
 use reth_consensus::Consensus;
-use reth_db_api::database::Database;
-use reth_engine_primitives::EngineTypes;
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, TreeConfig},
+    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -18,6 +15,7 @@ pub use reth_engine_tree::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::BlockClient;
+use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
@@ -35,51 +33,50 @@ use std::{
 type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
 
 /// Alias for chain orchestrator.
-type EngineServiceType<DB, Client, T> = ChainOrchestrator<
+type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
-        EngineApiRequestHandler<EngineApiRequest<T>>,
-        EngineMessageStream<T>,
+        EngineApiRequestHandler<EngineApiRequest<<N as NodeTypesWithEngine>::Engine>>,
+        EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
         BasicBlockDownloader<Client>,
     >,
-    PipelineSync<DB>,
+    PipelineSync<N>,
 >;
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EngineService<DB, Client, E, T>
+pub struct EngineService<N, Client, E>
 where
-    DB: Database + 'static,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
-    T: EngineTypes,
 {
-    orchestrator: EngineServiceType<DB, Client, T>,
+    orchestrator: EngineServiceType<N, Client>,
     _marker: PhantomData<E>,
 }
 
-impl<DB, Client, E, T> EngineService<DB, Client, E, T>
+impl<N, Client, E> EngineService<N, Client, E>
 where
-    DB: Database + 'static,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
-    T: EngineTypes + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         consensus: Arc<dyn Consensus>,
         executor_factory: E,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<N::ChainSpec>,
         client: Client,
-        incoming_requests: EngineMessageStream<T>,
-        pipeline: Pipeline<DB>,
+        incoming_requests: EngineMessageStream<N::Engine>,
+        pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
-        provider: ProviderFactory<DB>,
-        blockchain_db: BlockchainProvider2<DB>,
-        pruner: Pruner<DB, ProviderFactory<DB>>,
-        payload_builder: PayloadBuilderHandle<T>,
+        provider: ProviderFactory<N>,
+        blockchain_db: BlockchainProvider2<N>,
+        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,
+        invalid_block_hook: Box<dyn InvalidBlockHook>,
     ) -> Self {
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
@@ -97,6 +94,7 @@ where
             payload_builder,
             canonical_in_memory_state,
             tree_config,
+            invalid_block_hook,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -111,17 +109,16 @@ where
     }
 
     /// Returns a mutable reference to the orchestrator.
-    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<DB, Client, T> {
+    pub fn orchestrator_mut(&mut self) -> &mut EngineServiceType<N, Client> {
         &mut self.orchestrator
     }
 }
 
-impl<DB, Client, E, T> Stream for EngineService<DB, Client, E, T>
+impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
-    DB: Database + 'static,
+    N: EngineNodeTypes,
     Client: BlockClient + 'static,
     E: BlockExecutorProvider + 'static,
-    T: EngineTypes + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
@@ -141,7 +138,7 @@ mod tests {
     use super::*;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_tree::test_utils::TestPipelineBuilder;
+    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
@@ -196,6 +193,7 @@ mod tests {
             pruner,
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
         );
     }
 }

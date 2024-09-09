@@ -13,7 +13,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-    models::client_version::ClientVersion,
+    models::ClientVersion,
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{

@@ -13,6 +13,7 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
@@ -45,6 +46,7 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
@@ -255,7 +257,7 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, Vec::new()))
+        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO, None))
     }
 }
 
@@ -298,6 +300,7 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
+    let mut executed_senders = Vec::new();
 
     let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
@@ -444,7 +447,8 @@ where
             .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append transaction to the list of executed transactions
+        // append sender and transaction to the respective lists
+        executed_senders.push(tx.signer());
         executed_txs.push(tx.into_signed());
     }
 
@@ -500,11 +504,16 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = {
+    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+    let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider
-            .db
-            .state_root(HashedPostState::from_bundle_state(&execution_outcome.state().state))?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header
@@ -565,8 +574,16 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, receipts_pay);
+    // create the executed block data
+    let executed = ExecutedBlock {
+        block: Arc::new(sealed_block.clone()),
+        senders: Arc::new(executed_senders),
+        execution_output: Arc::new(execution_outcome),
+        hashed_state: Arc::new(hashed_state),
+        trie: Arc::new(trie_output),
+    };
+
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);

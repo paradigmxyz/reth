@@ -4,6 +4,8 @@ P2P Debugging utilities
 
 ```bash
 $ reth p2p --help
+```
+```txt
 Usage: reth p2p [OPTIONS] <COMMAND>
 
 Commands:
