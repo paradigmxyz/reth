@@ -1,7 +1,7 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
-use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
+use reth_nippy_jar::{MmapDataReader, NippyJar, NippyJarCursor};
 use reth_primitives::{static_file::SegmentHeader, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
@@ -15,7 +15,7 @@ type ColumnResult<T> = ProviderResult<Option<T>>;
 
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
-    pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
+    pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<MmapDataReader>) -> ProviderResult<Self> {
         Ok(Self(
             NippyJarCursor::with_reader(jar, reader)
                 .map_err(|err| ProviderError::NippyJar(err.to_string()))?,

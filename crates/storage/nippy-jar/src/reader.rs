@@ -8,7 +8,7 @@ use crate::{NippyJarError, OFFSETS_FILE_EXTENSION};
 ///
 /// Holds file and mmap descriptors of the data and offsets files of a `static_file`.
 #[derive(Debug)]
-pub struct DataReader {
+pub struct MmapDataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
     #[allow(dead_code)]
     data_file: File,
@@ -23,7 +23,7 @@ pub struct DataReader {
     offset_size: u8,
 }
 
-impl DataReader {
+impl MmapDataReader {
     /// Reads the respective data and offsets file and returns [`DataReader`].
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
         let data_file = File::open(path.as_ref())?;

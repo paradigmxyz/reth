@@ -32,7 +32,7 @@ use compression::Compression;
 use compression::Compressors;
 
 mod reader;
-pub use reader::DataReader;
+pub use reader::MmapDataReader;
 
 /// empty enum for backwards compatibility
 #[derive(Debug, Serialize, Deserialize)]
@@ -245,8 +245,8 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Returns a [`DataReader`] of the data and offset file
-    pub fn open_data_reader(&self) -> Result<DataReader, NippyJarError> {
-        DataReader::new(self.data_path())
+    pub fn open_data_reader(&self) -> Result<MmapDataReader, NippyJarError> {
+        MmapDataReader::new(self.data_path())
     }
 
     /// Writes all necessary configuration to file.

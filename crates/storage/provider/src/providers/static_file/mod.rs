@@ -23,7 +23,7 @@ type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), 
 #[derive(Debug)]
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
-    mmap_handle: Arc<reth_nippy_jar::DataReader>,
+    mmap_handle: Arc<reth_nippy_jar::MmapDataReader>,
 }
 
 impl LoadedJar {
@@ -38,7 +38,7 @@ impl LoadedJar {
     }
 
     /// Returns a clone of the mmap handle that can be used to instantiate a cursor.
-    fn mmap_handle(&self) -> Arc<reth_nippy_jar::DataReader> {
+    fn mmap_handle(&self) -> Arc<reth_nippy_jar::MmapDataReader> {
         self.mmap_handle.clone()
     }
 

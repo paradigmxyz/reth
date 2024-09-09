@@ -1,6 +1,6 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
+    MmapDataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
 use std::{ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;
@@ -11,7 +11,7 @@ pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
     /// Data and offset reader.
-    reader: Arc<DataReader>,
+    reader: Arc<MmapDataReader>,
     /// Internal buffer to unload data to without reallocating memory on each retrieval.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
@@ -38,7 +38,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
     pub fn with_reader(
         jar: &'a NippyJar<H>,
-        reader: Arc<DataReader>,
+        reader: Arc<MmapDataReader>,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
