@@ -23,7 +23,7 @@ pub struct DbTool<N: ProviderNodeTypes> {
 }
 
 impl<N: ProviderNodeTypes> DbTool<N> {
-    /// Get an [`Arc`] to the [`ChainSpec`].
+    /// Get an [`Arc`] to the [`reth_chainspec::ChainSpec`].
     pub fn chain(&self) -> Arc<N::ChainSpec> {
         self.provider_factory.chain_spec()
     }

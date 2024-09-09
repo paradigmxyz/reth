@@ -9,7 +9,7 @@ use futures::FutureExt;
 use metrics::Counter;
 use reth_errors::{RethError, RethResult};
 use reth_node_types::NodeTypesWithDB;
-use reth_provider::{ProviderNodeTypes, ProviderFactory};
+use reth_provider::{ProviderFactory, ProviderNodeTypes};
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
