@@ -1,6 +1,7 @@
 //! Unwinding a certain block range
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_primitives::{BlockNumber, B256};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -13,7 +14,7 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::args::NetworkArgs;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
     FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,

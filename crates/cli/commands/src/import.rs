@@ -1,5 +1,6 @@
 //! Command that initializes the node by importing a chain from a file.
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -22,7 +23,6 @@ use reth_network_p2p::{
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
-use reth_primitives::B256;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
     StageCheckpointReader,
