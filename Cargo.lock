@@ -7956,22 +7956,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-codecs"
-version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#b6a0c7d8e3b45775af2f7289df449f240ffce346"
-dependencies = [
- "alloy-consensus 0.2.1",
- "alloy-eips 0.2.1",
- "alloy-genesis 0.2.1",
- "alloy-primitives 0.7.7",
- "alloy-trie",
- "bytes",
- "modular-bitfield",
- "reth-codecs-derive 1.0.5 (git+https://github.com/telosnetwork/telos-reth.git)",
- "serde",
-]
-
-[[package]]
 name = "reth-codecs-derive"
 version = "1.0.5"
 dependencies = [
@@ -7986,17 +7970,6 @@ dependencies = [
 name = "reth-codecs-derive"
 version = "1.0.5"
 source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
-dependencies = [
- "convert_case 0.6.0",
- "proc-macro2",
- "quote",
- "syn 2.0.72",
-]
-
-[[package]]
-name = "reth-codecs-derive"
-version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#b6a0c7d8e3b45775af2f7289df449f240ffce346"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -9554,7 +9527,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "derive_more 0.99.18",
- "log",
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
@@ -9583,26 +9555,6 @@ dependencies = [
  "derive_more 0.99.18",
  "modular-bitfield",
  "reth-codecs 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm-primitives",
- "roaring",
- "serde",
-]
-
-[[package]]
-name = "reth-primitives-traits"
-version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#b6a0c7d8e3b45775af2f7289df449f240ffce346"
-dependencies = [
- "alloy-consensus 0.2.1",
- "alloy-eips 0.2.1",
- "alloy-genesis 0.2.1",
- "alloy-primitives 0.7.7",
- "alloy-rlp",
- "byteorder",
- "bytes",
- "derive_more 0.99.18",
- "modular-bitfield",
- "reth-codecs 1.0.5 (git+https://github.com/telosnetwork/telos-reth.git)",
  "revm-primitives",
  "roaring",
  "serde",
@@ -10372,26 +10324,6 @@ dependencies = [
  "nybbles",
  "reth-codecs 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "reth-primitives-traits 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
- "revm-primitives",
- "serde",
-]
-
-[[package]]
-name = "reth-trie-common"
-version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth.git#b6a0c7d8e3b45775af2f7289df449f240ffce346"
-dependencies = [
- "alloy-consensus 0.2.1",
- "alloy-genesis 0.2.1",
- "alloy-primitives 0.7.7",
- "alloy-rlp",
- "alloy-trie",
- "bytes",
- "derive_more 0.99.18",
- "itertools 0.13.0",
- "nybbles",
- "reth-codecs 1.0.5 (git+https://github.com/telosnetwork/telos-reth.git)",
- "reth-primitives-traits 1.0.5 (git+https://github.com/telosnetwork/telos-reth.git)",
  "revm-primitives",
  "serde",
 ]
@@ -11674,7 +11606,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client#b2217e4e11ff4b8815fabeb15d704eecb41dce0e"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?branch=add-consensus-shutdown#6b7faca41670810c4fccc53f995195c75514d9b7"
 dependencies = [
  "alloy 0.2.1",
  "alloy-consensus 0.2.1",
@@ -11691,7 +11623,6 @@ dependencies = [
  "futures",
  "hex",
  "jsonwebtoken",
- "log",
  "rand 0.8.5",
  "reqwest 0.11.27",
  "reth-primitives 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
@@ -11710,7 +11641,7 @@ dependencies = [
 [[package]]
 name = "telos-translator-rs"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-translator-rs.git?branch=master#3c2b55adae082968c88e8d0ef5a3252f9a41753f"
+source = "git+https://github.com/telosnetwork/telos-translator-rs.git?branch=master#f21a51f8474387b08087c1e279fe446dfb49b696"
 dependencies = [
  "alloy 0.2.1",
  "alloy-consensus 0.2.1",
@@ -11724,10 +11655,10 @@ dependencies = [
  "hex",
  "k256",
  "lazy_static",
- "log",
  "moka",
  "num-bigint",
- "reth-trie-common 1.0.5 (git+https://github.com/telosnetwork/telos-reth.git)",
+ "reth-rpc-types 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
+ "reth-trie-common 1.0.5 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
  "rlp",
  "ruint 0.3.0",
  "serde",

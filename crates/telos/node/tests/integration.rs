@@ -14,6 +14,7 @@ use telos_consensus_client::client::ConsensusClient;
 use telos_consensus_client::config::AppConfig;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
+use tokio::sync::oneshot;
 use tracing::info;
 
 struct TelosRethNodeHandle {
@@ -107,9 +108,10 @@ async fn start_consensus(
         // TODO: Determine a good stop block and test it here
         stop_block: None,
     };
+    let (_, receiver) = oneshot::channel();
 
     let mut client_under_test = ConsensusClient::new(config).await?;
-    Ok(client_under_test.run().await?)
+    Ok(client_under_test.run(receiver).await?)
 }
 
 #[tokio::test]
