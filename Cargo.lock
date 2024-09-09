@@ -11606,7 +11606,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?branch=master#e681aeb675f16c245a7aa5f8245d947b9d8ac4ad"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=e681aeb675f16c245a7aa5f8245d947b9d8ac4ad#e681aeb675f16c245a7aa5f8245d947b9d8ac4ad"
 dependencies = [
  "alloy 0.2.1",
  "alloy-consensus 0.2.1",
