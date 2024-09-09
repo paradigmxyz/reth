@@ -57,7 +57,7 @@ where
                         .map_err(Self::Error::from_eth_err)
                 })
                 .collect::<Result<Vec<_>, Self::Error>>();
-            return receipts.map(Some);
+            return receipts.map(Some)
         }
 
         Ok(None)

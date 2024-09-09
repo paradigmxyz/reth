@@ -4,13 +4,14 @@ use crate::{
     engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
+use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{BlockNumber, SealedBlock, B256};
+use reth_primitives::SealedBlock;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;

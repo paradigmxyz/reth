@@ -30,6 +30,9 @@ reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
 reth-node-types.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
