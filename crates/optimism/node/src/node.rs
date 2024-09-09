@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::ChainSpec;
+use reth_db_api::transaction::DbTx;
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::{FullNodeComponents, NodeAddOns, NodePrimitives, NodeTypesWithStorage};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -19,7 +20,7 @@ use reth_node_builder::{
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{CanonStateSubscriptions, NodeStorage};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
@@ -102,13 +103,45 @@ where
     }
 }
 
+/// Placeholder for Ethereum primitive types.
+#[derive(Debug)]
+pub struct OpPrimitives;
+
+/// Placeholder.
+#[derive(Debug)]
+pub struct OpStorage;
+
+impl NodePrimitives for OpPrimitives {
+    type Block = reth_primitives::Block;
+}
+
 impl NodeTypes for OptimismNode {
-    type Primitives = ();
+    type Primitives = OpPrimitives;
     type ChainSpec = ChainSpec;
 }
 
 impl NodeTypesWithEngine for OptimismNode {
     type Engine = OptimismEngineTypes;
+}
+
+impl NodeTypesWithStorage for OptimismNode {
+    type Storage = OpStorage;
+}
+
+impl NodeStorage for OpStorage {
+    type Types = OptimismNode;
+
+    fn new() -> Self {
+        Self {}
+    }
+
+    fn read_block<TX: DbTx>(
+        &self,
+        _id: reth_primitives::BlockHashOrNumber,
+        _provider: reth_provider::DatabaseProvider<TX>,
+    ) -> reth_primitives::Block {
+        reth_primitives::Block::default()
+    }
 }
 
 /// Add-ons w.r.t. optimism.

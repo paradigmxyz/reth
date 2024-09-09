@@ -38,6 +38,7 @@ reth-rpc-eth-api.workspace = true
 reth-optimism-rpc.workspace = true
 reth-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-db-api.workspace = true
 
 # async
 async-trait.workspace = true

@@ -13,7 +13,7 @@ use reth_downloaders::file_client::{
 use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
-use reth_provider::StageCheckpointReader;
+use reth_provider::{NodeTypesWithStorage, StageCheckpointReader};
 use reth_prune::PruneModes;
 use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
@@ -42,7 +42,9 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeStorage>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);

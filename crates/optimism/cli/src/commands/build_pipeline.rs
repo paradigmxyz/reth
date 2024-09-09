@@ -1,6 +1,5 @@
 use alloy_primitives::B256;
 use futures_util::{Stream, StreamExt};
-use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_downloaders::{
@@ -13,9 +12,10 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::NodeTypesWithDB;
 use reth_node_events::node::NodeEvent;
-use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory};
+use reth_provider::{
+    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderFactory, ProviderNodeTypes,
+};
 use reth_prune::PruneModes;
 use reth_stages::{sets::DefaultStages, Pipeline, StageSet};
 use reth_stages_types::StageId;

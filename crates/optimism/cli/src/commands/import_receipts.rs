@@ -18,8 +18,9 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, NodeTypesWithStorage,
+    OriginalValuesKnown, ProviderFactory, ProviderNodeTypes, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -47,7 +48,9 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeStorage>(
+    pub async fn execute<
+        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec> + NodeTypesWithStorage,
+    >(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
