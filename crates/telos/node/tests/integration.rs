@@ -1,4 +1,6 @@
 use antelope::api::client::{APIClient, DefaultProvider};
+use alloy::providers::{Provider, ProviderBuilder};
+use eyre::Result;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig},
@@ -14,7 +16,9 @@ use telos_consensus_client::client::ConsensusClient;
 use telos_consensus_client::config::{AppConfig, CliArgs};
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
+use tokio::time::sleep;
 use tokio::sync::oneshot;
+use tracing_subscriber::fmt::format;
 use tokio::sync::oneshot::Sender;
 use tracing::{info};
 
@@ -158,6 +162,21 @@ async fn testing_chain_sync() {
     let reth_handle = TelosRethNodeHandle { execution_port, jwt_secret };
     let node_context = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     info!("Started Reth on RPC port {}!", rpc_port);
+    _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
+
+    let rpc_url = format!("http://localhost:{}", rpc_port).parse().unwrap();
+    let provider = ProviderBuilder::new().on_http(rpc_url);
+
+    let consensus_run_future = start_consensus(reth_handle, ship_port, chain_port);
+
+    loop {
+        sleep(tokio::time::Duration::from_secs(1)).await;
+        let latest_block = provider.get_block_number().await.unwrap();
+        info!("Latest block: {latest_block}");
+        if latest_block > 0 {
+            break;
+        }
+    }
 
     match start_consensus(reth_handle, ship_port, chain_port).await {
         Ok((shutdown_sender, consensus_handle)) => {
@@ -167,5 +186,9 @@ async fn testing_chain_sync() {
         Err(error) => {
             panic!("Error with consensus client: {error:?}");
         }
+    // run_tests(&rpc_url.to_string(), "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48").await;
+
+    if let Err(error) = consensus_run_future.await {
+        panic!("Error with consensus client: {error:?}");
     }
 }

@@ -70,4 +70,6 @@ telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensu
 
 testcontainers = "0.21.1"
 
-alloy = { version = "0.3.1", features = ["providers", "reqwest"]}
+env_logger = "0.10.2"
+alloy = { version = "0.3.1", features = ["contract", "sol-types", "providers", "reqwest", "signer-local", "rpc-types"]}
+#alloy-sol-types = { version = "0.8.2" }

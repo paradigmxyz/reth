@@ -17,8 +17,9 @@ use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
-use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
+use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas, hex};
 use serde::{Deserialize, Serialize};
+use log::debug;
 
 /// Block header
 #[reth_codec(no_arbitrary)]
@@ -212,7 +213,11 @@ impl Header {
     /// Heavy function that will calculate hash of data and will *not* save the change to metadata.
     /// Use [`Header::seal`], [`SealedHeader`] and unlock if you need hash to be persistent.
     pub fn hash_slow(&self) -> B256 {
-        keccak256(alloy_rlp::encode(self))
+        let encoded = alloy_rlp::encode(self);
+        debug!("Encoded header: 0x{}", hex::encode(encoded.clone()));
+        let hash = keccak256(encoded);
+        debug!("Hash of header: {:?}",  hash);
+        hash
     }
 
     /// Checks if the header is empty - has no transactions and no ommers
@@ -359,6 +364,7 @@ impl Header {
 
 impl Encodable for Header {
     fn encode(&self, out: &mut dyn BufMut) {
+        debug!("Encoding header: {:?}", self);
         // Create a header indicating the encoded content is a list with the payload length computed
         // from the header's payload calculation function.
         let list_header =

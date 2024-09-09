@@ -37,6 +37,7 @@ serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+log = "0.4.22"
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
