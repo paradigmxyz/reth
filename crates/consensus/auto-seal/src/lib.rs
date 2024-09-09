@@ -15,6 +15,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
@@ -24,9 +25,8 @@ use reth_execution_errors::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHash, BlockHashOrNumber,
-    BlockNumber, BlockWithSenders, Bloom, Header, Requests, SealedBlock, SealedHeader,
-    TransactionSigned, Withdrawals, B256, U256,
+    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHashOrNumber,
+    BlockWithSenders, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -423,5 +423,259 @@ impl StorageInner {
         let new_header = header.seal(self.best_hash);
 
         Ok((new_header, execution_outcome))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_chainspec::{ChainHardforks, EthereumHardfork, ForkCondition};
+    use reth_primitives::Transaction;
+
+    use super::*;
+
+    #[test]
+    fn test_block_hash() {
+        let mut storage = StorageInner::default();
+
+        // Define two block hashes and their corresponding block numbers.
+        let block_hash_1: BlockHash = B256::random();
+        let block_number_1: BlockNumber = 1;
+        let block_hash_2: BlockHash = B256::random();
+        let block_number_2: BlockNumber = 2;
+
+        // Insert the block number and hash pairs into the `hash_to_number` map.
+        storage.hash_to_number.insert(block_hash_1, block_number_1);
+        storage.hash_to_number.insert(block_hash_2, block_number_2);
+
+        // Verify that `block_hash` returns the correct block hash for the given block number.
+        assert_eq!(storage.block_hash(block_number_1), Some(block_hash_1));
+        assert_eq!(storage.block_hash(block_number_2), Some(block_hash_2));
+
+        // Test that `block_hash` returns `None` for a non-existent block number.
+        let block_number_3: BlockNumber = 3;
+        assert_eq!(storage.block_hash(block_number_3), None);
+    }
+
+    #[test]
+    fn test_header_by_hash_or_number() {
+        let mut storage = StorageInner::default();
+
+        // Define block numbers, headers, and hashes.
+        let block_number_1: u64 = 1;
+        let block_number_2: u64 = 2;
+        let header_1 = Header { number: block_number_1, ..Default::default() };
+        let header_2 = Header { number: block_number_2, ..Default::default() };
+        let block_hash_1: BlockHash = B256::random();
+        let block_hash_2: BlockHash = B256::random();
+
+        // Insert headers and hash-to-number mappings.
+        storage.headers.insert(block_number_1, header_1.clone());
+        storage.headers.insert(block_number_2, header_2.clone());
+        storage.hash_to_number.insert(block_hash_1, block_number_1);
+        storage.hash_to_number.insert(block_hash_2, block_number_2);
+
+        // Test header retrieval by block number.
+        assert_eq!(
+            storage.header_by_hash_or_number(BlockHashOrNumber::Number(block_number_1)),
+            Some(header_1.clone())
+        );
+        assert_eq!(
+            storage.header_by_hash_or_number(BlockHashOrNumber::Number(block_number_2)),
+            Some(header_2.clone())
+        );
+
+        // Test header retrieval by block hash.
+        assert_eq!(
+            storage.header_by_hash_or_number(BlockHashOrNumber::Hash(block_hash_1)),
+            Some(header_1)
+        );
+        assert_eq!(
+            storage.header_by_hash_or_number(BlockHashOrNumber::Hash(block_hash_2)),
+            Some(header_2)
+        );
+
+        // Test non-existent block number and hash.
+        assert_eq!(storage.header_by_hash_or_number(BlockHashOrNumber::Number(999)), None);
+        let non_existent_hash: BlockHash = B256::random();
+        assert_eq!(
+            storage.header_by_hash_or_number(BlockHashOrNumber::Hash(non_existent_hash)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_insert_new_block() {
+        let mut storage = StorageInner::default();
+
+        // Define headers and block bodies.
+        let header_1 = Header { difficulty: U256::from(100), ..Default::default() };
+        let body_1 = BlockBody::default();
+        let header_2 = Header { difficulty: U256::from(200), ..Default::default() };
+        let body_2 = BlockBody::default();
+
+        // Insert the first block.
+        storage.insert_new_block(header_1.clone(), body_1.clone());
+        let best_block_1 = storage.best_block;
+        let best_hash_1 = storage.best_hash;
+
+        // Verify the block was inserted correctly.
+        assert_eq!(
+            storage.headers.get(&best_block_1),
+            Some(&Header { number: 1, ..header_1.clone() })
+        );
+        assert_eq!(storage.bodies.get(&best_hash_1), Some(&body_1));
+        assert_eq!(storage.hash_to_number.get(&best_hash_1), Some(&best_block_1));
+
+        // Insert the second block.
+        storage.insert_new_block(header_2.clone(), body_2.clone());
+        let best_block_2 = storage.best_block;
+        let best_hash_2 = storage.best_hash;
+
+        // Verify the second block was inserted correctly.
+        assert_eq!(
+            storage.headers.get(&best_block_2),
+            Some(&Header {
+                number: 2,
+                parent_hash: Header { number: 1, ..header_1 }.hash_slow(),
+                ..header_2
+            })
+        );
+        assert_eq!(storage.bodies.get(&best_hash_2), Some(&body_2));
+        assert_eq!(storage.hash_to_number.get(&best_hash_2), Some(&best_block_2));
+
+        // Check that the total difficulty was updated.
+        assert_eq!(storage.total_difficulty, header_1.difficulty + header_2.difficulty);
+    }
+
+    #[test]
+    fn test_build_basic_header_template() {
+        let mut storage = StorageInner::default();
+        let chain_spec = ChainSpec::default();
+
+        let best_block_number = 1;
+        let best_block_hash = B256::random();
+        let timestamp = 1_600_000_000;
+
+        // Set up best block information
+        storage.best_block = best_block_number;
+        storage.best_hash = best_block_hash;
+
+        // Build header template
+        let header = storage.build_header_template(
+            timestamp,
+            &[],  // no transactions
+            &[],  // no ommers
+            None, // no withdrawals
+            None, // no requests
+            &chain_spec,
+        );
+
+        // Verify basic fields
+        assert_eq!(header.parent_hash, best_block_hash);
+        assert_eq!(header.number, best_block_number + 1);
+        assert_eq!(header.timestamp, timestamp);
+        assert_eq!(header.gas_limit, chain_spec.max_gas_limit);
+    }
+
+    #[test]
+    fn test_ommers_and_transactions_roots() {
+        let storage = StorageInner::default();
+        let chain_spec = ChainSpec::default();
+        let timestamp = 1_600_000_000;
+
+        // Setup ommers and transactions
+        let ommers = vec![Header::default()];
+        let transactions = vec![TransactionSigned::default()];
+
+        // Build header template
+        let header = storage.build_header_template(
+            timestamp,
+            &transactions,
+            &ommers,
+            None, // no withdrawals
+            None, // no requests
+            &chain_spec,
+        );
+
+        // Verify ommers and transactions roots
+        assert_eq!(header.ommers_hash, proofs::calculate_ommers_root(&ommers));
+        assert_eq!(header.transactions_root, proofs::calculate_transaction_root(&transactions));
+    }
+
+    // Test base fee calculation from the parent block
+    #[test]
+    fn test_base_fee_calculation() {
+        let mut storage = StorageInner::default();
+        let chain_spec = ChainSpec::default();
+        let timestamp = 1_600_000_000;
+
+        // Set up the parent header with base fee
+        let base_fee = Some(100);
+        let parent_header = Header { base_fee_per_gas: base_fee, ..Default::default() };
+        storage.headers.insert(storage.best_block, parent_header);
+
+        // Build header template
+        let header = storage.build_header_template(
+            timestamp,
+            &[],  // no transactions
+            &[],  // no ommers
+            None, // no withdrawals
+            None, // no requests
+            &chain_spec,
+        );
+
+        // Verify base fee is correctly propagated
+        assert_eq!(header.base_fee_per_gas, base_fee);
+    }
+
+    // Test blob gas and excess blob gas calculation when Cancun is active
+    #[test]
+    fn test_blob_gas_calculation_cancun() {
+        let storage = StorageInner::default();
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                EthereumHardfork::Cancun.boxed(),
+                ForkCondition::Timestamp(25),
+            )]),
+            ..Default::default()
+        };
+        let timestamp = 26;
+
+        // Set up a transaction with blob gas
+        let blob_tx = TransactionSigned {
+            transaction: Transaction::Eip4844(Default::default()),
+            ..Default::default()
+        };
+        let transactions = vec![blob_tx];
+
+        // Build header template
+        let header = storage.build_header_template(
+            timestamp,
+            &transactions,
+            &[],  // no ommers
+            None, // no withdrawals
+            None, // no requests
+            &chain_spec,
+        );
+
+        // Verify that the header has the correct fields including blob gas
+        assert_eq!(
+            header,
+            Header {
+                parent_hash: B256::ZERO,
+                ommers_hash: proofs::calculate_ommers_root(&[]),
+                transactions_root: proofs::calculate_transaction_root(&transactions),
+                withdrawals_root: None,
+                difficulty: U256::from(2),
+                number: 1,
+                gas_limit: chain_spec.max_gas_limit,
+                timestamp,
+                base_fee_per_gas: None,
+                blob_gas_used: Some(0),
+                requests_root: None,
+                excess_blob_gas: Some(0),
+                ..Default::default()
+            }
+        );
     }
 }

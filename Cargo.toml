@@ -168,6 +168,7 @@ rustdoc.all = "warn"
 # suggestions which we fixed. The others didn't have any findings, so we can
 # assume they don't have that many false positives. Let's enable them to
 # prevent future problems.
+borrow_as_ptr = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
@@ -210,6 +211,7 @@ redundant_clone = "warn"
 redundant_else = "warn"
 single_char_pattern = "warn"
 string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
 suboptimal_flops = "warn"
 suspicious_operation_groupings = "warn"
 trailing_empty_array = "warn"
@@ -219,12 +221,14 @@ trivial_regex = "warn"
 tuple_array_conversions = "warn"
 type_repetition_in_bounds = "warn"
 uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
 unnecessary_struct_initialization = "warn"
 unnested_or_patterns = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
+while_float = "warn"
 zero_sized_map_values = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
@@ -406,7 +410,7 @@ revm = { version = "14.0.0", features = [
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.6"
+revm-inspectors = "0.6.1"
 revm-primitives = { version = "9.0.0", features = [
     "std",
 ], default-features = false }

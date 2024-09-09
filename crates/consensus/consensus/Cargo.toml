@@ -14,6 +14,9 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # misc
 auto_impl.workspace = true
 derive_more.workspace = true

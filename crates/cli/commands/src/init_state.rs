@@ -1,13 +1,13 @@
 //! Command that initializes the node from a genesis file.
 
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::config::EtlConfig;
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
-use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 
 use std::{fs::File, io::BufReader, path::PathBuf};
