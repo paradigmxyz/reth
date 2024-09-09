@@ -580,7 +580,7 @@ where
             .eth_api
             .block_with_senders(block_id.into())
             .await?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let this = self.clone();
 

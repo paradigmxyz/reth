@@ -379,6 +379,7 @@ where
         let EthExecuteOutput { receipts, requests, gas_used } =
             self.execute_without_verification(block, total_difficulty)?;
 
+        // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput {
