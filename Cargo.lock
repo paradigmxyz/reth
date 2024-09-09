@@ -7609,6 +7609,7 @@ name = "reth-node-builder"
 version = "1.0.6"
 dependencies = [
  "alloy-network",
+ "alloy-primitives",
  "aquamarine",
  "eyre",
  "fdlimit",
@@ -7669,6 +7670,7 @@ name = "reth-node-core"
 version = "1.0.6"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
  "const_format",
@@ -7759,6 +7761,7 @@ dependencies = [
 name = "reth-node-events"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-engine",
  "futures",
  "humantime",
