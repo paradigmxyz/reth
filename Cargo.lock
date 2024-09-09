@@ -6328,6 +6328,7 @@ name = "reth-blockchain-tree"
 version = "1.0.6"
 dependencies = [
  "alloy-genesis",
+ "alloy-primitives",
  "aquamarine",
  "assert_matches",
  "linked_hash_set",
