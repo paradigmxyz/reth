@@ -29,17 +29,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Build reth
-        run: |
-          cargo build --features asm-keccak --profile hivetests --bin reth --locked
-          mkdir dist && cp ./target/hivetests/reth ./dist/reth
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: .github/assets/hive/Dockerfile
+          file: Dockerfile
           tags: ghcr.io/paradigmxyz/reth:latest
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
