@@ -24,7 +24,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -71,6 +74,7 @@ where
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,
     >,

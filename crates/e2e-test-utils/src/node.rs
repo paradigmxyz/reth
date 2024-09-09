@@ -11,7 +11,7 @@ use reth::{
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
         api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::engine::PayloadStatusEnum,
+        types::{engine::PayloadStatusEnum, AnyTransactionReceipt},
     },
 };
 use reth_chainspec::ChainSpec;
@@ -90,8 +90,10 @@ where
         <Engine as EngineTypes>::ExecutionPayloadV3:
             From<Engine::BuiltPayload> + PayloadEnvelopeExt,
         AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
-        <AddOns::EthApi as EthApiTypes>::NetworkTypes:
-            Network<TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>>,
+        <AddOns::EthApi as EthApiTypes>::NetworkTypes: Network<
+            TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
+            ReceiptResponse = AnyTransactionReceipt,
+        >,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
