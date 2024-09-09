@@ -48,7 +48,6 @@ mod tests {
         mdbx::{cursor::Cursor, RW},
         tables, AccountsHistory,
     };
-    use reth_nippy_jar::DataReader;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,
@@ -56,6 +55,7 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
+    use reth_nippy_jar::DataReader;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, BlockNumber, Bytecode, SealedBlock,
         StaticFileSegment, B256, U256,
