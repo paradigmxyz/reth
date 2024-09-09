@@ -27,7 +27,10 @@ use reth_node_api::{
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -113,6 +116,7 @@ where
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,
     >,
@@ -348,6 +352,7 @@ where
             ctx.chain_spec(),
             beacon_engine_handle,
             ctx.components().payload_builder().clone().into(),
+            ctx.components().pool().clone(),
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
