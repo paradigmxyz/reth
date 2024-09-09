@@ -238,7 +238,7 @@ pub async fn test_exex_context_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
-    let evm_config = EthEvmConfig::new(MAINNET.clone());
+    let evm_config = EthEvmConfig::new(chain_spec.clone());
     let executor = MockExecutorProvider::default();
     let consensus = Arc::new(TestConsensus::default());
 

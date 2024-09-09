@@ -170,7 +170,7 @@ mod tests {
 
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        EthEvmConfig::new(MAINNET.clone()).fill_cfg_and_block_env(
+        EthEvmConfig::new(Arc::new(chain_spec.clone())).fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &header,
