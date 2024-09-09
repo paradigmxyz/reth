@@ -120,6 +120,14 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("HEKLA_ONTAKE_HEIGHT")
+                        .map_or(9999999, |h| h.parse().unwrap_or(9999999)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -155,7 +163,12 @@ pub static TAIKO_DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
             #[cfg(feature = "taiko")]
-            (Hardfork::Ontake, ForkCondition::Block(20)), //todo
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("DEV_ONTAKE_HEIGHT").map_or(2000, |h| h.parse().unwrap_or(2000)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
@@ -190,6 +203,14 @@ pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("MAINNET_ONTAKE_HEIGHT")
+                        .map_or(9999999, |h| h.parse().unwrap_or(9999999)),
+                ),
+            ),
         ]),
         deposit_contract: None,
         ..Default::default()
