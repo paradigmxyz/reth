@@ -1,7 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_primitives::{keccak256, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives::{keccak256, Address, B256, U256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::db::{states::BundleBuilder, BundleAccount};
 use std::collections::HashMap;

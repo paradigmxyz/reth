@@ -1,8 +1,8 @@
 //! Various noop implementations for traits.
 
 use crate::{BlockHashReader, BlockNumReader};
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Supports various api interfaces for testing purposes.

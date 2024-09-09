@@ -1107,7 +1107,7 @@ where
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
-    fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
+    fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
                 debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block_number, "Removing blocks using persistence task");
@@ -1153,9 +1153,9 @@ where
                     trace!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
                     self.persistence_state
                         .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block();
+                    self.on_new_persisted_block()?;
                 }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
         }
@@ -1460,15 +1460,14 @@ where
     /// height.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) {
+    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        debug!(target: "engine::tree", last_persisted_hash=?self.persistence_state.last_persisted_block_hash, last_persisted_number=?self.persistence_state.last_persisted_block_number, ?finalized, "New persisted block, clearing in memory blocks");
-        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)
-            .expect("todo: error handling");
+        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block_number,
             hash: self.persistence_state.last_persisted_block_hash,
         });
+        Ok(())
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2451,6 +2450,18 @@ where
     }
 }
 
+/// This is an error that can come from advancing persistence. Either this can be a
+/// [`TryRecvError`], or this can be a [`ProviderError`]
+#[derive(Debug, thiserror::Error)]
+pub enum AdvancePersistenceError {
+    /// An error that can be from failing to receive a value from persistence
+    #[error(transparent)]
+    RecvError(#[from] TryRecvError),
+    /// A provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 pub struct PersistenceState {
@@ -2518,6 +2529,61 @@ mod tests {
     };
     use tokio::sync::mpsc::unbounded_channel;
 
+    /// This is a test channel that allows you to `release` any value that is in the channel.
+    ///
+    /// If nothing has been sent, then the next value will be immediately sent.
+    #[allow(dead_code)]
+    struct TestChannel<T> {
+        /// If an item is sent to this channel, an item will be released in the wrapped channel
+        release: Receiver<()>,
+        /// The sender channel
+        tx: Sender<T>,
+        /// The receiver channel
+        rx: Receiver<T>,
+    }
+
+    impl<T: Send + 'static> TestChannel<T> {
+        /// Creates a new test channel
+        #[allow(dead_code)]
+        fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
+            let (original_tx, original_rx) = channel();
+            let (wrapped_tx, wrapped_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            let handle = TestChannelHandle::new(release_tx);
+            let test_channel = Self { release: release_rx, tx: wrapped_tx, rx: original_rx };
+            // spawn the task that listens and releases stuff
+            std::thread::spawn(move || test_channel.intercept_loop());
+            (original_tx, wrapped_rx, handle)
+        }
+
+        /// Runs the intercept loop, waiting for the handle to release a value
+        fn intercept_loop(&self) {
+            while self.release.recv() == Ok(()) {
+                let Ok(value) = self.rx.recv() else { return };
+
+                let _ = self.tx.send(value);
+            }
+        }
+    }
+
+    struct TestChannelHandle {
+        /// The sender to use for releasing values
+        release: Sender<()>,
+    }
+
+    impl TestChannelHandle {
+        /// Returns a [`TestChannelHandle`]
+        const fn new(release: Sender<()>) -> Self {
+            Self { release }
+        }
+
+        /// Signals to the channel task that a value should be released
+        #[allow(dead_code)]
+        fn release(&self) {
+            let _ = self.release.send(());
+        }
+    }
+
     struct TestHarness {
         tree: EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
@@ -2532,6 +2598,20 @@ mod tests {
     impl TestHarness {
         fn new(chain_spec: Arc<ChainSpec>) -> Self {
             let (action_tx, action_rx) = channel();
+            Self::with_persistence_channel(chain_spec, action_tx, action_rx)
+        }
+
+        #[allow(dead_code)]
+        fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
+            let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
+            (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)
+        }
+
+        fn with_persistence_channel(
+            chain_spec: Arc<ChainSpec>,
+            action_tx: Sender<PersistenceAction>,
+            action_rx: Receiver<PersistenceAction>,
+        ) -> Self {
             let persistence_handle = PersistenceHandle::new(action_tx);
 
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));

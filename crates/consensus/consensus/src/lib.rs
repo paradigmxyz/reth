@@ -9,10 +9,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockHash, BlockNumber, BlockWithSenders, Bloom, GotExpected,
-    GotExpectedBoxed, Header, InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
-    B256, U256,
+    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, GotExpected, GotExpectedBoxed, Header,
+    InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
 };
 
 #[cfg(feature = "std")]

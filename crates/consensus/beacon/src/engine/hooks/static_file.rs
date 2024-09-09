@@ -4,10 +4,11 @@ use crate::{
     engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
+use alloy_primitives::BlockNumber;
 use futures::FutureExt;
 use reth_errors::RethResult;
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
+use reth_primitives::static_file::HighestStaticFiles;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;

@@ -4,6 +4,8 @@ Unwinds a certain block range, deleting it from the database
 
 ```bash
 $ reth stage unwind --help
+```
+```txt
 Usage: reth stage unwind [OPTIONS] <COMMAND>
 
 Commands:

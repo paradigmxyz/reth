@@ -4,6 +4,8 @@ Debug engine API by replaying stored messages
 
 ```bash
 $ reth debug replay-engine --help
+```
+```txt
 Usage: reth debug replay-engine [OPTIONS] --engine-api-store <PATH>
 
 Options:

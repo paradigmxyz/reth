@@ -4,6 +4,8 @@ Prune according to the configuration without any limits
 
 ```bash
 $ reth prune --help
+```
+```txt
 Usage: reth prune [OPTIONS]
 
 Options:

@@ -4,6 +4,8 @@ Database debugging utilities
 
 ```bash
 $ reth db --help
+```
+```txt
 Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:

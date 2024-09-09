@@ -16,8 +16,9 @@ use crate::{
     PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
     TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
+use alloy_primitives::{Address, TxHash, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
+use reth_primitives::BlobTransactionSidecar;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
