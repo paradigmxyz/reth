@@ -362,10 +362,9 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        let cache = core::mem::take(&mut self.state.cache);
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
-            cache,
+            cache: core::mem::take(&mut self.state.cache),
             receipts,
             requests: vec![],
             gas_used,
