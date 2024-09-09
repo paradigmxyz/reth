@@ -16,9 +16,10 @@ use crate::{
     PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
     TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use alloy_primitives::{Address, TxHash, U256};
+use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::BlobTransactionSidecar;
+use reth_rpc_types::BlobAndProofV1;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -242,6 +243,13 @@ impl TransactionPool for NoopTransactionPool {
             return Ok(vec![])
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+    }
+
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
     }
 
     fn get_pending_transactions_by_origin(
