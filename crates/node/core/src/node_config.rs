@@ -230,7 +230,7 @@ impl NodeConfig {
     }
 
     /// Set the pruning args for the node
-    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }

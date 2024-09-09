@@ -1411,7 +1411,7 @@ mod tests {
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
         ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-        TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+        StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -3251,6 +3251,172 @@ mod tests {
         assert_eq!(
             provider.requests_by_block(in_memory_block.number.into(), prague_timestamp,)?,
             in_memory_block.requests.clone()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_state_provider_factory() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        // test in-memory state use-cases
+        let (in_memory_provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // test database state use-cases
+        let (only_database_provider, database_blocks, _, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            0,
+            BlockRangeParams::default(),
+        )?;
+
+        let blocks = [database_blocks.clone(), in_memory_blocks.clone()].concat();
+        let first_in_memory_block = in_memory_blocks.first().unwrap();
+        let first_db_block = database_blocks.first().unwrap();
+
+        // test latest state
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider.latest().unwrap().block_hash(first_in_memory_block.number)?.unwrap()
+        );
+        // test latest falls back to database state when there's no in-memory block
+        assert_eq!(
+            first_db_block.hash(),
+            only_database_provider.latest().unwrap().block_hash(first_db_block.number)?.unwrap()
+        );
+
+        // test history by block number
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .history_by_block_number(first_in_memory_block.number)?
+                .block_hash(first_in_memory_block.number)?
+                .unwrap()
+        );
+        assert_eq!(
+            first_db_block.hash(),
+            only_database_provider
+                .history_by_block_number(first_db_block.number)?
+                .block_hash(first_db_block.number)?
+                .unwrap()
+        );
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .history_by_block_hash(first_in_memory_block.hash())?
+                .block_hash(first_in_memory_block.number)?
+                .unwrap()
+        );
+        assert!(only_database_provider.history_by_block_hash(B256::random()).is_err());
+
+        // test state by block hash
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .state_by_block_hash(first_in_memory_block.hash())?
+                .block_hash(first_in_memory_block.number)?
+                .unwrap()
+        );
+        assert_eq!(
+            first_db_block.hash(),
+            only_database_provider
+                .state_by_block_hash(first_db_block.hash())?
+                .block_hash(first_db_block.number)?
+                .unwrap()
+        );
+        assert!(only_database_provider.state_by_block_hash(B256::random()).is_err());
+
+        // test pending without pending state- falls back to latest
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .pending()
+                .unwrap()
+                .block_hash(first_in_memory_block.number)
+                .unwrap()
+                .unwrap()
+        );
+
+        // adding a pending block to state can test pending() and  pending_state_by_hash() function
+        let pending_block = database_blocks[database_blocks.len() - 1].clone();
+        only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            block: Arc::new(pending_block.clone()),
+            senders: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+            trie: Default::default(),
+        });
+
+        assert_eq!(
+            pending_block.hash(),
+            only_database_provider
+                .pending()
+                .unwrap()
+                .block_hash(pending_block.number)
+                .unwrap()
+                .unwrap()
+        );
+
+        assert_eq!(
+            pending_block.hash(),
+            only_database_provider
+                .pending_state_by_hash(pending_block.hash())?
+                .unwrap()
+                .block_hash(pending_block.number)?
+                .unwrap()
+        );
+
+        // test state by block number or tag
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Number(
+                    first_in_memory_block.number
+                ))?
+                .block_hash(first_in_memory_block.number)?
+                .unwrap()
+        );
+        assert_eq!(
+            first_in_memory_block.hash(),
+            in_memory_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Latest)?
+                .block_hash(first_in_memory_block.number)?
+                .unwrap()
+        );
+        // test state by block tag for safe block
+        let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
+        in_memory_provider.canonical_in_memory_state.set_safe(safe_block.header.clone());
+        assert_eq!(
+            safe_block.hash(),
+            in_memory_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Safe)?
+                .block_hash(safe_block.number)?
+                .unwrap()
+        );
+        // test state by block tag for finalized block
+        let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
+        in_memory_provider.canonical_in_memory_state.set_finalized(finalized_block.header.clone());
+        assert_eq!(
+            finalized_block.hash(),
+            in_memory_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Finalized)?
+                .block_hash(finalized_block.number)?
+                .unwrap()
+        );
+        // test state by block tag for earliest block
+        let earliest_block = blocks.first().unwrap().clone();
+        assert_eq!(
+            earliest_block.hash(),
+            only_database_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Earliest)?
+                .block_hash(earliest_block.number)?
+                .unwrap()
         );
 
         Ok(())

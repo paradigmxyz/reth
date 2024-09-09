@@ -4,6 +4,8 @@ Drop a stage's tables from the database
 
 ```bash
 $ reth stage drop --help
+```
+```txt
 Usage: reth stage drop [OPTIONS] <STAGE>
 
 Options:

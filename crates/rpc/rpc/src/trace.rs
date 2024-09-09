@@ -213,7 +213,7 @@ where
             })
             .await
             .transpose()
-            .ok_or_else(|| EthApiError::TransactionNotFound)?
+            .ok_or(EthApiError::TransactionNotFound)?
     }
 
     /// Returns transaction trace objects at the given index

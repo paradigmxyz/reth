@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::setup;
+use alloy_primitives::BlockNumber;
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{tables, DatabaseEnv};
@@ -10,7 +11,6 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_builder::NodeTypesWithStorageAdapter;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::BlockNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory, ProviderNodeTypes};
 use reth_prune::PruneModes;
 use reth_stages::{

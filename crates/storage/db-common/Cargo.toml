@@ -24,6 +24,7 @@ reth-fs-util.workspace = true
 
 # eth
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 
 # misc
 eyre.workspace = true

@@ -2,9 +2,9 @@ use reth_chainspec::ChainSpecBuilder;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Address, B256};
 use reth_provider::{
-    NodeTypesWithStorageAdapter, providers::{ StaticFileProvider},
-    AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
-    StateProvider, TransactionsProvider,
+    providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
+    NodeTypesWithStorageAdapter, ProviderFactory, ReceiptProvider, StateProvider,
+    TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use std::path::Path;

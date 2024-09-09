@@ -1,15 +1,14 @@
 //! Reth genesis initialization utility functions.
 
 use alloy_genesis::GenesisAccount;
+use alloy_primitives::{Address, B256, U256};
 use reth_chainspec::ChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_primitives::{
-    Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
-};
+use reth_primitives::{Account, Bytecode, Receipts, StaticFileSegment, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,

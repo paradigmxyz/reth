@@ -2,11 +2,11 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
+use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, StorageKey,
-    StorageValue, B256, KECCAK_EMPTY, U256,
+    BlockId, BlockNumHash, BlockNumberOrTag, Bytecode, StorageKey, StorageValue, KECCAK_EMPTY,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
@@ -140,7 +140,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_[StateProvider] with matching block hash.
+    /// Returns _any_ [StateProvider] with matching block hash.
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;

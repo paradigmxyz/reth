@@ -1,12 +1,6 @@
-use crate::{
-    NodeStorage, NodeTypesWithStorage,
-    NodeTypesWithStorageAdapter,
-};
+use crate::{NodeStorage, NodeTypesWithStorage, NodeTypesWithStorageAdapter};
 use reth_chainspec::EthChainSpec;
-use reth_db::{
-    test_utils::TempDatabase,
-    DatabaseEnv,
-};
+use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_primitives::EngineTypes;
 use reth_node_types::{
     AnyNodeTypes, AnyNodeTypesWithEngine, NodePrimitives, NodeTypes, NodeTypesWithEngine,

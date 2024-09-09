@@ -1,4 +1,4 @@
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
 

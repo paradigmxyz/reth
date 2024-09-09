@@ -1,7 +1,7 @@
 use crate::{
     providers::{state::latest::LatestStateProvider, StaticFileProvider},
     to_range,
-    traits::{BlockSource, NodeStorage, NodeTypesWithStorage, ProviderNodeTypes, ReceiptProvider},
+    traits::{BlockSource, ProviderNodeTypes, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
