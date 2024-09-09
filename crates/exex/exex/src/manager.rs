@@ -309,6 +309,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                     self.backfill_job = None;
                 }
             }
+            #[allow(clippy::branches_sharing_code)]
             std::cmp::Ordering::Equal => {
                 // ExEx is at the same block height as the node head
 
