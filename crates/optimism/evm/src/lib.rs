@@ -35,6 +35,8 @@ use revm_primitives::{Bytes, Env, OptimismFields, TxKind};
 pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
+    type Header = Header;
+
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
     }

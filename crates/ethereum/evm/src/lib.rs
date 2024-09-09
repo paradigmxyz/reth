@@ -37,6 +37,8 @@ pub mod eip6110;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
+    type Header = Header;
+
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
