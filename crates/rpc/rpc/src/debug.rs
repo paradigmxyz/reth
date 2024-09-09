@@ -310,7 +310,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(inspector).into())
+                        return Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -356,7 +356,7 @@ where
                                 let frame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_geth_builder()
-                                    .geth_prestate_traces(&res, prestate_config, db)
+                                    .geth_prestate_traces(&res, &prestate_config, db)
                                     .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame)
                             })
@@ -706,7 +706,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(inspector).into(), res.state))
+                        return Ok((FourByteFrame::from(&inspector).into(), res.state))
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -739,7 +739,7 @@ where
                         let frame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_geth_builder()
-                            .geth_prestate_traces(&res, prestate_config, db)
+                            .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         return Ok((frame.into(), res.state))
