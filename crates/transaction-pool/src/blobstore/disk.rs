@@ -135,13 +135,12 @@ impl BlobStore for DiskFileBlobStore {
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         let mut result = vec![None; versioned_hashes.len()];
         for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            // FIXME(sproul): these versioned hashes could be cached
             for (i, blob_versioned_hash) in blob_sidecar.versioned_hashes().enumerate() {
                 for (j, target_versioned_hash) in versioned_hashes.iter().enumerate() {
                     if blob_versioned_hash == *target_versioned_hash {
                         result[j].get_or_insert_with(|| BlobAndProofV1 {
-                            blob: blob_sidecar.blobs[i].clone(),
-                            proof: blob_sidecar.proofs[i].clone(),
+                            blob: Box::new(blob_sidecar.blobs[i]),
+                            proof: blob_sidecar.proofs[i],
                         });
                     }
                 }

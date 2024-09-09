@@ -61,18 +61,16 @@ pub use eth::{
     },
 };
 
-use alloy_eips::eip4844::BYTES_PER_BLOB;
-use alloy_primitives::FixedBytes;
+use alloy_eips::eip4844::{Blob, Bytes48};
 use serde::{Deserialize, Serialize};
 
-/// Blob type returned in responses to `engine_getBlobsV1`.
-// FIXME(sproul): move to alloy?
+/// Blob type returned in responses to `engine_getBlobsV1`: <https://github.com/ethereum/execution-apis/pull/559>
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BlobAndProofV1 {
     /// The blob data.
-    pub blob: FixedBytes<BYTES_PER_BLOB>,
+    pub blob: Box<Blob>,
     /// The KZG proof for the blob.
-    pub proof: FixedBytes<48>,
+    pub proof: Bytes48,
 }
 
 /// Optimism specific rpc types.

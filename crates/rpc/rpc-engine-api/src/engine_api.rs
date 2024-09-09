@@ -41,6 +41,9 @@ pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
+/// The upper limit blobs `eth_getBlobs`.
+const MAX_BLOB_LIMIT: usize = 128;
+
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
 pub struct EngineApi<Provider, EngineT: EngineTypes, Pool> {
@@ -919,12 +922,16 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
-        // FIXME(sproul): work out error wrapping or make infallible
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
+        }
+
         Ok(self
             .inner
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
-            .expect("get_blobs_for_versioned_hashes is infallible"))
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
     }
 }
 
@@ -942,20 +949,21 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-    use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_testing_utils::generators::random_block;
-
     use reth_chainspec::MAINNET;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::SealedBlock;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
+    use reth_testing_utils::generators::random_block;
     use reth_tokio_util::EventSender;
+    use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
+    fn setup_engine_api(
+    ) -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes, NoopTransactionPool>)
     {
         let client = ClientVersionV1 {
             code: ClientCode::RH,
@@ -975,6 +983,7 @@ mod tests {
             chain_spec.clone(),
             BeaconConsensusEngineHandle::new(to_engine, event_sender),
             payload_store.into(),
+            NoopTransactionPool::default(),
             task_executor,
             client,
             EngineCapabilities::default(),
