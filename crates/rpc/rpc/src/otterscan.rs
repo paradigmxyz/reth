@@ -1,5 +1,4 @@
 use alloy_network::Network;
-use alloy_network_primitives::ReceiptResponse;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};

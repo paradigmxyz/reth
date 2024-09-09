@@ -15,7 +15,6 @@ where
         self.inner.cache()
     }
 
-    /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,
