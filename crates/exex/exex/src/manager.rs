@@ -1,9 +1,14 @@
-use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
-use futures::Stream;
+use crate::{
+    BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight, StreamBackfillJob,
+};
+use futures::{Stream, StreamExt};
 use metrics::Gauge;
+use reth_chainspec::Head;
 use reth_exex_types::ExExHead;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::BlockNumber;
+use reth_node_api::FullNodeComponents;
+use reth_primitives::{BlockNumber, U256};
+use reth_provider::{Chain, HeaderProvider};
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
@@ -62,11 +67,13 @@ impl ExExHandle {
     /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<Node>(
         id: String,
+        node_head: Head,
         components: Node,
     ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<Node>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let notifications = ExExNotifications { components, notifications: notification_rx };
+        let notifications =
+            ExExNotifications { node_head, components, notifications: notification_rx };
 
         (
             Self {
@@ -146,6 +153,7 @@ impl ExExHandle {
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 pub struct ExExNotifications<Node> {
+    node_head: Head,
     components: Node,
     notifications: Receiver<ExExNotification>,
 }
@@ -159,10 +167,14 @@ impl<Node> Debug for ExExNotifications<Node> {
     }
 }
 
-impl<Node> ExExNotifications<Node> {
+impl<Node: FullNodeComponents> ExExNotifications<Node> {
     /// Creates a new instance of [`ExExNotifications`].
-    pub const fn new(components: Node, notifications: Receiver<ExExNotification>) -> Self {
-        Self { components, notifications }
+    pub const fn new(
+        node_head: Head,
+        components: Node,
+        notifications: Receiver<ExExNotification>,
+    ) -> Self {
+        Self { node_head, components, notifications }
     }
 
     /// Receives the next value for this receiver.
@@ -221,12 +233,8 @@ impl<Node> ExExNotifications<Node> {
     /// Notifications will be sent starting from the head, not inclusive. For example, if
     /// `head.number == 10`, then the first notification will be with `block.number == 11`.
     #[allow(dead_code)]
-    fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<Node> {
-        ExExNotificationsWithHead {
-            components: self.components,
-            notifications: self.notifications,
-            head,
-        }
+    fn with_head(self, head: ExExHead) -> eyre::Result<ExExNotificationsWithHead<Node>> {
+        ExExNotificationsWithHead::new(self.node_head, self.components, self.notifications, head)
     }
 }
 
@@ -241,31 +249,152 @@ impl<Node: Unpin> Stream for ExExNotifications<Node> {
 /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that are
 /// committed or reverted after the given head.
 #[derive(Debug)]
-pub struct ExExNotificationsWithHead<Node> {
+pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
     #[allow(dead_code)]
     components: Node,
     notifications: Receiver<ExExNotification>,
     head: ExExHead,
+    backfill_job: Option<StreamBackfillJob<Node::Executor, Node::Provider, Chain>>,
+    compare_head: bool,
 }
 
-impl<Node: Unpin> Stream for ExExNotificationsWithHead<Node> {
-    type Item = ExExNotification;
+impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
+    /// Creates a new [`ExExNotificationsWithHead`].
+    pub fn new(
+        node_head: Head,
+        components: Node,
+        notifications: Receiver<ExExNotification>,
+        exex_head: ExExHead,
+    ) -> eyre::Result<Self> {
+        let mut notifications = Self {
+            components,
+            notifications,
+            head: exex_head,
+            backfill_job: None,
+            compare_head: false,
+        };
+
+        notifications.heal(node_head)?;
+
+        Ok(notifications)
+    }
+
+    fn heal(&mut self, node_head: Head) -> eyre::Result<()> {
+        let backfill_job_factory = BackfillJobFactory::new(
+            self.components.block_executor().clone(),
+            self.components.provider().clone(),
+        );
+        match self.head.block.number.cmp(&node_head.number) {
+            std::cmp::Ordering::Less => {
+                // ExEx is behind the node head
+
+                if let Some(exex_header) =
+                    self.components.provider().header(&self.head.block.hash)?
+                {
+                    // ExEx is on the canonical chain
+
+                    if exex_header.number != self.head.block.number {
+                        eyre::bail!("ExEx head number does not match the hash")
+                    }
+
+                    // ExEx is on the canonical chain, start backfill
+                    let backfill = backfill_job_factory
+                        .backfill(self.head.block.number + 1..=node_head.number)
+                        .into_stream();
+                    self.backfill_job = Some(backfill);
+                } else {
+                    // ExEx is not on the canonical chain, first unwind it and then backfill
+
+                    // TODO(alexey): unwind and backfill
+                    self.backfill_job = None;
+                }
+            }
+            std::cmp::Ordering::Equal => {
+                // ExEx is at the same block height as the node head
+
+                if let Some(exex_header) =
+                    self.components.provider().header(&self.head.block.hash)?
+                {
+                    // ExEx is on the canonical chain
+
+                    if exex_header.number != self.head.block.number {
+                        eyre::bail!("ExEx head number does not match the hash")
+                    }
+
+                    // ExEx is on the canonical chain and the same as the node head, no need to
+                    // backfill
+                    self.backfill_job = None;
+                } else {
+                    // ExEx is not on the canonical chain, first unwind it and then backfill
+
+                    // TODO(alexey): unwind and backfill
+                    self.backfill_job = None;
+                }
+            }
+            std::cmp::Ordering::Greater => {
+                // ExEx is ahead of the node head
+
+                // TODO(alexey): wait until the node head is at the same height as the ExEx head
+                // and then repeat the process above
+                self.compare_head = true;
+            }
+        };
+
+        Ok(())
+    }
+}
+
+impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node> {
+    type Item = eyre::Result<ExExNotification>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // TODO(alexey): backfill according to the head
+        if let Some(backfill_job) = &mut this.backfill_job {
+            if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)) {
+                return Poll::Ready(Some(Ok(ExExNotification::ChainCommitted {
+                    new: Arc::new(chain?),
+                })))
+            }
+
+            // Backfill job is done, remove it
+            this.backfill_job = None;
+        }
+
         loop {
             let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
                 return Poll::Ready(None)
             };
 
-            if notification
-                .committed_chain()
-                .or_else(|| notification.reverted_chain())
-                .map_or(false, |chain| chain.first().number > this.head.block.number)
-            {
-                return Poll::Ready(Some(notification))
+            let chain = notification.committed_chain().or_else(|| notification.reverted_chain());
+
+            if this.compare_head {
+                if let Some(block) =
+                    chain.as_ref().and_then(|chain| chain.blocks().get(&this.head.block.number))
+                {
+                    if block.hash() == this.head.block.hash {
+                        // ExEx is on the canonical chain
+                        this.compare_head = false;
+                    } else {
+                        // ExEx is not on the canonical chain, heal
+                        let total_difficulty = this
+                            .components
+                            .provider()
+                            .header_td_by_number(block.number)?
+                            .unwrap_or(U256::MAX);
+                        this.heal(Head::new(
+                            block.number,
+                            block.hash(),
+                            block.difficulty,
+                            total_difficulty,
+                            block.timestamp,
+                        ))?;
+                    }
+                }
+            }
+
+            if chain.map_or(false, |chain| chain.first().number > this.head.block.number) {
+                return Poll::Ready(Some(Ok(notification)))
             }
         }
     }
@@ -612,7 +741,7 @@ mod tests {
     #[tokio::test]
     async fn test_delivers_events() {
         let (mut exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), ());
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Send an event and check that it's delivered correctly
         event_tx.send(ExExEvent::FinishedHeight(42)).unwrap();
@@ -622,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_exexs() {
-        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), ());
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), Head::default(), ());
 
         assert!(!ExExManager::new(vec![], 0).handle.has_exexs());
 
@@ -631,7 +760,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_capacity() {
-        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), ());
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), Head::default(), ());
 
         assert!(!ExExManager::new(vec![], 0).handle.has_capacity());
 
@@ -640,7 +769,7 @@ mod tests {
 
     #[test]
     fn test_push_notification() {
-        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), ());
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Create a mock ExExManager and add the exex_handle to it
         let mut exex_manager = ExExManager::new(vec![exex_handle], 10);
@@ -685,7 +814,7 @@ mod tests {
 
     #[test]
     fn test_update_capacity() {
-        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), ());
+        let (exex_handle, _, _) = ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Create a mock ExExManager and add the exex_handle to it
         let max_capacity = 5;
@@ -720,7 +849,7 @@ mod tests {
     #[tokio::test]
     async fn test_updates_block_height() {
         let (exex_handle, event_tx, mut _notification_rx) =
-            ExExHandle::new("test_exex".to_string(), ());
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Check initial block height
         assert!(exex_handle.finished_height.is_none());
@@ -757,8 +886,10 @@ mod tests {
     #[tokio::test]
     async fn test_updates_block_height_lower() {
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string(), ());
-        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string(), ());
+        let (exex_handle1, event_tx1, _) =
+            ExExHandle::new("test_exex1".to_string(), Head::default(), ());
+        let (exex_handle2, event_tx2, _) =
+            ExExHandle::new("test_exex2".to_string(), Head::default(), ());
 
         // Send events to update the block heights of the two handles, with the second being lower
         event_tx1.send(ExExEvent::FinishedHeight(42)).unwrap();
@@ -788,8 +919,10 @@ mod tests {
     #[tokio::test]
     async fn test_updates_block_height_greater() {
         // Create two `ExExHandle` instances
-        let (exex_handle1, event_tx1, _) = ExExHandle::new("test_exex1".to_string(), ());
-        let (exex_handle2, event_tx2, _) = ExExHandle::new("test_exex2".to_string(), ());
+        let (exex_handle1, event_tx1, _) =
+            ExExHandle::new("test_exex1".to_string(), Head::default(), ());
+        let (exex_handle2, event_tx2, _) =
+            ExExHandle::new("test_exex2".to_string(), Head::default(), ());
 
         // Assert that the initial block height is `None` for the first `ExExHandle`.
         assert!(exex_handle1.finished_height.is_none());
@@ -825,7 +958,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exex_manager_capacity() {
-        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), ());
+        let (exex_handle_1, _, _) = ExExHandle::new("test_exex_1".to_string(), Head::default(), ());
 
         // Create an ExExManager with a small max capacity
         let max_capacity = 2;
@@ -863,7 +996,8 @@ mod tests {
 
     #[tokio::test]
     async fn exex_handle_new() {
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string(), ());
+        let (mut exex_handle, _, mut notifications) =
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Check initial state
         assert_eq!(exex_handle.id, "test_exex");
@@ -905,7 +1039,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_if_finished_height_gt_chain_tip() {
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string(), ());
+        let (mut exex_handle, _, mut notifications) =
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(15);
@@ -946,7 +1081,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reorged_notification() {
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string(), ());
+        let (mut exex_handle, _, mut notifications) =
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         let notification = ExExNotification::ChainReorged {
             old: Arc::new(Chain::default()),
@@ -976,7 +1112,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sends_chain_reverted_notification() {
-        let (mut exex_handle, _, mut notifications) = ExExHandle::new("test_exex".to_string(), ());
+        let (mut exex_handle, _, mut notifications) =
+            ExExHandle::new("test_exex".to_string(), Head::default(), ());
 
         let notification = ExExNotification::ChainReverted { old: Arc::new(Chain::default()) };
 

@@ -48,7 +48,8 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         for (id, exex) in extensions {
             // create a new exex handle
-            let (handle, events, notifications) = ExExHandle::new(id.clone(), components.clone());
+            let (handle, events, notifications) =
+                ExExHandle::new(id.clone(), head, components.clone());
             exex_handles.push(handle);
 
             // create the launch context for the exex
