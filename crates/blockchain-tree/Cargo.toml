@@ -31,6 +31,9 @@ reth-network.workspace = true
 reth-consensus.workspace = true
 reth-node-types.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # common
 parking_lot.workspace = true
 tracing.workspace = true
