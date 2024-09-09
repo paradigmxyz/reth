@@ -20,15 +20,10 @@ jobs:
   prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
@@ -252,7 +247,7 @@ jobs:
           cat hivetests/workspace/logs/reth/client-*.log
   notify-on-error:
     needs: test
-    if: failure()
+    if: false #failure()
     runs-on:
       group: Reth
     steps:
