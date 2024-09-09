@@ -1,4 +1,5 @@
 use alloy_network::Network;
+use alloy_network_primitives::ReceiptResponse;
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
@@ -18,7 +19,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    AnyTransactionReceipt, BlockTransactions, Header, Transaction, WithOtherFields,
+    BlockTransactions, Header, Transaction, WithOtherFields,
 };
 use reth_rpc_types_compat::TransactionCompat;
 use revm_inspectors::{
@@ -52,12 +53,12 @@ where
     fn block_details(
         &self,
         block: RpcBlock<Eth::NetworkTypes>,
-        receipts: Vec<AnyTransactionReceipt>,
+        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
     ) -> RpcResult<BlockDetails> {
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
+            .map(|receipt| receipt.gas_used().saturating_mul(receipt.effective_gas_price()))
             .sum::<u128>();
 
         Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
@@ -247,14 +248,12 @@ where
         let receipts = receipts
             .drain(page_start..page_end)
             .map(|receipt| {
-                let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
+                let receipt = receipt.map_inner(|receipt| OtsReceipt {
                     status: receipt
-                        .inner
-                        .receipt
-                        .status
+                        .status()
                         .as_eip658()
                         .expect("ETH API returned pre-EIP-658 status"),
-                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
+                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
                     logs: None,
                     logs_bloom: None,
                     r#type: receipt.r#type,

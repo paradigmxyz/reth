@@ -17,8 +17,7 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, BlockNumberOrTag, TransactionInfo, TransactionRequest,
-    TypedTransactionRequest,
+    BlockNumberOrTag, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
@@ -26,7 +25,7 @@ use reth_rpc_types_compat::{
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{EthApiTypes, FromEthApiError, IntoEthApiError, RpcTransaction};
+use crate::{EthApiTypes, FromEthApiError, IntoEthApiError, RpcReceipt, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
@@ -140,7 +139,7 @@ pub trait EthTransactions: LoadTransaction {
     fn transaction_receipt(
         &self,
         hash: B256,
-    ) -> impl Future<Output = Result<Option<AnyTransactionReceipt>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {

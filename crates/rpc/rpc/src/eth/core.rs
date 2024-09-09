@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use alloy_network::AnyNetwork;
+use alloy_network::{AnyNetwork, Ethereum, Network};
 use derive_more::Deref;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
@@ -126,7 +126,7 @@ where
 {
     type Error = EthApiError;
     // todo: replace with alloy_network::Ethereum
-    type NetworkTypes = AnyNetwork;
+    type NetworkTypes = Ethereum;
     type TransactionCompat = EthTxBuilder;
 }
 

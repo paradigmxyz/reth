@@ -3,16 +3,16 @@
 use std::sync::Arc;
 
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
+use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index};
+use reth_rpc_eth_types::{EthApiError, EthStateCache};
+use reth_rpc_types::{Header, Index};
 use reth_rpc_types_compat::{
     block::{from_block, uncle_block_from_header},
     TransactionCompat,
 };
 
-use crate::{FromEthApiError, RpcBlock, RpcTransaction};
+use crate::{FromEthApiError, RpcBlock, RpcReceipt, RpcTransaction};
 
 use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
@@ -106,46 +106,9 @@ pub trait EthBlocks: LoadBlock {
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>> + Send
     where
-        Self: LoadReceipt,
-    {
-        async move {
-            if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-                let block_number = block.number;
-                let base_fee = block.base_fee_per_gas;
-                let block_hash = block.hash();
-                let excess_blob_gas = block.excess_blob_gas;
-                let timestamp = block.timestamp;
-                let block = block.unseal();
-
-                let receipts = block
-                    .body
-                    .into_iter()
-                    .zip(receipts.iter())
-                    .enumerate()
-                    .map(|(idx, (tx, receipt))| {
-                        let meta = TransactionMeta {
-                            tx_hash: tx.hash,
-                            index: idx as u64,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                            excess_blob_gas,
-                            timestamp,
-                        };
-
-                        ReceiptBuilder::new(&tx, meta, receipt, &receipts)
-                            .map(|builder| builder.build())
-                            .map_err(Self::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Self::Error>>();
-                return receipts.map(Some);
-            }
-
-            Ok(None)
-        }
-    }
+        Self: LoadReceipt;
 
     /// Helper method that loads a bock and all its receipts.
     fn load_block_and_receipts(

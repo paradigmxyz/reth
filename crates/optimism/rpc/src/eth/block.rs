@@ -29,7 +29,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>
+    ) -> Result<Option<Vec<RpcReceipt<Self::NetworkTypes>>>, Self::Error>
     where
         Self: LoadReceipt,
     {
@@ -60,13 +60,15 @@ where
                         timestamp,
                     };
 
-                    let op_tx_meta =
-                        self.build_op_receipt_meta(tx, l1_block_info.clone(), receipt)?;
-
-                    Ok(ReceiptBuilder::new(tx, meta, receipt, &receipts)
-                        .map_err(Self::Error::from_eth_err)?
-                        .add_other_fields(op_tx_meta.into())
-                        .build())
+                    Ok(OpReceiptBuilder::new(
+                        self.provider().chain_spec(),
+                        tx,
+                        meta,
+                        receipt,
+                        &receipts,
+                        l1_block_info.clone(),
+                    )?
+                    .build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>();
             return receipts.map(Some)

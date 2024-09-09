@@ -451,6 +451,7 @@ alloy-transport-http = { version = "0.3.1", features = [
 ], default-features = false }
 alloy-transport-ipc = { version = "0.3.1", default-features = false }
 alloy-transport-ws = { version = "0.3.1", default-features = false }
+alloy-network-primitives = { version = "0.3.1", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.2.8"
