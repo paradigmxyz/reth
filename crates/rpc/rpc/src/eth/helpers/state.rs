@@ -83,9 +83,9 @@ mod tests {
         accounts: HashMap<Address, ExtendedAccount>,
     ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
-
         let mock_provider = MockEthProvider::default();
+
+        let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
 
         let cache =
