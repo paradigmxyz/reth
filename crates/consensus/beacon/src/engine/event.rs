@@ -1,5 +1,6 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
-use reth_primitives::{SealedBlock, SealedHeader, B256};
+use alloy_primitives::B256;
+use reth_primitives::{SealedBlock, SealedHeader};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{sync::Arc, time::Duration};
 
