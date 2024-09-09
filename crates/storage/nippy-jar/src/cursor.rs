@@ -1,6 +1,7 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    MmapDataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
+    reader::DataReader,
+    DefaultDataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
 use std::{ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;
@@ -11,8 +12,8 @@ pub struct NippyJarCursor<'a, H = ()> {
     /// [`NippyJar`] which holds most of the required configuration to read from the file.
     jar: &'a NippyJar<H>,
     /// Data and offset reader.
-    reader: Arc<MmapDataReader>,
-    /// Internal buffer to unload data to without reallocating memory on each retrieval.
+    reader: Arc<DefaultDataReader>,
+    /// Internal buffer to unload decrypted to without reallocating memory on each retrieval.
     internal_buffer: Vec<u8>,
     /// Cursor row position.
     row: u64,
@@ -38,7 +39,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
     pub fn with_reader(
         jar: &'a NippyJar<H>,
-        reader: Arc<MmapDataReader>,
+        reader: Arc<DefaultDataReader>,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
         Ok(NippyJarCursor {
@@ -92,7 +93,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         Ok(Some(
             row.into_iter()
                 .map(|v| match v {
-                    ValueRange::Mmap(range) => self.reader.data(range),
+                    ValueRange::Mmap(range) => self.reader.data_ref(range),
                     ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
@@ -133,7 +134,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         Ok(Some(
             row.into_iter()
                 .map(|v| match v {
-                    ValueRange::Mmap(range) => self.reader.data(range),
+                    ValueRange::Mmap(range) => self.reader.data_ref(range),
                     ValueRange::Internal(range) => &self.internal_buffer[range],
                 })
                 .collect(),
@@ -152,14 +153,28 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
             // It's the last column of the last row
-            value_offset..self.reader.size()
+            value_offset..self.reader.size()?
         } else {
             let next_value_offset = self.reader.offset(offset_pos + 1)? as usize;
             value_offset..next_value_offset
         };
 
         if let Some(compression) = self.jar.compressor() {
+            let mut _file_buffer = None;
             let from = self.internal_buffer.len();
+
+            // Reference to the input data
+            let data = if self.reader.allows_data_ref() {
+                self.reader.data_ref(column_offset_range)
+            } else {
+                // Only Mmap reader allows reading directly from memory. Otherwise we need to copy
+                // the data to a buffer, and pass it as a slice to Zstd.
+                let mut buffer = vec![0u8; column_offset_range.end - column_offset_range.start];
+                self.reader.data(column_offset_range, buffer.as_mut_slice())?;
+                _file_buffer = Some(buffer);
+                _file_buffer.as_deref().expect("qed")
+            };
+
             match compression {
                 Compressors::Zstd(z) if z.use_dict => {
                     // If we are here, then for sure we have the necessary dictionaries and they're
@@ -169,19 +184,17 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
                         [column]
                         .loaded()
                         .expect("dictionary to be loaded");
+
                     let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
                     Zstd::decompress_with_dictionary(
-                        self.reader.data(column_offset_range),
+                        data,
                         &mut self.internal_buffer,
                         &mut decompressor,
                     )?;
                 }
                 _ => {
                     // Uses the chosen default decompressor
-                    compression.decompress_to(
-                        self.reader.data(column_offset_range),
-                        &mut self.internal_buffer,
-                    )?;
+                    compression.decompress_to(data, &mut self.internal_buffer)?;
                 }
             }
             let to = self.internal_buffer.len();
@@ -189,7 +202,21 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             row.push(ValueRange::Internal(from..to));
         } else {
             // Not compressed
-            row.push(ValueRange::Mmap(column_offset_range));
+            if self.reader.allows_data_ref() {
+                row.push(ValueRange::Mmap(column_offset_range));
+            } else {
+                let len = column_offset_range.end - column_offset_range.start;
+
+                // It's safe to use internal_buffer, since there's no partial compression. Either
+                // all rows are compressed, or none are.
+                if self.internal_buffer.len() < len {
+                    self.internal_buffer.resize(len, 0);
+                }
+                self.reader
+                    .data(column_offset_range.clone(), self.internal_buffer.as_mut_slice())?;
+
+                row.push(ValueRange::Internal(column_offset_range));
+            }
         }
 
         Ok(())

@@ -48,6 +48,7 @@ mod tests {
         mdbx::{cursor::Cursor, RW},
         tables, AccountsHistory,
     };
+    use reth_nippy_jar::DataReader;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,

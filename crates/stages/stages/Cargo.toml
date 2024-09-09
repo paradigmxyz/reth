@@ -61,6 +61,7 @@ reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
+reth-nippy-jar = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
