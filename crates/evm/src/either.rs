@@ -8,6 +8,8 @@ use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionO
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use revm_primitives::db::Database;
 
 // re-export Either
@@ -65,10 +67,10 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(self, input: Self::Input<'_>, #[cfg(feature = "telos")] telos_extra_fields: Option<TelosEngineAPIExtraFields>) -> Result<Self::Output, Self::Error> {
         match self {
-            Self::Left(a) => a.execute(input),
-            Self::Right(b) => b.execute(input),
+            Self::Left(a) => a.execute(input, #[cfg(feature = "telos")] telos_extra_fields),
+            Self::Right(b) => b.execute(input, #[cfg(feature = "telos")] telos_extra_fields),
         }
     }
 }

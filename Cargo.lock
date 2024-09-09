@@ -5595,7 +5595,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -7684,6 +7684,7 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
+ "reth-telos-rpc-engine-api",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
@@ -7762,6 +7763,7 @@ dependencies = [
  "reth-revm",
  "reth-stages-api",
  "reth-storage-errors",
+ "reth-telos-rpc-engine-api",
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
@@ -7778,6 +7780,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-primitives 1.0.5",
  "reth-storage-errors",
+ "reth-telos-rpc-engine-api",
  "thiserror",
 ]
 
@@ -7942,7 +7945,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-consensus 0.2.1",
  "alloy-eips 0.2.1",
@@ -8410,6 +8413,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types 1.0.5",
  "reth-rpc-types-compat",
+ "reth-telos-rpc-engine-api",
  "revm-primitives",
  "serde",
  "serde_json",
@@ -8547,7 +8551,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-forks"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 0.7.7",
@@ -8603,6 +8607,7 @@ dependencies = [
  "reth-primitives 1.0.5",
  "reth-prune-types",
  "reth-storage-errors",
+ "reth-telos-rpc-engine-api",
  "revm",
  "revm-primitives",
 ]
@@ -8621,6 +8626,7 @@ dependencies = [
  "reth-primitives 1.0.5",
  "reth-prune-types",
  "reth-revm",
+ "reth-telos-rpc-engine-api",
  "reth-testing-utils",
  "revm-primitives",
  "secp256k1",
@@ -9486,7 +9492,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-eips 0.2.1",
  "alloy-genesis 0.2.1",
@@ -9542,7 +9548,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-consensus 0.2.1",
  "alloy-eips 0.2.1",
@@ -9592,6 +9598,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-telos-rpc-engine-api",
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
@@ -9735,6 +9742,7 @@ dependencies = [
  "reth-primitives 1.0.5",
  "reth-rpc-eth-api",
  "reth-rpc-types 1.0.5",
+ "reth-telos-rpc-engine-api",
  "serde_json",
 ]
 
@@ -9824,6 +9832,7 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-storage-api",
  "reth-tasks",
+ "reth-telos-rpc-engine-api",
  "reth-testing-utils",
  "reth-tokio-util",
  "serde",
@@ -9955,7 +9964,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-types"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-primitives 0.7.7",
  "alloy-rpc-types",
@@ -10113,7 +10122,7 @@ dependencies = [
 [[package]]
 name = "reth-static-file-types"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-primitives 0.7.7",
  "derive_more 0.99.18",
@@ -10174,6 +10183,14 @@ dependencies = [
  "reth-node-telos",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
+]
+
+[[package]]
+name = "reth-telos-rpc-engine-api"
+version = "1.0.5"
+dependencies = [
+ "reth-primitives 1.0.5",
+ "serde",
 ]
 
 [[package]]
@@ -10311,7 +10328,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-common"
 version = "1.0.5"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#b6a0c7d8e3b45775af2f7289df449f240ffce346"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#a76668d66b5e6c92cea97031940824be2e101002"
 dependencies = [
  "alloy-consensus 0.2.1",
  "alloy-genesis 0.2.1",

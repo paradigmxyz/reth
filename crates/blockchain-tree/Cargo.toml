@@ -43,6 +43,9 @@ metrics.workspace = true
 aquamarine.workspace = true
 linked_hash_set.workspace = true
 
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -62,4 +65,5 @@ test-utils = []
 optimism = ["reth-primitives/optimism", "reth-provider/optimism"]
 telos = [
     "reth-blockchain-tree-api/telos",
+    "dep:reth-telos-rpc-engine-api",
 ]

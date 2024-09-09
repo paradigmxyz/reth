@@ -41,6 +41,9 @@ serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+# telos
+reth-telos-rpc-engine-api.workspace = true
+
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -54,3 +57,4 @@ assert_matches.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism"]
+telos = []

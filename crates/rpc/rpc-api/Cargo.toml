@@ -22,6 +22,9 @@ reth-network-peers.workspace = true
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
+# telos
+reth-telos-rpc-engine-api.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true
 

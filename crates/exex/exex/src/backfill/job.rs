@@ -205,7 +205,7 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
 
-        let block_execution_output = executor.execute((&block_with_senders, td).into())?;
+        let block_execution_output = executor.execute((&block_with_senders, td).into(), #[cfg(feature = "telos")] None)?;
 
         Ok((block_with_senders, block_execution_output))
     }

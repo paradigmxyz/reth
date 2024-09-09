@@ -146,6 +146,7 @@ impl Command {
                 merkle_block_td + block.difficulty,
             )
                 .into(),
+            #[cfg(feature = "telos")] None,
         )?;
         let execution_outcome =
             ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);

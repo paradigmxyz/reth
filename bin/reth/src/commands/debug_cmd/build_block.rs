@@ -274,7 +274,7 @@ impl Command {
                 let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
                 let BlockExecutionOutput { state, receipts, requests, .. } =
-                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into(), #[cfg(feature = "telos")] None)?;
                 let execution_outcome = ExecutionOutcome::new(
                     state,
                     receipts.into(),

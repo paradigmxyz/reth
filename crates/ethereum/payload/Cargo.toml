@@ -33,4 +33,5 @@ tracing.workspace = true
 [features]
 telos = [
     "revm/telos",
+    "reth-evm-ethereum/telos",
 ]

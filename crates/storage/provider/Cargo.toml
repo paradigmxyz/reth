@@ -60,6 +60,9 @@ alloy-rlp = { workspace = true, optional = true }
 # parallel utils
 rayon.workspace = true
 
+# telos
+reth-telos-rpc-engine-api = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -78,4 +81,5 @@ serde = ["reth-execution-types/serde"]
 test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils", "reth-trie/test-utils", "reth-chain-state/test-utils", "reth-db/test-utils"]
 telos = [
     "revm/telos",
+    "dep:reth-telos-rpc-engine-api",
 ]

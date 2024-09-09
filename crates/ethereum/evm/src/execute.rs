@@ -33,6 +33,8 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
@@ -142,11 +144,15 @@ where
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
     {
+        #[cfg(feature = "telos")]
+        println!("Engine API: {:?}",telos_extra_fields);
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.evm_config,
@@ -304,6 +310,8 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<EthExecuteOutput, BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
@@ -312,7 +320,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm)
+            self.executor.execute_state_transitions(block, evm, #[cfg(feature = "telos")] telos_extra_fields)
         }?;
 
         // 3. apply post execution changes
@@ -374,10 +382,10 @@ where
     /// Returns the receipts of the transactions in the block.
     ///
     /// Returns an error if the block could not be executed or failed verification.
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(mut self, input: Self::Input<'_>, #[cfg(feature = "telos")] telos_extra_fields: Option<TelosEngineAPIExtraFields>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
-            self.execute_without_verification(block, total_difficulty)?;
+            self.execute_without_verification(block, total_difficulty, #[cfg(feature = "telos")] telos_extra_fields)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
@@ -419,7 +427,7 @@ where
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used: _ } =
-            self.executor.execute_without_verification(block, total_difficulty)?;
+            self.executor.execute_without_verification(block, total_difficulty, #[cfg(feature = "telos")] None)?;
 
         validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
 

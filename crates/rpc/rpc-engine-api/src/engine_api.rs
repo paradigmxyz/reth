@@ -30,6 +30,7 @@ use reth_tasks::TaskSpawner;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -115,6 +116,8 @@ where
     pub async fn new_payload_v1(
         &self,
         payload: ExecutionPayloadV1,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionPayload::from(payload);
         let payload_or_attrs =
@@ -126,7 +129,7 @@ where
             EngineApiMessageVersion::V1,
             payload_or_attrs,
         )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None, #[cfg(feature = "telos")] telos_extra_fields).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -144,7 +147,7 @@ where
             EngineApiMessageVersion::V2,
             payload_or_attrs,
         )?;
-        Ok(self.inner.beacon_consensus.new_payload(payload, None).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, None, #[cfg(feature = "telos")] None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
@@ -168,7 +171,7 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields), #[cfg(feature = "telos")] None).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
@@ -192,7 +195,7 @@ where
 
         let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
 
-        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields), #[cfg(feature = "telos")] None).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -617,11 +620,11 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1, #[cfg(feature = "telos")] telos_extra_fields: Option<TelosEngineAPIExtraFields>, #[cfg(not(feature = "telos"))] _telos_extra_fields: Option<TelosEngineAPIExtraFields>) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
         let gas_used = payload.gas_used;
-        let res = Self::new_payload_v1(self, payload).await;
+        let res = Self::new_payload_v1(self, payload, #[cfg(feature = "telos")] telos_extra_fields).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);

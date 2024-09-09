@@ -546,4 +546,5 @@ test-fuzz = "5"
 # telos
 reth-node-telos = { path = "crates/telos/node" }
 reth-telos-rpc = { path = "crates/telos/rpc" }
+reth-telos-rpc-engine-api = { path = "crates/telos/rpc-engine-api" }
 antelope-client = { git = "https://github.com/telosnetwork/antelope-rs", branch = "finish_table_rows_params" }

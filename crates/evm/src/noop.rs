@@ -7,6 +7,8 @@ use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionO
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use revm_primitives::db::Database;
 
 use crate::execute::{BatchExecutor, BlockExecutorProvider, Executor};
@@ -43,7 +45,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(self, _: Self::Input<'_>, #[cfg(feature = "telos")] _telos_extra_fields: Option<TelosEngineAPIExtraFields>) -> Result<Self::Output, Self::Error> {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 }

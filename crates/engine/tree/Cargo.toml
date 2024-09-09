@@ -86,3 +86,4 @@ test-utils = [
   "reth-static-file",
   "reth-tracing",
 ]
+telos = []

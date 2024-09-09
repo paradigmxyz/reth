@@ -18,6 +18,8 @@ use reth_provider::{
     ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
@@ -51,10 +53,12 @@ where
         &self,
         block: SealedBlockWithSenders,
         validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         trace!(target: "blockchain_tree", hash = %block.hash(), number = block.number, parent_hash = %block.parent_hash, "Inserting block");
         let mut tree = self.tree.write();
-        let res = tree.insert_block(block, validation_kind);
+        let res = tree.insert_block(block, validation_kind, #[cfg(feature = "telos")] telos_extra_fields);
         tree.update_chains_metrics();
         res
     }

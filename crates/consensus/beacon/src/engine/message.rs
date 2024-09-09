@@ -7,6 +7,8 @@ use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
 use std::{
     future::Future,
     pin::Pin,
@@ -147,6 +149,9 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         cancun_fields: Option<CancunPayloadFields>,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+        #[cfg(feature = "telos")]
+        /// Telos Engine API Extra Fields
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
