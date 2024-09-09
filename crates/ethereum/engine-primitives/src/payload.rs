@@ -273,7 +273,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
                     None
                 }
             })
-            .map(BlobExcessGasAndPrice::new);
+            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
 
         let mut basefee =
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()));
@@ -290,7 +290,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             gas_limit *= U256::from(elasticity_multiplier);
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+            basefee = Some(EIP1559_INITIAL_BASE_FEE.into())
         }
 
         let block_env = BlockEnv {

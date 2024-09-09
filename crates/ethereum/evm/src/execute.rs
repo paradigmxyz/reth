@@ -169,11 +169,11 @@ where
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            let block_available_gas = (block.header.gas_limit - cumulative_gas_used) as u64;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
+                    block_available_gas: block_available_gas as u64,
                 }
                 .into())
             }
@@ -198,7 +198,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used();
+            cumulative_gas_used += result.gas_used() as u128;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(
@@ -208,7 +208,7 @@ where
                     // Success flag was added in `EIP-658: Embedding transaction status code in
                     // receipts`.
                     success: result.is_success(),
-                    cumulative_gas_used,
+                    cumulative_gas_used: cumulative_gas_used as u64,
                     // convert to reth log
                     logs: result.into_logs(),
                     ..Default::default()
@@ -234,7 +234,7 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used as u64 })
     }
 }
 
