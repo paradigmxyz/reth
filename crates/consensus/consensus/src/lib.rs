@@ -394,10 +394,10 @@ pub enum ConsensusError {
         timestamp: u64,
     },
     /// Error when arithmetical error during difficulty calculation was encountered
-    #[display(fmt = "unexpected error during difficulty calculation")]
+    #[display("unexpected error during difficulty calculation")]
     DifficultyCalculationError,
     /// Error when the block's difficulty is different from the expected difficulty.
-    #[display(fmt = "block difficulty mismatch: {_0}")]
+    #[display("block difficulty mismatch: {_0}")]
     DifficultyDiff(GotExpected<U256>),
 }
 
