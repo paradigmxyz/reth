@@ -6949,6 +6949,21 @@ dependencies = [
 [[package]]
 name = "reth-engine-local"
 version = "1.0.6"
+dependencies = [
+ "futures",
+ "futures-util",
+ "reth-beacon-consensus",
+ "reth-engine-tree",
+ "reth-node-types",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-transaction-pool",
+ "tokio",
+ "tokio-stream",
+]
 
 [[package]]
 name = "reth-engine-primitives"

@@ -9,6 +9,24 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
+# reth
+reth-beacon-consensus.workspace = true
+reth-engine-tree.workspace = true
+reth-node-types.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-transaction-pool.workspace = true
+
+# async
+futures.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+
+# misc
 
 [lints]
 workspace = true
