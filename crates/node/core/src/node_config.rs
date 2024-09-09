@@ -17,7 +17,7 @@ use std::{fs, path::Path};
 
 use alloy_primitives::{BlockNumber, B256};
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{revm_primitives::EnvKzgSettings, BlockHashOrNumber, Head, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, Head, SealedHeader};
 use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
@@ -258,11 +258,6 @@ impl NodeConfig {
         };
 
         Ok(max_block)
-    }
-
-    /// Loads '`EnvKzgSettings::Default`'
-    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
-        Ok(EnvKzgSettings::Default)
     }
 
     /// Fetches the head block from the database.
