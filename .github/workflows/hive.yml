@@ -32,14 +32,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          tags: ghcr.io/paradigmxyz/reth:latest
-          outputs: type=docker,dest=./artifacts/reth_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker buildx build \
+            --file Dockerfile \
+            --output type=docker,dest=./artifacts/reth_image.tar \
+            --tag ghcr.io/paradigmxyz/reth:latest \
+            --build-arg BUILD_PROFILE=hivetests \
+            --build-arg FEATURES=asm-keccak \
+            .
 
       - name: Upload reth image
         uses: actions/upload-artifact@v4
