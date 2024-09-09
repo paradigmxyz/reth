@@ -165,7 +165,7 @@ mod tests {
     use std::{collections::HashSet, sync::Arc};
 
     fn test_evm_config() -> OptimismEvmConfig {
-        OptimismEvmConfig::new(Arc::new(Arc::unwrap_or_clone(BASE_MAINNET.clone())))
+        OptimismEvmConfig::new(BASE_MAINNET.clone())
     }
 
     #[test]
