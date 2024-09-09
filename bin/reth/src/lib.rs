@@ -114,6 +114,11 @@ pub mod blockchain_tree {
     pub use reth_blockchain_tree::*;
 }
 
+/// Re-exported from `reth_consensus`.
+pub mod consensus {
+    pub use reth_consensus::*;
+}
+
 /// Re-exported from `reth_consensus_common`.
 pub mod consensus_common {
     pub use reth_consensus_common::*;

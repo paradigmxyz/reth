@@ -30,7 +30,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{
@@ -343,6 +346,7 @@ where
                         + FullEthApiServer<
                             NetworkTypes: alloy_network::Network<
                                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                                ReceiptResponse = AnyTransactionReceipt,
                             >,
                         >
                         + AddDevSigners
@@ -493,6 +497,7 @@ where
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,
     >,

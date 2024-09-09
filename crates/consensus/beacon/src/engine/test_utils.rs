@@ -3,6 +3,7 @@ use crate::{
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
+use alloy_primitives::{BlockNumber, B256};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -20,7 +21,6 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithStorage},

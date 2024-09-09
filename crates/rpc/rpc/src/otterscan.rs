@@ -44,14 +44,17 @@ impl<Eth> OtterscanApi<Eth> {
 impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+        NetworkTypes: Network<
+            TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            ReceiptResponse = AnyTransactionReceipt,
+        >,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
         block: RpcBlock<Eth::NetworkTypes>,
-        receipts: Vec<AnyTransactionReceipt>,
+        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
     ) -> RpcResult<BlockDetails> {
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
@@ -73,6 +76,7 @@ where
         > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + TraceExt
         + EthTransactions
