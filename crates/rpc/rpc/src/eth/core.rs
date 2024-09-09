@@ -350,7 +350,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 #[cfg(test)]
 mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::{BaseFeeParams, ChainSpec, MAINNET};
+    use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, B256, U64};
