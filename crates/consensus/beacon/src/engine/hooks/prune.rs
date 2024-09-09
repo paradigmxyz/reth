@@ -4,11 +4,11 @@ use crate::{
     engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
+use alloy_primitives::BlockNumber;
 use futures::FutureExt;
 use metrics::Counter;
 use reth_errors::{RethError, RethResult};
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::BlockNumber;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
