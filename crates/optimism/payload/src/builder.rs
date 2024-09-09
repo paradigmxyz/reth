@@ -209,8 +209,6 @@ where
         let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
-        let receipts = Vec::new();
-
         Ok(OptimismBuiltPayload::new(
             attributes.payload_attributes.payload_id(),
             sealed_block,
@@ -218,7 +216,6 @@ where
             chain_spec,
             attributes,
             None,
-            receipts,
         ))
     }
 }
@@ -608,7 +605,6 @@ where
         trie: Arc::new(trie_output),
     };
 
-    let receipts_pay: Vec<Receipt> = receipts.into_iter().flatten().collect();
     let mut payload = OptimismBuiltPayload::new(
         attributes.payload_attributes.id,
         sealed_block,
@@ -616,7 +612,6 @@ where
         chain_spec,
         attributes,
         Some(executed),
-        receipts_pay,
     );
 
     // extend the payload with the blob sidecars from the executed txs
