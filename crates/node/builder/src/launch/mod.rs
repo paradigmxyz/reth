@@ -352,6 +352,7 @@ where
             ctx.chain_spec(),
             beacon_engine_handle,
             ctx.components().payload_builder().clone().into(),
+            ctx.components().pool().clone(),
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
