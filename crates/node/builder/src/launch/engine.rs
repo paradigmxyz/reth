@@ -223,6 +223,7 @@ where
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
             ctx.invalid_block_hook()?,
+            ctx.sync_metrics_tx(),
         );
 
         let event_sender = EventSender::default();
