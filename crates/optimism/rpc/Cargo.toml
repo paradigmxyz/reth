@@ -34,6 +34,7 @@ alloy-primitives.workspace = true
 op-alloy-network.workspace = true
 revm.workspace = true
 op-alloy-rpc-types.workspace = true
+op-alloy-consensus.workspace = true
 
 # async
 parking_lot.workspace = true

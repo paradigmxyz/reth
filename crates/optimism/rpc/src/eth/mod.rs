@@ -1,12 +1,14 @@
 //! OP-Reth `eth_` endpoint implementation.
 
 pub mod receipt;
+pub mod rpc;
 pub mod transaction;
 
 mod block;
 mod call;
 mod pending_block;
-pub mod rpc;
+
+pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 
 use std::{fmt, sync::Arc};
 
