@@ -15,6 +15,7 @@ use telos_consensus_client::config::{AppConfig, CliArgs};
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tokio::sync::oneshot;
+use tokio::sync::oneshot::Sender;
 use tracing::{info};
 
 struct TelosRethNodeHandle {
@@ -92,7 +93,7 @@ async fn start_consensus(
     reth_handle: TelosRethNodeHandle,
     ship_port: u16,
     chain_port: u16,
-) -> eyre::Result<()> {
+) -> eyre::Result<(Sender<()>, ())> {
     let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: 41,
@@ -112,14 +113,14 @@ async fn start_consensus(
         maximum_sync_range: 100000,
         latest_blocks_in_db_num: 100,
     };
-    let (_, receiver) = oneshot::channel();
+    let (sender, receiver) = oneshot::channel();
 
     let cli_args = CliArgs {
         config: "".to_string(),
         clean: false,
     };
     let mut client_under_test = ConsensusClient::new(&cli_args, config).await?;
-    Ok(client_under_test.run(receiver).await?)
+    Ok((sender, client_under_test.run(receiver).await?))
 }
 
 #[tokio::test]
@@ -155,10 +156,16 @@ async fn testing_chain_sync() {
     let execution_port = node_handle.node.auth_server_handle().local_addr().port();
     let rpc_port = node_handle.node.rpc_server_handles.rpc.http_local_addr().unwrap().port();
     let reth_handle = TelosRethNodeHandle { execution_port, jwt_secret };
-    _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
+    let node_context = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     info!("Started Reth on RPC port {}!", rpc_port);
 
-    if let Err(error) = start_consensus(reth_handle, ship_port, chain_port).await {
-        panic!("Error with consensus client: {error:?}");
+    match start_consensus(reth_handle, ship_port, chain_port).await {
+        Ok((shutdown_sender, consensus_handle)) => {
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            shutdown_sender.send(()).unwrap();
+        }
+        Err(error) => {
+            panic!("Error with consensus client: {error:?}");
+        }
     }
 }
