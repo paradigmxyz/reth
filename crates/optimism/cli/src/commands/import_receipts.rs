@@ -252,8 +252,8 @@ pub struct ImportReceiptsResult {
 
 #[cfg(test)]
 mod test {
+    use alloy_primitives::hex;
     use reth_db_common::init::init_genesis;
-    use reth_primitives::hex;
     use reth_stages::test_utils::TestStageDB;
     use tempfile::tempfile;
     use tokio::{
