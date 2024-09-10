@@ -40,9 +40,9 @@ use reth_primitives::{
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
-    noop::NoopTransactionPool,
-    pool::BestTransactionFilter, BestTransactions, BestTransactionsAttributes,
-    NoopTransactionFilter, TransactionFilter, TransactionPool, ValidPoolTransaction,
+    noop::NoopTransactionPool, pool::BestTransactionFilter, BestTransactions,
+    BestTransactionsAttributes, NoopTransactionFilter, TransactionFilter, TransactionPool,
+    ValidPoolTransaction,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -129,7 +129,8 @@ where
             best_payload: None,
         };
         let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
+        let tx_filter =  NoopTransactionFilter::default();
+        default_ethereum_payload(self.evm_config.clone(), args, tx_filter, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
