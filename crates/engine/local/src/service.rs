@@ -105,7 +105,7 @@ where
     }
 }
 
-/// Run the [`LocalEnginService`] as a Future. The service will poll the payload builder
+/// Run the [`LocalEngineService`] as a Future. The service will poll the payload builder
 /// with two varying modes, [`MiningMode::Instant`] or [`MiningMode::Interval`]
 /// which will respectively either execute the block as soon as it finds a
 /// transaction in the pool or build the block based on an interval.
@@ -248,7 +248,7 @@ mod tests {
             MiningMode::interval(period),
         );
 
-        // Wait 2 interval
+        // Wait 4 intervals
         tokio::time::sleep(4 * period).await;
 
         // Assert a block has been build
