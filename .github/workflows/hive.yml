@@ -24,19 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
-      - name: Check Docker Version
-        run: docker --version
-      - name: Install Latest Docker
-        run: |
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-          sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu  $(lsb_release -cs)  stable"
-          sudo apt-get update
-          sudo apt-get remove docker docker-engine docker.io containerd runc
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-      - name: Restart Docker Service
-        run: sudo service docker restart
-      - name: Check Docker Version
-        run: docker --version
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
