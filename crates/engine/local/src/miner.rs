@@ -1,3 +1,5 @@
+//! Contains the implementation of the mining mode for the local engine.
+
 use futures_util::{stream::Fuse, StreamExt};
 use reth_primitives::TxHash;
 use reth_transaction_pool::TransactionPool;
@@ -11,14 +13,12 @@ use tokio::time::Interval;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 /// A mining mode for the local dev engine.
-///
-/// This can either be [`Auto`] which will
-/// build a payload as soon as it has transactions
-/// in the pool or a [`Interval`] which will build
-/// a payload at a predefined interval
 #[derive(Debug)]
 pub enum MiningMode {
+    /// In this mode a block is build as soon as
+    /// a valid transaction reaches the pool.
     Auto(Fuse<ReceiverStream<TxHash>>),
+    /// In this mode a block is build at a fixed interval
     Interval(Interval),
 }
 
