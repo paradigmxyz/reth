@@ -95,3 +95,13 @@ impl Compact for AlloyHeader {
         (alloy_header, buf)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ensure_backwards_compatibility() {
+        assert_eq!(Header::bitflag_encoded_bytes(), 4);
+    }
+}

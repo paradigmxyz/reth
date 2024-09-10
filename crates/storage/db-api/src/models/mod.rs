@@ -325,7 +325,6 @@ mod tests {
         assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
         assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
         assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
-        assert_eq!(Header::bitflag_encoded_bytes(), 4);
         assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
         assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
