@@ -8100,6 +8100,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "pin-project",
+ "reth-chain-state",
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",

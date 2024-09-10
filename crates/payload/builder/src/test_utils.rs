@@ -5,6 +5,7 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
+use reth_chain_state::ExecutedBlock;
 use alloy_primitives::U256;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives::Block;
@@ -87,7 +88,7 @@ impl PayloadJob for TestPayloadJob {
             self.attr.payload_id(),
             Block::default().seal_slow(),
             U256::ZERO,
-            None,
+            Some(ExecutedBlock::default()),
         ))
     }
 
