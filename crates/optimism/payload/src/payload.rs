@@ -2,6 +2,7 @@
 
 //! Optimism builder support
 
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -11,8 +12,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     transaction::WithEncoded,
-    Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
-    U256,
+    BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals,
 };
 /// Re-export for use in downstream arguments.
 pub use reth_rpc_types::optimism::OptimismPayloadAttributes;

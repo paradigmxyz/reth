@@ -19,12 +19,14 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-trie-common.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
-
 
 [features]
 optimism = ["reth-primitives/optimism"]

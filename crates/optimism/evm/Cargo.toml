@@ -21,6 +21,9 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-prune-types.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # Optimism
 reth-optimism-consensus.workspace = true
 

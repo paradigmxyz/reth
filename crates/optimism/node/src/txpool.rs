@@ -224,10 +224,11 @@ pub struct OpL1BlockInfo {
 #[cfg(test)]
 mod tests {
     use crate::txpool::OpTransactionValidator;
+    use alloy_primitives::{TxKind, U256};
+    use reth::primitives::Signature;
     use reth_chainspec::MAINNET;
     use reth_primitives::{
-        Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
-        U256,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
