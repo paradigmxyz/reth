@@ -742,7 +742,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<T::Types> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<ProviderFactory<T::Types>> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 

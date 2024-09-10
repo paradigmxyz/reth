@@ -3706,6 +3706,10 @@ impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
     fn tx_ref(&self) -> &Self::Tx {
         &self.tx
     }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
+    }
 }
 
 /// Helper method to recover senders for any blocks in the db which do not have senders. This
