@@ -26,6 +26,7 @@ jobs:
       - run: mkdir artifacts
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - run: env
       - name: Build and export reth image
         run: |
           docker buildx build \
