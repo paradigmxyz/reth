@@ -52,9 +52,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
+    use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
     use reth_rpc_eth_types::{

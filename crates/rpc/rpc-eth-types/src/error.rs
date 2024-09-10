@@ -2,9 +2,10 @@
 
 use std::time::Duration;
 
+use alloy_primitives::{Address, Bytes};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
-use reth_primitives::{revm_primitives::InvalidHeader, Address, BlockId, Bytes};
+use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
