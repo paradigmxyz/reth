@@ -59,6 +59,7 @@ reth-transaction-pool.workspace = true
 
 ## ethereum
 alloy-network.workspace = true
+alloy-primitives.workspace = true
 
 ## async
 futures.workspace = true

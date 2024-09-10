@@ -4,6 +4,8 @@ Initialize the database from a genesis file
 
 ```bash
 $ reth init --help
+```
+```txt
 Usage: reth init [OPTIONS]
 
 Options:

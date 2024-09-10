@@ -1,6 +1,7 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, BlobTransactionValidationError, InvalidTransactionError, TxHash};
+use alloy_primitives::{Address, TxHash};
+use reth_primitives::{BlobTransactionValidationError, InvalidTransactionError};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -104,7 +105,7 @@ impl PoolError {
             }
             PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => {
                 // fee cap of the tx below the technical minimum determined by the protocol, see
-                // [MINIMUM_PROTOCOL_FEE_CAP](reth_primitives::constants::MIN_PROTOCOL_BASE_FEE)
+                // [MINIMUM_PROTOCOL_FEE_CAP](alloy_primitives::constants::MIN_PROTOCOL_BASE_FEE)
                 // although this transaction will always be invalid, we do not want to penalize the
                 // sender because this check simply could not be implemented by the client
                 false

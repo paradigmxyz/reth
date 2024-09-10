@@ -1,4 +1,5 @@
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, U256};
+use alloy_primitives::{BlockHash, BlockNumber, U256};
+use reth_primitives::{BlockHashOrNumber, Header, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
