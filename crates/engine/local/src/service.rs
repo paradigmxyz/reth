@@ -7,7 +7,7 @@
 //! building at a fixed interval.
 
 use crate::miner::MiningMode;
-use futures::FutureExt;
+use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::EngineNodeTypes;
 use reth_engine_tree::persistence::PersistenceHandle;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -16,15 +16,16 @@ use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 use reth_prune::Pruner;
 use std::{
+    fmt::Formatter,
     future::Future,
     pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
+use tracing::debug;
 
 /// Provides a local dev service engine that can be used to drive the
 /// chain forward.
-#[derive(Debug)]
 pub struct LocalEngineService<N>
 where
     N: EngineNodeTypes,
@@ -39,6 +40,28 @@ where
     head: B256,
     /// The mining mode for the engine
     mode: MiningMode,
+    /// Payload request task
+    payload_request_state: RequestState,
+}
+
+impl<N: EngineNodeTypes> std::fmt::Debug for LocalEngineService<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalEngineService")
+            .field("payload_builder", &self.payload_builder)
+            .field("payload_attributes", &self.payload_attributes)
+            .field("persistence_handle", &self.persistence_handle)
+            .field("head", &self.head)
+            .field("mode", &self.mode)
+            .field("payload_request_state", &"...")
+            .finish()
+    }
+}
+
+/// The internal state of the [`LocalEngineService`]'s polling task
+#[derive(Default)]
+struct RequestState {
+    ready: bool,
+    task: Option<BoxFuture<'static, eyre::Result<B256>>>,
 }
 
 impl<N> LocalEngineService<N>
@@ -56,7 +79,14 @@ where
     ) -> Self {
         let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
 
-        Self { payload_builder, payload_attributes, persistence_handle, head, mode }
+        Self {
+            payload_builder,
+            payload_attributes,
+            persistence_handle,
+            head,
+            mode,
+            payload_request_state: RequestState::default(),
+        }
     }
 
     /// Spawn a [`LocalEngineService`] on a new OS thread.
@@ -67,12 +97,10 @@ where
         pruner: Pruner<N::DB, ProviderFactory<N>>,
         head: B256,
         mode: MiningMode,
-    ) -> Result<(), LocalEngineServiceError> {
+    ) {
         let engine = Self::new(payload_builder, payload_attributes, provider, pruner, head, mode);
 
         let _ = tokio::spawn(async { engine.await });
-
-        Ok(())
     }
 }
 
@@ -88,61 +116,73 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let mut head = this.head;
-        let mut ready = false;
         loop {
             // Wait for the interval or the pool to receive a transaction
-            if !ready {
+            if !this.payload_request_state.ready {
                 let _ = ready!(pin!(&mut this.mode).poll(cx));
+                this.payload_request_state.ready = true;
             }
 
-            // TODO: for now we clone this.payload_attributes, waiting for better solution
-            let attr = <N::Engine as PayloadTypes>::PayloadBuilderAttributes::try_new(
-                head,
-                this.payload_attributes.clone(),
-            );
+            if this.payload_request_state.task.is_none() {
+                let head = this.head;
+                let attributes = this.payload_attributes.clone();
+                let payload_builder = this.payload_builder.clone();
+                let persistence_handle = this.persistence_handle.clone();
 
-            // TODO: with this, we should keep trying to get a attribute because
-            // continue means we skip the poll transaction, we shouldn't do this
-            if attr.is_err() {
-                continue;
-            }
+                let task = Box::pin(async move {
+                    let attr = <N::Engine as PayloadTypes>::PayloadBuilderAttributes::try_new(
+                        head, attributes,
+                    )
+                    .map_err(|_| eyre::eyre!("failed to fetch payload attributes"))?;
 
-            let attr = attr.unwrap();
-            let fut = pin!(this.payload_builder.new_payload(attr));
-            let payload_id = ready!(fut.poll(cx));
-            // TODO: again, we should probably not continue here but actually handle it
-            if payload_id.is_err() {
-                continue;
-            }
+                    let rx = payload_builder.send_new_payload(attr);
+                    let id = rx.await??;
 
-            let payload_id = payload_id.unwrap();
-            let fut = pin!(this.payload_builder.best_payload(payload_id));
-            let best_payload = ready!(fut.poll(cx));
-            if let Some(payload) = best_payload {
-                // TODO don't unwrap
-                let build_payload = payload.unwrap();
-                // TODO don't unwrap
-                let block = vec![build_payload.executed_block().unwrap()];
-                let (tx, mut rx) = oneshot::channel();
+                    let payload = payload_builder
+                        .best_payload(id)
+                        .await
+                        .ok_or_else(|| eyre::eyre!("failed to fetch best payload"))??;
 
-                let _ = this.persistence_handle.save_blocks(block, tx);
+                    let block =
+                        payload.executed_block().map(|block| vec![block]).unwrap_or_default();
+                    let (tx, rx) = oneshot::channel();
 
-                // Wait for the persistence_handle to complete
-                let hash = ready!(rx.poll_unpin(cx));
+                    let _ = persistence_handle.save_blocks(block, tx);
 
-                // TODO: again, we should probably not continue here but actually handle
-                // it
-                if hash.is_err() {
-                    continue
-                }
-                let hash = hash.unwrap();
-                if let Some(new_head) = hash {
-                    head = new_head.hash;
-                }
+                    // Wait for the persistence_handle to complete
+                    let new_head = rx.await?.ok_or_else(|| eyre::eyre!("missing new head"))?;
+
+                    Result::<_, eyre::Error>::Ok(new_head.hash)
+                });
+                this.payload_request_state.task = Some(task);
             }
 
             ready = false;
         }
+            if this.payload_request_state.task.is_some() {
+                let mut task = this.payload_request_state.task.take().unwrap();
+                match task.poll_unpin(cx) {
+                    Poll::Ready(Ok(head)) => {
+                        this.head = head;
+                        this.payload_request_state.ready = false;
+                        continue
+                    }
+                    Poll::Ready(Err(err)) => {
+                        // if we get an error, retry directly by creating a new payload request task
+                        debug!(target: "local_engine", ?err, "failed block production");
+                        continue
+                    }
+                    Poll::Pending => {
+                        this.payload_request_state.task = Some(task);
+                        break
+                    }
+                }
+            } else {
+                break
+            }
+        }
+        Poll::Pending
+    }
+}
     }
 }

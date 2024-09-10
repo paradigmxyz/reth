@@ -6950,19 +6950,29 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.0.7"
 dependencies = [
+ "eyre",
  "futures",
  "futures-util",
  "reth-beacon-consensus",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-config",
+ "reth-db",
  "reth-engine-tree",
+ "reth-ethereum-engine-primitives",
+ "reth-exex-test-utils",
  "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-rpc-types",
+ "reth-tracing",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
