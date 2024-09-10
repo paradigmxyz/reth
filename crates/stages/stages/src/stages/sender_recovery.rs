@@ -193,7 +193,7 @@ where
                     let is_err = res.is_err();
 
                     let _ = recovered_senders_tx.send(res);
-                    
+
                     // Finish early
                     if is_err {
                         break
@@ -232,7 +232,9 @@ where
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
-                        SenderRecoveryStageError::FailedBatchRecovery => Err(StageError::Fatal(SenderRecoveryStageError::FailedBatchRecovery.into())),
+                        SenderRecoveryStageError::FailedBatchRecovery => Err(StageError::Fatal(
+                            SenderRecoveryStageError::FailedBatchRecovery.into(),
+                        )),
                     }
                 }
             };
