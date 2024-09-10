@@ -89,7 +89,7 @@ where
         }
     }
 
-    /// Spawn a [`LocalEngineService`] on a new OS thread.
+    /// Spawn a [`LocalEngineService`] on a tokio green thread.
     pub fn spawn_new(
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_attributes: <N::Engine as PayloadTypes>::PayloadAttributes,
@@ -106,9 +106,9 @@ where
 }
 
 /// Run the [`LocalEnginService`] as a Future. The service will poll the payload builder
-/// with two varying modes, [`MiningMode::AutoSeal`] or [`MiningMode::Interval`]
-/// which will respectively either execute the block as soon as it finds an
-/// available payload or build the block based on an interval.
+/// with two varying modes, [`MiningMode::Instant`] or [`MiningMode::Interval`]
+/// which will respectively either execute the block as soon as it finds a
+/// transaction in the pool or build the block based on an interval.
 impl<N> Future for LocalEngineService<N>
 where
     N: EngineNodeTypes,
@@ -117,6 +117,8 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        const MAX_RETRIES: usize = 5;
+        let mut retries = 0;
         loop {
             // Wait for the interval or the pool to receive a transaction
             if !this.payload_request_state.ready {
@@ -169,6 +171,12 @@ where
                     Poll::Ready(Err(err)) => {
                         // if we get an error, retry directly by creating a new payload request task
                         debug!(target: "local_engine", ?err, "failed block production");
+                        // In order to avoid resource starvation, we break after 5 retries
+                        if retries == MAX_RETRIES {
+                            this.payload_request_state.ready = false;
+                            break
+                        }
+                        retries += 1;
                         continue
                     }
                     Poll::Pending => {
