@@ -50,8 +50,6 @@ engine-api:
 engine-cancun:
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  - Invalid NewPayload, BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Blob Count on BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P9 (Cancun) (reth)
