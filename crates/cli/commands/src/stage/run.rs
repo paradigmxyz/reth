@@ -28,6 +28,7 @@ use reth_node_core::{
     },
 };
 use reth_node_metrics::{
+    chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
@@ -130,6 +131,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                ChainSpecInfo { name: provider_factory.chain_spec().chain.to_string() },
                 ctx.task_executor,
                 Hooks::new(
                     provider_factory.db_ref().clone(),
