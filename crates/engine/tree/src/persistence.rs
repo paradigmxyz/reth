@@ -8,6 +8,7 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_prune::{Pruner, PrunerError, PrunerOutput};
+use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
     time::Instant,
@@ -33,6 +34,8 @@ pub struct PersistenceService<N: NodeTypesWithDB> {
     pruner: Pruner<N::DB, ProviderFactory<N>>,
     /// metrics
     metrics: PersistenceMetrics,
+    /// Sender for sync metrics - we only submit sync metrics for persisted blocks
+    sync_metrics_tx: MetricEventsSender,
 }
 
 impl<N: ProviderNodeTypes> PersistenceService<N> {
@@ -41,8 +44,9 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
         provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction>,
         pruner: Pruner<N::DB, ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default() }
+        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -66,11 +70,20 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
             match action {
                 PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
                     let result = self.on_remove_blocks_above(new_tip_num)?;
+                    // send new sync metrics based on removed blocks
+                    let _ =
+                        self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
+                    if let Some(ref num_hash) = result {
+                        // send new sync metrics based on saved blocks
+                        let _ = self
+                            .sync_metrics_tx
+                            .send(MetricEvent::SyncHeight { height: num_hash.number });
+                    }
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
                 }
@@ -175,6 +188,7 @@ impl PersistenceHandle {
     pub fn spawn_service<N: ProviderNodeTypes>(
         provider_factory: ProviderFactory<N>,
         pruner: Pruner<N::DB, ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
     ) -> Self {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
@@ -183,7 +197,8 @@ impl PersistenceHandle {
         let persistence_handle = Self::new(db_service_tx);
 
         // spawn the persistence service
-        let db_service = PersistenceService::new(provider_factory, db_service_rx, pruner);
+        let db_service =
+            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
@@ -255,6 +270,7 @@ mod tests {
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
     use reth_prune::Pruner;
+    use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
@@ -271,7 +287,8 @@ mod tests {
             finished_exex_height_rx,
         );
 
-        PersistenceHandle::spawn_service(provider, pruner)
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx)
     }
 
     #[tokio::test]
