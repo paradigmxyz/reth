@@ -1297,7 +1297,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(Header::default().seal(B256::random()));
+        let target = SyncTarget::Gap(SealedHeader::new(Header::default(), B256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -1321,7 +1321,7 @@ mod tests {
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(next.seal(B256::random()));
+        downloader.update_local_head(SealedHeader::new(next, B256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 

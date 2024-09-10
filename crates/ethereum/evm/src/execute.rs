@@ -173,7 +173,7 @@ where
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas: block_available_gas as u64,
+                    block_available_gas,
                 }
                 .into())
             }
@@ -803,7 +803,7 @@ mod tests {
             timestamp: 1,
             number: 1,
             parent_beacon_block_root: Some(B256::with_last_byte(0x69)),
-            base_fee_per_gas: Some(u64::MAX),
+            base_fee_per_gas: Some(u64::MAX.into()),
             excess_blob_gas: Some(0),
             ..Header::default()
         };
@@ -1293,7 +1293,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap().into(),
+                gas_price: header.base_fee_per_gas.unwrap(),
                 gas_limit: 134_807,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
@@ -1383,7 +1383,7 @@ mod tests {
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(chain_spec.chain.id()),
                 nonce: 1,
-                gas_price: header.base_fee_per_gas.unwrap().into(),
+                gas_price: header.base_fee_per_gas.unwrap(),
                 gas_limit: 2_500_000, // higher than block gas limit
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 value: U256::from(1),

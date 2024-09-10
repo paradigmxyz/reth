@@ -130,7 +130,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
                     None
                 }
             })
-            .map(BlobExcessGasAndPrice::new);
+            .map(|excess_blob_gas| BlobExcessGasAndPrice::new(excess_blob_gas as u64));
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),

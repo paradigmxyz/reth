@@ -98,8 +98,8 @@ mod tests {
         let header = Header {
             difficulty: U256::from(0x8ae_u64),
             number: 0xd05_u64,
-            gas_limit: 0x115c_u64,
-            gas_used: 0x15b3_u64,
+            gas_limit: 0x115c_u128,
+            gas_used: 0x15b3_u128,
             timestamp: 0x1a0a_u64,
             extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: B256::ZERO,
@@ -130,13 +130,13 @@ mod tests {
             logs_bloom: bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
             difficulty: U256::from(0x020000),
             number: 0x01_u64,
-            gas_limit: 0x016345785d8a0000_u64,
-            gas_used: 0x015534_u64,
+            gas_limit: 0x016345785d8a0000_u128,
+            gas_used: 0x015534_u128,
             timestamp: 0x079e,
             extra_data: bytes!("42"),
             mix_hash: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
-            nonce: 0,
-            base_fee_per_gas: Some(0x036b_u64),
+            nonce: 0u64.into()  ,
+            base_fee_per_gas: Some(0x036b_u128),
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
@@ -153,8 +153,8 @@ mod tests {
         let expected = Header {
             difficulty: U256::from(0x8aeu64),
             number: 0xd05u64,
-            gas_limit: 0x115cu64,
-            gas_used: 0x15b3u64,
+            gas_limit: 0x115cu128,
+            gas_used: 0x15b3u128,
             timestamp: 0x1a0au64,
             extra_data: Bytes::from_str("7788").unwrap(),
             ommers_hash: B256::ZERO,
@@ -257,7 +257,7 @@ mod tests {
                 "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
             )
             .unwrap(),
-            nonce: 0,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(9),
             withdrawals_root: Some(
                 B256::from_str("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -304,7 +304,7 @@ mod tests {
             timestamp: 0x64c40d54,
             extra_data: bytes!("d883010c01846765746888676f312e32302e35856c696e7578"),
             mix_hash: b256!("70ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f2325"),
-            nonce: 0,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(7),
             withdrawals_root: Some(b256!(
                 "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"

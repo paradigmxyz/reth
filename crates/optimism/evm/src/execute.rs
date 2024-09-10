@@ -143,12 +143,12 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
+            if transaction.gas_limit() > block_available_gas as u64 &&
                 (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
+                    block_available_gas: block_available_gas as u64,
                 }
                 .into())
             }
@@ -199,7 +199,7 @@ where
             evm.db_mut().commit(state);
 
             // append gas used
-            cumulative_gas_used += result.gas_used();
+            cumulative_gas_used += result.gas_used() as u128;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
@@ -207,7 +207,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
-                cumulative_gas_used,
+                cumulative_gas_used: cumulative_gas_used as u64,
                 logs: result.into_logs(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
@@ -221,7 +221,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used))
+        Ok((receipts, cumulative_gas_used as u64))
     }
 }
 

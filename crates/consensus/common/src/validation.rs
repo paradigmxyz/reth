@@ -302,7 +302,9 @@ pub fn validate_against_parent_4844(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, U256};
+    use alloy_primitives::{
+        hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, Sealable, U256,
+    };
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
@@ -453,7 +455,7 @@ mod tests {
             timestamp: 0x635f9657,
             extra_data: hex!("")[..].into(),
             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-            nonce: 0x0000000000000000,
+            nonce: 0x0000000000000000u64.into(),
             base_fee_per_gas: 0x28f0001df.into(),
             withdrawals_root: None,
             blob_gas_used: None,
@@ -473,9 +475,12 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
+        let sealed = header.seal_slow();
+        let (header, seal) = sealed.into_parts();
+
         (
             SealedBlock {
-                header: header.seal_slow(),
+                header: SealedHeader::new(header, seal),
                 body,
                 ommers,
                 withdrawals: None,
@@ -496,12 +501,16 @@ mod tests {
                     .map(|idx| Withdrawal { index: *idx, ..Default::default() })
                     .collect(),
             );
+
+            let sealed = Header {
+                withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
+                ..Default::default()
+            }
+            .seal_slow();
+            let (header, seal) = sealed.into_parts();
+
             SealedBlock {
-                header: Header {
-                    withdrawals_root: Some(proofs::calculate_withdrawals_root(&withdrawals)),
-                    ..Default::default()
-                }
-                .seal_slow(),
+                header: SealedHeader::new(header, seal),
                 withdrawals: Some(withdrawals),
                 ..Default::default()
             }
@@ -533,14 +542,16 @@ mod tests {
         // create a tx with 10 blobs
         let transaction = mock_blob_tx(1, 10);
 
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
+        let sealed = Header {
+            base_fee_per_gas: Some(1337u128),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             blob_gas_used: Some(1),
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
         }
         .seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let header = SealedHeader::new(header, seal);
 
         let body = BlockBody {
             transactions: vec![transaction],

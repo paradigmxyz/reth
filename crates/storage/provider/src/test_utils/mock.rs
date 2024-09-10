@@ -12,9 +12,9 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    alloy_primitives::Sealable, keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber,
+    BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
@@ -181,7 +181,11 @@ impl HeaderProvider for MockEthProvider {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(self.header_by_number(number)?.map(|h| h.seal_slow()))
+        Ok(self.header_by_number(number)?.map(|h| {
+            let sealed = h.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            SealedHeader::new(header, seal)
+        }))
     }
 
     fn sealed_headers_while(
@@ -192,7 +196,11 @@ impl HeaderProvider for MockEthProvider {
         Ok(self
             .headers_range(range)?
             .into_iter()
-            .map(|h| h.seal_slow())
+            .map(|h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+                SealedHeader::new(header, seal)
+            })
             .take_while(|h| predicate(h))
             .collect())
     }
@@ -260,8 +268,14 @@ impl TransactionsProvider for MockEthProvider {
                         index: index as u64,
                         block_hash: *block_hash,
                         block_number: block.header.number,
-                        base_fee: block.header.base_fee_per_gas,
-                        excess_blob_gas: block.header.excess_blob_gas,
+                        base_fee: block
+                            .header
+                            .base_fee_per_gas
+                            .map(|base_fer_per_gas| base_fer_per_gas as u64),
+                        excess_blob_gas: block
+                            .header
+                            .excess_blob_gas
+                            .map(|excess_blob_gas| excess_blob_gas as u64),
                         timestamp: block.header.timestamp,
                     };
                     return Ok(Some((tx.clone(), meta)))
@@ -531,7 +545,14 @@ impl BlockReaderIdExt for MockEthProvider {
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
+        self.header_by_id(id)?.map_or_else(
+            || Ok(None),
+            |h| {
+                let sealed = h.seal_slow();
+                let (header, seal) = sealed.into_parts();
+                Ok(Some(SealedHeader::new(header, seal)))
+            },
+        )
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {

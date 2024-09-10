@@ -5,7 +5,7 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
+use reth_primitives::{alloy_primitives::Sealable, BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader, TrieWriter,
@@ -274,7 +274,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        validate_state_root(trie_root, target_block.seal_slow(), to_block)?;
+        let sealed = target_block.seal_slow();
+        let (header, seal) = sealed.into_parts();
+
+        validate_state_root(trie_root, SealedHeader::new(header, seal), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -326,7 +329,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let target = provider
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
-            validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
+
+            let sealed = target.seal_slow();
+            let (header, seal) = sealed.into_parts();
+
+            validate_state_root(block_root, SealedHeader::new(header, seal), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
@@ -528,8 +535,16 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head =
-                SealedBlock { header: header.seal_slow(), body, ommers, withdrawals, requests };
+
+            let sealed = header.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            let sealed_head = SealedBlock {
+                header: SealedHeader::new(header, seal),
+                body,
+                ommers,
+                withdrawals,
+                requests,
+            };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

@@ -736,7 +736,10 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
 
-            sealed_header = header.seal_slow();
+            let sealed = header.seal_slow();
+            let (header, seal) = sealed.into_parts();
+            sealed_header = SealedHeader::new(header, seal);
+
             client.insert(sealed_header.clone(), body.clone());
         }
 

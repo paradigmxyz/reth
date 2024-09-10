@@ -7,19 +7,6 @@ pub use error::HeaderError;
 #[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
 pub mod test_utils;
 
-use alloy_consensus::constants::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-use alloy_eips::{
-    calc_next_block_base_fee, eip1559::BaseFeeParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS,
-    BlockNumHash,
-};
-use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
-use alloy_rlp::{length_of_length, Decodable, Encodable};
-use bytes::BufMut;
-use core::mem;
-use reth_codecs::{add_arbitrary_tests, Compact};
-use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
-use serde::{Deserialize, Serialize};
-
 // /// Block header
 // #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Compact)]
 // #[add_arbitrary_tests(rlp, 25)]

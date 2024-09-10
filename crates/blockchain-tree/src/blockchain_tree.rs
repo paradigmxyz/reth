@@ -419,8 +419,9 @@ where
 
         let parent_header = provider
             .header(&block.parent_hash)?
-            .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?
-            .seal(block.parent_hash);
+            .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
+
+        let parent_sealed_header = SealedHeader::new(parent_header, block.parent_hash);
 
         let canonical_chain = self.state.block_indices.canonical_chain();
 
@@ -432,7 +433,7 @@ where
 
         let chain = AppendableChain::new_canonical_fork(
             block,
-            &parent_header,
+            &parent_sealed_header,
             canonical_chain.inner(),
             parent,
             &self.externals,
@@ -998,7 +999,7 @@ where
             header = provider.header(hash)?
         }
 
-        Ok(header.map(|header| header.seal(*hash)))
+        Ok(header.map(|header| SealedHeader::new(header, *hash)))
     }
 
     /// Determines whether or not a block is canonical, checking the db if necessary.
@@ -1380,7 +1381,7 @@ where
 mod tests {
     use super::*;
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, Address, B256};
+    use alloy_primitives::{keccak256, Address, Sealable, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -1602,32 +1603,35 @@ mod tests {
             // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
 
+            let sealed = Header {
+                number,
+                parent_hash: parent.unwrap_or_default(),
+                gas_used: body.len() as u128 * 21_000,
+                gas_limit: chain_spec.max_gas_limit.into(),
+                mix_hash: B256::random(),
+                base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE.into()),
+                transactions_root,
+                receipts_root,
+                state_root: state_root_unhashed(HashMap::from([(
+                    signer,
+                    (
+                        AccountInfo {
+                            balance: initial_signer_balance -
+                                (single_tx_cost * U256::from(num_of_signer_txs)),
+                            nonce: num_of_signer_txs,
+                            ..Default::default()
+                        },
+                        EMPTY_ROOT_HASH,
+                    ),
+                )])),
+                ..Default::default()
+            }
+            .seal_slow();
+            let (header, seal) = sealed.into_parts();
+
             SealedBlockWithSenders::new(
                 SealedBlock {
-                    header: Header {
-                        number,
-                        parent_hash: parent.unwrap_or_default(),
-                        gas_used: body.len() as u64 * 21_000,
-                        gas_limit: chain_spec.max_gas_limit,
-                        mix_hash: B256::random(),
-                        base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
-                        transactions_root,
-                        receipts_root,
-                        state_root: state_root_unhashed(HashMap::from([(
-                            signer,
-                            (
-                                AccountInfo {
-                                    balance: initial_signer_balance -
-                                        (single_tx_cost * U256::from(num_of_signer_txs)),
-                                    nonce: num_of_signer_txs,
-                                    ..Default::default()
-                                },
-                                EMPTY_ROOT_HASH,
-                            ),
-                        )])),
-                        ..Default::default()
-                    }
-                    .seal_slow(),
+                    header: SealedHeader::new(header, seal),
                     body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                     ommers: Vec::new(),
                     withdrawals: Some(Withdrawals::default()),
