@@ -157,8 +157,6 @@ where
                 this.payload_request_state.task = Some(task);
             }
 
-            ready = false;
-        }
             if this.payload_request_state.task.is_some() {
                 let mut task = this.payload_request_state.task.take().unwrap();
                 match task.poll_unpin(cx) {
@@ -184,5 +182,134 @@ where
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_chainspec::MAINNET;
+    use reth_config::PruneConfig;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_exex_test_utils::TestNode;
+    use reth_node_types::NodeTypesWithDBAdapter;
+    use reth_payload_builder::test_utils::spawn_test_payload_service;
+    use reth_primitives::B256;
+    use reth_provider::{providers::StaticFileProvider, BlockReader, ProviderFactory};
+    use reth_prune::PrunerBuilder;
+    use reth_rpc_types::engine::PayloadAttributes;
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction},
+        TransactionPool,
+    };
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_local_engine_service_interval() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Start the provider and the pruner
+        let (_, static_dir_path) = create_test_static_files_dir();
+        let provider = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+        let pruner = PrunerBuilder::new(PruneConfig::default())
+            .build_with_provider_factory(provider.clone());
+
+        // Start the payload builder service
+        let payload_handle = spawn_test_payload_service::<EthEngineTypes>();
+
+        // Get the attributes for start of block building
+        let attributes = PayloadAttributes {
+            timestamp: 0,
+            prev_randao: Default::default(),
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
+        let genesis_hash = B256::random();
+
+        // Launch the LocalEngineService in interval mode
+        let period = Duration::from_secs(1);
+        LocalEngineService::spawn_new(
+            payload_handle,
+            attributes,
+            provider.clone(),
+            pruner,
+            genesis_hash,
+            MiningMode::interval(period),
+        );
+
+        // Wait 2 interval
+        tokio::time::sleep(4 * period).await;
+
+        // Assert a block has been build
+        let block = provider.block_by_number(0)?.map(|b| b.seal_slow());
+        assert!(block.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_local_engine_service_instant() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Start the provider and the pruner
+        let (_, static_dir_path) = create_test_static_files_dir();
+        let provider = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
+            create_test_rw_db(),
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+        let pruner = PrunerBuilder::new(PruneConfig::default())
+            .build_with_provider_factory(provider.clone());
+
+        // Start the payload builder service
+        let payload_handle = spawn_test_payload_service::<EthEngineTypes>();
+
+        // Start a transaction pool
+        let pool = testing_pool();
+
+        // Get the attributes for start of block building
+        let attributes = PayloadAttributes {
+            timestamp: 0,
+            prev_randao: Default::default(),
+            suggested_fee_recipient: Default::default(),
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
+        let genesis_hash = B256::random();
+
+        // Launch the LocalEngineService in instant mode
+        LocalEngineService::spawn_new(
+            payload_handle,
+            attributes,
+            provider.clone(),
+            pruner,
+            genesis_hash,
+            MiningMode::instant(pool.clone()),
+        );
+
+        // Wait for a small period to assert block building is
+        // triggered by adding a transaction to the pool
+        let period = Duration::from_millis(500);
+        tokio::time::sleep(period).await;
+        let block = provider.block_by_number(0)?;
+        assert!(block.is_none());
+
+        // Add a transaction to the pool
+        let transaction = MockTransaction::legacy().with_gas_price(10);
+        pool.add_transaction(Default::default(), transaction).await?;
+
+        // Wait for block building
+        let period = Duration::from_secs(2);
+        tokio::time::sleep(period).await;
+
+        // Assert a block has been build
+        let block = provider.block_by_number(0)?.map(|b| b.seal_slow());
+        assert!(block.is_some());
+
+        Ok(())
     }
 }
