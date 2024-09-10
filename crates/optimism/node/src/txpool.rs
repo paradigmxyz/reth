@@ -41,6 +41,11 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
         self.inner.chain_spec()
     }
 
+    /// Returns the configured client
+    pub fn client(&self) -> &Client {
+        self.inner.client()
+    }
+
     /// Returns the current block timestamp.
     fn block_timestamp(&self) -> u64 {
         self.block_info.timestamp.load(Ordering::Relaxed)
