@@ -7206,6 +7206,7 @@ dependencies = [
 name = "reth-evm-optimism"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-evm",
@@ -7941,6 +7942,7 @@ dependencies = [
 name = "reth-optimism-payload-builder"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "reth-basic-payload-builder",
  "reth-chain-state",
