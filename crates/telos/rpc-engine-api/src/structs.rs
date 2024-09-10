@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use reth_primitives::{Address, Bytes, U256};
+use reth_primitives::{Address, Bytes, Receipt, U256};
 
 /// Telos EVM Account Table Row
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,4 +42,6 @@ pub struct TelosEngineAPIExtraFields {
     pub new_addresses_using_create: Option<Vec<(u64,U256)>>,
     /// New addresses using `openwallet` action in block
     pub new_addresses_using_openwallet: Option<Vec<(u64,U256)>>,
+    /// Receipts produced by telos.evm contract
+    pub receipts: Option<Vec<Receipt>>
 }
