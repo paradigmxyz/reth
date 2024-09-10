@@ -39,7 +39,7 @@ alloy-primitives = { workspace = true, features = [
     "serde",
     "rand",
 ] }
-alloy-consensus = { workspace = true }
+alloy-consensus = { workspace = true, features = ["arbitrary"] }
 alloy-rlp.workspace = true
 rand.workspace = true
 test-fuzz.workspace = true

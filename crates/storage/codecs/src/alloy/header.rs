@@ -1,7 +1,6 @@
 use crate::Compact;
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
-use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
 
 /// Block header
@@ -13,7 +12,6 @@ use serde::{Deserialize, Serialize};
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::Header`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Compact)]
-#[add_arbitrary_tests(rlp, 25)]
 struct Header {
     parent_hash: B256,
     ommers_hash: B256,
