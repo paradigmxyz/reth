@@ -100,7 +100,8 @@ where
     ) {
         let engine = Self::new(payload_builder, payload_attributes, provider, pruner, head, mode);
 
-        let _ = tokio::spawn(async { engine.await });
+        // Spawn the engine
+        tokio::spawn(engine);
     }
 }
 
@@ -119,7 +120,7 @@ where
         loop {
             // Wait for the interval or the pool to receive a transaction
             if !this.payload_request_state.ready {
-                let _ = ready!(pin!(&mut this.mode).poll(cx));
+                ready!(pin!(&mut this.mode).poll(cx));
                 this.payload_request_state.ready = true;
             }
 
@@ -175,8 +176,6 @@ where
                         break
                     }
                 }
-            } else {
-                break
             }
         }
         Poll::Pending
