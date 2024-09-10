@@ -11,11 +11,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use telos_consensus_client::client::ConsensusClient;
-use telos_consensus_client::config::AppConfig;
+use telos_consensus_client::config::{AppConfig, CliArgs};
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tokio::sync::oneshot;
-use tracing::info;
+use tracing::{info};
 
 struct TelosRethNodeHandle {
     execution_port: u16,
@@ -107,10 +107,18 @@ async fn start_consensus(
         start_block: 1,
         // TODO: Determine a good stop block and test it here
         stop_block: None,
+        data_path: "temp/db".to_string(),
+        block_checkpoint_interval: 1000,
+        maximum_sync_range: 100000,
+        latest_blocks_in_db_num: 100,
     };
     let (_, receiver) = oneshot::channel();
 
-    let mut client_under_test = ConsensusClient::new(config).await?;
+    let cli_args = CliArgs {
+        config: "".to_string(),
+        clean: false,
+    };
+    let mut client_under_test = ConsensusClient::new(&cli_args, config).await?;
     Ok(client_under_test.run(receiver).await?)
 }
 
