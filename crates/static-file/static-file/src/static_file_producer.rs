@@ -120,8 +120,8 @@ where
     ///
     /// For each [Some] target in [`StaticFileTargets`], initializes a corresponding [Segment] and
     /// runs it with the provided block range using [`reth_provider::providers::StaticFileProvider`]
-    /// and a read-only database transaction from [`ProviderFactory`]. All segments are run in
-    /// parallel.
+    /// and a read-only database transaction from [`DatabaseProviderFactory`]. All segments are run
+    /// in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
