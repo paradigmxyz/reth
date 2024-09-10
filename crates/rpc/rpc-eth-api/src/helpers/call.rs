@@ -28,10 +28,12 @@ use reth_rpc_server_types::constants::gas_oracle::{
     CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
 };
 use reth_rpc_types::{
-    simulate::{SimBlock, SimulatedBlock},
+    simulate::{SimBlock, SimCallResult, SimulateError, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
+    Block, BlockId, Bundle, EthCallResponse, Log, StateContext, TransactionInfo,
+    TransactionRequest,
 };
+use reth_rpc_types_compat::block::from_primitive_with_hash;
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
@@ -57,10 +59,147 @@ pub trait EthCall: Call + LoadPendingBlock {
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
     fn simulate_v1(
         &self,
-        _opts: SimBlock,
-        _block_number: Option<BlockId>,
-    ) -> impl Future<Output = Result<Vec<SimulatedBlock>, Self::Error>> + Send {
-        async move { Err(EthApiError::Unsupported("eth_simulateV1 is not supported.").into()) }
+        payload: SimulatePayload,
+        block: Option<BlockId>,
+    ) -> impl Future<Output = Result<Vec<SimulatedBlock>, Self::Error>> + Send
+    where
+        Self: LoadBlock,
+    {
+        async move {
+            let SimulatePayload {
+                block_state_calls,
+                trace_transfers,
+                validation,
+                return_full_transactions,
+            } = payload;
+
+            if block_state_calls.is_empty() {
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+            }
+
+            let (cfg, mut block_env, block) = self.evm_env_at(block.unwrap_or_default()).await?;
+            let gas_limit = self.call_gas_limit();
+            let mut parent_hash =
+                self.block(block).await?.map(|block| block.hash()).unwrap_or_default();
+
+            let this = self.clone();
+            self.spawn_with_state_at_block(block, move |state| {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut blocks = Vec::with_capacity(block_state_calls.len());
+
+                for block in block_state_calls {
+                    let SimBlock { block_overrides, state_overrides, calls } = block;
+
+                    if let Some(block_overrides) = block_overrides {
+                        apply_block_overrides(block_overrides, &mut db, &mut block_env);
+                    }
+                    if let Some(state_overrides) = state_overrides {
+                        apply_state_overrides(state_overrides, &mut db)?;
+                    }
+
+                    let mut transactions = calls.into_iter().peekable();
+                    let mut calls = Vec::with_capacity(transactions.len());
+
+                    let mut log_index = 0;
+                    while let Some(tx) = transactions.next() {
+                        let env = this.prepare_call_env(
+                            cfg.clone(),
+                            block_env.clone(),
+                            tx,
+                            gas_limit,
+                            &mut db,
+                            None,
+                        )?;
+
+                        let (res, _) = this.transact(&mut db, env)?;
+
+                        match res.result {
+                            ExecutionResult::Halt { reason, gas_used } => {
+                                let error = RpcInvalidTransactionError::halt(reason, gas_limit);
+                                calls.push(SimCallResult {
+                                    return_value: Bytes::new(),
+                                    error: Some(SimulateError {
+                                        code: error.error_code(),
+                                        message: error.to_string(),
+                                    }),
+                                    gas_used,
+                                    logs: Vec::new(),
+                                    status: false,
+                                });
+                            }
+                            ExecutionResult::Revert { output, gas_used } => {
+                                let error = RevertError::new(output.clone());
+                                calls.push(SimCallResult {
+                                    return_value: output,
+                                    error: Some(SimulateError {
+                                        code: error.error_code(),
+                                        message: error.to_string(),
+                                    }),
+                                    gas_used,
+                                    status: false,
+                                    logs: Vec::new(),
+                                });
+                            }
+                            ExecutionResult::Success { output, gas_used, logs, .. } => {
+                                calls.push(SimCallResult {
+                                    return_value: output.into_data(),
+                                    error: None,
+                                    gas_used,
+                                    logs: logs
+                                        .into_iter()
+                                        .map(|log| {
+                                            log_index += 1;
+                                            Log {
+                                                inner: log,
+                                                log_index: Some(log_index - 1),
+                                                transaction_index: Some(calls.len() as u64),
+                                                ..Default::default()
+                                            }
+                                        })
+                                        .collect(),
+                                    status: true,
+                                });
+                            }
+                        };
+
+                        if transactions.peek().is_some() {
+                            // need to apply the state changes of this call before executing the
+                            // next call
+                            db.commit(res.state);
+                        }
+                    }
+
+                    let header = reth_primitives::Header {
+                        beneficiary: block_env.coinbase,
+                        difficulty: block_env.difficulty,
+                        number: block_env.number.to(),
+                        timestamp: block_env.timestamp.to(),
+                        base_fee_per_gas: Some(block_env.basefee.to()),
+                        gas_used: calls.iter().map(|tx| tx.gas_used).sum(),
+                        blob_gas_used: Some(0),
+                        parent_hash,
+                        gas_limit,
+                        ..Default::default()
+                    };
+
+                    let block = SimulatedBlock {
+                        inner: Block {
+                            header: from_primitive_with_hash(header.seal_slow()),
+                            ..Default::default()
+                        },
+                        calls,
+                    };
+
+                    parent_hash = block.inner.header.hash;
+                    block_env.number += U256::from(1);
+
+                    blocks.push(block);
+                }
+
+                Ok(blocks)
+            })
+            .await
+        }
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -162,7 +301,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                             tx,
                             gas_limit,
                             &mut db,
-                            overrides,
+                            Some(overrides),
                         )
                         .map(Into::into)?;
                     let (res, _) = this.transact(&mut db, env)?;
@@ -398,7 +537,7 @@ pub trait Call: LoadState + SpawnBlocking {
                     request,
                     this.call_gas_limit(),
                     &mut db,
-                    overrides,
+                    Some(overrides),
                 )?;
 
                 f(StateCacheDbRefMutWrapper(&mut db), env)
@@ -935,7 +1074,7 @@ pub trait Call: LoadState + SpawnBlocking {
         mut request: TransactionRequest,
         gas_limit: u64,
         db: &mut CacheDB<DB>,
-        overrides: EvmOverrides,
+        overrides: Option<EvmOverrides>,
     ) -> Result<EnvWithHandlerCfg, Self::Error>
     where
         DB: DatabaseRef,
@@ -957,24 +1096,17 @@ pub trait Call: LoadState + SpawnBlocking {
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
 
-        // apply block overrides, we need to apply them first so that they take effect when we we
-        // create the evm env via `build_call_evm_env`, e.g. basefee
-        if let Some(mut block_overrides) = overrides.block {
-            if let Some(block_hashes) = block_overrides.block_hash.take() {
-                // override block hashes
-                db.block_hashes
-                    .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+        if let Some(overrides) = overrides {
+            if let Some(block_overrides) = overrides.block {
+                apply_block_overrides(*block_overrides, db, &mut block);
             }
-            apply_block_overrides(*block_overrides, &mut block);
+            if let Some(state_overrides) = overrides.state {
+                apply_state_overrides(state_overrides, db)?;
+            }
         }
 
         let request_gas = request.gas;
         let mut env = self.build_call_evm_env(cfg, block, request)?;
-
-        // apply state overrides
-        if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db)?;
-        }
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
