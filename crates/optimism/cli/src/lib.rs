@@ -69,7 +69,7 @@ pub struct Cli<
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = Spec::help_messge(),
+        long_help = Spec::help_message(),
         default_value = Spec::SUPPORTED_CHAINS[0],
         value_parser = Spec::parser(),
         global = true,
