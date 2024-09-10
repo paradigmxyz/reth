@@ -81,7 +81,7 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.gas_limit = tx.gas_limit as u64;
                 tx_env.gas_price = U256::from(tx.max_fee_per_gas);
                 tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
+                tx_env.transact_to = tx.to.into();
                 tx_env.value = tx.value;
                 tx_env.data = tx.input.clone();
                 tx_env.chain_id = Some(tx.chain_id);
