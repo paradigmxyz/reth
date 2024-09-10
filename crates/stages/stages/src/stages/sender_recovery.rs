@@ -153,7 +153,7 @@ where
         .unzip();
 
     let static_file_provider = provider.static_file_provider().clone();
-    tokio::task::spawn_blocking(move || {
+    std::thread::spawn(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
             // Read the raw value, and let the rayon worker to decompress & decode.
             let chunk = static_file_provider
@@ -186,6 +186,8 @@ where
     });
 
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
+
+    let mut last_appended_tx = 0;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
@@ -216,6 +218,7 @@ where
                 }
             };
             senders_cursor.append(tx_id, sender)?;
+            last_appended_tx = tx_id;
         }
     }
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
