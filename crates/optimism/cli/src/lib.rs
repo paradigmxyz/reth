@@ -55,7 +55,10 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<
+    Spec: ChainSpecParser<ChainSpec = ChainSpec> = OpChainSpecParser,
+    Ext: clap::Args + fmt::Debug = NoArgs,
+> {
     /// The command to run
     #[command(subcommand)]
     command: Commands<Ext>,
@@ -66,12 +69,12 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = OpChainSpecParser::help_messge(),
-        default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
-        value_parser = OpChainSpecParser::parser(),
+        long_help = Spec::help_messge(),
+        default_value = Spec::SUPPORTED_CHAINS[0],
+        value_parser = Spec::parser(),
         global = true,
     )]
-    chain: Arc<ChainSpec>,
+    chain: Arc<Spec::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -109,7 +112,11 @@ impl Cli {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
+impl<Spec, Ext> Cli<Spec, Ext>
+where
+    Spec: ChainSpecParser<ChainSpec = ChainSpec>,
+    Ext: clap::Args + fmt::Debug,
+{
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
