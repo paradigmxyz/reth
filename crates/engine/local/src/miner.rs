@@ -17,16 +17,16 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 pub enum MiningMode {
     /// In this mode a block is build as soon as
     /// a valid transaction reaches the pool.
-    Auto(Fuse<ReceiverStream<TxHash>>),
+    Instant(Fuse<ReceiverStream<TxHash>>),
     /// In this mode a block is build at a fixed interval
     Interval(Interval),
 }
 
 impl MiningMode {
-    /// Constructor for an [`MiningMode::Auto`]
+    /// Constructor for an [`MiningMode::Instant`]
     pub fn instant<Pool: TransactionPool>(pool: Pool) -> Self {
         let rx = pool.pending_transactions_listener();
-        Self::Auto(ReceiverStream::new(rx).fuse())
+        Self::Instant(ReceiverStream::new(rx).fuse())
     }
 
     /// Constructor for an [`MiningMode::Interval`]
@@ -42,7 +42,7 @@ impl Future for MiningMode {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         match this {
-            Self::Auto(rx) => {
+            Self::Instant(rx) => {
                 // drain all transactions notifications
                 if let Poll::Ready(Some(_)) = pin!(rx).poll_next(cx) {
                     return Poll::Ready(())
