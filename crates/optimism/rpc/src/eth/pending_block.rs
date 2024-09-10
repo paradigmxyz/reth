@@ -1,10 +1,11 @@
 //! Loads OP pending block for a RPC response.
 
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
-    revm_primitives::BlockEnv, BlockNumber, Receipt, SealedBlockWithSenders, B256,
+    revm_primitives::BlockEnv, BlockNumberOrTag, Receipt, SealedBlockWithSenders,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
@@ -58,19 +59,21 @@ where
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        let block_id = latest.hash().into();
         let block = self
             .provider()
-            .block_with_senders(latest.hash().into(), Default::default())
+            .block_with_senders(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
             .seal(latest.hash());
 
         let receipts = self
             .provider()
-            .receipts_by_block(block.hash().into())
+            .receipts_by_block(block_id)
             .map_err(Self::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
+
         Ok(Some((block, receipts)))
     }
 

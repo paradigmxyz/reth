@@ -42,6 +42,12 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
+    /// Too many requested versioned hashes for blobs request
+    #[error("requested blob count too large: {len}")]
+    BlobRequestTooLarge {
+        /// The length that was requested.
+        len: usize,
+    },
     /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
@@ -145,7 +151,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 error.to_string(),
                 None::<()>,
             ),
-            EngineApiError::PayloadRequestTooLarge { .. } => {
+            EngineApiError::PayloadRequestTooLarge { .. } |
+            EngineApiError::BlobRequestTooLarge { .. } => {
                 jsonrpsee_types::error::ErrorObject::owned(
                     REQUEST_TOO_LARGE_CODE,
                     REQUEST_TOO_LARGE_MESSAGE,

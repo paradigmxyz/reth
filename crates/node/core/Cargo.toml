@@ -18,7 +18,6 @@ reth-cli.workspace = true
 reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-db-api.workspace = true
 reth-storage-errors.workspace = true
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
@@ -44,8 +43,8 @@ reth-node-types.workspace = true
 
 # ethereum
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
-
 
 # misc
 eyre.workspace = true
@@ -64,8 +63,6 @@ dirs-next = "2.0.0"
 shellexpand.workspace = true
 serde_json.workspace = true
 
-
-
 # tracing
 tracing.workspace = true
 
@@ -78,7 +75,6 @@ secp256k1 = { workspace = true, features = [
 
 # async
 futures.workspace = true
-
 
 [dev-dependencies]
 # test vectors generation

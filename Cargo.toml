@@ -168,6 +168,7 @@ rustdoc.all = "warn"
 # suggestions which we fixed. The others didn't have any findings, so we can
 # assume they don't have that many false positives. Let's enable them to
 # prevent future problems.
+borrow_as_ptr = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
@@ -210,6 +211,7 @@ redundant_clone = "warn"
 redundant_else = "warn"
 single_char_pattern = "warn"
 string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
 suboptimal_flops = "warn"
 suspicious_operation_groupings = "warn"
 trailing_empty_array = "warn"
@@ -219,12 +221,14 @@ trivial_regex = "warn"
 tuple_array_conversions = "warn"
 type_repetition_in_bounds = "warn"
 uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
 unnecessary_struct_initialization = "warn"
 unnested_or_patterns = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
+while_float = "warn"
 zero_sized_map_values = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
@@ -406,7 +410,7 @@ revm = { version = "14.0.0", features = [
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.6"
+revm-inspectors = "0.6.1"
 revm-primitives = { version = "9.0.0", features = [
     "std",
 ], default-features = false }
@@ -419,38 +423,38 @@ alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
 alloy-trie = { version = "0.5", default-features = false }
 
-alloy-consensus = { version = "0.3.2", default-features = false }
-alloy-eips = { version = "0.3.2", default-features = false }
-alloy-genesis = { version = "0.3.2", default-features = false }
-alloy-json-rpc = { version = "0.3.2", default-features = false }
-alloy-network = { version = "0.3.2", default-features = false }
-alloy-node-bindings = { version = "0.3.2", default-features = false }
-alloy-provider = { version = "0.3.2", features = [
+alloy-consensus = { version = "0.3.3", default-features = false }
+alloy-eips = { version = "0.3.3", default-features = false }
+alloy-genesis = { version = "0.3.3", default-features = false }
+alloy-json-rpc = { version = "0.3.3", default-features = false }
+alloy-network = { version = "0.3.3", default-features = false }
+alloy-node-bindings = { version = "0.3.3", default-features = false }
+alloy-provider = { version = "0.3.3", features = [
     "reqwest",
 ], default-features = false }
-alloy-pubsub = { version = "0.3.2", default-features = false }
-alloy-rpc-client = { version = "0.3.2", default-features = false }
-alloy-rpc-types = { version = "0.3.2", features = [
+alloy-pubsub = { version = "0.3.3", default-features = false }
+alloy-rpc-client = { version = "0.3.3", default-features = false }
+alloy-rpc-types = { version = "0.3.3", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-admin = { version = "0.3.2", default-features = false }
-alloy-rpc-types-anvil = { version = "0.3.2", default-features = false }
-alloy-rpc-types-beacon = { version = "0.3.2", default-features = false }
-alloy-rpc-types-debug = { version = "0.3.2", default-features = false }
-alloy-rpc-types-engine = { version = "0.3.2", default-features = false }
-alloy-rpc-types-eth = { version = "0.3.2", default-features = false }
-alloy-rpc-types-mev = { version = "0.3.2", default-features = false }
-alloy-rpc-types-trace = { version = "0.3.2", default-features = false }
-alloy-rpc-types-txpool = { version = "0.3.2", default-features = false }
-alloy-serde = { version = "0.3.2", default-features = false }
-alloy-signer = { version = "0.3.2", default-features = false }
-alloy-signer-local = { version = "0.3.2", default-features = false }
-alloy-transport = { version = "0.3.2" }
-alloy-transport-http = { version = "0.3.2", features = [
+alloy-rpc-types-admin = { version = "0.3.3", default-features = false }
+alloy-rpc-types-anvil = { version = "0.3.3", default-features = false }
+alloy-rpc-types-beacon = { version = "0.3.3", default-features = false }
+alloy-rpc-types-debug = { version = "0.3.3", default-features = false }
+alloy-rpc-types-engine = { version = "0.3.3", default-features = false }
+alloy-rpc-types-eth = { version = "0.3.3", default-features = false }
+alloy-rpc-types-mev = { version = "0.3.3", default-features = false }
+alloy-rpc-types-trace = { version = "0.3.3", default-features = false }
+alloy-rpc-types-txpool = { version = "0.3.3", default-features = false }
+alloy-serde = { version = "0.3.3", default-features = false }
+alloy-signer = { version = "0.3.3", default-features = false }
+alloy-signer-local = { version = "0.3.3", default-features = false }
+alloy-transport = { version = "0.3.3" }
+alloy-transport-http = { version = "0.3.3", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ipc = { version = "0.3.2", default-features = false }
-alloy-transport-ws = { version = "0.3.2", default-features = false }
+alloy-transport-ipc = { version = "0.3.3", default-features = false }
+alloy-transport-ws = { version = "0.3.3", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.2.9"

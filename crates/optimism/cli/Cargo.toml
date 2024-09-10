@@ -42,11 +42,9 @@ reth-cli-runner.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 
-
 # eth
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
 
 # misc
 futures-util.workspace = true
@@ -68,10 +66,10 @@ tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 
-[features] 
- optimism = [ 
+[features]
+ optimism = [
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
     "reth-provider/optimism",
     "reth-node-optimism/optimism",
- ] 
+ ]

@@ -2,6 +2,7 @@
 
 //! Optimism builder support
 
+use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -11,8 +12,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     transaction::WithEncoded,
-    Address, BlobTransactionSidecar, Header, Receipt, SealedBlock, TransactionSigned, Withdrawals,
-    B256, U256,
+    BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals,
 };
 /// Re-export for use in downstream arguments.
 pub use reth_rpc_types::optimism::OptimismPayloadAttributes;
@@ -179,8 +179,6 @@ pub struct OptimismBuiltPayload {
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// The payload attributes.
     pub(crate) attributes: OptimismPayloadBuilderAttributes,
-    /// The receipts of the block
-    pub(crate) receipts: Vec<Receipt>,
 }
 
 // === impl BuiltPayload ===
@@ -194,18 +192,8 @@ impl OptimismBuiltPayload {
         chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
         executed_block: Option<ExecutedBlock>,
-        receipts: Vec<Receipt>,
     ) -> Self {
-        Self {
-            id,
-            block,
-            executed_block,
-            fees,
-            sidecars: Vec::new(),
-            chain_spec,
-            attributes,
-            receipts,
-        }
+        Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
 
     /// Returns the identifier of the payload.
@@ -241,10 +229,6 @@ impl BuiltPayload for OptimismBuiltPayload {
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
     }
-
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
-    }
 }
 
 impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
@@ -258,10 +242,6 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 
     fn executed_block(&self) -> Option<ExecutedBlock> {
         self.executed_block.clone()
-    }
-
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
     }
 }
 

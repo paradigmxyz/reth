@@ -165,7 +165,7 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, FullEthApiServer,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
@@ -207,6 +207,7 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+use reth_node_core::rpc::types::AnyTransactionReceipt;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
@@ -228,7 +229,9 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer<
+        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+    >,
 {
     let module_config = module_config.into();
     server_config
@@ -435,7 +438,9 @@ where
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: FullEthApiServer,
+        EthApi: FullEthApiServer<
+            NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+        >,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
@@ -501,7 +506,9 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer,
+        EthApi: FullEthApiServer<
+            NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+        >,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -792,10 +799,12 @@ where
     pub fn register_eth(&mut self) -> &mut Self
     where
         EthApi: EthApiServer<
-            reth_rpc_types::Transaction,
-            reth_rpc_types::Block,
-            reth_rpc_types::AnyTransactionReceipt,
-        >,
+                reth_rpc_types::Transaction,
+                reth_rpc_types::Block,
+                RpcReceipt<EthApi::NetworkTypes>,
+            > + EthApiTypes<
+                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+            >,
     {
         let eth_api = self.eth_api().clone();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -812,7 +821,9 @@ where
         EthApi: EthApiServer<
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-                reth_rpc_types::AnyTransactionReceipt,
+                RpcReceipt<EthApi::NetworkTypes>,
+            > + EthApiTypes<
+                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
             > + TraceExt
             + EthTransactions,
     {
@@ -917,7 +928,9 @@ where
         EthApi: EthApiServer<
                 WithOtherFields<reth_rpc_types::Transaction>,
                 reth_rpc_types::Block<WithOtherFields<reth_rpc_types::Transaction>>,
-                reth_rpc_types::AnyTransactionReceipt,
+                RpcReceipt<EthApi::NetworkTypes>,
+            > + EthApiTypes<
+                NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
             > + TraceExt
             + EthTransactions,
     {
@@ -965,7 +978,9 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer<
+        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+    >,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace

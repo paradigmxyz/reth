@@ -73,7 +73,7 @@ impl SequencerClient {
         let body = serde_json::to_string(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
-            "params": [format!("0x{}", reth_primitives::hex::encode(tx))],
+            "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
             "id": self.next_request_id()
         }))
         .map_err(|_| {
