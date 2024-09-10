@@ -156,20 +156,26 @@ where
     std::thread::spawn(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
             // Read the raw value, and let the rayon worker to decompress & decode.
-            let chunk = static_file_provider
-                .fetch_range_with_predicate(
-                    StaticFileSegment::Transactions,
-                    chunk_range.clone(),
-                    |cursor, number| {
-                        Ok(cursor
-                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
-                                number.into(),
-                            )?
-                            .map(|tx| (number, tx)))
-                    },
-                    |_| true,
-                )
-                .expect("failed to fetch range");
+            let chunk = match static_file_provider.fetch_range_with_predicate(
+                StaticFileSegment::Transactions,
+                chunk_range.clone(),
+                |cursor, number| {
+                    Ok(cursor
+                        .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
+                            number.into(),
+                        )?
+                        .map(|tx| (number, tx)))
+                },
+                |_| true,
+            ) {
+                Ok(chunk) => chunk,
+                Err(err) => {
+                    // We exit early since we could not process this chunk.
+                    let _ = recovered_senders_tx
+                        .send(Err(Box::new(SenderRecoveryStageError::StageError(err.into()))));
+                    break
+                }
+            };
 
             // Spawn the task onto the global rayon pool
             // This task will send the results through the channel after it has read the transaction
@@ -178,8 +184,20 @@ where
                 let mut rlp_buf = Vec::with_capacity(128);
                 for (number, tx) in chunk {
                     rlp_buf.clear();
-                    let tx = tx.value().expect("decode error");
-                    let _ = recovered_senders_tx.send(recover_sender((number, tx), &mut rlp_buf));
+
+                    let res = tx
+                        .value()
+                        .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))
+                        .and_then(|tx| recover_sender((number, tx), &mut rlp_buf));
+
+                    let is_err = res.is_err();
+
+                    let _ = recovered_senders_tx.send(res);
+                    
+                    // Finish early
+                    if is_err {
+                        break
+                    }
                 }
             });
         }
@@ -187,7 +205,7 @@ where
 
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Appending recovered senders to the database");
 
-    let mut last_appended_tx = 0;
+    let mut processed_transactions = 0;
     for channel in receivers {
         while let Ok(recovered) = channel.recv() {
             let (tx_id, sender) = match recovered {
@@ -214,14 +232,20 @@ where
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
+                        SenderRecoveryStageError::FailedBatchRecovery => Err(StageError::Fatal(SenderRecoveryStageError::FailedBatchRecovery.into())),
                     }
                 }
             };
             senders_cursor.append(tx_id, sender)?;
-            last_appended_tx = tx_id;
+            processed_transactions += 1;
         }
     }
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
+
+    // Fail safe to ensure that we do not proceed without having recovered all senders.
+    if processed_transactions != (tx_range.end - tx_range.start) {
+        return Err(StageError::Fatal(SenderRecoveryStageError::FailedBatchRecovery.into()));
+    }
 
     Ok(())
 }
@@ -268,6 +292,10 @@ enum SenderRecoveryStageError {
     /// A transaction failed sender recovery
     #[error(transparent)]
     FailedRecovery(#[from] FailedSenderRecoveryError),
+
+    /// A recovering batch job failed recovery
+    #[error("failed to recover a batch")]
+    FailedBatchRecovery,
 
     /// A different type of stage error occurred
     #[error(transparent)]
