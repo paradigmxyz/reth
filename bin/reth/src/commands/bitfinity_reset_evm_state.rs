@@ -65,9 +65,17 @@ impl BitfinityResetEvmStateCommandBuilder {
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain, DatadirArgs::default());
         let db_path = data_dir.db();
         let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(db.clone(), chain, StaticFileProvider::read_write(data_dir.static_files())?);
+        let provider_factory = ProviderFactory::new(
+            db,
+            chain,
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
-        Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor, self.bitfinity.parallel_requests))
+        Ok(BitfinityResetEvmStateCommand::new(
+            provider_factory,
+            executor,
+            self.bitfinity.parallel_requests,
+        ))
     }
 }
 
@@ -91,22 +99,20 @@ impl BitfinityResetEvmStateCommand {
 
     /// Execute the command
     pub async fn execute(&self) -> eyre::Result<()> {
-
         let mut provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
         let last_block =
-        provider.block_by_number(last_block_number)?.expect("Block should be present");
-        
+            provider.block_by_number(last_block_number)?.expect("Block should be present");
+
         info!(target: "reth::cli", "Attempting reset of evm to block {}, state root: {:?}", last_block_number, last_block.state_root);
-        
+
         // Step 1: Reset the evm, the EVM must be disabled
         {
             self.executor.start().await?;
         }
-        
+
         // Step 2: Send the state to the EVM
         {
-            
             let start = std::time::Instant::now();
             let tx_ref = provider.tx_mut();
 
@@ -118,7 +124,8 @@ impl BitfinityResetEvmStateCommand {
             let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
             let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
 
-            let (accounts_sender, accounts_receiver) = async_channel::bounded(self.parallel_requests * 20);
+            let (accounts_sender, accounts_receiver) =
+                async_channel::bounded(self.parallel_requests * 20);
             let mut task_handles = vec![];
 
             // We need to create a number of tasks that will send the account data to the EVM
@@ -135,11 +142,11 @@ impl BitfinityResetEvmStateCommand {
                             plain_accounts_total_count,
                             &plain_accounts_recovered_count,
                         )
-                        .await.expect("Failed to send account data");
+                        .await
+                        .expect("Failed to send account data");
                     }
                 }));
             }
-
 
             // We need to iterate through all the accounts and retrieve their storage tries and populate the AccountInfo
             let mut accounts = AccountInfoMap::new();
@@ -162,9 +169,9 @@ impl BitfinityResetEvmStateCommand {
                 debug!("Recovering storage for account {}", address);
 
                 let mut plain_storage_cursor = tx_ref.cursor_read::<tables::PlainStorageState>()?;
-                let mut storage_walker = plain_storage_cursor.walk_range(*address..=*address)?;
+                let storage_walker = plain_storage_cursor.walk_range(*address..=*address)?;
 
-                while let Some(result) = storage_walker.next() {
+                for result in storage_walker {
                     let (storage_address, storage_entry) = result?;
                     trace!(
                         "Recovering storage for account {} - found entry: {:?}",
@@ -210,7 +217,6 @@ impl BitfinityResetEvmStateCommand {
             for handle in task_handles {
                 handle.await.expect("Failed to wait for task to finish");
             }
-
         }
 
         // Step 3: End of the recovery process. Send block data
@@ -264,7 +270,7 @@ impl<C: CanisterClient> Debug for EvmCanisterResetStateExecutor<C> {
 
 impl<C: CanisterClient> EvmCanisterResetStateExecutor<C> {
     /// Create a new instance of the executor
-    pub fn new(client: EvmCanisterClient<C>) -> Self {
+    pub const fn new(client: EvmCanisterClient<C>) -> Self {
         Self { client }
     }
 }
@@ -316,13 +322,14 @@ async fn split_and_send_add_accout_request(
     total_accounts: usize,
     processed_accounts: &AtomicUsize,
 ) -> eyre::Result<()> {
-
     let accounts_data_len = accounts.data.len();
     for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
         executor.add_accounts(account).await?;
     }
 
-    let processed_accounts_count = processed_accounts.fetch_add(accounts_data_len, std::sync::atomic::Ordering::Relaxed) + accounts_data_len;
+    let processed_accounts_count = processed_accounts
+        .fetch_add(accounts_data_len, std::sync::atomic::Ordering::Relaxed)
+        + accounts_data_len;
 
     let percent_done = (processed_accounts_count * 100) / total_accounts;
     let minutes_elapsed = process_start.elapsed().as_secs() / 60;
