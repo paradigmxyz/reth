@@ -94,12 +94,12 @@ pub struct Header {
 impl From<Header> for SealedHeader {
     fn from(value: Header) -> Self {
         let header = RethHeader {
-            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to::<u128>()),
+            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to::<u64>().into()),
             beneficiary: value.coinbase,
             difficulty: value.difficulty,
             extra_data: value.extra_data,
-            gas_limit: value.gas_limit.to::<u128>(),
-            gas_used: value.gas_used.to::<u128>(),
+            gas_limit: value.gas_limit.to::<u64>().into(),
+            gas_used: value.gas_used.to::<u64>().into(),
             mix_hash: value.mix_hash,
             nonce: u64::from_be_bytes(value.nonce.0).into(),
             number: value.number.to::<u64>(),
@@ -111,8 +111,8 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
-            blob_gas_used: value.blob_gas_used.map(|v| v.to::<u128>()),
-            excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u128>()),
+            blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>().into()),
+            excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>().into()),
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_root: value.requests_root,
         };

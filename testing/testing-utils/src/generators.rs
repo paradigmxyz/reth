@@ -204,7 +204,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         gas_limit: total_gas.into(),
         transactions_root,
         ommers_hash,
-        base_fee_per_gas: Some(rng.gen()),
+        base_fee_per_gas: Some(rng.gen::<u64>().into()),
         requests_root,
         withdrawals_root,
         ..Default::default()
