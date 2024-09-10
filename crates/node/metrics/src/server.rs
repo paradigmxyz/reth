@@ -1,4 +1,5 @@
 use crate::{
+    chain::ChainSpecInfo,
     hooks::{Hook, Hooks},
     recorder::install_prometheus_recorder,
     version::VersionInfo,
@@ -17,6 +18,7 @@ use tracing::info;
 pub struct MetricServerConfig {
     listen_addr: SocketAddr,
     version_info: VersionInfo,
+    chain_spec_info: ChainSpecInfo,
     task_executor: TaskExecutor,
     hooks: Hooks,
 }
@@ -26,10 +28,11 @@ impl MetricServerConfig {
     pub const fn new(
         listen_addr: SocketAddr,
         version_info: VersionInfo,
+        chain_spec_info: ChainSpecInfo,
         task_executor: TaskExecutor,
         hooks: Hooks,
     ) -> Self {
-        Self { listen_addr, hooks, task_executor, version_info }
+        Self { listen_addr, hooks, task_executor, version_info, chain_spec_info }
     }
 }
 
@@ -47,7 +50,8 @@ impl MetricServer {
 
     /// Spawns the metrics server
     pub async fn serve(&self) -> eyre::Result<()> {
-        let MetricServerConfig { listen_addr, hooks, task_executor, version_info } = &self.config;
+        let MetricServerConfig { listen_addr, hooks, task_executor, version_info, chain_spec_info } =
+            &self.config;
 
         info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
 
@@ -68,6 +72,7 @@ impl MetricServer {
         describe_io_stats();
 
         version_info.register_version_metrics();
+        chain_spec_info.register_chain_spec_metrics();
 
         Ok(())
     }
@@ -221,6 +226,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metrics_endpoint() {
+        let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
         let version_info = VersionInfo {
             version: "test",
             build_timestamp: "test",
@@ -237,7 +243,8 @@ mod tests {
         let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
 
         let listen_addr = get_random_available_addr();
-        let config = MetricServerConfig::new(listen_addr, version_info, executor, hooks);
+        let config =
+            MetricServerConfig::new(listen_addr, version_info, chain_spec_info, executor, hooks);
 
         MetricServer::new(config).serve().await.unwrap();
 
