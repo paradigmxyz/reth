@@ -48,7 +48,6 @@ serde = { workspace = true, optional = true }
 # reth
 reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # trie
@@ -62,9 +61,7 @@ tokio = { workspace = true, default-features = false, features = [
     "rt",
     "macros",
 ] }
-tokio-stream.workspace = true
 serde_json.workspace = true
-similar-asserts.workspace = true
 criterion.workspace = true
 
 [features]
