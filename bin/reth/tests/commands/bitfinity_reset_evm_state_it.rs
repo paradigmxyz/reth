@@ -1,5 +1,5 @@
 //!
-//! Integration tests for the BitfinityResetEvmStateCommand.
+//! Integration tests for the `BitfinityResetEvmStateCommand`.
 //! These tests requires a running EVM node or EVM block extractor node at the specified URL.
 //!
 
@@ -109,8 +109,11 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
     let executor = Arc::new(InMemoryResetStateExecutor::default());
     let parallel_requests = 4;
-    let reset_state_command =
-        BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone(), parallel_requests);
+    let reset_state_command = BitfinityResetEvmStateCommand::new(
+        import_data.provider_factory.clone(),
+        executor.clone(),
+        parallel_requests,
+    );
 
     // Act
     {
@@ -147,7 +150,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
             let mut accounts_with_code = 0;
             let mut accounts_with_storage_values = 0;
-            for (executor_account_address, executor_account) in executor_accounts.data.iter() {
+            for (executor_account_address, executor_account) in &executor_accounts.data {
                 let account =
                     provider.basic_account(executor_account_address.0 .0.into()).unwrap().unwrap();
 
@@ -163,7 +166,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
                     assert!(account.bytecode_hash.is_none());
                 }
 
-                if executor_account.storage.len() > 0 {
+                if !executor_account.storage.is_empty() {
                     accounts_with_storage_values += 1;
                 }
             }
@@ -233,7 +236,14 @@ async fn build_bitfinity_reset_evm_command(
 
     let executor = Arc::new(EvmCanisterResetStateExecutor::new(evm_client.clone()));
 
-    (evm_client, BitfinityResetEvmStateCommand::new(provider_factory, executor, bitfinity_args.parallel_requests))
+    (
+        evm_client,
+        BitfinityResetEvmStateCommand::new(
+            provider_factory,
+            executor,
+            bitfinity_args.parallel_requests,
+        ),
+    )
 }
 
 /// In-memory executor for resetting the EVM canister state.

@@ -17,6 +17,28 @@ use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
 use std::net::SocketAddr;
+use std::time::Duration;
+
+#[tokio::test]
+async fn test_finalized_and_safe_query_params_works() {
+    // Arrange
+    let _log = init_logs();
+    let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(evm_datasource_url, None).await.unwrap();
+
+    let end_block = 100;
+    import_data.bitfinity_args.end_block = Some(end_block);
+    import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
+
+    // Act
+    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
+
+    let (reth_client, _reth_node) = start_reth_testing_node(None).await;
+
+    assert!(reth_client.get_block_by_number("finalized".into()).await.is_ok());
+    assert!(reth_client.get_block_by_number("safe".into()).await.is_ok())
+}
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
