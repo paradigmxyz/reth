@@ -393,8 +393,8 @@ impl PruneConfig {
         self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 
-    /// Merges another `PruneConfig` into this one, taking values from the other config iff the
-    /// corresponding value in this config is not set.
+    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
+    /// if the corresponding value in this config is not set.
     pub fn merge(&mut self, other: Option<Self>) {
         let Some(other) = other else { return };
 
