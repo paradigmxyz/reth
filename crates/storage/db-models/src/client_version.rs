@@ -1,6 +1,6 @@
 //! Client version model.
 
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact, Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 
 /// Client version that accessed the database.
@@ -43,5 +43,23 @@ impl Compact for ClientVersion {
             build_timestamp: unsafe { String::from_utf8_unchecked(build_timestamp) },
         };
         (client_version, buf)
+    }
+}
+
+impl Encode for ClientVersion {
+    type Encoded = Vec<u8>;
+
+    // Delegate to the Compact implementation
+    fn encode(self) -> Self::Encoded {
+        let mut buf = vec![];
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for ClientVersion {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
     }
 }

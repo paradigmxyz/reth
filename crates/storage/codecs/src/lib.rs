@@ -19,14 +19,19 @@
 
 pub use reth_codecs_derive::*;
 
-use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
+use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, B256, U256};
 use bytes::{Buf, BufMut};
 
 extern crate alloc;
 use alloc::vec::Vec;
 
+use core::fmt::Debug;
+
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
+
+mod error;
+pub use error::DecodeError;
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -475,6 +480,104 @@ fn decode_varuint(buf: &[u8]) -> (usize, &[u8]) {
 #[cold]
 const fn decode_varuint_panic() -> ! {
     panic!("could not decode varuint");
+}
+
+/// Trait that will transform the data to be saved in the DB.
+pub trait Encode: Send + Sync + Sized + Debug {
+    /// Encoded type.
+    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync + Ord + Debug;
+
+    /// Encodes data going into the database.
+    fn encode(self) -> Self::Encoded;
+}
+
+/// Trait that will transform the data to be read from the DB.
+pub trait Decode: Send + Sync + Sized + Debug {
+    /// Decodes data coming from the database.
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError>;
+}
+
+/// Macro that implements [`Encode`] and [`Decode`] for uint types.
+macro_rules! impl_uints {
+    ($($name:tt),+) => {
+        $(
+            impl Encode for $name {
+                type Encoded = [u8; core::mem::size_of::<$name>()];
+
+                fn encode(self) -> Self::Encoded {
+                    self.to_be_bytes()
+                }
+            }
+
+            impl Decode for $name {
+                fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DecodeError> {
+                    Ok(
+                        $name::from_be_bytes(
+                            value.as_ref().try_into().map_err(|_| $crate::DecodeError)?
+                        )
+                    )
+                }
+            }
+        )+
+    };
+}
+
+impl_uints!(u64, u32, u16, u8);
+
+impl Encode for Vec<u8> {
+    type Encoded = Self;
+
+    fn encode(self) -> Self::Encoded {
+        self
+    }
+}
+
+impl Decode for Vec<u8> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        Ok(value.as_ref().to_vec())
+    }
+}
+
+impl Encode for Address {
+    type Encoded = [u8; 20];
+
+    fn encode(self) -> Self::Encoded {
+        self.0 .0
+    }
+}
+
+impl Decode for Address {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        Ok(Self::from_slice(value.as_ref()))
+    }
+}
+
+impl Encode for B256 {
+    type Encoded = [u8; 32];
+
+    fn encode(self) -> Self::Encoded {
+        self.0
+    }
+}
+
+impl Decode for B256 {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        Ok(Self::new(value.as_ref().try_into().map_err(|_| DecodeError)?))
+    }
+}
+
+impl Encode for String {
+    type Encoded = Vec<u8>;
+
+    fn encode(self) -> Self::Encoded {
+        self.into_bytes()
+    }
+}
+
+impl Decode for String {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        Self::from_utf8(value.as_ref().to_vec()).map_err(|_| DecodeError)
+    }
 }
 
 #[cfg(test)]

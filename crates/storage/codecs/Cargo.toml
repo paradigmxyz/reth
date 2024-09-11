@@ -28,6 +28,7 @@ op-alloy-consensus = { workspace = true, optional = true }
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+derive_more.workspace = true
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = [

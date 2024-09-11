@@ -9,6 +9,7 @@ use core::{
     fmt::{Debug, Display},
     str::FromStr,
 };
+use reth_codecs::DecodeError;
 
 /// Database error type.
 #[derive(Clone, Debug, PartialEq, Eq, derive_more::Display)]
@@ -84,6 +85,13 @@ impl From<DatabaseWriteError> for DatabaseError {
     #[inline]
     fn from(error: DatabaseWriteError) -> Self {
         Self::Write(Box::new(error))
+    }
+}
+
+impl From<DecodeError> for DatabaseError {
+    #[inline]
+    fn from(_: DecodeError) -> Self {
+        Self::Decode
     }
 }
 

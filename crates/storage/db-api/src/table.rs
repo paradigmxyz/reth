@@ -4,6 +4,8 @@ use crate::{
     DatabaseError,
 };
 
+pub use reth_codecs::{Decode, Encode};
+
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -44,21 +46,6 @@ pub trait Decompress: Send + Sync + Sized + Debug {
     fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
         Self::decompress(value)
     }
-}
-
-/// Trait that will transform the data to be saved in the DB.
-pub trait Encode: Send + Sync + Sized + Debug {
-    /// Encoded type.
-    type Encoded: AsRef<[u8]> + Into<Vec<u8>> + Send + Sync + Ord + Debug;
-
-    /// Encodes data going into the database.
-    fn encode(self) -> Self::Encoded;
-}
-
-/// Trait that will transform the data to be read from the DB.
-pub trait Decode: Send + Sync + Sized + Debug {
-    /// Decodes data coming from the database.
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].

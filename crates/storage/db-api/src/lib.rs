@@ -78,6 +78,4 @@ pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 pub mod models;
 mod scale;
 
-mod utils;
-
 pub use database::Database;
