@@ -71,7 +71,12 @@ pub struct DebugArgs {
     /// Determines which type of bad block hook to install
     ///
     /// Example: `witness,prestate`
-    #[arg(long = "debug.invalid-block-hook", help_heading = "Debug", value_parser = InvalidBlockSelectionValueParser::default())]
+    #[arg(
+        long = "debug.invalid-block-hook",
+        help_heading = "Debug",
+        value_parser = InvalidBlockSelectionValueParser::default(),
+        default_value = "witness"
+    )]
     pub invalid_block_hook: Option<InvalidBlockSelection>,
 }
 
