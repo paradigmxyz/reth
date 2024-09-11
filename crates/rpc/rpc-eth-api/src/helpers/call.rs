@@ -6,6 +6,7 @@ use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
+    basefee::calc_next_block_base_fee,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
@@ -104,12 +105,34 @@ pub trait EthCall: Call + LoadPendingBlock {
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let mut blocks = Vec::with_capacity(block_state_calls.len());
+                let mut blocks: Vec<
+                    SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>,
+                > = Vec::with_capacity(block_state_calls.len());
                 let mut gas_used = 0;
                 for block in block_state_calls {
                     // Increase number and timestamp for every new block
                     block_env.number += U256::from(1);
                     block_env.timestamp += U256::from(1);
+
+                    if !validation {
+                        block_env.basefee = U256::ZERO;
+                    } else {
+                        let chain_spec = LoadPendingBlock::provider(&this).chain_spec();
+                        let base_fee_params =
+                            chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
+                        let base_fee = if let Some(latest) = blocks.last() {
+                            let header = &latest.inner.header;
+                            calc_next_block_base_fee(
+                                header.gas_used,
+                                header.gas_limit,
+                                header.base_fee_per_gas.unwrap_or_default(),
+                                base_fee_params,
+                            )
+                        } else {
+                            base_block.header.next_block_base_fee(base_fee_params).unwrap_or_default() as u128
+                        };
+                        block_env.basefee = U256::from(base_fee);
+                    }
 
                     let SimBlock { block_overrides, state_overrides, mut calls } = block;
 
