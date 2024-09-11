@@ -15,21 +15,21 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 /// A mining mode for the local dev engine.
 #[derive(Debug)]
 pub enum MiningMode {
-    /// In this mode a block is build as soon as
+    /// In this mode a block is built as soon as
     /// a valid transaction reaches the pool.
     Instant(Fuse<ReceiverStream<TxHash>>),
-    /// In this mode a block is build at a fixed interval
+    /// In this mode a block is built at a fixed interval.
     Interval(Interval),
 }
 
 impl MiningMode {
-    /// Constructor for an [`MiningMode::Instant`]
+    /// Constructor for a [`MiningMode::Instant`]
     pub fn instant<Pool: TransactionPool>(pool: Pool) -> Self {
         let rx = pool.pending_transactions_listener();
         Self::Instant(ReceiverStream::new(rx).fuse())
     }
 
-    /// Constructor for an [`MiningMode::Interval`]
+    /// Constructor for a [`MiningMode::Interval`]
     pub fn interval(duration: Duration) -> Self {
         let start = tokio::time::Instant::now() + duration;
         Self::Interval(tokio::time::interval_at(start, duration))
