@@ -80,28 +80,6 @@ where
     }
 }
 
-/// L1 fee and data gas for a transaction, along with the L1 block info.
-#[derive(Debug, Default, Clone)]
-pub struct OptimismTxMeta {
-    /// The L1 block info.
-    pub l1_block_info: Option<L1BlockInfo>,
-    /// The L1 fee for the block.
-    pub l1_fee: Option<u128>,
-    /// The L1 data gas for the block.
-    pub l1_data_gas: Option<u128>,
-}
-
-impl OptimismTxMeta {
-    /// Creates a new [`OptimismTxMeta`].
-    pub const fn new(
-        l1_block_info: Option<L1BlockInfo>,
-        l1_fee: Option<u128>,
-        l1_data_gas: Option<u128>,
-    ) -> Self {
-        Self { l1_block_info, l1_fee, l1_data_gas }
-    }
-}
-
 impl<N, Eth> OpEthApi<N, Eth>
 where
     N: FullNodeComponents,
