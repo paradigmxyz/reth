@@ -548,7 +548,7 @@ Debug:
           [possible values: witness, pre-state, opcode]
 
       --debug.healthy-node-rpc-url <URL>
-          The URL of the healthy node RPC.
+          The RPC URL of a healthy node.
 
 Database:
       --db.log-level <LOG_LEVEL>

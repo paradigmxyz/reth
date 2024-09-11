@@ -162,12 +162,12 @@ where
         let witness = state_provider.witness(HashedPostState::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let mut file = File::options()
+        let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
+        File::options()
             .write(true)
             .create_new(true)
-            .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?;
-        let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
-        file.write_all(serde_json::to_string(&response)?.as_bytes())?;
+            .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?
+            .write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
         if bundle_state != output.state {
@@ -194,6 +194,7 @@ where
         }
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
+            // Compare the witness against the healthy node.
             let healthy_node_witness = tokio::runtime::Handle::current().block_on(async move {
                 DebugApiClient::debug_execution_witness(
                     healthy_node_client,
@@ -203,8 +204,20 @@ where
                 .await
             })?;
 
+            // Write the healthy node witness to the output directory.
+            File::options()
+                .write(true)
+                .create_new(true)
+                .open(self.output_directory.join(format!(
+                    "{}_{}.healthy_witness.json",
+                    block.number,
+                    block.hash()
+                )))?
+                .write_all(serde_json::to_string(&healthy_node_witness)?.as_bytes())?;
+
+            // If the witnesses are different, write the diff to the output directory.
             if response != healthy_node_witness {
-                let filename = format!("{}_{}.witness.diff", block.number, block.hash());
+                let filename = format!("{}_{}.healthy_witness.diff", block.number, block.hash());
                 let path = self.save_diff(filename, &response, &healthy_node_witness)?;
                 warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Witness mismatch against healthy node");
             }
