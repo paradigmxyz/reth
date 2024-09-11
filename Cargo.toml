@@ -455,7 +455,7 @@ alloy-transport-http = { version = "0.3.3", features = [
 ], default-features = false }
 alloy-transport-ipc = { version = "0.3.3", default-features = false }
 alloy-transport-ws = { version = "0.3.3", default-features = false }
-alloy-network-primitives = { version = "0.3.1", default-features = false }
+alloy-network-primitives = { version = "0.3.3", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.2.9"
@@ -537,6 +537,7 @@ tower-http = "0.5"
 
 # p2p
 discv5 = "0.7.0"
+if-addrs = "0.13"
 
 # rpc
 jsonrpsee = "0.24"

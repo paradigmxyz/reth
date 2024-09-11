@@ -249,13 +249,9 @@ where
             .drain(page_start..page_end)
             .zip(transactions.iter().map(|tx| tx.inner.transaction_type.unwrap_or(0)))
             .map(|(receipt, tx_ty)| {
-                let status = receipt.status();
-                let cumulative_gas_used = receipt.cumulative_gas_used() as u64;
-                let r#type = receipt.transaction_type();
-
                 let inner = OtsReceipt {
                     status: receipt.status(),
-                    cumulative_gas_used,
+                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
                     logs: None,
                     logs_bloom: None,
                     r#type: tx_ty,

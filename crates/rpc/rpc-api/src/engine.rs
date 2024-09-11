@@ -3,11 +3,11 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_types::{
     engine::{
         ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2,

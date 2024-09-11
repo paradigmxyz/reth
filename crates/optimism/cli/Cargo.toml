@@ -67,9 +67,16 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 
 [features]
- optimism = [
+optimism = [
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
     "reth-provider/optimism",
+    "reth-node-core/optimism",
     "reth-node-optimism/optimism",
- ]
+]
+asm-keccak = [
+    "alloy-primitives/asm-keccak",
+    "reth-node-core/asm-keccak",
+    "reth-node-optimism/asm-keccak",
+    "reth-primitives/asm-keccak",
+]

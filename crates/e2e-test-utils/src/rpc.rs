@@ -27,6 +27,7 @@ where
         + EthTransactions<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
             TransactionCompat: TransactionCompat<
                 Transaction = RpcTransaction<EthApi::NetworkTypes>,
