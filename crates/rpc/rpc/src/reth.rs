@@ -1,9 +1,10 @@
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethResult;
-use reth_primitives::{Address, BlockId, U256};
+use reth_primitives::BlockId;
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};

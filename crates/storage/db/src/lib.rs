@@ -36,6 +36,7 @@ pub use utils::is_database_empty;
 #[cfg(feature = "mdbx")]
 pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
 
+pub use models::ClientVersion;
 pub use reth_db_api::*;
 
 /// Collection of database test utilities

@@ -1,6 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
@@ -12,7 +13,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_primitives::{BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, U256};
+use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
@@ -441,10 +442,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        b256, Account, Address, Block, Signature, StorageKey, StorageValue, Transaction,
-        TransactionSigned, TxEip1559, BASE_MAINNET,
+        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,

@@ -3,10 +3,11 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
-use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
 use reth_primitives::B256;
-use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
+use reth_provider::{
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
@@ -33,9 +34,9 @@ use tracing::*;
 ///
 /// If possible, use more optimized `AsyncStateRoot` instead.
 #[derive(Debug)]
-pub struct ParallelStateRoot<DB, Provider> {
+pub struct ParallelStateRoot<Factory> {
     /// Consistent view of the database.
-    view: ConsistentDbView<DB, Provider>,
+    view: ConsistentDbView<Factory>,
     /// Changed hashed state.
     hashed_state: HashedPostState,
     /// Parallel state root metrics.
@@ -43,9 +44,9 @@ pub struct ParallelStateRoot<DB, Provider> {
     metrics: ParallelStateRootMetrics,
 }
 
-impl<DB, Provider> ParallelStateRoot<DB, Provider> {
+impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<DB, Provider>, hashed_state: HashedPostState) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, hashed_state: HashedPostState) -> Self {
         Self {
             view,
             hashed_state,
@@ -55,10 +56,9 @@ impl<DB, Provider> ParallelStateRoot<DB, Provider> {
     }
 }
 
-impl<DB, Provider> ParallelStateRoot<DB, Provider>
+impl<Factory> ParallelStateRoot<Factory>
 where
-    DB: Database,
-    Provider: DatabaseProviderFactory<DB> + Send + Sync,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {

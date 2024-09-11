@@ -71,7 +71,7 @@ pub struct Pipeline<N: NodeTypesWithDB> {
     stages: Vec<BoxedStage<N::DB>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    static_file_producer: StaticFileProducer<N>,
+    static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     /// Sender for events the pipeline emits.
     event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.

@@ -1,5 +1,6 @@
 //! Contains common `reth` arguments
 
+use alloy_primitives::B256;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -14,7 +15,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::B256;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -39,7 +39,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = C::help_messge(),
+        long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser()
     )]

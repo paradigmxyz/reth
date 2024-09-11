@@ -1,3 +1,4 @@
+use alloy_primitives::BlockHash;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_db::{
@@ -7,7 +8,7 @@ use reth_db::{
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_builder::NodeTypesWithDB;
-use reth_primitives::{BlockHash, Header};
+use reth_primitives::Header;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
@@ -204,10 +205,10 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, B256};
     use clap::{Args, Parser};
     use reth_db::{AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory};
     use reth_db_api::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
-    use reth_primitives::{Address, B256};
     use std::str::FromStr;
 
     /// A helper type to parse Args more easily

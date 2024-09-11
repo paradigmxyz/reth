@@ -9,6 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use alloy_primitives::U256;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -17,9 +18,7 @@ use reth_consensus_common::validation::{
     validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
     validate_header_gas,
 };
-use reth_primitives::{
-    BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
-};
+use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;

@@ -1,5 +1,5 @@
+use alloy_primitives::U64;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::U64;
 
 /// Net rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]

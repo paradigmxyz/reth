@@ -2,9 +2,10 @@
 
 use super::state::SidechainId;
 use crate::canonical_chain::CanonicalChain;
+use alloy_primitives::{BlockHash, BlockNumber};
 use linked_hash_set::LinkedHashSet;
 use reth_execution_types::Chain;
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, SealedBlockWithSenders};
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
@@ -178,7 +179,7 @@ impl BlockIndices {
                     if new_block_value.1 != old_block_value.1 {
                         // remove block hash as it is different
                         removed.push(old_block_value);
-                        added.push(new_block_value.into());
+                        added.push(new_block_value.into())
                     }
                     new_hash = new_hashes.next();
                     old_hash = old_hashes.next();
@@ -375,7 +376,8 @@ impl BlockIndices {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Header, SealedBlock, SealedHeader, B256};
+    use alloy_primitives::B256;
+    use reth_primitives::{Header, SealedBlock, SealedHeader};
 
     #[test]
     fn pending_block_num_hash_returns_none_if_no_fork() {
