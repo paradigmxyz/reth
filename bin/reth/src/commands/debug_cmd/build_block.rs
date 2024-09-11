@@ -19,7 +19,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes};
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, Address, BlobTransaction, BlobTransactionSidecar, Bytes,
@@ -243,7 +243,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             None,
         );
 
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         match payload_builder.try_build(args)? {
             BuildOutcome::Better { payload, .. } => {

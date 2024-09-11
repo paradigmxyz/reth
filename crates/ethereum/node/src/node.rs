@@ -11,14 +11,14 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::{ConfigureEvm, FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    BuilderContext, ConfigureEvm, Node, PayloadBuilderConfig, PayloadTypes,
+    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -57,7 +57,7 @@ impl EthereumNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::new(EthEvmConfig::default()))
+            .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
@@ -120,8 +120,8 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
-        let evm_config = EthEvmConfig::default();
-        let executor = EthExecutorProvider::new(chain_spec, evm_config);
+        let evm_config = EthEvmConfig::new(ctx.chain_spec());
+        let executor = EthExecutorProvider::new(chain_spec, evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -204,37 +204,29 @@ where
 /// A basic ethereum payload service.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct EthereumPayloadBuilder<Evm = EthEvmConfig> {
-    /// The EVM configuration to use for the payload builder.
-    pub evm_config: Evm,
-}
+pub struct EthereumPayloadBuilder;
 
-impl<EVM> EthereumPayloadBuilder<EVM> {
-    /// Create a new instance with the given evm config.
-    pub const fn new(evm_config: EVM) -> Self {
-        Self { evm_config }
-    }
-}
-
-impl<Types, Node, Evm, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder<Evm>
-where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
-    Evm: ConfigureEvm,
-    Pool: TransactionPool + Unpin + 'static,
-    Types::Engine: PayloadTypes<
-        BuiltPayload = EthBuiltPayload,
-        PayloadAttributes = EthPayloadAttributes,
-        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-    >,
-{
-    async fn spawn_payload_service(
+impl EthereumPayloadBuilder {
+    /// A helper method initializing [`PayloadBuilderService`] with the given EVM config.
+    pub fn spawn<Types, Node, Evm, Pool>(
         self,
+        evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>>
+    where
+        Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        Node: FullNodeTypes<Types = Types>,
+        Evm: ConfigureEvm,
+        Pool: TransactionPool + Unpin + 'static,
+        Types::Engine: PayloadTypes<
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
+    {
         let payload_builder =
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(self.evm_config);
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -257,6 +249,26 @@ where
         ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
+    }
+}
+
+impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
+where
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<Types = Types>,
+    Pool: TransactionPool + Unpin + 'static,
+    Types::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = EthPayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>> {
+        self.spawn(EthEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 

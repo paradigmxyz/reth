@@ -47,7 +47,7 @@ pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
 impl EthExecutorProvider {
     /// Creates a new default ethereum executor provider.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec, Default::default())
+        Self::new(chain_spec.clone(), EthEvmConfig::new(chain_spec))
     }
 
     /// Returns a new provider for the mainnet.
@@ -285,7 +285,6 @@ where
         self.executor.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
-            self.chain_spec(),
             header,
             total_difficulty,
         );
@@ -522,7 +521,7 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> EthExecutorProvider<EthEvmConfig> {
-        EthExecutorProvider { chain_spec, evm_config: Default::default() }
+        EthExecutorProvider { evm_config: EthEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]

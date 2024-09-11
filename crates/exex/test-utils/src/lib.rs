@@ -76,16 +76,16 @@ pub struct TestExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for TestExecutorBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     type EVM = EthEvmConfig;
     type Executor = MockExecutorProvider;
 
     async fn build_evm(
         self,
-        _ctx: &BuilderContext<Node>,
+        ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::default();
+        let evm_config = EthEvmConfig::new(ctx.chain_spec());
         let executor = MockExecutorProvider::default();
 
         Ok((evm_config, executor))
@@ -238,7 +238,7 @@ pub async fn test_exex_context_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
-    let evm_config = EthEvmConfig::default();
+    let evm_config = EthEvmConfig::new(chain_spec.clone());
     let executor = MockExecutorProvider::default();
     let consensus = Arc::new(TestConsensus::default());
 
