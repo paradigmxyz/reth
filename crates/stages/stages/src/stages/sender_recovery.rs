@@ -153,6 +153,14 @@ where
         .unzip();
 
     let static_file_provider = provider.static_file_provider().clone();
+
+    // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
+    // there will be a timeout grace period in which Tokio does not allow spawning
+    // additional blocking tasks. This would cause this function to return
+    // `SenderRecoveryStageError::FailedBatchRecovery` at the end.
+    //
+    // However, using `std::thread::spawn` allows us to utilize the timeout grace 
+    // period to complete some work without throwing errors during the shutdown.
     std::thread::spawn(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
             // Read the raw value, and let the rayon worker to decompress & decode.
