@@ -367,11 +367,7 @@ impl<T>
         RpcReceipt<T::NetworkTypes>,
     > for T
 where
-    T: FullEthApi<
-        NetworkTypes: alloy_network::Network<
-            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-        >,
-    >,
+    T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`

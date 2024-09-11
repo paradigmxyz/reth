@@ -4,7 +4,7 @@ use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction};
 use reth_rpc_types::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
     SyncStatus, TransactionRequest,
@@ -40,11 +40,7 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthApiTypes<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+        > + FullEthApiTypes,
     EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
 {
     /// Handler for: `eth_syncing`

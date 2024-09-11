@@ -25,9 +25,7 @@ use reth_rpc_types_compat::{
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{
-    EthApiTypes, FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction,
-};
+use crate::{FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
@@ -232,15 +230,7 @@ pub trait EthTransactions: LoadTransaction {
         include_pending: bool,
     ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadBlock
-            + LoadState
-            + EthApiTypes<
-                NetworkTypes: alloy_network::Network<
-                    TransactionResponse = reth_rpc_types::WithOtherFields<
-                        reth_rpc_types::Transaction,
-                    >,
-                >,
-            >,
+        Self: LoadBlock + LoadState + FullEthApiTypes,
     {
         async move {
             // Check the pool first

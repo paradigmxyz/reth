@@ -23,13 +23,7 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
-    EthApi: EthApiSpec
-        + EthTransactions<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
-                ReceiptResponse = AnyTransactionReceipt,
-            >,
-        > + TraceExt,
+    EthApi: EthApiSpec + EthTransactions + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
     pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {

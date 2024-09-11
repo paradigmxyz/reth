@@ -301,12 +301,7 @@ pub async fn launch_rpc_servers<Node, Engine, EthApi>(
 where
     Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
     Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
-    EthApi: EthApiBuilderProvider<Node>
-        + FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+    EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;
     let module_config = config.rpc.transport_rpc_module_config();

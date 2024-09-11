@@ -88,14 +88,7 @@ where
     ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
         Engine::ExecutionPayloadV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec
-            + EthTransactions
-            + TraceExt
-            + FullEthApiTypes<
-                NetworkTypes: alloy_network::Network<
-                    TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
-                >,
-            >,
+        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt + FullEthApiTypes,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

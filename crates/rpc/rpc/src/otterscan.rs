@@ -1,4 +1,4 @@
-use alloy_network::{Network, ReceiptResponse};
+use alloy_network::ReceiptResponse;
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
@@ -6,7 +6,7 @@ use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+    FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -43,9 +43,7 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
-    >,
+    Eth: FullEthApiTypes,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
@@ -70,13 +68,12 @@ where
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + EthApiTypes<
-            NetworkTypes: Network<
-                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
-            >,
         > + TraceExt
-        + EthTransactions
-        + 'static,
+        + EthTransactions<
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            >,
+        > + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {

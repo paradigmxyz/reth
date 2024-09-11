@@ -86,11 +86,7 @@ where
     Network: Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: EthApiTypes<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + 'static,
+    EthApi: EthApiTypes + 'static,
 {
     /// Returns a new instance with handlers for `eth` namespace.
     pub fn build(self) -> EthHandlers<Provider, Pool, Network, Events, EthApi> {
@@ -148,13 +144,7 @@ impl EthFilterApiBuilder {
         Provider: Send + Sync + Clone + 'static,
         Pool: Send + Sync + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        Eth: EthApiTypes<
-                NetworkTypes: alloy_network::Network<
-                    TransactionResponse = reth_rpc_types::WithOtherFields<
-                        reth_rpc_types::Transaction,
-                    >,
-                >,
-            > + 'static,
+        Eth: EthApiTypes + 'static,
     {
         EthFilter::new(
             ctx.provider.clone(),

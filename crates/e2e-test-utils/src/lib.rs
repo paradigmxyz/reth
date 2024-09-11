@@ -61,12 +61,7 @@ where
     >,
     N::AddOns: NodeAddOns<
         Adapter<N>,
-        EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + AddDevSigners
-                    + EthApiBuilderProvider<Adapter<N>>,
+        EthApi: FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
     >,
 {
     let tasks = TaskManager::current();

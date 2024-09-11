@@ -229,11 +229,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
-    EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<
-            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-        >,
-    >,
+    EthApi: FullEthApiServer,
 {
     let module_config = module_config.into();
     server_config
@@ -440,11 +436,7 @@ where
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+        EthApi: FullEthApiServer,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
@@ -496,13 +488,7 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
-        EthApi: EthApiTypes<
-                NetworkTypes: alloy_network::Network<
-                    TransactionResponse = reth_rpc_types::WithOtherFields<
-                        reth_rpc_types::Transaction,
-                    >,
-                >,
-            > + 'static,
+        EthApi: EthApiTypes + 'static,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
         RpcRegistryInner::new(provider, pool, network, executor, events, config, evm_config, eth)
@@ -516,11 +502,7 @@ where
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+        EthApi: FullEthApiServer,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -650,11 +632,7 @@ where
     Network: Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: EthApiTypes<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + 'static,
+    EthApi: EthApiTypes + 'static,
 {
     /// Creates a new, empty instance.
     #[allow(clippy::too_many_arguments)]
@@ -812,11 +790,7 @@ where
             RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
-        > + EthApiTypes<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        >,
+        > + EthApiTypes,
 {
     /// Register Eth Namespace
     ///
@@ -988,11 +962,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EthApi: FullEthApiServer<
-        NetworkTypes: alloy_network::Network<
-            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-        >,
-    >,
+    EthApi: FullEthApiServer,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
