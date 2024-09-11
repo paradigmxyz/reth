@@ -1,10 +1,10 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    DatabaseProviderRO,
+    DBProvider,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -14,14 +14,14 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Headers;
 
-impl<DB: Database> Segment<DB> for Headers {
+impl<Provider: DBProvider> Segment<Provider> for Headers {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
     }
 
     fn copy_to_static_files(
         &self,
-        provider: DatabaseProviderRO<DB>,
+        provider: Provider,
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {

@@ -746,6 +746,31 @@ pub enum BuildOutcome<Payload> {
     Cancelled,
 }
 
+impl<Payload> BuildOutcome<Payload> {
+    /// Consumes the type and returns the payload if the outcome is `Better`.
+    pub fn into_payload(self) -> Option<Payload> {
+        match self {
+            Self::Better { payload, .. } => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// Returns true if the outcome is `Better`.
+    pub const fn is_better(&self) -> bool {
+        matches!(self, Self::Better { .. })
+    }
+
+    /// Returns true if the outcome is `Aborted`.
+    pub const fn is_aborted(&self) -> bool {
+        matches!(self, Self::Aborted { .. })
+    }
+
+    /// Returns true if the outcome is `Cancelled`.
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+}
+
 /// A collection of arguments used for building payloads.
 ///
 /// This struct encapsulates the essential components and configuration required for the payload
@@ -756,6 +781,8 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
     /// How to interact with the chain.
     pub client: Client,
     /// The transaction pool.
+    ///
+    /// Or the type that provides the transactions to build the payload.
     pub pool: Pool,
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
@@ -778,6 +805,18 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
         best_payload: Option<Payload>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
+    }
+
+    /// Maps the transaction pool to a new type.
+    pub fn with_pool<P>(self, pool: P) -> BuildArguments<P, Client, Attributes, Payload> {
+        BuildArguments {
+            client: self.client,
+            pool,
+            cached_reads: self.cached_reads,
+            config: self.config,
+            cancel: self.cancel,
+            best_payload: self.best_payload,
+        }
     }
 }
 

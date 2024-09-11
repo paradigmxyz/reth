@@ -63,8 +63,6 @@ engine-cancun:
   - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
   - Invalid NewPayload, ParentBeaconBlockRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Blob Count on BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8579

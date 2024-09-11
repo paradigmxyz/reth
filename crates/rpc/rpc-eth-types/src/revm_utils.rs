@@ -1,6 +1,6 @@
 //! utilities for working with revm
 
-use reth_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
@@ -142,7 +142,7 @@ impl CallFees {
                 }
                 None => Ok(block_base_fee
                     .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
-                    .ok_or_else(|| EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
+                    .ok_or(EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
             }
         }
 

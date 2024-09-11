@@ -4,6 +4,8 @@ Debug block building
 
 ```bash
 $ reth debug build-block --help
+```
+```txt
 Usage: reth debug build-block [OPTIONS] --prev-randao <PREV_RANDAO> --timestamp <TIMESTAMP> --suggested-fee-recipient <SUGGESTED_FEE_RECIPIENT>
 
 Options:

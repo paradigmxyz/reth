@@ -486,7 +486,8 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) }).unwrap()
+        // Ignore the error, because we're dropping the cursor anyway.
+        let _ = self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
     }
 }
 

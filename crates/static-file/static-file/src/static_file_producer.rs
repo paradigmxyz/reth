@@ -4,11 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth_chainspec::ChainSpec;
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockReader, DBProvider, DatabaseProviderFactory,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
@@ -26,28 +24,29 @@ use tracing::{debug, trace};
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [`StaticFileProducer`] instance itself with the result of [`StaticFileProducerInner::run`]
-pub type StaticFileProducerWithResult<N> = (StaticFileProducer<N>, StaticFileProducerResult);
+pub type StaticFileProducerWithResult<Provider> =
+    (StaticFileProducer<Provider>, StaticFileProducerResult);
 
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
 #[derive(Debug)]
-pub struct StaticFileProducer<N: NodeTypesWithDB>(Arc<Mutex<StaticFileProducerInner<N>>>);
+pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provider>>>);
 
-impl<N: NodeTypesWithDB> StaticFileProducer<N> {
+impl<Provider> StaticFileProducer<Provider> {
     /// Creates a new [`StaticFileProducer`].
-    pub fn new(provider_factory: ProviderFactory<N>, prune_modes: PruneModes) -> Self {
-        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
+    pub fn new(provider: Provider, prune_modes: PruneModes) -> Self {
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider, prune_modes))))
     }
 }
 
-impl<N: NodeTypesWithDB> Clone for StaticFileProducer<N> {
+impl<Provider> Clone for StaticFileProducer<Provider> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<N: NodeTypesWithDB> Deref for StaticFileProducer<N> {
-    type Target = Arc<Mutex<StaticFileProducerInner<N>>>;
+impl<Provider> Deref for StaticFileProducer<Provider> {
+    type Target = Arc<Mutex<StaticFileProducerInner<Provider>>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -57,9 +56,9 @@ impl<N: NodeTypesWithDB> Deref for StaticFileProducer<N> {
 /// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
 /// description.
 #[derive(Debug)]
-pub struct StaticFileProducerInner<N: NodeTypesWithDB> {
+pub struct StaticFileProducerInner<Provider> {
     /// Provider factory
-    provider_factory: ProviderFactory<N>,
+    provider: Provider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
     /// files. See [`StaticFileProducerInner::get_static_file_targets`].
@@ -101,13 +100,17 @@ impl StaticFileTargets {
     }
 }
 
-impl<N: NodeTypesWithDB> StaticFileProducerInner<N> {
-    fn new(provider_factory: ProviderFactory<N>, prune_modes: PruneModes) -> Self {
-        Self { provider_factory, prune_modes, event_sender: Default::default() }
+impl<Provider> StaticFileProducerInner<Provider> {
+    fn new(provider: Provider, prune_modes: PruneModes) -> Self {
+        Self { provider, prune_modes, event_sender: Default::default() }
     }
 }
 
-impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
+impl<Provider> StaticFileProducerInner<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<Provider: StageCheckpointReader + BlockReader>,
+{
     /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
         self.event_sender.new_listener()
@@ -117,8 +120,8 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
     ///
     /// For each [Some] target in [`StaticFileTargets`], initializes a corresponding [Segment] and
     /// runs it with the provided block range using [`reth_provider::providers::StaticFileProvider`]
-    /// and a read-only database transaction from [`ProviderFactory`]. All segments are run in
-    /// parallel.
+    /// and a read-only database transaction from [`DatabaseProviderFactory`]. All segments are run
+    /// in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -129,7 +132,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(
-            self.provider_factory.static_file_provider().get_highest_static_files()
+            self.provider.static_file_provider().get_highest_static_files()
         ));
 
         self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
@@ -137,7 +140,8 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
 
-        let mut segments = Vec::<(Box<dyn Segment<N::DB>>, RangeInclusive<BlockNumber>)>::new();
+        let mut segments =
+            Vec::<(Box<dyn Segment<Provider::Provider>>, RangeInclusive<BlockNumber>)>::new();
 
         if let Some(block_range) = targets.transactions.clone() {
             segments.push((Box::new(segments::Transactions), block_range));
@@ -155,8 +159,9 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
-            let provider = self.provider_factory.provider()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider, self.provider_factory.static_file_provider(), block_range.clone())?;
+            let mut provider = self.provider.database_provider_ro()?;
+            provider.disable_long_read_transaction_safety();
+            segment.copy_to_static_files(provider, self.provider.static_file_provider(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
@@ -164,9 +169,9 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
             Ok(())
         })?;
 
-        self.provider_factory.static_file_provider().commit()?;
+        self.provider.static_file_provider().commit()?;
         for (segment, block_range) in segments {
-            self.provider_factory
+            self.provider
                 .static_file_provider()
                 .update_index(segment.segment(), Some(*block_range.end()))?;
         }
@@ -185,7 +190,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
     ///
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
-        let provider = self.provider_factory.provider()?;
+        let provider = self.provider.database_provider_ro()?;
         let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
             .into_iter()
             .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
@@ -209,8 +214,7 @@ impl<N: NodeTypesWithDB<ChainSpec = ChainSpec>> StaticFileProducerInner<N> {
         &self,
         finalized_block_numbers: HighestStaticFiles,
     ) -> ProviderResult<StaticFileTargets> {
-        let highest_static_files =
-            self.provider_factory.static_file_provider().get_highest_static_files();
+        let highest_static_files = self.provider.static_file_provider().get_highest_static_files();
 
         let targets = StaticFileTargets {
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {

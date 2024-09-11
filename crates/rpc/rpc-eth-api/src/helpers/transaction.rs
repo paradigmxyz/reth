@@ -2,10 +2,10 @@
 //! network.
 
 use alloy_dyn_abi::TypedData;
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
-    TxHash, TxKind, B256, U256,
+    BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{
@@ -17,7 +17,8 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, BlockNumberOrTag, TransactionInfo, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -249,7 +250,7 @@ pub trait EthTransactions: LoadTransaction {
             }
 
             let Ok(high) = LoadBlock::provider(self).best_block_number() else {
-                return Err(EthApiError::UnknownBlockNumber.into());
+                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 
             // Perform a binary search over the block range to find the block in which the sender's
@@ -262,7 +263,8 @@ pub trait EthTransactions: LoadTransaction {
             })
             .await?;
 
-            self.block_with_senders(num.into())
+            let block_id = num.into();
+            self.block_with_senders(block_id)
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
@@ -284,7 +286,7 @@ pub trait EthTransactions: LoadTransaction {
                             from_recovered_with_block_context(tx, tx_info)
                         })
                 })
-                .ok_or(EthApiError::UnknownBlockNumber.into())
+                .ok_or(EthApiError::HeaderNotFound(block_id).into())
                 .map(Some)
         }
     }

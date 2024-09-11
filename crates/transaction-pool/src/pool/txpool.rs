@@ -18,11 +18,9 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use reth_primitives::{
-    constants::{
-        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-    },
-    Address, TxHash, B256,
+use alloy_primitives::{Address, TxHash, B256};
+use reth_primitives::constants::{
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -1848,7 +1846,8 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
 
     use super::*;
     use crate::{

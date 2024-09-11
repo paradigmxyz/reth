@@ -1,8 +1,8 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::Address;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},

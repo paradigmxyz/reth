@@ -1,5 +1,5 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
-use reth_primitives::B256;
+use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]

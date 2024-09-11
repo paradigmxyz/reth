@@ -1,11 +1,12 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
+use alloy_primitives::{Address, Bytes, B256, U256};
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
+use reth_primitives::{BlockId, Header, KECCAK_EMPTY};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
 };
@@ -98,7 +99,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         let block_number = LoadState::provider(self)
             .block_number_for_id(block_id)
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
             return Err(EthApiError::ExceedsMaxProofWindow.into())
@@ -108,7 +109,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let _permit = self
                 .acquire_owned()
                 .await
-                .map_err(|err| EthApiError::Internal(RethError::other(err)))?;
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
@@ -222,7 +224,7 @@ pub trait LoadState: EthApiTypes {
                 let block_hash = LoadPendingBlock::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .ok_or(EthApiError::HeaderNotFound(at))?;
                 let (cfg, env) = self
                     .cache()
                     .get_evm_env(block_hash)

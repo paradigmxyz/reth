@@ -1,5 +1,6 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_primitives::{Address, Bytes, B256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256};
 use reth_rpc_types::{
     debug::ExecutionWitness,
     trace::geth::{
@@ -106,7 +107,7 @@ pub trait DebugApi {
     async fn debug_trace_call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
 
