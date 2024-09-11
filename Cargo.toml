@@ -111,6 +111,7 @@ members = [
     "crates/storage/db-api/",
     "crates/storage/db-common",
     "crates/storage/db-models/",
+    "crates/storage/db-serialization/",
     "crates/storage/db/",
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
@@ -311,6 +312,7 @@ reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
 reth-db-models = { path = "crates/storage/db-models" }
+reth-db-serialization = { path = "crates/storage/db-serialization" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }

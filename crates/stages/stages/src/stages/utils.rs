@@ -1,5 +1,6 @@
 //! Utils for `stages`.
 use alloy_primitives::BlockNumber;
+use reth_codecs::DecodeError;
 use reth_config::config::EtlConfig;
 use reth_db::BlockNumberList;
 use reth_db_api::{
@@ -107,7 +108,7 @@ pub(crate) fn load_history_indices<Provider, H, P>(
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
     sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
-    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
+    decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DecodeError>,
     get_partial: impl Fn(<H as Table>::Key) -> P,
 ) -> Result<(), StageError>
 where
@@ -125,7 +126,7 @@ where
 
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
-        let sharded_key = decode_key(k)?;
+        let sharded_key = decode_key(k).map_err(|_| DatabaseError::Decode)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index % interval == 0 && total_entries > 100 {

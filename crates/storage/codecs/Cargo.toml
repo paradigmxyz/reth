@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-codecs-derive = { path = "./derive", default-features = false }
+reth-db-serialization.workspace = true
 
 # eth
 alloy-consensus = { workspace = true, optional = true }

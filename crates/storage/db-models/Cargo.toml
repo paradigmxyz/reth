@@ -25,6 +25,7 @@ serde = { workspace = true, default-features = false }
 
 # misc
 bytes.workspace = true
+derive_more.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -34,6 +35,8 @@ proptest = { workspace = true, optional = true }
 # reth
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
+
+rand.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest-arbitrary-interop.workspace = true

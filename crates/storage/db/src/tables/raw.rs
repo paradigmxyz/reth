@@ -59,7 +59,7 @@ impl<K: Key> RawKey<K> {
 
     /// Returns the decoded value.
     pub fn key(&self) -> Result<K, DatabaseError> {
-        K::decode(&self.key)
+        K::decode(&self.key).map_err(|_| DatabaseError::Decode)
     }
 
     /// Returns the raw key as seen on the database.
@@ -96,7 +96,7 @@ impl<K: Key> Encode for RawKey<K> {
 
 // Decode
 impl<K: Key> Decode for RawKey<K> {
-    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, DatabaseError> {
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, reth_codecs::DecodeError> {
         Ok(Self { key: key.as_ref().to_vec(), _phantom: std::marker::PhantomData })
     }
 }

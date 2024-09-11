@@ -1,5 +1,5 @@
 [package]
-name = "reth-storage-errors"
+name = "reth-db-serialization"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,19 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
-reth-codecs.workspace = true
-reth-primitives.workspace = true
-reth-fs-util.workspace = true
-
-# ethereum
-alloy-eips.workspace = true
+# eth
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 
-# misc
+#misc
 derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["alloy-primitives/std"]

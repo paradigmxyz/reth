@@ -22,11 +22,9 @@ pub(crate) mod utils;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_db_api::{
     models::{
-        accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
-        storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, ShardedKey, StoredBlockBodyIndices,
-        StoredBlockWithdrawals,
+        AccountBeforeTx, BlockNumberAddress, ClientVersion, CompactU256, ShardedKey,
+        StorageShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table},
 };
@@ -429,11 +427,11 @@ impl Encode for ChainStateKey {
 }
 
 impl Decode for ChainStateKey {
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_codecs::DecodeError> {
         if value.as_ref() == [0] {
             Ok(Self::LastFinalizedBlock)
         } else {
-            Err(reth_db_api::DatabaseError::Decode)
+            Err(reth_codecs::DecodeError)
         }
     }
 }

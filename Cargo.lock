@@ -6603,6 +6603,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs-derive",
+ "reth-db-serialization",
  "serde",
  "serde_json",
  "test-fuzz",
@@ -6701,6 +6702,7 @@ dependencies = [
  "pprof",
  "proptest",
  "rand 0.8.5",
+ "reth-codecs",
  "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",
@@ -6731,7 +6733,6 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
- "derive_more",
  "metrics",
  "modular-bitfield",
  "parity-scale-codec",
@@ -6785,13 +6786,23 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
+ "derive_more",
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-primitives",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-db-serialization"
+version = "1.0.7"
+dependencies = [
+ "alloy-primitives",
+ "derive_more",
 ]
 
 [[package]]
@@ -8936,6 +8947,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",
+ "reth-codecs",
  "reth-fs-util",
  "reth-primitives",
 ]

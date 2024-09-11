@@ -1,6 +1,6 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact, Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -54,6 +54,23 @@ impl PruneSegment {
             }
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
+    }
+}
+
+impl Encode for PruneSegment {
+    type Encoded = [u8; 1];
+
+    fn encode(self) -> Self::Encoded {
+        let mut buf = [0u8];
+        self.to_compact(&mut buf.as_mut());
+        buf
+    }
+}
+
+impl Decode for PruneSegment {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DecodeError> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
     }
 }
 
