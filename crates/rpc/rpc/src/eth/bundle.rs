@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::{keccak256, U256};
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
-    keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement, U256,
+    PooledTransactionsElement,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};

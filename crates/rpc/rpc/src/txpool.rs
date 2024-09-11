@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
+use alloy_primitives::Address;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{Address, TransactionSignedEcRecovered};
+use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},

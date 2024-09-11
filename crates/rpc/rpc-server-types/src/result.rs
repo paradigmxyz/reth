@@ -144,7 +144,7 @@ pub fn rpc_err(
         code,
         msg.into(),
         data.map(|data| {
-            jsonrpsee_core::to_json_raw_value(&reth_primitives::hex::encode_prefixed(data))
+            jsonrpsee_core::to_json_raw_value(&alloy_primitives::hex::encode_prefixed(data))
                 .expect("serializing String can't fail")
         }),
     )

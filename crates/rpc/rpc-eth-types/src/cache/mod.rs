@@ -1,5 +1,6 @@
 //! Async caching support for eth RPC
 
+use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
@@ -7,7 +8,7 @@ use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionSigned, TransactionSignedEcRecovered, B256,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};

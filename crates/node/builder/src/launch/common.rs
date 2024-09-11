@@ -2,6 +2,7 @@
 
 use std::{sync::Arc, thread::available_parallelism};
 
+use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -30,11 +31,12 @@ use reth_node_core::{
     },
 };
 use reth_node_metrics::{
+    chain::ChainSpecInfo,
     hooks::Hooks,
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_primitives::{BlockNumber, Head, B256};
+use reth_primitives::Head;
 use reth_provider::{
     providers::{BlockchainProvider, BlockchainProvider2, StaticFileProvider},
     BlockHashReader, CanonStateNotificationSender, ChainSpecProvider, ProviderFactory,
@@ -507,6 +509,7 @@ where
                     target_triple: VERGEN_CARGO_TARGET_TRIPLE,
                     build_profile: BUILD_PROFILE_NAME,
                 },
+                ChainSpecInfo { name: self.left().config.chain.chain.to_string() },
                 self.task_executor().clone(),
                 Hooks::new(self.database().clone(), self.static_file_provider()),
             );
@@ -617,7 +620,7 @@ where
     /// If the database is empty, returns the genesis block.
     pub fn lookup_head(&self) -> eyre::Result<Head> {
         self.node_config()
-            .lookup_head(self.provider_factory().clone())
+            .lookup_head(self.provider_factory())
             .wrap_err("the head block is missing")
     }
 
@@ -741,7 +744,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<T::Types> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<ProviderFactory<T::Types>> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 

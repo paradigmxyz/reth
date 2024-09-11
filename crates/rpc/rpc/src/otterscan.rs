@@ -1,8 +1,8 @@
-use alloy_network::Network;
-use alloy_primitives::Bytes;
+use alloy_network::{Network, ReceiptResponse};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -46,6 +46,7 @@ impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
         NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.

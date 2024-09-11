@@ -1,10 +1,11 @@
 //! Loads OP pending block for a RPC response.
 
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
-    revm_primitives::BlockEnv, BlockNumber, BlockNumberOrTag, Receipt, SealedBlockWithSenders, B256,
+    revm_primitives::BlockEnv, BlockNumberOrTag, Receipt, SealedBlockWithSenders,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,

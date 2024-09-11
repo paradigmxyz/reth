@@ -207,6 +207,7 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+use reth_node_core::rpc::types::AnyTransactionReceipt;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]

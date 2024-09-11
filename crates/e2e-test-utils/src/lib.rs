@@ -7,7 +7,10 @@ use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     network::PeersHandleProvider,
-    rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        api::eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
     tasks::TaskManager,
 };
 use reth_chainspec::ChainSpec;

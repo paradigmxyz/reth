@@ -11,7 +11,7 @@ use reth::{
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
         api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::engine::PayloadStatusEnum,
+        types::{engine::PayloadStatusEnum, AnyTransactionReceipt},
     },
 };
 use reth_chainspec::ChainSpec;
@@ -87,11 +87,18 @@ where
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + Copy,
     ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
-        <Engine as EngineTypes>::ExecutionPayloadV3:
-            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
-        <AddOns::EthApi as EthApiTypes>::NetworkTypes:
-            Network<TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>>,
+        Engine::ExecutionPayloadV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        AddOns::EthApi: EthApiSpec
+            + EthTransactions
+            + TraceExt
+            + EthApiTypes<
+                NetworkTypes: Network<
+                    TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
+                    TransactionCompat: TransactionCompat<
+                        Transaction = RpcTransaction<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+                    >,
+                >,
+            >,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

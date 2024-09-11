@@ -1,8 +1,9 @@
 //! Compatibility functions for rpc `Block` type.
 
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals,
 };
 use reth_rpc_types::{
     Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,

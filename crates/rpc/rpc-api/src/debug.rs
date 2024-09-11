@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, Bytes, B256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_types::{
     debug::ExecutionWitness,
     trace::geth::{

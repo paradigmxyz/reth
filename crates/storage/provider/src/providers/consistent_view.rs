@@ -1,8 +1,7 @@
-use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, HeaderProvider};
-use reth_db_api::database::Database;
+use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use reth_primitives::{GotExpected, B256};
+use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;
-use std::marker::PhantomData;
 
 pub use reth_storage_errors::provider::ConsistentViewError;
 
@@ -22,24 +21,22 @@ pub use reth_storage_errors::provider::ConsistentViewError;
 ///    appropriately.
 /// 2) be sure that the state does not change.
 #[derive(Clone, Debug)]
-pub struct ConsistentDbView<DB, Provider> {
-    database: PhantomData<DB>,
-    provider: Provider,
+pub struct ConsistentDbView<Factory> {
+    factory: Factory,
     tip: Option<B256>,
 }
 
-impl<DB, Provider> ConsistentDbView<DB, Provider>
+impl<Factory> ConsistentDbView<Factory>
 where
-    DB: Database,
-    Provider: DatabaseProviderFactory<DB>,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
     /// Creates new consistent database view.
-    pub const fn new(provider: Provider, tip: Option<B256>) -> Self {
-        Self { database: PhantomData, provider, tip }
+    pub const fn new(factory: Factory, tip: Option<B256>) -> Self {
+        Self { factory, tip }
     }
 
     /// Creates new consistent database view with latest tip.
-    pub fn new_with_latest_tip(provider: Provider) -> ProviderResult<Self> {
+    pub fn new_with_latest_tip(provider: Factory) -> ProviderResult<Self> {
         let provider_ro = provider.database_provider_ro()?;
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
@@ -47,9 +44,9 @@ where
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.
-    pub fn provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
+    pub fn provider_ro(&self) -> ProviderResult<Factory::Provider> {
         // Create a new provider.
-        let provider_ro = self.provider.database_provider_ro()?;
+        let provider_ro = self.factory.database_provider_ro()?;
 
         // Check that the latest stored header number matches the number
         // that consistent view was initialized with.

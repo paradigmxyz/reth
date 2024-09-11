@@ -1,10 +1,11 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_primitives::{B256, U256};
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
     proofs::{self},
-    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
+    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -447,7 +448,7 @@ mod tests {
         block_to_payload_v3, try_into_block, try_payload_v3_to_block, try_payload_v4_to_block,
         validate_block_hash,
     };
-    use reth_primitives::{b256, hex, Bytes, U256};
+    use alloy_primitives::{b256, hex, Bytes, U256};
     use reth_rpc_types::{
         engine::{CancunPayloadFields, ExecutionPayloadV3, ExecutionPayloadV4},
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,

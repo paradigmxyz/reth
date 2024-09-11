@@ -1,16 +1,19 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-pub use signature::*;
-pub use typed::*;
-
 mod signature;
 mod typed;
 
+pub use signature::*;
+pub use typed::*;
+
 use std::fmt;
 
-use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
+use alloy_rpc_types::{
+    request::{TransactionInput, TransactionRequest},
+    TransactionInfo,
+};
 use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered, TxType};
-use reth_rpc_types::{Transaction, TransactionInfo, WithOtherFields};
+use reth_rpc_types::{Transaction, WithOtherFields};
 
 /// Create a new rpc transaction result for a mined transaction, using the given block hash,
 /// number, and tx index fields to populate the corresponding fields in the rpc result.

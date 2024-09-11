@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;

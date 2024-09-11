@@ -24,7 +24,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -220,6 +223,7 @@ where
             ctx.components().payload_builder().clone(),
             TreeConfig::default(),
             ctx.invalid_block_hook()?,
+            ctx.sync_metrics_tx(),
         );
 
         let event_sender = EventSender::default();
@@ -264,6 +268,7 @@ where
             ctx.chain_spec(),
             beacon_engine_handle,
             ctx.components().payload_builder().clone().into(),
+            ctx.components().pool().clone(),
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
