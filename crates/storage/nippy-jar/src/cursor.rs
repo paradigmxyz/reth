@@ -3,7 +3,7 @@ use crate::{
     reader::DataReader,
     DefaultDataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
-use std::{ops::Range, sync::Arc};
+use std::{borrow::Cow, ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
@@ -160,19 +160,17 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         };
 
         if let Some(compression) = self.jar.compressor() {
-            let mut _file_buffer = None;
             let from = self.internal_buffer.len();
 
             // Reference to the input data
             let data = if self.reader.allows_data_ref() {
-                self.reader.data_ref(column_offset_range)
+                Cow::Borrowed(self.reader.data_ref(column_offset_range))
             } else {
                 // Only Mmap reader allows reading directly from memory. Otherwise we need to copy
                 // the data to a buffer, and pass it as a slice to Zstd.
                 let mut buffer = vec![0u8; column_offset_range.end - column_offset_range.start];
                 self.reader.data(column_offset_range, buffer.as_mut_slice())?;
-                _file_buffer = Some(buffer);
-                _file_buffer.as_deref().expect("qed")
+                Cow::Owned(buffer)
             };
 
             match compression {
@@ -187,14 +185,14 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
                     let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
                     Zstd::decompress_with_dictionary(
-                        data,
+                        data.as_ref(),
                         &mut self.internal_buffer,
                         &mut decompressor,
                     )?;
                 }
                 _ => {
                     // Uses the chosen default decompressor
-                    compression.decompress_to(data, &mut self.internal_buffer)?;
+                    compression.decompress_to(data.as_ref(), &mut self.internal_buffer)?;
                 }
             }
             let to = self.internal_buffer.len();
