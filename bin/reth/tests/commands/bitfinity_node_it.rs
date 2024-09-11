@@ -20,7 +20,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 #[tokio::test]
-async fn test_finalized_and_safe_query_params_works() {
+async fn bitfinity_test_finalized_and_safe_query_params_works() {
     // Arrange
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;

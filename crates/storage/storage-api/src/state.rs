@@ -123,13 +123,6 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ) -> ProviderResult<StateProviderBox> {
         match number_or_tag {
             BlockNumberOrTag::Latest => self.latest(),
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
-            BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                // Note: The `BlockchainProvider` could also lookup the tree for the given block number, if for example the block number is `latest + 1`, however this should only support canonical state: <https://github.com/paradigmxyz/reth/issues/4515>
-                self.history_by_block_number(num)
-            }
-
             BlockNumberOrTag::Finalized => {
                 // we can only get the finalized state by hash, not by num
                 let hash =
@@ -143,6 +136,12 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
                 let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
 
                 self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => {
+                // Note: The `BlockchainProvider` could also lookup the tree for the given block number, if for example the block number is `latest + 1`, however this should only support canonical state: <https://github.com/paradigmxyz/reth/issues/4515>
+                self.history_by_block_number(num)
             }
         }
     }
