@@ -151,7 +151,7 @@ pub struct NetworkArgs {
 
     /// Name of network interface used to communicate with peers.
     ///
-    /// If flags is set, but no value is passed, the default interface for docker `eth0` is tried.
+    /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[cfg(not(target_os = "windows"))]
     #[arg(long = "net-if", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
