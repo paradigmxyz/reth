@@ -31,6 +31,7 @@ pub mod noop;
 pub mod test_utils;
 
 /// Post execution input passed to [`Consensus::validate_block_post_execution`].
+#[derive(Debug)]
 pub struct PostExecutionInput<'a> {
     /// Receipts of the block.
     pub receipts: &'a [Receipt],
