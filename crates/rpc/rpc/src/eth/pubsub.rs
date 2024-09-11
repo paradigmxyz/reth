@@ -195,7 +195,7 @@ where
                     let msg = SubscriptionMessage::from_json(&sync_status)
                         .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
-                        break;
+                        break
                     }
                 }
             }
