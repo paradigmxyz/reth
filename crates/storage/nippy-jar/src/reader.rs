@@ -7,9 +7,11 @@ use std::{
     path::Path,
 };
 
+/// Uses [`FileDataReader`] due to Windows-specific issues with mmap, such as file access locks and poor handling of file changes.
 #[cfg(windows)]
 pub type DefaultDataReader = FileDataReader;
 
+/// Uses [`MmapDataReader`] for efficient zero-copy read access.
 #[cfg(not(windows))]
 pub type DefaultDataReader = MmapDataReader;
 
@@ -153,7 +155,7 @@ impl DataReader for MmapDataReader {
     }
 }
 
-/// Manages the reading of static file data using direct file access.
+/// Manages the reading of static file data using standard file I/O.
 #[derive(Debug)]
 pub struct FileDataReader {
     /// Data file descriptor.
