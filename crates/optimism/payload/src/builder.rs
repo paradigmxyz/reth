@@ -173,7 +173,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             op_block_attributes.add_sequencer_transaction(sequencer_tx, db);
 
             // TODO: add payload attributes txs
-            // TODO: return some executedTransaction including the receipt, sender, and transaction
 
             //TODO: add transactions from the pool
         }
@@ -276,13 +275,14 @@ where
                 ))
             })?;
 
+        // TODO: abstract into function
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             self.initialized_cfg.clone(),
             self.initialized_block_env.clone(),
             self.evm_config.tx_env(&sequencer_tx),
         );
 
-        // let mut evm = evm_config.evm_with_env(&mut db, env);
+        let mut evm = self.evm_config.evm_with_env(db, env);
 
         // let ResultAndState { result, state } = match evm.transact() {
         //     Ok(res) => res,
