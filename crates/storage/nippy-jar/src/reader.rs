@@ -221,6 +221,9 @@ impl DataReader for FileDataReader {
         false
     }
 
+    /// Not supported by [`FileDataReader`] and **will PANIC**.
+    /// 
+    /// Use [`Self::data`] instead.
     fn data_ref(&self, _: Range<usize>) -> &[u8] {
         unimplemented!()
     }
