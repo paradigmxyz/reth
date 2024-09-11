@@ -113,10 +113,8 @@ impl InMemoryState {
 
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState>> {
-        self.numbers
-            .read()
-            .last_key_value()
-            .and_then(|(_, hash)| self.blocks.read().get(hash).cloned())
+        let hash = *self.numbers.read().last_key_value()?.1;
+        self.state_by_hash(hash)
     }
 
     /// Returns the pending state corresponding to the current head plus one,
