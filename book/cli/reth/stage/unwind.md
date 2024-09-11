@@ -234,7 +234,7 @@ Networking:
       --net-if.experimental <IF_NAME>
           Name of network interface used to communicate with peers.
 
-          If flags is set, but no value is passed, the default interface for docker `eth0` is tried.
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
