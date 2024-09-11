@@ -7,13 +7,14 @@ use crate::{
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
-    constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, Block, Header,
-    IntoRecoveredTransaction, Receipt, TxType, B256, EMPTY_OMMER_ROOT_HASH,
+    constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, transaction::WithEncoded,
+    Address, Block, Header, IntoRecoveredTransaction, Receipt, TransactionSigned, TxType, B256,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -23,7 +24,10 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+        ResultAndState,
+    },
     Database, DatabaseCommit, State,
 };
 use std::{fmt::Display, sync::Arc};
@@ -81,9 +85,9 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             .with_bundle_update()
             .build();
 
-        self.init_pre_block_state(config, evm_config, db)?;
+        self.init_pre_block_state(config, evm_config, &mut db)?;
 
-        //TODO: construct block
+        // self.construct_block();
 
         todo!()
     }
@@ -140,6 +144,195 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
             PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
         })
+    }
+
+    fn construct_block<Pool, DB>(
+        &self,
+        payload_config: PayloadConfig<OptimismPayloadBuilderAttributes>,
+        pool: Pool,
+        chain_spec: &ChainSpec,
+        db: &mut revm::State<DB>,
+        cancel: Cancelled,
+    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm,
+        Pool: TransactionPool,
+        DB: Database + DatabaseCommit,
+        DB::Error: Display,
+    {
+        let mut op_block_attributes =
+            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
+
+        // Add sequencer transactions to the block
+        for sequencer_tx in &payload_config.attributes.transactions {
+            // Check if the job was cancelled, if so we can exit early.
+            if cancel.is_cancelled() {
+                return Ok(BuildOutcome::Cancelled);
+            }
+
+            op_block_attributes.add_sequencer_transaction(sequencer_tx, db);
+
+            // TODO: add payload attributes txs
+            // TODO: return some executedTransaction including the receipt, sender, and transaction
+
+            //TODO: add transactions from the pool
+        }
+
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
+    receipts: Vec<Option<Receipt>>,
+    executed_txs: Vec<TransactionSigned>,
+    executed_senders: Vec<Address>,
+    is_regolith: bool,
+    block_gas_limit: u64,
+    base_fee: u64,
+    cumulative_gas_used: u64,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
+    evm_config: EvmConfig,
+}
+
+impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+{
+    pub fn new(
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        evm_config: EvmConfig,
+    ) -> Self {
+        let attributes = &payload_config.attributes;
+        let initialized_block_env = payload_config.initialized_block_env.clone();
+
+        let is_regolith = payload_config.chain_spec.is_fork_active_at_timestamp(
+            OptimismHardfork::Regolith,
+            attributes.payload_attributes.timestamp,
+        );
+
+        let block_gas_limit: u64 = attributes.gas_limit.unwrap_or_else(|| {
+            initialized_block_env
+                .gas_limit
+                .try_into()
+                .unwrap_or(payload_config.chain_spec.max_gas_limit)
+        });
+
+        let base_fee = initialized_block_env.basefee.to::<u64>();
+
+        Self {
+            executed_senders: Vec::with_capacity(attributes.transactions.len()),
+            executed_txs: Vec::with_capacity(attributes.transactions.len()),
+            receipts: Vec::with_capacity(attributes.transactions.len()),
+            is_regolith,
+            block_gas_limit,
+            base_fee,
+            cumulative_gas_used: 0,
+            initialized_cfg: payload_config.initialized_cfg.clone(),
+            initialized_block_env,
+            evm_config,
+        }
+    }
+
+    pub fn add_sequencer_transaction<DB>(
+        &mut self,
+        sequencer_tx: &WithEncoded<TransactionSigned>,
+        db: &mut revm::State<DB>,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: Database + DatabaseCommit,
+        DB::Error: Display,
+    {
+        // Payload attributes transactions should never contain blob transactions.
+        if sequencer_tx.value().is_eip4844() {
+            return Err(PayloadBuilderError::other(
+                OptimismPayloadBuilderError::BlobTransactionRejected,
+            ));
+        }
+
+        // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
+        // Deposit transactions do not have signatures, so if the tx is a deposit, this
+        // will just pull in its `from` address.
+        let sequencer_tx = sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
+            PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
+        })?;
+
+        // Cache the depositor account prior to the state transition for the deposit nonce.
+        //
+        // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
+        // were not introduced in Bedrock. In addition, regular transactions don't have deposit
+        // nonces, so we don't need to touch the DB for those.
+        let depositor = (self.is_regolith && sequencer_tx.is_deposit())
+            .then(|| {
+                db.load_cache_account(sequencer_tx.signer())
+                    .map(|acc| acc.account_info().unwrap_or_default())
+            })
+            .transpose()
+            .map_err(|_| {
+                PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                    sequencer_tx.signer(),
+                ))
+            })?;
+
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
+            self.evm_config.tx_env(&sequencer_tx),
+        );
+
+        // let mut evm = evm_config.evm_with_env(&mut db, env);
+
+        // let ResultAndState { result, state } = match evm.transact() {
+        //     Ok(res) => res,
+        //     Err(err) => {
+        //         match err {
+        //             EVMError::Transaction(err) => {
+        //                 trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+        //                 continue;
+        //             }
+        //             err => {
+        //                 // this is an error that we should treat as fatal for this attempt
+        //                 return Err(PayloadBuilderError::EvmExecutionError(err));
+        //             }
+        //         }
+        //     }
+        // };
+
+        // // to release the db reference drop evm.
+        // drop(evm);
+        // // commit changes
+        // db.commit(state);
+
+        // let gas_used = result.gas_used();
+
+        // // add gas used by the transaction to cumulative gas used, before creating the receipt
+        // cumulative_gas_used += gas_used;
+
+        // // Push transaction changeset and calculate header bloom filter for receipt.
+        // receipts.push(Some(Receipt {
+        //     tx_type: sequencer_tx.tx_type(),
+        //     success: result.is_success(),
+        //     cumulative_gas_used,
+        //     logs: result.into_logs().into_iter().map(Into::into).collect(),
+        //     deposit_nonce: depositor.map(|account| account.nonce),
+        //     // The deposit receipt version was introduced in Canyon to indicate an update to how
+        //     // receipt hashes should be computed when set. The state transition process
+        //     // ensures this is only set for post-Canyon deposit transactions.
+        //     deposit_receipt_version: chain_spec
+        //         .is_fork_active_at_timestamp(
+        //             OptimismHardfork::Canyon,
+        //             attributes.payload_attributes.timestamp,
+        //         )
+        //         .then_some(1),
+        // }));
+
+        // // append sender and transaction to the respective lists
+        // executed_senders.push(sequencer_tx.signer());
+        // executed_txs.push(sequencer_tx.into_signed());
+
+        todo!()
     }
 }
 
