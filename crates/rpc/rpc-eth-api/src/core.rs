@@ -11,8 +11,9 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
+    AnyTransactionReceipt, Block, BlockOverrides, Bundle, EIP1186AccountProofResponse,
+    EthCallResponse, FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest,
+    WithOtherFields, Work,
 };
 use tracing::trace;
 
@@ -213,7 +214,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
         &self,
         opts: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>>;
+    ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -620,7 +621,7 @@ where
         &self,
         payload: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>> {
+    ) -> RpcResult<Vec<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
