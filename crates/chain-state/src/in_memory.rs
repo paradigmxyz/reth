@@ -92,7 +92,8 @@ impl InMemoryState {
 
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState>> {
-        self.numbers.read().get(&number).and_then(|hash| self.blocks.read().get(hash).cloned())
+        let hash = self.hash_by_number(number)?;
+        self.state_by_hash(hash)
     }
 
     /// Returns the hash for a specific block number
@@ -104,8 +105,7 @@ impl InMemoryState {
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState>> {
         self.numbers
             .read()
-            .iter()
-            .max_by_key(|(&number, _)| number)
+            .last_key_value()
             .and_then(|(_, hash)| self.blocks.read().get(hash).cloned())
     }
 
