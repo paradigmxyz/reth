@@ -13,20 +13,20 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, Block, Header,
-    IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    IntoRecoveredTransaction, Receipt, TxType, B256, EMPTY_OMMER_ROOT_HASH,
 };
-use reth_provider::StateProviderFactory;
+use reth_provider::{StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::states::bundle_state::BundleRetention,
+    db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
-    DatabaseCommit, State,
+    Database, DatabaseCommit, State,
 };
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -61,16 +61,44 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 
-    fn build_payload<EvmConfig, Pool, Client>(
+    fn build_payload<Pool, Client>(
         &self,
         evm_config: EvmConfig,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
         _compute_pending_block: bool,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
+    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm,
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
+    {
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
-        let mut db = self.init_db_state(&config.parent_block.hash())?;
+        let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db = State::builder()
+            .with_database_ref(cached_reads.as_db(state))
+            .with_bundle_update()
+            .build();
 
+        self.init_pre_block_state(config, evm_config, db)?;
+
+        //TODO: construct block
+
+        todo!()
+    }
+
+    fn init_pre_block_state<DB>(
+        &self,
+        payload_config: PayloadConfig<OptimismPayloadBuilderAttributes>,
+        evm_config: EvmConfig,
+        db: &mut revm::State<DB>,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: Database + DatabaseCommit,
+        DB::Error: Display,
+        EvmConfig: ConfigureEvm,
+    {
         let PayloadConfig {
             initialized_block_env,
             initialized_cfg,
@@ -78,29 +106,12 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             attributes,
             chain_spec,
             ..
-        } = config;
+        } = payload_config;
 
         debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
-    }
 
-    fn init_db_state(
-        &self,
-        block_hash: &Hash,
-    ) -> Result<State<StateProviderDatabase>, PayloadBuilderError> {
-        let state_provider = client.state_by_block_hash(block_hash)?;
-        let state = StateProviderDatabase::new(state_provider);
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build()
-    }
-
-    fn init_pre_block_state(&self) {}
-
-    fn pre_block_calls(
-        &self,
-        db: &mut State<StateProviderDatabase>,
-        attributes: &OptimismPayloadBuilderAttributes,
-    ) -> Result<(), PayloadBuilderError> {
         pre_block_beacon_root_contract_call(
-            &mut db,
+            db,
             &evm_config,
             &chain_spec,
             &initialized_cfg,
@@ -123,12 +134,12 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         reth_evm_optimism::ensure_create2_deployer(
             chain_spec.clone(),
             attributes.payload_attributes.timestamp,
-            &mut db,
+            db,
         )
         .map_err(|err| {
             warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
             PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
-        })?;
+        })
     }
 }
 
