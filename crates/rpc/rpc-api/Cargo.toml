@@ -21,6 +21,7 @@ reth-network-peers.workspace = true
 
 # ethereum
 alloy-json-rpc.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # misc

@@ -1,8 +1,8 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
