@@ -125,7 +125,7 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
                 Hardfork::Ontake,
                 ForkCondition::Block(
                     std::env::var("HEKLA_ONTAKE_HEIGHT")
-                        .map_or(9999999, |h| h.parse().unwrap_or(9999999)),
+                        .map_or(840512, |h| h.parse().unwrap_or(840512)),
                 ),
             ),
         ]),
