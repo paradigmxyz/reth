@@ -35,6 +35,7 @@ use reth_network::{
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
+use tracing::error;
 
 use crate::version::P2P_CLIENT_VERSION;
 
@@ -153,22 +154,31 @@ pub struct NetworkArgs {
     ///
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[cfg(not(target_os = "windows"))]
-    #[arg(long = "net-if", conflicts_with = "addr", value_name = "IF_NAME")]
+    #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
 }
 
 impl NetworkArgs {
     /// Returns the resolved IP address.
-    pub fn resolved_addr(&self) -> eyre::Result<IpAddr> {
+    pub fn resolved_addr(&self) -> IpAddr {
         #[cfg(not(target_os = "windows"))]
         if let Some(ref if_name) = self.net_if {
-            if if_name.is_empty() {
-                return Ok(reth_net_nat::net_if::resolve_net_if_ip(DEFAULT_NET_IF_NAME)?)
+            let if_name = if if_name.is_empty() { DEFAULT_NET_IF_NAME } else { if_name };
+            return match reth_net_nat::net_if::resolve_net_if_ip(if_name) {
+                Ok(addr) => addr,
+                Err(err) => {
+                    error!(target: "reth::cli",
+                        if_name,
+                        %err,
+                        "Failed to read network interface IP"
+                    );
+
+                    DEFAULT_DISCOVERY_ADDR
+                }
             }
-            return Ok(reth_net_nat::net_if::resolve_net_if_ip(if_name)?)
         }
 
-        Ok(self.addr)
+        self.addr
     }
 
     /// Returns the resolved bootnodes if any are provided.
@@ -195,8 +205,8 @@ impl NetworkArgs {
         chain_spec: Arc<ChainSpec>,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-    ) -> eyre::Result<NetworkConfigBuilder> {
-        let addr = self.resolved_addr()?;
+    ) -> NetworkConfigBuilder {
+        let addr = self.resolved_addr();
         let chain_bootnodes = self
             .resolved_bootnodes()
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
@@ -222,7 +232,7 @@ impl NetworkArgs {
         };
 
         // Configure basic network stack
-        Ok(NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             ))
@@ -256,7 +266,7 @@ impl NetworkArgs {
                 self.discovery.addr,
                 // set discovery port based on instance number
                 self.discovery.port,
-            )))
+            ))
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
