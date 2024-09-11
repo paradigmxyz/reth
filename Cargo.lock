@@ -6951,7 +6951,6 @@ name = "reth-engine-local"
 version = "1.0.7"
 dependencies = [
  "eyre",
- "futures",
  "futures-util",
  "reth-beacon-consensus",
  "reth-chain-state",
@@ -6968,6 +6967,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-rpc-types",
+ "reth-stages-api",
  "reth-tracing",
  "reth-transaction-pool",
  "tokio",

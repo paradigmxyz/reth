@@ -7,186 +7,150 @@
 //! building at a fixed interval.
 
 use crate::miner::MiningMode;
-use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::EngineNodeTypes;
 use reth_engine_tree::persistence::PersistenceHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, PayloadAttributesBuilder, PayloadBuilderAttributes, PayloadTypes,
+};
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 use reth_prune::Pruner;
-use std::{
-    fmt::Formatter,
-    future::Future,
-    pin::{pin, Pin},
-    task::{ready, Context, Poll},
-};
+use reth_stages_api::MetricEventsSender;
+use std::fmt::Formatter;
 use tokio::sync::oneshot;
 use tracing::debug;
 
 /// Provides a local dev service engine that can be used to drive the
 /// chain forward.
-pub struct LocalEngineService<N>
+pub struct LocalEngineService<N, B>
 where
     N: EngineNodeTypes,
+    B: PayloadAttributesBuilder<PayloadAttributes = <N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     /// The payload builder for the engine
     payload_builder: PayloadBuilderHandle<N::Engine>,
-    /// The attributes for the payload builder
-    payload_attributes: <N::Engine as PayloadTypes>::PayloadAttributes,
+    /// The payload attribute builder for the engine
+    payload_attributes_builder: B,
     /// A handle to the persistence layer
     persistence_handle: PersistenceHandle,
     /// The hash of the current head
     head: B256,
     /// The mining mode for the engine
     mode: MiningMode,
-    /// Payload request task
-    payload_request_state: RequestState,
 }
 
-impl<N: EngineNodeTypes> std::fmt::Debug for LocalEngineService<N> {
+impl<N, B> std::fmt::Debug for LocalEngineService<N, B>
+where
+    N: EngineNodeTypes,
+    B: PayloadAttributesBuilder<PayloadAttributes = <N::Engine as PayloadTypes>::PayloadAttributes>,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalEngineService")
             .field("payload_builder", &self.payload_builder)
-            .field("payload_attributes", &self.payload_attributes)
+            .field("payload_attributes_builder", &self.payload_attributes_builder)
             .field("persistence_handle", &self.persistence_handle)
             .field("head", &self.head)
             .field("mode", &self.mode)
-            .field("payload_request_state", &"...")
             .finish()
     }
 }
 
-/// The internal state of the [`LocalEngineService`]'s polling task
-#[derive(Default)]
-struct RequestState {
-    ready: bool,
-    task: Option<BoxFuture<'static, eyre::Result<B256>>>,
-}
-
-impl<N> LocalEngineService<N>
+impl<N, B> LocalEngineService<N, B>
 where
     N: EngineNodeTypes,
+    B: PayloadAttributesBuilder<PayloadAttributes = <N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     /// Constructor for [`LocalEngineService`].
     pub fn new(
         payload_builder: PayloadBuilderHandle<N::Engine>,
-        payload_attributes: <N::Engine as PayloadTypes>::PayloadAttributes,
+        payload_attributes_builder: B,
         provider: ProviderFactory<N>,
         pruner: Pruner<N::DB, ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
         head: B256,
         mode: MiningMode,
     ) -> Self {
-        let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
+        let persistence_handle =
+            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
 
-        Self {
-            payload_builder,
-            payload_attributes,
-            persistence_handle,
-            head,
-            mode,
-            payload_request_state: RequestState::default(),
-        }
+        Self { payload_builder, payload_attributes_builder, persistence_handle, head, mode }
     }
 
-    /// Spawn a [`LocalEngineService`] on a tokio green thread.
+    /// Spawn the [`LocalEngineService`] on a tokio green thread. The service will poll the payload
+    /// builder with two varying modes, [`MiningMode::Instant`] or [`MiningMode::Interval`]
+    /// which will respectively either execute the block as soon as it finds a
+    /// transaction in the pool or build the block based on an interval.
     pub fn spawn_new(
         payload_builder: PayloadBuilderHandle<N::Engine>,
-        payload_attributes: <N::Engine as PayloadTypes>::PayloadAttributes,
+        payload_attributes_builder: B,
         provider: ProviderFactory<N>,
         pruner: Pruner<N::DB, ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
         head: B256,
         mode: MiningMode,
     ) {
-        let engine = Self::new(payload_builder, payload_attributes, provider, pruner, head, mode);
+        let mut engine = Self::new(
+            payload_builder,
+            payload_attributes_builder,
+            provider,
+            pruner,
+            sync_metrics_tx,
+            head,
+            mode,
+        );
 
         // Spawn the engine
-        tokio::spawn(engine);
-    }
-}
+        tokio::spawn(async move {
+            loop {
+                // Wait for the interval or the pool to receive a transaction
+                (&mut engine.mode).await;
 
-/// Run the [`LocalEngineService`] as a Future. The service will poll the payload builder
-/// with two varying modes, [`MiningMode::Instant`] or [`MiningMode::Interval`]
-/// which will respectively either execute the block as soon as it finds a
-/// transaction in the pool or build the block based on an interval.
-impl<N> Future for LocalEngineService<N>
-where
-    N: EngineNodeTypes,
-{
-    type Output = ();
+                // Start a new payload building job
+                let new_head = engine.build_and_save_payload().await;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        const MAX_RETRIES: usize = 5;
-        let mut retries = 0;
-        loop {
-            // Wait for the interval or the pool to receive a transaction
-            if !this.payload_request_state.ready {
-                ready!(pin!(&mut this.mode).poll(cx));
-                this.payload_request_state.ready = true;
-            }
-
-            if this.payload_request_state.task.is_none() {
-                let head = this.head;
-                let attributes = this.payload_attributes.clone();
-                let payload_builder = this.payload_builder.clone();
-                let persistence_handle = this.persistence_handle.clone();
-
-                let task = Box::pin(async move {
-                    let attr = <N::Engine as PayloadTypes>::PayloadBuilderAttributes::try_new(
-                        head, attributes,
-                    )
-                    .map_err(|_| eyre::eyre!("failed to fetch payload attributes"))?;
-
-                    let rx = payload_builder.send_new_payload(attr);
-                    let id = rx.await??;
-
-                    let payload = payload_builder
-                        .best_payload(id)
-                        .await
-                        .ok_or_else(|| eyre::eyre!("failed to fetch best payload"))??;
-
-                    let block =
-                        payload.executed_block().map(|block| vec![block]).unwrap_or_default();
-                    let (tx, rx) = oneshot::channel();
-
-                    let _ = persistence_handle.save_blocks(block, tx);
-
-                    // Wait for the persistence_handle to complete
-                    let new_head = rx.await?.ok_or_else(|| eyre::eyre!("missing new head"))?;
-
-                    Result::<_, eyre::Error>::Ok(new_head.hash)
-                });
-                this.payload_request_state.task = Some(task);
-            }
-
-            if this.payload_request_state.task.is_some() {
-                let mut task = this.payload_request_state.task.take().unwrap();
-                match task.poll_unpin(cx) {
-                    Poll::Ready(Ok(head)) => {
-                        this.head = head;
-                        this.payload_request_state.ready = false;
-                        continue
-                    }
-                    Poll::Ready(Err(err)) => {
-                        // if we get an error, retry directly by creating a new payload request task
-                        debug!(target: "local_engine", ?err, "failed block production");
-                        // In order to avoid resource starvation, we break after 5 retries
-                        if retries == MAX_RETRIES {
-                            this.payload_request_state.ready = false;
-                            break
-                        }
-                        retries += 1;
-                        continue
-                    }
-                    Poll::Pending => {
-                        this.payload_request_state.task = Some(task);
-                        break
-                    }
+                if new_head.is_err() {
+                    debug!(target: "local_engine", err = ?new_head.unwrap_err(), "failed payload
+                building");
+                    continue
                 }
+
+                // Update the head
+                engine.head = new_head.expect("not error");
             }
-        }
-        Poll::Pending
+        });
+    }
+
+    /// Builds a payload by initiating a new payload job via the [`PayloadBuilderHandle`],
+    /// saving the execution outcome to persistence and returning the current head of the
+    /// chain.
+    async fn build_and_save_payload(&self) -> eyre::Result<B256> {
+        let payload_attributes = self.payload_attributes_builder.build();
+        let payload_builder_attributes =
+            <N::Engine as PayloadTypes>::PayloadBuilderAttributes::try_new(
+                self.head,
+                payload_attributes,
+            )
+            .map_err(|_| eyre::eyre!("failed to fetch payload attributes"))?;
+
+        let rx = self.payload_builder.send_new_payload(payload_builder_attributes);
+        let id = rx.await??;
+
+        let payload = self
+            .payload_builder
+            .best_payload(id)
+            .await
+            .ok_or_else(|| eyre::eyre!("failed to fetch best payload"))??;
+
+        let block = payload.executed_block().map(|block| vec![block]).unwrap_or_default();
+        let (tx, rx) = oneshot::channel();
+
+        let _ = self.persistence_handle.save_blocks(block, tx);
+
+        // Wait for the persistence_handle to complete
+        let new_head = rx.await?.ok_or_else(|| eyre::eyre!("missing new head"))?;
+
+        Ok(new_head.hash)
     }
 }
 
@@ -203,12 +167,29 @@ mod tests {
     use reth_primitives::B256;
     use reth_provider::{providers::StaticFileProvider, BlockReader, ProviderFactory};
     use reth_prune::PrunerBuilder;
-    use reth_rpc_types::engine::PayloadAttributes;
     use reth_transaction_pool::{
         test_utils::{testing_pool, MockTransaction},
         TransactionPool,
     };
     use std::time::Duration;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[derive(Debug)]
+    struct TestPayloadAttributesBuilder;
+
+    impl PayloadAttributesBuilder for TestPayloadAttributesBuilder {
+        type PayloadAttributes = reth_rpc_types::engine::PayloadAttributes;
+
+        fn build(&self) -> Self::PayloadAttributes {
+            reth_rpc_types::engine::PayloadAttributes {
+                timestamp: 0,
+                prev_randao: Default::default(),
+                suggested_fee_recipient: Default::default(),
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_local_engine_service_interval() -> eyre::Result<()> {
@@ -227,23 +208,20 @@ mod tests {
         // Start the payload builder service
         let payload_handle = spawn_test_payload_service::<EthEngineTypes>();
 
+        // Sync metric channel
+        let (sync_metrics_tx, _) = unbounded_channel();
+
         // Get the attributes for start of block building
-        let attributes = PayloadAttributes {
-            timestamp: 0,
-            prev_randao: Default::default(),
-            suggested_fee_recipient: Default::default(),
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        };
         let genesis_hash = B256::random();
 
         // Launch the LocalEngineService in interval mode
         let period = Duration::from_secs(1);
         LocalEngineService::spawn_new(
             payload_handle,
-            attributes,
+            TestPayloadAttributesBuilder,
             provider.clone(),
             pruner,
+            sync_metrics_tx,
             genesis_hash,
             MiningMode::interval(period),
         );
@@ -278,22 +256,19 @@ mod tests {
         // Start a transaction pool
         let pool = testing_pool();
 
+        // Sync metric channel
+        let (sync_metrics_tx, _) = unbounded_channel();
+
         // Get the attributes for start of block building
-        let attributes = PayloadAttributes {
-            timestamp: 0,
-            prev_randao: Default::default(),
-            suggested_fee_recipient: Default::default(),
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        };
         let genesis_hash = B256::random();
 
         // Launch the LocalEngineService in instant mode
         LocalEngineService::spawn_new(
             payload_handle,
-            attributes,
+            TestPayloadAttributesBuilder,
             provider.clone(),
             pruner,
+            sync_metrics_tx,
             genesis_hash,
             MiningMode::instant(pool.clone()),
         );

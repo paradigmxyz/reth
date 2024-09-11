@@ -145,3 +145,12 @@ impl PayloadAttributes for OptimismPayloadAttributes {
         Ok(())
     }
 }
+
+/// A builder that can return the current payload attribute.
+pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
+    /// The payload attributes type returned by the builder.
+    type PayloadAttributes: PayloadAttributes;
+
+    /// Return a new payload attribute from the builder.
+    fn build(&self) -> Self::PayloadAttributes;
+}
