@@ -1,11 +1,12 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
+use alloy_primitives::{Address, Bytes, B256, U256};
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, Bytes, Header, B256, KECCAK_EMPTY, U256};
+use reth_primitives::{BlockId, Header, KECCAK_EMPTY};
 use reth_provider::{
     BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
 };

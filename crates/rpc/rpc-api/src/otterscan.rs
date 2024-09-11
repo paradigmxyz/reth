@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, Bytes, TxHash, B256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, Bytes, TxHash, B256};
+use reth_primitives::BlockId;
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,

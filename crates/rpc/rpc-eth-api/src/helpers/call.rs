@@ -2,6 +2,7 @@
 //! methods.
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
@@ -10,7 +11,7 @@ use reth_primitives::{
         ResultAndState, TransactTo, TxEnv,
     },
     transaction::AccessListResult,
-    Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
+    TransactionSignedEcRecovered,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
