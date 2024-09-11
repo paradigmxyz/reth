@@ -2173,7 +2173,6 @@ where
         let mut state_root_result = None;
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
-            // NOTE: there is a possibility of a race condition here if some data was persisted. ???
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
             let mut trie_nodes = TrieUpdates::default();
             let mut state = HashedPostState::default();
