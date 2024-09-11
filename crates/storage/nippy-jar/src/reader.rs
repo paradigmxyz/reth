@@ -45,6 +45,9 @@ pub trait DataReader {
 
     /// Returns the underlying data range as a slice of bytes.
     ///
+    /// # Safety
+    /// The caller must ensure that [`Self::allows_data_ref`] returns `true` before calling this function.
+    /// 
     /// # Panics
     /// If the reader does not support returning the data range as a slice of bytes.
     fn data_ref(&self, range: Range<usize>) -> &[u8];
@@ -226,7 +229,7 @@ impl DataReader for FileDataReader {
     ///
     /// Use [`Self::data`] instead.
     fn data_ref(&self, _: Range<usize>) -> &[u8] {
-        unimplemented!()
+        panic!("FileDataReader does not support returning data as a slice. Use reader.data() instead")
     }
 
     fn data(&self, range: Range<usize>, buffer: &mut [u8]) -> Result<(), NippyJarError> {
