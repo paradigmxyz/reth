@@ -32,6 +32,7 @@ reth-chainspec.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 op-alloy-network.workspace = true
+op-alloy-rpc-types.workspace = true
 revm.workspace = true
 
 # async
@@ -46,6 +47,9 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = [

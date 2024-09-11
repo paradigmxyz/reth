@@ -4,6 +4,8 @@ Run a single stage.
 
 ```bash
 $ reth stage run --help
+```
+```txt
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
 Options:
@@ -263,6 +265,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
 Logging:
       --log.stdout.format <FORMAT>

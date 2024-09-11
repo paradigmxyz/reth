@@ -300,13 +300,13 @@ pub fn validate_against_parent_4844(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{hex_literal::hex, Address, BlockHash, BlockNumber, Bytes, U256};
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
-        BlockNumber, Bytes, Signature, Transaction, TransactionSigned, TxEip4844, Withdrawal,
-        Withdrawals, U256,
+        proofs, Account, BlockBody, BlockHashOrNumber, Signature, Transaction, TransactionSigned,
+        TxEip4844, Withdrawal, Withdrawals,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
@@ -419,7 +419,6 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            placeholder: Some(()),
             to: Address::default(),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),

@@ -1,9 +1,12 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "optimism")]
 
 use clap::Parser;
-use reth::cli::Cli;
 use reth_node_builder::EngineNodeLauncher;
 use reth_node_optimism::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
+use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_rpc::eth::rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 
@@ -12,13 +15,7 @@ use reth_provider::providers::BlockchainProvider2;
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-#[cfg(not(feature = "optimism"))]
-compile_error!("Cannot build the `op-reth` binary with the `optimism` feature flag disabled. Did you mean to build `reth`?");
-
-#[cfg(feature = "optimism")]
 fn main() {
-    use reth::args::utils::DefaultChainSpecParser;
-
     reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -27,7 +24,7 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<DefaultChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
+        Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
             let enable_engine2 = rollup_args.experimental;
             let sequencer_http_arg = rollup_args.sequencer_http.clone();
             match enable_engine2 {

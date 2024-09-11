@@ -12,8 +12,13 @@ pub enum InvalidTransactionError {
     /// The nonce is lower than the account's nonce, or there is a nonce gap present.
     ///
     /// This is a consensus error.
-    #[display("transaction nonce is not consistent")]
-    NonceNotConsistent,
+    #[display("transaction nonce is not consistent: next nonce {state}, tx nonce {tx}")]
+    NonceNotConsistent {
+        /// The nonce of the transaction.
+        tx: u64,
+        /// The current state of the nonce in the local chain.
+        state: u64,
+    },
     /// The transaction is before Spurious Dragon and has a chain ID.
     #[display("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,

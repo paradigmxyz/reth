@@ -4,6 +4,8 @@ Debug engine API by replaying stored messages
 
 ```bash
 $ reth debug replay-engine --help
+```
+```txt
 Usage: reth debug replay-engine [OPTIONS] --engine-api-store <PATH>
 
 Options:
@@ -220,6 +222,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
       --engine-api-store <PATH>
           The path to read engine API messages from

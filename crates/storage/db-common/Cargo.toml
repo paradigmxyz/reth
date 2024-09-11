@@ -21,9 +21,11 @@ reth-etl.workspace = true
 reth-codecs.workspace = true
 reth-stages-types.workspace = true
 reth-fs-util.workspace = true
+reth-node-types.workspace = true
 
 # eth
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 
 # misc
 eyre.workspace = true
@@ -39,6 +41,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true

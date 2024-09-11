@@ -17,15 +17,12 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 pub use access_list::{AccessList, AccessListItem, AccessListResult};
-pub use eip1559::TxEip1559;
-pub use eip2930::TxEip2930;
-pub use eip4844::TxEip4844;
-pub use eip7702::TxEip7702;
+
+pub use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
 
 pub use error::{
     InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
 };
-pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
@@ -44,12 +41,7 @@ pub use variant::TransactionSignedVariant;
 
 pub(crate) mod access_list;
 mod compat;
-mod eip1559;
-mod eip2930;
-mod eip4844;
-mod eip7702;
 mod error;
-mod legacy;
 mod meta;
 mod pooled;
 mod sidecar;
@@ -59,10 +51,7 @@ pub(crate) mod util;
 mod variant;
 
 #[cfg(feature = "optimism")]
-mod optimism;
-
-#[cfg(feature = "optimism")]
-pub use optimism::TxDeposit;
+pub use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
@@ -143,21 +132,40 @@ pub enum Transaction {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Transaction {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut tx = match TxType::arbitrary(u)? {
-            TxType::Legacy => Self::Legacy(TxLegacy::arbitrary(u)?),
-            TxType::Eip2930 => Self::Eip2930(TxEip2930::arbitrary(u)?),
-            TxType::Eip1559 => Self::Eip1559(TxEip1559::arbitrary(u)?),
-            TxType::Eip4844 => Self::Eip4844(TxEip4844::arbitrary(u)?),
-            TxType::Eip7702 => Self::Eip7702(TxEip7702::arbitrary(u)?),
+        Ok(match TxType::arbitrary(u)? {
+            TxType::Legacy => {
+                let mut tx = TxLegacy::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Legacy(tx)
+            }
+            TxType::Eip2930 => {
+                let mut tx = TxEip2930::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip2930(tx)
+            }
+            TxType::Eip1559 => {
+                let mut tx = TxEip1559::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip1559(tx)
+            }
+            TxType::Eip4844 => {
+                let mut tx = TxEip4844::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip4844(tx)
+            }
+
+            TxType::Eip7702 => {
+                let mut tx = TxEip7702::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Eip7702(tx)
+            }
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Self::Deposit(TxDeposit::arbitrary(u)?),
-        };
-
-        if let Self::Legacy(tx) = &mut tx {
-            tx.gas_limit = (tx.gas_limit as u64).into();
-        };
-
-        Ok(tx)
+            TxType::Deposit => {
+                let mut tx = TxDeposit::arbitrary(u)?;
+                tx.gas_limit = (tx.gas_limit as u64).into();
+                Self::Deposit(tx)
+            }
+        })
     }
 }
 
@@ -210,9 +218,10 @@ impl Transaction {
         match self {
             Self::Legacy(TxLegacy { to, .. }) |
             Self::Eip2930(TxEip2930 { to, .. }) |
-            Self::Eip1559(TxEip1559 { to, .. }) |
-            Self::Eip7702(TxEip7702 { to, .. }) => *to,
-            Self::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
+            Self::Eip1559(TxEip1559 { to, .. }) => *to,
+            Self::Eip4844(TxEip4844 { to, .. }) | Self::Eip7702(TxEip7702 { to, .. }) => {
+                TxKind::Call(*to)
+            }
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { to, .. }) => *to,
         }
@@ -230,12 +239,12 @@ impl Transaction {
     pub const fn tx_type(&self) -> TxType {
         match self {
             Self::Legacy(_) => TxType::Legacy,
-            Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
-            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.tx_type(),
-            Self::Eip4844(blob_tx) => blob_tx.tx_type(),
-            Self::Eip7702(set_code_tx) => set_code_tx.tx_type(),
+            Self::Eip2930(_) => TxType::Eip2930,
+            Self::Eip1559(_) => TxType::Eip1559,
+            Self::Eip4844(_) => TxType::Eip4844,
+            Self::Eip7702(_) => TxType::Eip7702,
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.tx_type(),
+            Self::Deposit(_) => TxType::Deposit,
         }
     }
 
@@ -294,13 +303,13 @@ impl Transaction {
     /// Get the gas limit of the transaction.
     pub const fn gas_limit(&self) -> u64 {
         match self {
-            Self::Legacy(TxLegacy { gas_limit, .. }) => *gas_limit as u64,
-            Self::Eip2930(TxEip2930 { gas_limit, .. }) |
+            Self::Legacy(TxLegacy { gas_limit, .. }) |
             Self::Eip1559(TxEip1559 { gas_limit, .. }) |
             Self::Eip4844(TxEip4844 { gas_limit, .. }) |
-            Self::Eip7702(TxEip7702 { gas_limit, .. }) => *gas_limit,
+            Self::Eip7702(TxEip7702 { gas_limit, .. }) |
+            Self::Eip2930(TxEip2930 { gas_limit, .. }) => *gas_limit as u64,
             #[cfg(feature = "optimism")]
-            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit,
+            Self::Deposit(TxDeposit { gas_limit, .. }) => *gas_limit as u64,
         }
     }
 
@@ -520,18 +529,28 @@ impl Transaction {
                     out,
                 )
             }
-            Self::Eip2930(access_list_tx) => {
-                access_list_tx.encode_with_signature(signature, out, with_header)
-            }
-            Self::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
-            }
-            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
-            Self::Eip7702(set_code_tx) => {
-                set_code_tx.encode_with_signature(signature, out, with_header)
-            }
+            Self::Eip2930(access_list_tx) => access_list_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
+            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
+            Self::Eip7702(set_code_tx) => set_code_tx.encode_with_signature(
+                &signature.as_signature_with_boolean_parity(),
+                out,
+                with_header,
+            ),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
+            Self::Deposit(deposit_tx) => deposit_tx.encode_inner(out, with_header),
         }
     }
 
@@ -539,12 +558,12 @@ impl Transaction {
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
             Self::Legacy(tx) => tx.gas_limit = gas_limit.into(),
-            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
-            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
-            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
-            Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit.into(),
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit.into(),
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit.into(),
+            Self::Eip7702(tx) => tx.gas_limit = gas_limit.into(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.gas_limit = gas_limit,
+            Self::Deposit(tx) => tx.gas_limit = gas_limit.into(),
         }
     }
 
@@ -814,7 +833,7 @@ impl Encodable for Transaction {
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => {
-                deposit_tx.encode(out, true);
+                deposit_tx.encode_inner(out, true);
             }
         }
     }
@@ -827,7 +846,7 @@ impl Encodable for Transaction {
             Self::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
             Self::Eip7702(set_code_tx) => set_code_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
-            Self::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Self::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 }
@@ -1201,18 +1220,24 @@ impl TransactionSigned {
             Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
-            Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.payload_len_with_signature(&self.signature)
-            }
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature(&self.signature)
-            }
-            Transaction::Eip4844(blob_tx) => blob_tx.payload_len_with_signature(&self.signature),
-            Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature(&self.signature)
-            }
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
+            Transaction::Eip4844(blob_tx) => blob_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                true,
+            ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
         }
     }
 
@@ -1334,12 +1359,12 @@ impl TransactionSigned {
         };
 
         let transaction = match tx_type {
-            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_inner(data)?),
-            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_inner(data)?),
-            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_inner(data)?),
-            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_inner(data)?),
+            TxType::Eip2930 => Transaction::Eip2930(TxEip2930::decode_fields(data)?),
+            TxType::Eip1559 => Transaction::Eip1559(TxEip1559::decode_fields(data)?),
+            TxType::Eip4844 => Transaction::Eip4844(TxEip4844::decode_fields(data)?),
+            TxType::Eip7702 => Transaction::Eip7702(TxEip7702::decode_fields(data)?),
             #[cfg(feature = "optimism")]
-            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_inner(data)?),
+            TxType::Deposit => Transaction::Deposit(TxDeposit::decode_fields(data)?),
             TxType::Legacy => return Err(RlpError::Custom("unexpected legacy tx type")),
         };
 
@@ -1407,20 +1432,24 @@ impl TransactionSigned {
             Transaction::Legacy(legacy_tx) => legacy_tx.encoded_len_with_signature(
                 &self.signature.as_signature_with_eip155_parity(legacy_tx.chain_id),
             ),
-            Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            Transaction::Eip4844(blob_tx) => {
-                blob_tx.payload_len_with_signature_without_header(&self.signature)
-            }
-            Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.payload_len_with_signature_without_header(&self.signature)
-            }
+            Transaction::Eip2930(access_list_tx) => access_list_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
+            Transaction::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
+            Transaction::Eip4844(blob_tx) => blob_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
+            Transaction::Eip7702(set_code_tx) => set_code_tx.encoded_len_with_signature(
+                &self.signature.as_signature_with_boolean_parity(),
+                false,
+            ),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(deposit_tx) => deposit_tx.payload_len_without_header(),
+            Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),
         }
     }
 }
@@ -1517,11 +1546,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
-
-        if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
-            tx_eip_4844.placeholder =
-                if tx_eip_4844.to == Address::default() { None } else { Some(()) };
         }
 
         #[cfg(feature = "optimism")]

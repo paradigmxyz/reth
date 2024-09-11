@@ -5,23 +5,25 @@ use crate::{
     state::{SidechainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
 };
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
+    BlockNumHash, EthereumHardfork, ForkBlock, GotExpected, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, BlockWriter,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
+    ProviderError, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -58,13 +60,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [`BlockchainTree::make_canonical`]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB, E> {
+pub struct BlockchainTree<N: NodeTypesWithDB, E> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, E>,
+    externals: TreeExternals<N, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -75,7 +77,7 @@ pub struct BlockchainTree<DB, E> {
     metrics: TreeMetrics,
 }
 
-impl<DB, E> BlockchainTree<DB, E> {
+impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are emitted by the tree.
@@ -89,9 +91,9 @@ impl<DB, E> BlockchainTree<DB, E> {
     }
 }
 
-impl<DB, E> BlockchainTree<DB, E>
+impl<N, E> BlockchainTree<N, E>
 where
-    DB: Database + Clone,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
@@ -115,7 +117,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        mut externals: TreeExternals<DB, E>,
+        mut externals: TreeExternals<N, E>,
         config: BlockchainTreeConfig,
         prune_modes: PruneModes,
     ) -> ProviderResult<Self> {
@@ -186,7 +188,7 @@ where
     ) -> Result<Option<BlockStatus>, InsertBlockErrorKind> {
         // check if block is canonical
         if self.is_block_hash_canonical(&block.hash)? {
-            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
+            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)));
         }
 
         let last_finalized_block = self.block_indices().last_finalized_block();
@@ -194,7 +196,7 @@ where
         if block.number <= last_finalized_block {
             // check if block is inside database
             if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
-                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
+                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)));
             }
 
             return Err(BlockchainTreeError::PendingBlockIsFinalized {
@@ -205,7 +207,7 @@ where
 
         // is block inside chain
         if let Some(attachment) = self.is_block_inside_sidechain(&block) {
-            return Ok(Some(BlockStatus::Valid(attachment)))
+            return Ok(Some(BlockStatus::Valid(attachment)));
         }
 
         // check if block is disconnected
@@ -289,7 +291,7 @@ where
             let Some((first_pending_block_number, _)) = parent_block_hashes.first_key_value()
             else {
                 debug!(target: "blockchain_tree", ?chain_id, "No block hashes stored");
-                return None
+                return None;
             };
             let canonical_chain = canonical_chain
                 .iter()
@@ -299,7 +301,7 @@ where
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(ExecutionData { execution_outcome, parent_block_hashes, canonical_fork })
+            return Some(ExecutionData { execution_outcome, parent_block_hashes, canonical_fork });
         }
 
         // check if there is canonical block
@@ -309,7 +311,7 @@ where
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
                 execution_outcome: ExecutionOutcome::default(),
                 parent_block_hashes: canonical_chain.inner().clone(),
-            })
+            });
         }
 
         None
@@ -332,12 +334,12 @@ where
         // check if block parent can be found in any side chain.
         if let Some(chain_id) = self.block_indices().get_side_chain_id(&parent.hash) {
             // found parent in side tree, try to insert there
-            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind)
+            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind);
         }
 
         // if not found, check if the parent can be found inside canonical chain.
         if self.is_block_hash_canonical(&parent.hash)? {
-            return self.try_append_canonical_chain(block.clone(), block_validation_kind)
+            return self.try_append_canonical_chain(block.clone(), block_validation_kind);
         }
 
         // this is another check to ensure that if the block points to a canonical block its block
@@ -688,7 +690,7 @@ where
     pub fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block));
         }
 
         self.state.buffered_blocks.insert_block(block);
@@ -706,17 +708,17 @@ where
                 "Failed to validate total difficulty for block {}: {e}",
                 block.header.hash()
             );
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
             error!(?block, "Failed to validate header {}: {e}", block.header.hash());
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_block_pre_execution(block) {
             error!(?block, "Failed to validate block {}: {e}", block.header.hash());
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -741,7 +743,7 @@ where
                 Some(BlockAttachment::Canonical)
             } else {
                 Some(BlockAttachment::HistoricalFork)
-            }
+            };
         }
         None
     }
@@ -782,7 +784,7 @@ where
 
         // validate block consensus rules
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block));
         }
 
         let status = self
@@ -1056,7 +1058,7 @@ where
             }
 
             let head = self.state.block_indices.canonical_tip();
-            return Ok(CanonicalOutcome::AlreadyCanonical { header, head })
+            return Ok(CanonicalOutcome::AlreadyCanonical { header, head });
         }
 
         let Some(chain_id) = self.block_indices().get_side_chain_id(&block_hash) else {
@@ -1071,7 +1073,7 @@ where
             debug!(target: "blockchain_tree", ?block_hash, ?chain_id, "Chain not present");
             return Err(CanonicalError::from(BlockchainTreeError::BlockSideChainIdConsistency {
                 chain_id: chain_id.into(),
-            }));
+            }))
         };
         trace!(target: "blockchain_tree", chain = ?canonical, "Found chain to make canonical");
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
@@ -1101,7 +1103,7 @@ where
             debug!(target: "blockchain_tree", "No blocks in the chain to make canonical");
             return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
                 block_hash: fork_block.hash,
-            }));
+            }))
         };
         trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
         let mut chain_appended = false;
@@ -1282,7 +1284,7 @@ where
     pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), CanonicalError> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices().canonical_tip().number <= unwind_to {
-            return Ok(())
+            return Ok(());
         }
         // revert `N` blocks from current canonical chain and put them inside BlockchainTree
         let old_canon_chain = self.revert_canonical_from_database(unwind_to)?;
@@ -1324,7 +1326,7 @@ where
                 "Reverting optimistic canonical chain to block {}",
                 revert_until
             );
-            return Err(CanonicalError::OptimisticTargetRevert(revert_until))
+            return Err(CanonicalError::OptimisticTargetRevert(revert_until));
         }
 
         // read data that is needed for new sidechain
@@ -1378,28 +1380,27 @@ where
 mod tests {
     use super::*;
     use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{keccak256, Address, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_consensus::test_utils::TestConsensus;
-    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db::tables;
     use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    #[cfg(not(feature = "optimism"))]
-    use reth_primitives::proofs::calculate_receipt_root;
-    #[cfg(feature = "optimism")]
-    use reth_primitives::proofs::calculate_receipt_root_optimism;
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
-        keccak256,
-        proofs::calculate_transaction_root,
+        proofs::{calculate_receipt_root, calculate_transaction_root},
         revm_primitives::AccountInfo,
-        Account, Address, Header, Signature, Transaction, TransactionSigned,
-        TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
+        Account, Header, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        TxEip1559, Withdrawals,
     };
     use reth_provider::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
         ProviderFactory,
     };
     use reth_stages_api::StageCheckpoint;
@@ -1408,7 +1409,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<ExecutionOutcome>,
-    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
+    ) -> TreeExternals<MockNodeTypesWithDB, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1424,7 +1425,7 @@ mod tests {
         TreeExternals::new(provider_factory, consensus, executor_factory)
     }
 
-    fn setup_genesis<DB: Database>(factory: &ProviderFactory<DB>, mut genesis: SealedBlock) {
+    fn setup_genesis<N: ProviderNodeTypes>(factory: &ProviderFactory<N>, mut genesis: SealedBlock) {
         // insert genesis to db.
 
         genesis.header.set_block_number(10);
@@ -1501,7 +1502,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
+        fn assert<N: NodeTypesWithDB, E: BlockExecutorProvider>(self, tree: &BlockchainTree<N, E>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }
@@ -1598,11 +1599,8 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            #[cfg(not(feature = "optimism"))]
+            // receipts root computation is different for OP
             let receipts_root = calculate_receipt_root(&receipts);
-
-            #[cfg(feature = "optimism")]
-            let receipts_root = calculate_receipt_root_optimism(&receipts, &chain_spec, 0);
 
             SealedBlockWithSenders::new(
                 SealedBlock {

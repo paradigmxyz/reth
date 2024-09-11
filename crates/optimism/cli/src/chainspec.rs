@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::utils::parse_custom_chain_spec;
 use reth_optimism_chainspec::{
@@ -26,7 +27,7 @@ fn chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>, eyre::Error> {
 pub struct OpChainSpecParser;
 
 impl ChainSpecParser for OpChainSpecParser {
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = ChainSpec;
 
     const SUPPORTED_CHAINS: &'static [&'static str] = &[
         "dev",
@@ -38,8 +39,8 @@ impl ChainSpecParser for OpChainSpecParser {
         "base-sepolia",
     ];
 
-    fn parse(s: &str) -> eyre::Result<Arc<OpChainSpec>> {
-        chain_value_parser(s)
+    fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+        chain_value_parser(s).map(|s| Arc::new(Arc::unwrap_or_clone(s).inner))
     }
 }
 

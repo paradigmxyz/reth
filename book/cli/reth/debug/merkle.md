@@ -4,6 +4,8 @@ Debug the clean & incremental state root calculations
 
 ```bash
 $ reth debug merkle --help
+```
+```txt
 Usage: reth debug merkle [OPTIONS] --to <TO>
 
 Options:
@@ -220,6 +222,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
       --retries <RETRIES>
           The number of retries per request

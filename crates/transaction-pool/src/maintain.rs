@@ -7,6 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction,
 };
+use alloy_primitives::{Address, BlockHash, BlockNumber};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -16,8 +17,8 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, BlockNumberOrTag, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    BlockNumberOrTag, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    TransactionSigned,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -678,9 +679,10 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
-    use reth_primitives::{hex, PooledTransactionsElement, U256};
+    use reth_primitives::PooledTransactionsElement;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

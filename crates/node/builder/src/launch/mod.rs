@@ -21,11 +21,16 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider};
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns};
+use reth_node_api::{
+    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypesWithDB, NodeTypesWithEngine,
+};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -100,12 +105,10 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
+impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    T: FullNodeTypes<
-        Provider = BlockchainProvider<<T as FullNodeTypes>::DB>,
-        ChainSpec = ChainSpec,
-    >,
+    Types: NodeTypesWithDB<ChainSpec = ChainSpec> + NodeTypesWithEngine,
+    T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<
         NodeAdapter<T, CB::Components>,
@@ -113,6 +116,7 @@ where
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,
     >,
@@ -348,6 +352,7 @@ where
             ctx.chain_spec(),
             beacon_engine_handle,
             ctx.components().payload_builder().clone().into(),
+            ctx.components().pool().clone(),
             Box::new(ctx.task_executor().clone()),
             client,
             EngineCapabilities::default(),
@@ -405,7 +410,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
+                rpc_consensus_client.run::<Types::Engine>().await
             });
         }
 
@@ -418,7 +423,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("rpc consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
+                rpc_consensus_client.run::<Types::Engine>().await
             });
         }
 

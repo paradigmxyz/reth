@@ -4,6 +4,8 @@ P2P Debugging utilities
 
 ```bash
 $ reth p2p --help
+```
+```txt
 Usage: reth p2p [OPTIONS] <COMMAND>
 
 Commands:
@@ -197,6 +199,11 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
 
 Datadir:
       --datadir <DATA_DIR>

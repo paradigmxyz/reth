@@ -1,9 +1,8 @@
+use alloy_primitives::{Bytes, TxKind, U256};
+use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_node_api::FullNodeComponents;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, OptimismFields, TxEnv},
-    Bytes, TxKind, U256,
-};
+use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_primitives::revm_primitives::{BlockEnv, OptimismFields, TxEnv};
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError,
@@ -16,7 +15,7 @@ use crate::{OpEthApi, OpEthApiError};
 impl<N> EthCall for OpEthApi<N>
 where
     Self: Call,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
 }
 

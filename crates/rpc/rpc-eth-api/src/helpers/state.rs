@@ -42,14 +42,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
-        self.spawn_blocking_io(move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)?
-                .account_code(address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default()
-                .original_bytes())
-        })
+        LoadState::get_code(self, address, block_id)
     }
 
     /// Returns balance of given account, at given blocknumber.
@@ -105,7 +98,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         let block_number = LoadState::provider(self)
             .block_number_for_id(block_id)
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
             return Err(EthApiError::ExceedsMaxProofWindow.into())
@@ -115,7 +108,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let _permit = self
                 .acquire_owned()
                 .await
-                .map_err(|err| EthApiError::Internal(RethError::other(err)))?;
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(block_id)?;
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
@@ -229,7 +223,7 @@ pub trait LoadState: EthApiTypes {
                 let block_hash = LoadPendingBlock::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                    .ok_or(EthApiError::HeaderNotFound(at))?;
                 let (cfg, env) = self
                     .cache()
                     .get_evm_env(block_hash)
@@ -293,6 +287,25 @@ pub trait LoadState: EthApiTypes {
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default(),
             ))
+        })
+    }
+
+    /// Returns code of given account, at the given identifier.
+    fn get_code(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            Ok(this
+                .state_at_block_id_or_latest(block_id)?
+                .account_code(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default()
+                .original_bytes())
         })
     }
 }

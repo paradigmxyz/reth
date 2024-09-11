@@ -18,11 +18,9 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use reth_primitives::{
-    constants::{
-        eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
-    },
-    Address, TxHash, B256,
+use alloy_primitives::{Address, TxHash, B256};
+use reth_primitives::constants::{
+    eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -1235,7 +1233,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_exclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1246,7 +1244,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_inclusive<'a, 'b: 'a>(
         &'a self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
         self.txs.range(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1257,7 +1255,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     pub(crate) fn descendant_txs_mut<'a, 'b: 'a>(
         &'a mut self,
         id: &'b TransactionId,
-    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + '_ {
+    ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
         self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
     }
 
@@ -1848,7 +1846,8 @@ impl SenderInfo {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
 
     use super::*;
     use crate::{

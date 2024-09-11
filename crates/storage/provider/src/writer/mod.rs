@@ -260,16 +260,23 @@ where
 
         // Get the total txs for the block range, so we have the correct number of columns for
         // receipts and transactions
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         let tx_range = self
             .database()
-            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
+            .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
         let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
         self.database().remove_block_and_execution_range(
-            block_number..=self.database().last_block_number()?,
+            block_number + 1..=self.database().last_block_number()?,
         )?;
 
+        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
+        // we remove only what is ABOVE the block.
+        //
+        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+        // will have three blocks to remove, which will be block 8, 7, and 6.
         debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?

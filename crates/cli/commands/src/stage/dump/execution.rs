@@ -1,17 +1,21 @@
+use std::sync::Arc;
+
 use super::setup;
+use reth_chainspec::ChainSpec;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
 };
 use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_execution_stage<DB, E>(
-    db_tool: &DbTool<DB>,
+pub(crate) async fn dump_execution_stage<N, E>(
+    db_tool: &DbTool<N>,
     from: u64,
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
@@ -19,7 +23,7 @@ pub(crate) async fn dump_execution_stage<DB, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     E: BlockExecutorProvider,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
@@ -30,8 +34,8 @@ where
 
     if should_run {
         dry_run(
-            ProviderFactory::new(
-                output_db,
+            ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
+                Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
@@ -45,9 +49,9 @@ where
 }
 
 /// Imports all the tables that can be copied over a range.
-fn import_tables_with_range<DB: Database>(
+fn import_tables_with_range<N: NodeTypesWithDB>(
     output_db: &DatabaseEnv,
-    db_tool: &DbTool<DB>,
+    db_tool: &DbTool<N>,
     from: u64,
     to: u64,
 ) -> eyre::Result<()> {
@@ -125,8 +129,8 @@ fn import_tables_with_range<DB: Database>(
 /// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
-fn unwind_and_copy<DB: Database>(
-    db_tool: &DbTool<DB>,
+fn unwind_and_copy<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+    db_tool: &DbTool<N>,
     from: u64,
     tip_block_number: u64,
     output_db: &DatabaseEnv,
@@ -155,14 +159,14 @@ fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage without committing
-fn dry_run<DB, E>(
-    output_provider_factory: ProviderFactory<DB>,
+fn dry_run<N, E>(
+    output_provider_factory: ProviderFactory<N>,
     to: u64,
     from: u64,
     executor: E,
 ) -> eyre::Result<()>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     E: BlockExecutorProvider,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact, Serialize, Deserialize)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
 #[cfg_attr(test, crate::add_arbitrary_tests(compact))]
-struct TxLegacy {
+pub(crate) struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
     chain_id: Option<ChainId>,
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
@@ -67,28 +67,12 @@ impl Compact for AlloyTxLegacy {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas_limit: tx.gas_limit as u128,
+            gas_limit: tx.gas_limit.into(),
             to: tx.to,
             value: tx.value,
             input: tx.input,
         };
 
         (alloy_tx, buf)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::alloy::transaction::TxLegacy;
-
-    // each value in the database has an extra field named flags that encodes metadata about other
-    // fields in the value, e.g. offset and length.
-    //
-    // this check is to ensure we do not inadvertently add too many fields to a struct which would
-    // expand the flags field and break backwards compatibility
-
-    #[test]
-    fn test_ensure_backwards_compatibility() {
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
     }
 }
