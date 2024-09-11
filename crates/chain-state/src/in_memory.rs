@@ -151,8 +151,8 @@ impl CanonicalInMemoryStateInner {
             // acquire locks, starting with the numbers lock
             let mut numbers = self.in_memory_state.numbers.write();
             let mut blocks = self.in_memory_state.blocks.write();
-            blocks.clear();
             numbers.clear();
+            blocks.clear();
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
