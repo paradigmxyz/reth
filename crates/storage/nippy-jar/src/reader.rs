@@ -7,7 +7,8 @@ use std::{
     path::Path,
 };
 
-/// Uses [`FileDataReader`] due to Windows-specific issues with mmap, such as file access locks and poor handling of file changes.
+/// Uses [`FileDataReader`] due to Windows-specific issues with mmap, such as file access locks and
+/// poor handling of file changes.
 #[cfg(windows)]
 pub type DefaultDataReader = FileDataReader;
 
@@ -222,7 +223,7 @@ impl DataReader for FileDataReader {
     }
 
     /// Not supported by [`FileDataReader`] and **will PANIC**.
-    /// 
+    ///
     /// Use [`Self::data`] instead.
     fn data_ref(&self, _: Range<usize>) -> &[u8] {
         unimplemented!()
