@@ -1,6 +1,7 @@
 use crate::{
     BackfillJobFactory, ExExEvent, ExExNotification, FinishedExExHeight, StreamBackfillJob,
 };
+use eyre::OptionExt;
 use futures::{Stream, StreamExt};
 use metrics::Gauge;
 use reth_chainspec::Head;
@@ -254,8 +255,11 @@ pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
     components: Node,
     notifications: Receiver<ExExNotification>,
     head: ExExHead,
+    /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<Node::Executor, Node::Provider, Chain>>,
-    compare_head: bool,
+    /// Whether to wait for the node head to be at the same height as the ExEx head, and then
+    /// call the [`Self::heal`].
+    wait_for_head: bool,
 }
 
 impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
@@ -271,7 +275,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
             notifications,
             head: exex_head,
             backfill_job: None,
-            compare_head: false,
+            wait_for_head: false,
         };
 
         notifications.heal(node_head)?;
@@ -337,7 +341,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
 
                 // TODO(alexey): wait until the node head is at the same height as the ExEx head
                 // and then repeat the process above
-                self.compare_head = true;
+                self.wait_for_head = true;
             }
         };
 
@@ -367,34 +371,54 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                 return Poll::Ready(None)
             };
 
-            let chain = notification.committed_chain().or_else(|| notification.reverted_chain());
+            let chain_and_tip = notification
+                .committed_chain()
+                .map(|chain| (chain.clone(), chain.tip().number))
+                .or_else(|| {
+                    notification
+                        .reverted_chain()
+                        .map(|chain| (chain.clone(), chain.first().number - 1))
+                });
 
-            if this.compare_head {
-                if let Some(block) =
-                    chain.as_ref().and_then(|chain| chain.blocks().get(&this.head.block.number))
-                {
+            if this.wait_for_head {
+                // If we are waiting for the node head to be at the same height as the ExEx head,
+                // then we need to check if the ExEx is on the canonical chain. To do this, we need
+                // to get the block at the ExEx head's height from new chain, and compare its hash
+                // to the ExEx head's hash.
+                if let Some((block, tip)) = chain_and_tip.as_ref().and_then(|(chain, tip)| {
+                    chain.blocks().get(&this.head.block.number).zip(Some(tip))
+                }) {
                     if block.hash() == this.head.block.hash {
-                        // ExEx is on the canonical chain
-                        this.compare_head = false;
+                        // ExEx is on the canonical chain, proceed with the notification
+                        this.wait_for_head = false;
                     } else {
                         // ExEx is not on the canonical chain, heal
+                        let tip = this
+                            .components
+                            .provider()
+                            .sealed_header(*tip)?
+                            .ok_or_eyre("node head not found")?;
                         let total_difficulty = this
                             .components
                             .provider()
-                            .header_td_by_number(block.number)?
+                            .header_td_by_number(tip.number)?
                             .unwrap_or(U256::MAX);
                         this.heal(Head::new(
-                            block.number,
-                            block.hash(),
-                            block.difficulty,
+                            tip.number,
+                            tip.hash(),
+                            tip.difficulty,
                             total_difficulty,
-                            block.timestamp,
+                            tip.timestamp,
                         ))?;
                     }
                 }
             }
 
-            if chain.map_or(false, |chain| chain.first().number > this.head.block.number) {
+            if notification
+                .committed_chain()
+                .or_else(|| notification.reverted_chain())
+                .map_or(false, |chain| chain.first().number > this.head.block.number)
+            {
                 return Poll::Ready(Some(Ok(notification)))
             }
         }

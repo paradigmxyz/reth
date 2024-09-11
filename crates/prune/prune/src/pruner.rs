@@ -305,7 +305,6 @@ impl<DB: Database> Pruner<DB, ()> {
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
-    #[allow(clippy::doc_markdown)]
     pub fn run(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
@@ -321,7 +320,6 @@ impl<N: ProviderNodeTypes> Pruner<N::DB, ProviderFactory<N>> {
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
-    #[allow(clippy::doc_markdown)]
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let provider = self.provider_factory.provider_rw()?;
         let result = self.run_with_provider(&provider, tip_block_number);
