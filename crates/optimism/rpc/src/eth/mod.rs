@@ -33,7 +33,6 @@ use reth_rpc_eth_api::{
     EthApiTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,

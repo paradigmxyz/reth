@@ -21,7 +21,6 @@ use reth_node_builder::{
     RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc_types_compat::TransactionCompat;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -63,8 +62,8 @@ where
     N::AddOns: NodeAddOns<
         Adapter<N>,
         EthApi: FullEthApiServer<
-            TransactionCompat: TransactionCompat<
-                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         > + AddDevSigners
                     + EthApiBuilderProvider<Adapter<N>>,

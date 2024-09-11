@@ -5,6 +5,7 @@ use std::{error::Error, fmt};
 use alloy_network::{AnyNetwork, Network};
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types::{Block, Transaction, WithOtherFields};
+use reth_rpc_types_compat::TransactionCompat;
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError};
 
@@ -42,3 +43,16 @@ pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
 
 /// Adapter for network specific receipt type.
 pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;
+
+/// Helper trait holds necessary trait bounds on [`EthApiTypes`] to implement `eth` API.
+pub trait FullEthApiTypes:
+    EthApiTypes<TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Self::NetworkTypes>>>
+{
+}
+
+impl<T> FullEthApiTypes for T where
+    T: EthApiTypes<
+        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<T::NetworkTypes>>,
+    >
+{
+}

@@ -20,7 +20,6 @@ use reth_rpc_types::{
     },
     BlockTransactions, Header, Transaction, TransactionReceipt, WithOtherFields,
 };
-use reth_rpc_types_compat::TransactionCompat;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
@@ -46,7 +45,6 @@ impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
         NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
-        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
@@ -76,7 +74,6 @@ where
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
             >,
-            TransactionCompat: TransactionCompat<Transaction = RpcTransaction<Eth::NetworkTypes>>,
         > + TraceExt
         + EthTransactions
         + 'static,

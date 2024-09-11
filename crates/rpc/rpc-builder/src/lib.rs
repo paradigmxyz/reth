@@ -230,7 +230,9 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
     EthApi: FullEthApiServer<
-        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<EthApi::NetworkTypes>>,
+        NetworkTypes: alloy_network::Network<
+            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+        >,
     >,
 {
     let module_config = module_config.into();
@@ -439,8 +441,8 @@ where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
-            TransactionCompat: TransactionCompat<
-                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         >,
     {
@@ -495,8 +497,10 @@ where
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
         EthApi: EthApiTypes<
-                TransactionCompat: TransactionCompat<
-                    Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+                NetworkTypes: alloy_network::Network<
+                    TransactionResponse = reth_rpc_types::WithOtherFields<
+                        reth_rpc_types::Transaction,
+                    >,
                 >,
             > + 'static,
     {
@@ -513,8 +517,8 @@ where
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
-            TransactionCompat: TransactionCompat<
-                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         >,
     {
@@ -647,8 +651,8 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes<
-            TransactionCompat: TransactionCompat<
-                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         > + 'static,
 {
@@ -809,8 +813,8 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
-                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         >,
 {
@@ -985,7 +989,9 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: FullEthApiServer<
-        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<EthApi::NetworkTypes>>,
+        NetworkTypes: alloy_network::Network<
+            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+        >,
     >,
 {
     /// Configures the auth module that includes the

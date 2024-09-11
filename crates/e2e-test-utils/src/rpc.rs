@@ -25,12 +25,9 @@ where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
     EthApi: EthApiSpec
         + EthTransactions<
-            NetworkTypes: Network<
+            NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
                 ReceiptResponse = AnyTransactionReceipt,
-            >,
-            TransactionCompat: TransactionCompat<
-                Transaction = RpcTransaction<EthApi::NetworkTypes>,
             >,
         > + TraceExt,
 {

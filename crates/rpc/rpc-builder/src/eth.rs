@@ -87,8 +87,8 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EthApi: EthApiTypes<
-            TransactionCompat: TransactionCompat<
-                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         > + 'static,
 {
@@ -149,8 +149,10 @@ impl EthFilterApiBuilder {
         Pool: Send + Sync + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
         Eth: EthApiTypes<
-                TransactionCompat: TransactionCompat<
-                    Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+                NetworkTypes: alloy_network::Network<
+                    TransactionResponse = reth_rpc_types::WithOtherFields<
+                        reth_rpc_types::Transaction,
+                    >,
                 >,
             > + 'static,
     {

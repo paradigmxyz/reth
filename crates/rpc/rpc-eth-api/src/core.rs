@@ -13,7 +13,6 @@ use reth_rpc_types::{
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
     Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
-use reth_rpc_types_compat::TransactionCompat;
 use tracing::trace;
 
 use crate::{
@@ -369,7 +368,9 @@ impl<T>
     > for T
 where
     T: FullEthApi<
-        TransactionCompat: TransactionCompat<Transaction = RpcTransaction<T::NetworkTypes>>,
+        NetworkTypes: alloy_network::Network<
+            TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
+        >,
     >,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {

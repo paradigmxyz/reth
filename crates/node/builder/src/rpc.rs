@@ -22,7 +22,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_rpc_types_compat::TransactionCompat;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -304,8 +303,8 @@ where
     Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
     EthApi: EthApiBuilderProvider<Node>
         + FullEthApiServer<
-            TransactionCompat: TransactionCompat<
-                Transaction = RpcTransaction<EthApi::NetworkTypes>,
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
             >,
         >,
 {

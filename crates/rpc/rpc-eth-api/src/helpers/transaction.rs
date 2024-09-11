@@ -25,7 +25,9 @@ use reth_rpc_types_compat::{
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{EthApiTypes, FromEthApiError, IntoEthApiError, RpcReceipt, RpcTransaction};
+use crate::{
+    EthApiTypes, FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcReceipt, RpcTransaction,
+};
 
 use super::{
     Call, EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState,
@@ -233,8 +235,10 @@ pub trait EthTransactions: LoadTransaction {
         Self: LoadBlock
             + LoadState
             + EthApiTypes<
-                TransactionCompat: TransactionCompat<
-                    Transaction = RpcTransaction<Self::NetworkTypes>,
+                NetworkTypes: alloy_network::Network<
+                    TransactionResponse = reth_rpc_types::WithOtherFields<
+                        reth_rpc_types::Transaction,
+                    >,
                 >,
             >,
     {
@@ -620,7 +624,7 @@ pub trait EthTransactions: LoadTransaction {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking {
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.
     type Pool: TransactionPool;

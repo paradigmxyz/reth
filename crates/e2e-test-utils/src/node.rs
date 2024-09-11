@@ -91,12 +91,9 @@ where
         AddOns::EthApi: EthApiSpec
             + EthTransactions
             + TraceExt
-            + EthApiTypes<
-                NetworkTypes: Network<
+            + FullEthApiTypes<
+                NetworkTypes: alloy_network::Network<
                     TransactionResponse = WithOtherFields<alloy_rpc_types::Transaction>,
-                    TransactionCompat: TransactionCompat<
-                        Transaction = RpcTransaction<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-                    >,
                 >,
             >,
     {

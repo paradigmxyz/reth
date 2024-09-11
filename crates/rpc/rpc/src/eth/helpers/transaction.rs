@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to transactions
 
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
-use reth_rpc_eth_api::helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking};
+use reth_rpc_eth_api::{
+    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    FullEthApiTypes,
+};
 use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
@@ -28,7 +31,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     Provider: TransactionsProvider,
     Pool: TransactionPool,
 {
