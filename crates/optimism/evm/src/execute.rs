@@ -31,23 +31,21 @@ use tracing::trace;
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
 pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     evm_config: EvmConfig,
 }
 
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(
-            chain_spec.clone(),
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
-        )
+        let op_chain_spec = Arc::new(OpChainSpec { inner: (*chain_spec).clone() });
+        Self::new(op_chain_spec.clone(), OptimismEvmConfig::new(op_chain_spec))
     }
 }
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<OpChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -97,7 +95,7 @@ where
 #[derive(Debug, Clone)]
 struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
 }
@@ -124,7 +122,7 @@ where
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.evm_config,
-            &self.chain_spec,
+            &self.chain_spec.inner,
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -132,8 +130,11 @@ where
         )?;
 
         // execute transactions
-        let is_regolith =
-            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
+        let is_regolith = self
+            .chain_spec
+            .inner
+            .fork(OptimismHardfork::Regolith)
+            .active_at_timestamp(block.timestamp);
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -245,12 +246,16 @@ pub struct OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(
+        chain_spec: Arc<OpChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+    ) -> Self {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
     #[inline]
-    fn chain_spec(&self) -> &ChainSpec {
+    fn chain_spec(&self) -> &OpChainSpec {
         &self.executor.chain_spec
     }
 
@@ -484,13 +489,8 @@ mod tests {
         db
     }
 
-    fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
-                inner: (*chain_spec).clone(),
-            })),
-            chain_spec,
-        }
+    fn executor_provider(chain_spec: Arc<OpChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
+        OpExecutorProvider { evm_config: OptimismEvmConfig::new(chain_spec.clone()), chain_spec }
     }
 
     #[test]
@@ -512,11 +512,11 @@ mod tests {
         let account = Account { balance: U256::MAX, ..Account::default() };
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec = Arc::new(
-            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+        let chain_spec = Arc::new(OpChainSpec {
+            inner: ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
                 .regolith_activated()
                 .build(),
-        );
+        });
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {
@@ -596,11 +596,11 @@ mod tests {
 
         db.insert_account(addr, account, None, HashMap::new());
 
-        let chain_spec = Arc::new(
-            ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
+        let chain_spec = Arc::new(OpChainSpec {
+            inner: ChainSpecBuilder::from(&Arc::new(BASE_MAINNET.inner.clone()))
                 .canyon_activated()
                 .build(),
-        );
+        });
 
         let tx = TransactionSigned::from_transaction_and_signature(
             Transaction::Eip1559(TxEip1559 {

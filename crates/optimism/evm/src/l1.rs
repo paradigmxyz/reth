@@ -1,6 +1,6 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use crate::OptimismBlockExecutionError;
+use crate::{OpChainSpec, OptimismBlockExecutionError};
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_execution_errors::BlockExecutionError;
@@ -258,7 +258,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 /// deployer contract. This is done by directly setting the code of the create2 deployer account
 /// prior to executing any transactions on the timestamp activation of the fork.
 pub fn ensure_create2_deployer<DB>(
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: Arc<OpChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
 ) -> Result<(), DB::Error>

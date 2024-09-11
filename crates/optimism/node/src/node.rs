@@ -134,9 +134,9 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
-        let evm_config =
-            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() }));
-        let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
+        let op_chain_spec = Arc::new(OpChainSpec { inner: (*chain_spec).clone() });
+        let evm_config = OptimismEvmConfig::new(op_chain_spec.clone());
+        let executor = OpExecutorProvider::new(op_chain_spec, evm_config.clone());
 
         Ok((evm_config, executor))
     }

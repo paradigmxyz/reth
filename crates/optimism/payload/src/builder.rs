@@ -193,7 +193,7 @@ where
     // so we can safely assume that this will always be triggered upon the transition and that
     // the above check for empty blocks will never be hit on OP chains.
     reth_evm_optimism::ensure_create2_deployer(
-        chain_spec.clone(),
+        Arc::new((*chain_spec).clone().into()),
         attributes.payload_attributes.timestamp,
         &mut db,
     )

@@ -34,6 +34,12 @@ pub struct OpChainSpec {
     pub inner: ChainSpec,
 }
 
+impl From<ChainSpec> for OpChainSpec {
+    fn from(inner: ChainSpec) -> Self {
+        Self { inner }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_genesis::Genesis;
