@@ -82,6 +82,7 @@ secp256k1 = { workspace = true, features = [
 aquamarine.workspace = true
 eyre.workspace = true
 fdlimit.workspace = true
+jsonrpsee.workspace = true
 rayon.workspace = true
 
 # tracing

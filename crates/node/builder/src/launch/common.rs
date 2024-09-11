@@ -855,35 +855,43 @@ where
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
-        Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
-            let output_directory = self.data_dir().invalid_block_hooks();
-            let hooks = hook
-                .iter()
-                .copied()
-                .map(|hook| {
-                    let output_directory = output_directory.join(hook.to_string());
-                    fs::create_dir_all(&output_directory)?;
+        let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
+            return Ok(Box::new(NoopInvalidBlockHook::default()))
+        };
+        let healthy_node_rpc_client = self
+            .node_config()
+            .debug
+            .healthy_node_rpc_url
+            .as_ref()
+            .map(|url| jsonrpsee::http_client::HttpClientBuilder::default().build(url))
+            .transpose()?;
 
-                    Ok(match hook {
-                        reth_node_core::args::InvalidBlockHook::Witness => {
-                            Box::new(InvalidBlockWitnessHook::new(
-                                output_directory,
-                                self.blockchain_db().clone(),
-                                self.components().evm_config().clone(),
-                            )) as Box<dyn InvalidBlockHook>
-                        }
-                        reth_node_core::args::InvalidBlockHook::PreState |
-                        reth_node_core::args::InvalidBlockHook::Opcode => {
-                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                        }
-                    })
+        let output_directory = self.data_dir().invalid_block_hooks();
+        let hooks = hook
+            .iter()
+            .copied()
+            .map(|hook| {
+                let output_directory = output_directory.join(hook.to_string());
+                fs::create_dir_all(&output_directory)?;
+
+                Ok(match hook {
+                    reth_node_core::args::InvalidBlockHook::Witness => {
+                        Box::new(InvalidBlockWitnessHook::new(
+                            self.blockchain_db().clone(),
+                            self.components().evm_config().clone(),
+                            output_directory,
+                            healthy_node_rpc_client.clone(),
+                        )) as Box<dyn InvalidBlockHook>
+                    }
+                    reth_node_core::args::InvalidBlockHook::PreState |
+                    reth_node_core::args::InvalidBlockHook::Opcode => {
+                        eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                    }
                 })
-                .collect::<Result<_, _>>()?;
+            })
+            .collect::<Result<_, _>>()?;
 
-            Box::new(InvalidBlockHooks(hooks))
-        } else {
-            Box::new(NoopInvalidBlockHook::default())
-        })
+        Ok(Box::new(InvalidBlockHooks(hooks)))
     }
 }
 

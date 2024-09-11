@@ -7347,6 +7347,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "eyre",
+ "jsonrpsee",
  "pretty_assertions",
  "reth-chainspec",
  "reth-engine-primitives",
@@ -7354,9 +7355,11 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-api",
  "reth-tracing",
  "reth-trie",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -7623,6 +7626,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "jsonrpsee",
  "rayon",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
