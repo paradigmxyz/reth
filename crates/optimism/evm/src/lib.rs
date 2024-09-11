@@ -10,7 +10,6 @@
 #![cfg(feature = "optimism")]
 
 use alloy_primitives::{Address, U256};
-use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{
@@ -157,7 +156,7 @@ mod tests {
     use reth_evm::execute::ProviderError;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        Genesis, Header, B256, BASE_MAINNET, KECCAK_EMPTY, U256,
+        Genesis, Header, BASE_MAINNET, KECCAK_EMPTY,
     };
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},

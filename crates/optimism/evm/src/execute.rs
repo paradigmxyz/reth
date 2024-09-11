@@ -1,6 +1,8 @@
 //! Optimism block executor.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{
+    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
+};
 use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
@@ -444,6 +446,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OpChainSpec;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{

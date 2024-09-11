@@ -43,8 +43,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::MAINNET;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
+    use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, KECCAK_EMPTY};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};

@@ -52,8 +52,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use reth_chainspec::ChainSpecProvider;
     use alloy_primitives::{hex_literal::hex, Bytes};
+    use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
