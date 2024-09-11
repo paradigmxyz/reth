@@ -3,7 +3,7 @@ use clap::Subcommand;
 use import::ImportOpCommand;
 use import_receipts::ImportReceiptsOpCommand;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd, init_state,
+    config_cmd, db, dump_genesis, init_cmd,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -13,6 +13,7 @@ use std::fmt;
 mod build_pipeline;
 pub mod import;
 pub mod import_receipts;
+pub mod init_state;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]

@@ -7896,6 +7896,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
+ "rayon",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -7974,6 +7975,11 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.6"
+dependencies = [
+ "alloy-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+]
 
 [[package]]
 name = "reth-optimism-rpc"
