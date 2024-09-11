@@ -200,9 +200,14 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             row.push(ValueRange::Internal(from..to));
         } else {
             // Not compressed
+            //
+            // ! Only MmapReader allows reading directly from memory by using `reader.data_ref`.
+            // Otherwise we need to copy the data to a buffer by using `reader.data`.
             if self.reader.allows_data_ref() {
+                // MmapReader
                 row.push(ValueRange::Mmap(column_offset_range));
             } else {
+                // FileReader
                 let len = column_offset_range.end - column_offset_range.start;
 
                 // It's safe to use internal_buffer, since there's no partial compression. Either
