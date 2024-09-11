@@ -30,12 +30,9 @@ default = ["jemalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
-asm-keccak = ["reth-node-optimism/asm-keccak"]
+asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-node-optimism/asm-keccak"]
 
-optimism = [
-    "reth-optimism-cli/optimism",
-    "reth-node-optimism/optimism",
-]
+optimism = ["reth-optimism-cli/optimism", "reth-node-optimism/optimism"]
 
 [[bin]]
 name = "op-reth"
