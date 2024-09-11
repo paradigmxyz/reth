@@ -1,6 +1,6 @@
+use alloy_primitives::U64;
 use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::PeersInfo;
-use reth_primitives::U64;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_eth_api::helpers::EthApiSpec;
 

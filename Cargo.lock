@@ -8294,6 +8294,7 @@ name = "reth-rpc-api"
 version = "1.0.6"
 dependencies = [
  "alloy-json-rpc",
+ "alloy-primitives",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
@@ -8307,6 +8308,7 @@ dependencies = [
 name = "reth-rpc-api-testing-util"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
@@ -8324,6 +8326,7 @@ name = "reth-rpc-builder"
 version = "1.0.6"
 dependencies = [
  "alloy-network",
+ "alloy-primitives",
  "clap",
  "http",
  "jsonrpsee",
@@ -8370,6 +8373,7 @@ dependencies = [
 name = "reth-rpc-engine-api"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "async-trait",
@@ -8407,6 +8411,7 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-json-rpc",
  "alloy-network",
+ "alloy-primitives",
  "async-trait",
  "auto_impl",
  "dyn-clone",
@@ -8440,6 +8445,7 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-sol-types",
  "derive_more",
  "futures",
@@ -8532,6 +8538,7 @@ dependencies = [
 name = "reth-rpc-types-compat"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
  "reth-primitives",

@@ -2,10 +2,10 @@
 //! network.
 
 use alloy_dyn_abi::TypedData;
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures::Future;
 use reth_primitives::{
-    Address, BlockId, Bytes, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
-    TxHash, TxKind, B256, U256,
+    BlockId, Receipt, SealedBlockWithSenders, TransactionMeta, TransactionSigned,
 };
 use reth_provider::{BlockNumReader, BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_types::{

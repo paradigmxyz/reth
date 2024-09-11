@@ -36,7 +36,7 @@ reth-node-api.workspace = true
 reth-network-types.workspace = true
 reth-trie.workspace = true
 
-# eth
+# ethereum
 alloy-dyn-abi.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true

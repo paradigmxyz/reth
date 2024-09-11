@@ -1,9 +1,10 @@
 //! Auth server tests
 
 use crate::utils::launch_auth;
+use alloy_primitives::U64;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_primitives::{Block, U64};
+use reth_primitives::Block;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
