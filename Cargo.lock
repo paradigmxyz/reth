@@ -8241,6 +8241,7 @@ name = "reth-rpc"
 version = "1.0.6"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
@@ -8298,6 +8299,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.0.6"
 dependencies = [
+ "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
  "jsonrpsee",
