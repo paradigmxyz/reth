@@ -26,7 +26,7 @@ reth-node-core.workspace = true
 reth-node-optimism.workspace = true
 reth-primitives.workspace = true
 
-## optimisim
+## optimism
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
