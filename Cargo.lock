@@ -11690,7 +11690,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=9db5e04684f65c6c5734dceb90fcc7a6f487b118#9db5e04684f65c6c5734dceb90fcc7a6f487b118"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=b0c70e49fe4488146adb55923f9e02a0173d2a37#b0c70e49fe4488146adb55923f9e02a0173d2a37"
 dependencies = [
  "alloy 0.2.1",
  "alloy-consensus 0.2.1",
@@ -11726,10 +11726,11 @@ dependencies = [
 [[package]]
 name = "telos-translator-rs"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-translator-rs.git?branch=master#0686df5013d9385ea72eb3ce8431ee2efde9df4b"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=b0c70e49fe4488146adb55923f9e02a0173d2a37#b0c70e49fe4488146adb55923f9e02a0173d2a37"
 dependencies = [
  "alloy 0.2.1",
  "alloy-consensus 0.2.1",
+ "alloy-eips 0.2.1",
  "alloy-rlp",
  "antelope-client 0.2.1 (git+https://github.com/telosnetwork/antelope-rs?branch=finish_table_rows_params)",
  "bytes",
