@@ -6647,15 +6647,11 @@ name = "reth-db-api"
 version = "1.0.6"
 dependencies = [
  "arbitrary",
- "assert_matches",
  "bytes",
- "criterion",
  "derive_more",
- "iai-callgrind",
  "metrics",
  "modular-bitfield",
  "parity-scale-codec",
- "pprof",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -6911,7 +6907,6 @@ dependencies = [
  "futures",
  "pin-project",
  "reth-beacon-consensus",
- "reth-blockchain-tree",
  "reth-chainspec",
  "reth-consensus",
  "reth-engine-tree",
@@ -6926,7 +6921,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
- "reth-prune-types",
  "reth-stages-api",
  "reth-tasks",
  "thiserror",
@@ -8819,16 +8813,13 @@ dependencies = [
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
- "reth-provider",
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
  "serde",
  "serde_json",
- "similar-asserts",
  "tokio",
- "tokio-stream",
  "tracing",
  "triehash",
 ]
@@ -8855,8 +8846,6 @@ dependencies = [
  "reth-primitives-traits",
  "revm-primitives",
  "serde",
- "test-fuzz",
- "toml",
 ]
 
 [[package]]
@@ -8865,7 +8854,6 @@ version = "1.0.6"
 dependencies = [
  "alloy-rlp",
  "auto_impl",
- "criterion",
  "derive_more",
  "itertools 0.13.0",
  "metrics",
