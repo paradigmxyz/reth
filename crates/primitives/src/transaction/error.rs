@@ -2,7 +2,7 @@ use crate::{GotExpectedBoxed, U256};
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
-#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
+#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display, derive_more::Error)]
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
     #[display(
@@ -61,12 +61,9 @@ pub enum InvalidTransactionError {
     SignerAccountHasBytecode,
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for InvalidTransactionError {}
-
 /// Represents error variants that can happen when trying to convert a transaction to
 /// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
-#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
+#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display, derive_more::Error)]
 pub enum TransactionConversionError {
     /// This error variant is used when a transaction cannot be converted into a
     /// [`PooledTransactionsElement`](crate::PooledTransactionsElement) because it is not supported
@@ -74,9 +71,6 @@ pub enum TransactionConversionError {
     #[display("Transaction is not supported for p2p")]
     UnsupportedForP2P,
 }
-
-#[cfg(feature = "std")]
-impl std::error::Error for TransactionConversionError {}
 
 /// Represents error variants than can happen when trying to convert a
 /// [`TransactionSignedEcRecovered`](crate::TransactionSignedEcRecovered) transaction.
