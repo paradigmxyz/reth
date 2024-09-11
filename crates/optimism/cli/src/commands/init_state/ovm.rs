@@ -3,7 +3,7 @@ use reth_chainspec::ChainSpec;
 use reth_db::{models::StoredBlockBodyIndices, tables, DatabaseEnv};
 use reth_db_api::transaction::DbTxMut;
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
-use reth_optimism_primitives::ovm::{LAST_OVM_HEADER, LAST_OVM_HEADER_TTD};
+use reth_optimism_primitives::ovm::{LAST_OVM_HEADER, LAST_OVM_HEADER_HASH, LAST_OVM_HEADER_TTD};
 use reth_primitives::{Header, StaticFileSegment, U256};
 use reth_provider::{
     providers::StaticFileProvider, writer::UnifiedStorageWriter, ProviderFactory,
@@ -60,7 +60,7 @@ fn insert_last_ovm_header(sf_provider: StaticFileProvider) -> Result<(), eyre::E
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         &LAST_OVM_HEADER,
         LAST_OVM_HEADER_TTD,
-        &B256::ZERO,
+        &LAST_OVM_HEADER_HASH,
     )?;
 
     sf_provider
