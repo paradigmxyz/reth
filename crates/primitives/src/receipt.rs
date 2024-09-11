@@ -117,7 +117,7 @@ impl Receipts {
         chain_spec: &reth_chainspec::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
+        Some(calculate_receipt_root_no_memo_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
