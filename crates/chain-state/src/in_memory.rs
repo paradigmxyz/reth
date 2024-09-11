@@ -40,6 +40,16 @@ pub(crate) struct InMemoryStateMetrics {
 ///
 /// This tracks blocks and their state that haven't been persisted to disk yet but are part of the
 /// canonical chain that can be traced back to a canonical block on disk.
+///
+/// # Locking behavior on state updates
+///
+/// All update calls must be atomic, meaning that they must acquire all locks at once, before
+/// modifying the state. This is to ensure that the internal state is always consistent.
+/// Update functions ensure that the numbers write lock is always acquired first, because lookup by
+/// numbers first read the numbers map and then the blocks map.
+/// By acquiring the numbers lock first, we ensure that read-only lookups don't deadlock updates.
+/// This holds, because only lookup by number functions need to acquire the numbers lock first to
+/// get the block hash.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState {
     /// All canonical blocks that are not on disk yet.
@@ -138,10 +148,11 @@ impl CanonicalInMemoryStateInner {
     /// Clears all entries in the in memory state.
     fn clear(&self) {
         {
-            let mut blocks = self.in_memory_state.blocks.write();
+            // acquire locks, starting with the numbers lock
             let mut numbers = self.in_memory_state.numbers.write();
-            blocks.clear();
+            let mut blocks = self.in_memory_state.blocks.write();
             numbers.clear();
+            blocks.clear();
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
@@ -239,7 +250,7 @@ impl CanonicalInMemoryState {
         I: IntoIterator<Item = ExecutedBlock>,
     {
         {
-            // acquire all locks
+            // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
@@ -301,8 +312,9 @@ impl CanonicalInMemoryState {
         }
 
         {
-            let mut blocks = self.inner.in_memory_state.blocks.write();
+            // acquire locks, starting with the numbers lock
             let mut numbers = self.inner.in_memory_state.numbers.write();
+            let mut blocks = self.inner.in_memory_state.blocks.write();
 
             let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
