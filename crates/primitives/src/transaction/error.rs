@@ -2,7 +2,7 @@ use crate::{GotExpectedBoxed, U256};
 
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
-#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display, derive_more::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
     #[display(
@@ -60,6 +60,9 @@ pub enum InvalidTransactionError {
     #[display("transaction signer has bytecode set")]
     SignerAccountHasBytecode,
 }
+
+#[cfg(feature = "std")]
+impl std::error::Error for InvalidTransactionError {}
 
 /// Represents error variants that can happen when trying to convert a transaction to
 /// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
