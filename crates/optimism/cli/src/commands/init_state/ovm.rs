@@ -15,8 +15,8 @@ use tracing::info;
 
 /// Creates a dummy chain (with no transactions) up to the last OVM block inclusive.
 ///
-/// The last OVM header needs to be valid so the node can validate the parent header of the first bedrock
-/// header.
+/// The last OVM header needs to be valid so the node can validate the parent header of the first
+/// bedrock header.
 pub(crate) fn setup_op_mainnet_without_ovm<N: NodeTypesWithEngine<ChainSpec = ChainSpec>>(
     provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
 ) -> Result<(), eyre::Error> {
