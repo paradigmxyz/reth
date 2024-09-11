@@ -41,6 +41,9 @@ pub trait DataReader {
     fn allows_data_ref(&self) -> bool;
 
     /// Returns the underlying data range as a slice of bytes.
+    ///
+    /// # Panics
+    /// If the reader does not support returning the data range as a slice of bytes.
     fn data_ref(&self, range: Range<usize>) -> &[u8];
 
     /// Copies the underlying data range to a given mutable slice.
