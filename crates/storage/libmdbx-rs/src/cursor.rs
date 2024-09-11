@@ -488,9 +488,9 @@ where
     fn drop(&mut self) {
         // To be able to close a cursor of a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
-        self.txn
-            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) })
-            .unwrap();
+        let _ = self
+            .txn
+            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
     }
 }
 
