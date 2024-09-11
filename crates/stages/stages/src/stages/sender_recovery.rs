@@ -6,7 +6,7 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Address, StaticFileSegment, TransactionSignedNoHash, TxNumber};
+use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
@@ -232,9 +232,11 @@ where
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
-                        SenderRecoveryStageError::FailedBatchRecovery => Err(StageError::Fatal(
-                            SenderRecoveryStageError::FailedBatchRecovery.into(),
-                        )),
+                        SenderRecoveryStageError::FailedBatchRecovery(expectation) => {
+                            Err(StageError::Fatal(
+                                SenderRecoveryStageError::FailedBatchRecovery(expectation).into(),
+                            ))
+                        }
                     }
                 }
             };
@@ -245,8 +247,15 @@ where
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Finished recovering senders batch");
 
     // Fail safe to ensure that we do not proceed without having recovered all senders.
-    if processed_transactions != (tx_range.end - tx_range.start) {
-        return Err(StageError::Fatal(SenderRecoveryStageError::FailedBatchRecovery.into()));
+    let expected = tx_range.end - tx_range.start;
+    if processed_transactions != expected {
+        return Err(StageError::Fatal(
+            SenderRecoveryStageError::FailedBatchRecovery(GotExpected {
+                got: processed_transactions,
+                expected,
+            })
+            .into(),
+        ));
     }
 
     Ok(())
@@ -296,8 +305,8 @@ enum SenderRecoveryStageError {
     FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// A recovering batch job failed recovery
-    #[error("failed to recover a batch")]
-    FailedBatchRecovery,
+    #[error("failed to recover all senders from the batch: {_0}")]
+    FailedBatchRecovery(GotExpected<u64>),
 
     /// A different type of stage error occurred
     #[error(transparent)]
