@@ -7970,6 +7970,7 @@ version = "1.0.6"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee-types",
+ "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "parking_lot 0.12.3",

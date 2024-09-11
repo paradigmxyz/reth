@@ -14,9 +14,9 @@ use super::{EthApiError, EthResult};
 #[derive(Debug)]
 pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
-    base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
+    pub base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
     /// Additional L2 fields.
-    other: OtherFields,
+    pub other: OtherFields,
 }
 
 impl ReceiptBuilder {
