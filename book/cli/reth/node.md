@@ -547,6 +547,9 @@ Debug:
 
           [possible values: witness, pre-state, opcode]
 
+      --debug.healthy-node-rpc-url <URL>
+          The URL of the healthy node RPC.
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
