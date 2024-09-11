@@ -7,7 +7,7 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
+    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
@@ -3697,6 +3697,18 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
+    type Tx = TX;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
     }
 }
 

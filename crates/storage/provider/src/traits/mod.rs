@@ -29,9 +29,6 @@ pub use trie::{StorageTrieWriter, TrieWriter};
 mod history;
 pub use history::HistoryWriter;
 
-mod database_provider;
-pub use database_provider::DatabaseProviderFactory;
-
 mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
 

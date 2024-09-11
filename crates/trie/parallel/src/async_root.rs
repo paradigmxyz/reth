@@ -3,10 +3,11 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
 use reth_primitives::B256;
-use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
+use reth_provider::{
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+};
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -35,9 +36,9 @@ use tracing::*;
 ///
 /// For sync usage, take a look at `ParallelStateRoot`.
 #[derive(Debug)]
-pub struct AsyncStateRoot<DB, Provider> {
+pub struct AsyncStateRoot<Factory> {
     /// Consistent view of the database.
-    view: ConsistentDbView<DB, Provider>,
+    view: ConsistentDbView<Factory>,
     /// Blocking task pool.
     blocking_pool: BlockingTaskPool,
     /// Changed hashed state.
@@ -47,10 +48,10 @@ pub struct AsyncStateRoot<DB, Provider> {
     metrics: ParallelStateRootMetrics,
 }
 
-impl<DB, Provider> AsyncStateRoot<DB, Provider> {
+impl<Factory> AsyncStateRoot<Factory> {
     /// Create new async state root calculator.
     pub fn new(
-        view: ConsistentDbView<DB, Provider>,
+        view: ConsistentDbView<Factory>,
         blocking_pool: BlockingTaskPool,
         hashed_state: HashedPostState,
     ) -> Self {
@@ -64,10 +65,9 @@ impl<DB, Provider> AsyncStateRoot<DB, Provider> {
     }
 }
 
-impl<DB, Provider> AsyncStateRoot<DB, Provider>
+impl<Factory> AsyncStateRoot<Factory>
 where
-    DB: Database + Clone + 'static,
-    Provider: DatabaseProviderFactory<DB> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     /// Calculate incremental state root asynchronously.
     pub async fn incremental_root(self) -> Result<B256, AsyncStateRootError> {

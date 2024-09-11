@@ -16,10 +16,11 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{fs, path::Path};
 
 use alloy_primitives::{BlockNumber, B256};
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{BlockHashOrNumber, Head, SealedHeader};
-use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
 use reth_stages_types::StageId;
+use reth_storage_api::{
+    BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -263,11 +264,13 @@ impl NodeConfig {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-        &self,
-        factory: ProviderFactory<N>,
-    ) -> ProviderResult<Head> {
-        let provider = factory.provider()?;
+    pub fn lookup_head<Factory>(&self, factory: &Factory) -> ProviderResult<Head>
+    where
+        Factory: DatabaseProviderFactory<
+            Provider: HeaderProvider + StageCheckpointReader + BlockHashReader,
+        >,
+    {
+        let provider = factory.database_provider_ro()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 

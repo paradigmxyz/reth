@@ -72,7 +72,7 @@ where
     pub fn build<N: NodeTypesWithDB<DB = DB>>(
         self,
         provider_factory: ProviderFactory<N>,
-        static_file_producer: StaticFileProducer<N>,
+        static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> Pipeline<N> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
