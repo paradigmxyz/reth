@@ -608,20 +608,6 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
-/// Convert the provided fork options into fork conditions using a provided fork type
-/// ([`ForkCondition::Block`] or [`ForkCondition::Timestamp`]).
-fn into_forks<F>(
-    fork_opts: impl Iterator<Item = (Box<dyn Hardfork>, Option<u64>)>,
-    fork_variant: F,
-) -> impl Iterator<Item = (Box<dyn Hardfork>, ForkCondition)>
-where
-    F: Fn(u64) -> ForkCondition,
-{
-    fork_opts.into_iter().filter_map(move |(hardfork, opt)| {
-        opt.map(|time_or_block| (hardfork, fork_variant(time_or_block)))
-    })
-}
-
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]
 fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
@@ -641,7 +627,26 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
         (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
         (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
     ];
-    let block_hardforks = into_forks(hardfork_opts.into_iter(), ForkCondition::Block);
+    let mut hardforks = hardfork_opts
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+        .collect::<Vec<_>>();
+
+    // Paris
+    let paris_block_and_final_difficulty =
+        if let Some(ttd) = genesis.config.terminal_total_difficulty {
+            hardforks.push((
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    total_difficulty: ttd,
+                    fork_block: genesis.config.merge_netsplit_block,
+                },
+            ));
+
+            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+        } else {
+            None
+        };
 
     // Time-based hardforks
     let time_hardfork_opts = [
@@ -650,9 +655,12 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
         (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
     ];
 
-    let time_hardforks = into_forks(time_hardfork_opts.into_iter(), ForkCondition::Timestamp);
+    let mut time_hardforks = time_hardfork_opts
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|time| (hardfork, ForkCondition::Timestamp(time))))
+        .collect::<Vec<_>>();
 
-    let mut hardforks: Vec<_> = block_hardforks.chain(time_hardforks).collect();
+    hardforks.append(&mut time_hardforks);
 
     // Ordered Hardforks
     let mainnet_hardforks: ChainHardforks = EthereumHardfork::mainnet().into();
@@ -666,23 +674,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
     }
 
     // append the remaining unknown hardforks to ensure we don't filter any out
-    ordered_hardforks.extend(hardforks);
-
-    // Paris
-    let paris_block_and_final_difficulty =
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
-            ordered_hardforks.push((
-                EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD {
-                    total_difficulty: ttd,
-                    fork_block: genesis.config.merge_netsplit_block,
-                },
-            ));
-
-            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-        } else {
-            None
-        };
+    ordered_hardforks.append(&mut hardforks);
 
     // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
     // have the deployment block in the genesis file, so we use block zero. We use the same
@@ -728,7 +720,26 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
         (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
         (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
     ];
-    let block_hardforks = into_forks(hardfork_opts.into_iter(), ForkCondition::Block);
+    let mut block_hardforks = hardfork_opts
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
+        .collect::<Vec<_>>();
+
+    // Paris
+    let paris_block_and_final_difficulty =
+        if let Some(ttd) = genesis.config.terminal_total_difficulty {
+            block_hardforks.push((
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    total_difficulty: ttd,
+                    fork_block: genesis.config.merge_netsplit_block,
+                },
+            ));
+
+            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
+        } else {
+            None
+        };
 
     // Time-based hardforks
     let time_hardfork_opts = [
@@ -742,39 +753,26 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
         (OptimismHardfork::Granite.boxed(), genesis_info.granite_time),
     ];
 
-    let time_hardforks = into_forks(time_hardfork_opts.into_iter(), ForkCondition::Timestamp);
+    let mut time_hardforks = time_hardfork_opts
+        .into_iter()
+        .filter_map(|(hardfork, opt)| opt.map(|time| (hardfork, ForkCondition::Timestamp(time))))
+        .collect::<Vec<_>>();
 
-    let mut hardforks: Vec<_> = block_hardforks.chain(time_hardforks).collect();
+    block_hardforks.append(&mut time_hardforks);
 
     // Ordered Hardforks
     let mainnet_hardforks = OptimismHardfork::op_mainnet();
     let mainnet_order = mainnet_hardforks.forks_iter();
 
-    let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
+    let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
     for (hardfork, _) in mainnet_order {
-        if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
-            ordered_hardforks.push(hardforks.remove(pos));
+        if let Some(pos) = block_hardforks.iter().position(|(e, _)| **e == *hardfork) {
+            ordered_hardforks.push(block_hardforks.remove(pos));
         }
     }
 
     // append the remaining unknown hardforks to ensure we don't filter any out
-    ordered_hardforks.extend(hardforks);
-
-    // Paris
-    let paris_block_and_final_difficulty =
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
-            ordered_hardforks.push((
-                EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD {
-                    total_difficulty: ttd,
-                    fork_block: genesis.config.merge_netsplit_block,
-                },
-            ));
-
-            genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-        } else {
-            None
-        };
+    ordered_hardforks.append(&mut block_hardforks);
 
     // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
     // have the deployment block in the genesis file, so we use block zero. We use the same
