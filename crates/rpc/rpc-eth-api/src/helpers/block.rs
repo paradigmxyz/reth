@@ -126,12 +126,12 @@ pub trait EthBlocks: LoadBlock {
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((block, Arc::new(receipts))))
+                    return Ok(Some((block, Arc::new(receipts))));
                 }
 
                 // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block.block, Arc::new(receipts))))
+                    return Ok(Some((block.block, Arc::new(receipts))));
                 }
             }
 

@@ -1410,7 +1410,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into())
+                        .into());
                     }
                     Some(ws_cors)
                 }
@@ -1459,7 +1459,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     ipc_endpoint: self.ipc_endpoint.clone(),
                     ipc: ipc_handle,
                     jwt_secret: self.jwt_secret,
-                })
+                });
             }
         }
 

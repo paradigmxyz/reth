@@ -255,7 +255,7 @@ pub trait EthTransactions: LoadTransaction {
 
             // Check if the sender is a contract
             if self.get_code(sender, None).await?.len() > 0 {
-                return Ok(None)
+                return Ok(None);
             }
 
             let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
@@ -263,11 +263,11 @@ pub trait EthTransactions: LoadTransaction {
             // If the nonce is higher or equal to the highest nonce, the transaction is pending or
             // not exists.
             if nonce >= highest {
-                return Ok(None)
+                return Ok(None);
             }
 
             let Ok(high) = LoadBlock::provider(self).best_block_number() else {
-                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into())
+                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 
             // Perform a binary search over the block range to find the block in which the sender's
@@ -575,7 +575,7 @@ pub trait EthTransactions: LoadTransaction {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into_eth_err()),
-                };
+                }
             }
         }
         Err(EthApiError::InvalidTransactionSignature.into())
