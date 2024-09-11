@@ -93,7 +93,7 @@ where
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // replay all transactions of the block
@@ -332,7 +332,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame);
+                        return Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -360,7 +360,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into());
+                        return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -387,7 +387,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame);
+                        return Ok(frame)
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -419,7 +419,7 @@ where
 
                     Ok(GethTrace::JS(res))
                 }
-            };
+            }
         }
 
         // default structlog tracer
@@ -455,7 +455,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -723,7 +723,7 @@ where
                             .into_geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
-                        return Ok((frame.into(), res.state));
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -741,7 +741,7 @@ where
                             .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
-                        return Ok((frame.into(), res.state));
+                        return Ok((frame.into(), res.state))
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
@@ -758,7 +758,7 @@ where
                         let frame = inspector
                             .try_into_mux_frame(&res, db)
                             .map_err(Eth::Error::from_eth_err)?;
-                        return Ok((frame.into(), res.state));
+                        return Ok((frame.into(), res.state))
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -782,7 +782,7 @@ where
                         inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
                 }
-            };
+            }
         }
 
         // default structlog tracer

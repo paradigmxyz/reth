@@ -106,7 +106,7 @@ pub trait EthTransactions: LoadTransaction {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
             {
-                return Ok(Some(tx));
+                return Ok(Some(tx))
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -214,7 +214,7 @@ pub trait EthTransactions: LoadTransaction {
 
                     return Ok(Some(from_recovered_with_block_context::<Self::TransactionCompat>(
                         tx, tx_info,
-                    )));
+                    )))
                 }
             }
 
@@ -251,7 +251,7 @@ pub trait EthTransactions: LoadTransaction {
 
             // Check if the sender is a contract
             if self.get_code(sender, None).await?.len() > 0 {
-                return Ok(None);
+                return Ok(None)
             }
 
             let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
@@ -259,11 +259,11 @@ pub trait EthTransactions: LoadTransaction {
             // If the nonce is higher or equal to the highest nonce, the transaction is pending or
             // not exists.
             if nonce >= highest {
-                return Ok(None);
+                return Ok(None)
             }
 
             let Ok(high) = LoadBlock::provider(self).best_block_number() else {
-                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
+                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into())
             };
 
             // Perform a binary search over the block range to find the block in which the sender's
@@ -320,7 +320,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 if let Some(tx) = block.transactions().nth(index) {
-                    return Ok(Some(tx.envelope_encoded()));
+                    return Ok(Some(tx.envelope_encoded()))
                 }
             }
 
@@ -367,7 +367,7 @@ pub trait EthTransactions: LoadTransaction {
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err());
+                return Err(SignError::NoAccount.into_eth_err())
             }
 
             // set nonce if not already set before

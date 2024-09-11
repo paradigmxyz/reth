@@ -102,7 +102,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
-            return Err(EthApiError::ExceedsMaxProofWindow.into());
+            return Err(EthApiError::ExceedsMaxProofWindow.into())
         }
 
         Ok(async move {
@@ -277,7 +277,7 @@ pub trait LoadState: EthApiTypes {
                     let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
                         EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
                     ))?;
-                    return Ok(U256::from(tx_count));
+                    return Ok(U256::from(tx_count))
                 }
             }
 

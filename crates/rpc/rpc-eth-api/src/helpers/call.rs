@@ -94,7 +94,7 @@ pub trait EthCall: Call + LoadPendingBlock {
             if transactions.is_empty() {
                 return Err(
                     EthApiError::InvalidParams(String::from("transactions are empty.")).into()
-                );
+                )
             }
 
             let StateContext { transaction_index, block_number } =
@@ -267,11 +267,11 @@ pub trait EthCall: Call + LoadPendingBlock {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Success { .. } => {}
         };
@@ -495,7 +495,7 @@ pub trait Call: LoadState + SpawnBlocking {
         for tx in transactions {
             if tx.hash() == target_tx_hash {
                 // reached the target transaction
-                break;
+                break
             }
 
             let sender = tx.signer();
@@ -596,7 +596,7 @@ pub trait Call: LoadState + SpawnBlocking {
                         env.tx.gas_limit = MIN_TRANSACTION_GAS;
                         if let Ok((res, _)) = self.transact(&mut db, env) {
                             if res.result.is_success() {
-                                return Ok(U256::from(MIN_TRANSACTION_GAS));
+                                return Ok(U256::from(MIN_TRANSACTION_GAS))
                             }
                         }
                     }
@@ -643,7 +643,7 @@ pub trait Call: LoadState + SpawnBlocking {
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err());
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -653,7 +653,7 @@ pub trait Call: LoadState + SpawnBlocking {
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
-                };
+                }
             }
         };
 
@@ -711,7 +711,7 @@ pub trait Call: LoadState + SpawnBlocking {
             if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
                 ESTIMATE_GAS_ERROR_RATIO
             {
-                break;
+                break
             };
 
             env.tx.gas_limit = mid_gas_limit;
@@ -783,7 +783,7 @@ pub trait Call: LoadState + SpawnBlocking {
                         // These cases should be unreachable because we know the transaction
                         // succeeds, but if they occur, treat them as an
                         // error.
-                        return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err());
+                        return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
                     }
                 }
             }
@@ -837,7 +837,7 @@ pub trait Call: LoadState + SpawnBlocking {
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err());
+            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
         let TransactionRequest {

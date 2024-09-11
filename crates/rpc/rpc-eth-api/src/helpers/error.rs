@@ -54,7 +54,7 @@ pub trait AsEthApiError {
     /// [`RpcInvalidTransactionError::GasTooHigh`](reth_rpc_eth_types::RpcInvalidTransactionError::GasTooHigh).
     fn is_gas_too_high(&self) -> bool {
         if let Some(err) = self.as_err() {
-            return err.is_gas_too_high();
+            return err.is_gas_too_high()
         }
 
         false

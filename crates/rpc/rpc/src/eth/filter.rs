@@ -164,7 +164,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty);
+                return Ok(FilterChanges::Empty)
             }
 
             // update filter
@@ -232,7 +232,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id));
+                return Err(EthFilterError::FilterNotFound(id))
             }
         };
 
@@ -450,11 +450,11 @@ where
         let best_number = chain_info.best_number;
 
         if to_block < from_block {
-            return Err(EthFilterError::InvalidBlockRangeParams);
+            return Err(EthFilterError::InvalidBlockRangeParams)
         }
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
+            return Err(EthFilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
 
         let mut all_logs = Vec::new();
@@ -478,7 +478,7 @@ where
                     block.header.timestamp,
                 )?;
             }
-            return Ok(all_logs);
+            return Ok(all_logs)
         }
 
         // derive bloom filters from filter input, so we can check headers for matching logs
@@ -524,7 +524,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(EthFilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ));
+                            ))
                         }
                     }
                 }
@@ -674,7 +674,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None;
+            return None
         }
         Some((start, end))
     }
