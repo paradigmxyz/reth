@@ -4,16 +4,19 @@ use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
-    FromEthApiError, RpcReceipt,
+    RpcReceipt,
 };
-use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
-use reth_rpc_types::BlockId;
+use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadBlock,
+    Self: LoadBlock<
+        Error = EthApiError,
+        NetworkTypes: alloy_network::Network<ReceiptResponse = AnyTransactionReceipt>,
+    >,
     Provider: HeaderProvider,
 {
     #[inline]
@@ -54,7 +57,6 @@ where
 
                     ReceiptBuilder::new(&tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
-                        .map_err(Self::Error::from_eth_err)
                 })
                 .collect::<Result<Vec<_>, Self::Error>>();
             return receipts.map(Some)

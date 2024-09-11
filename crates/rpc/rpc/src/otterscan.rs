@@ -18,14 +18,14 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    BlockTransactions, Header, Transaction, WithOtherFields,
+    BlockTransactions, Header, Transaction, TransactionReceipt, WithOtherFields,
 };
 use reth_rpc_types_compat::TransactionCompat;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use revm_primitives::ExecutionResult;
+use revm_primitives::{ExecutionResult, SignedAuthorization};
 
 const API_LEVEL: u64 = 8;
 
@@ -247,17 +247,38 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .map(|receipt| {
-                let receipt = receipt.map_inner(|receipt| OtsReceipt {
-                    status: receipt
-                        .status()
-                        .as_eip658()
-                        .expect("ETH API returned pre-EIP-658 status"),
-                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
+            .zip(transactions.iter().map(|tx| tx.inner.transaction_type.unwrap_or(0)))
+            .map(|(receipt, tx_ty)| {
+                let status = receipt.status();
+                let cumulative_gas_used = receipt.cumulative_gas_used() as u64;
+                let r#type = receipt.transaction_type();
+
+                let inner = OtsReceipt {
+                    status: receipt.status(),
+                    cumulative_gas_used,
                     logs: None,
                     logs_bloom: None,
-                    r#type: receipt.r#type,
-                });
+                    r#type: tx_ty,
+                };
+
+                let receipt = TransactionReceipt {
+                    inner,
+                    transaction_hash: receipt.transaction_hash(),
+                    transaction_index: receipt.transaction_index(),
+                    block_hash: receipt.block_hash(),
+                    block_number: receipt.block_number(),
+                    gas_used: receipt.gas_used(),
+                    effective_gas_price: receipt.effective_gas_price(),
+                    blob_gas_used: receipt.blob_gas_used(),
+                    blob_gas_price: receipt.blob_gas_price(),
+                    from: receipt.from(),
+                    to: receipt.to(),
+                    contract_address: receipt.contract_address(),
+                    state_root: receipt.state_root(),
+                    authorization_list: receipt
+                        .authorization_list()
+                        .map(<[SignedAuthorization]>::to_vec),
+                };
 
                 OtsTransactionReceipt { receipt, timestamp }
             })
