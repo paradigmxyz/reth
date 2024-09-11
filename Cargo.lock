@@ -3846,6 +3846,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a78a89907582615b19f6f0da1af18abf6ff08be259395669b834b057a7ee92d8"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "impl-codec"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7435,6 +7445,7 @@ name = "reth-net-nat"
 version = "1.0.6"
 dependencies = [
  "futures-util",
+ "if-addrs",
  "reqwest",
  "reth-tracing",
  "serde_with",
