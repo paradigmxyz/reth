@@ -157,7 +157,7 @@ where
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
     // there will be a timeout grace period in which Tokio does not allow spawning
     // additional blocking tasks. This would cause this function to return
-    // `SenderRecoveryStageError::FailedBatchRecovery` at the end.
+    // `SenderRecoveryStageError::RecoveredSendersMismatch` at the end.
     //
     // However, using `std::thread::spawn` allows us to utilize the timeout grace
     // period to complete some work without throwing errors during the shutdown.
@@ -240,9 +240,10 @@ where
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
-                        SenderRecoveryStageError::FailedBatchRecovery(expectation) => {
+                        SenderRecoveryStageError::RecoveredSendersMismatch(expectation) => {
                             Err(StageError::Fatal(
-                                SenderRecoveryStageError::FailedBatchRecovery(expectation).into(),
+                                SenderRecoveryStageError::RecoveredSendersMismatch(expectation)
+                                    .into(),
                             ))
                         }
                     }
@@ -258,7 +259,7 @@ where
     let expected = tx_range.end - tx_range.start;
     if processed_transactions != expected {
         return Err(StageError::Fatal(
-            SenderRecoveryStageError::FailedBatchRecovery(GotExpected {
+            SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
                 got: processed_transactions,
                 expected,
             })
@@ -312,9 +313,9 @@ enum SenderRecoveryStageError {
     #[error(transparent)]
     FailedRecovery(#[from] FailedSenderRecoveryError),
 
-    /// A recovering batch job failed recovery
+    /// Number of recovered senders does not match
     #[error("failed to recover all senders from the batch: {_0}")]
-    FailedBatchRecovery(GotExpected<u64>),
+    RecoveredSendersMismatch(GotExpected<u64>),
 
     /// A different type of stage error occurred
     #[error(transparent)]
