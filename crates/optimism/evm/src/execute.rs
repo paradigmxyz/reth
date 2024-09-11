@@ -122,7 +122,7 @@ where
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.evm_config,
-            &self.chain_spec.inner,
+            &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -130,11 +130,8 @@ where
         )?;
 
         // execute transactions
-        let is_regolith = self
-            .chain_spec
-            .inner
-            .fork(OptimismHardfork::Regolith)
-            .active_at_timestamp(block.timestamp);
+        let is_regolith =
+            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
