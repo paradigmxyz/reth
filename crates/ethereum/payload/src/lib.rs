@@ -63,12 +63,6 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     }
 }
 
-impl Default for EthereumPayloadBuilder {
-    fn default() -> Self {
-        Self::new(EthEvmConfig::default())
-    }
-}
-
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where

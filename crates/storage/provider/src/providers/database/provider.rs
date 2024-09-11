@@ -2480,13 +2480,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_and_block_env(
-            cfg,
-            block_env,
-            &self.chain_spec,
-            header,
-            total_difficulty,
-        );
+        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
         Ok(())
     }
 
@@ -2516,7 +2510,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
     }
 }

@@ -963,7 +963,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
 }
 
 /// `PoS` deposit contract details.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DepositContract {
     /// Deposit Contract Address
     pub address: Address,
