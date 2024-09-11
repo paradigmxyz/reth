@@ -159,7 +159,7 @@ where
     // additional blocking tasks. This would cause this function to return
     // `SenderRecoveryStageError::FailedBatchRecovery` at the end.
     //
-    // However, using `std::thread::spawn` allows us to utilize the timeout grace 
+    // However, using `std::thread::spawn` allows us to utilize the timeout grace
     // period to complete some work without throwing errors during the shutdown.
     std::thread::spawn(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
