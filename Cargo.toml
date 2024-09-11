@@ -536,6 +536,7 @@ tower-http = "0.5"
 
 # p2p
 discv5 = "0.7.0"
+if-addrs = "0.13"
 
 # rpc
 jsonrpsee = "0.24"
