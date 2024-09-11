@@ -31,7 +31,6 @@ pub mod noop;
 pub mod test_utils;
 
 /// Post execution input passed to [`Consensus::validate_block_post_execution`].
-#[derive(Debug)]
 pub struct PostExecutionInput<'a> {
     /// Receipts of the block.
     pub receipts: &'a [Receipt],
@@ -127,7 +126,7 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
+#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display, derive_more::Error)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[display("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -395,16 +394,6 @@ pub enum ConsensusError {
     },
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ConsensusError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidTransaction(err) => std::error::Error::source(err),
-            _ => Option::None,
-        }
-    }
-}
-
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
     pub const fn is_state_root_error(&self) -> bool {
@@ -419,9 +408,6 @@ impl From<InvalidTransactionError> for ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(derive_more::Display, Debug)]
+#[derive(derive_more::Display, derive_more::Error, Debug)]
 #[display("Consensus error: {_0}, Invalid header: {_1:?}")]
 pub struct HeaderConsensusError(ConsensusError, SealedHeader);
-
-#[cfg(feature = "std")]
-impl std::error::Error for HeaderConsensusError {}
