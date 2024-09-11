@@ -3,7 +3,7 @@
 use std::{sync::Arc, thread::available_parallelism};
 
 use alloy_primitives::{BlockNumber, B256};
-use eyre::Context;
+use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -44,6 +44,7 @@ use reth_provider::{
     TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
+use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, StageId};
@@ -863,7 +864,26 @@ where
             .debug
             .healthy_node_rpc_url
             .as_ref()
-            .map(|url| jsonrpsee::http_client::HttpClientBuilder::default().build(url))
+            .map(|url| {
+                let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+
+                // Verify that the healthy node is running the same chain as the current node.
+                let chain_id = tokio::runtime::Handle::current()
+                    .block_on(async {
+                        EthApiClient::<
+                            reth_rpc_types::Transaction,
+                            reth_rpc_types::Block,
+                            reth_rpc_types::Receipt,
+                        >::chain_id(&client)
+                        .await
+                    })?
+                    .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+                if chain_id.to::<u64>() != self.chain_id().id() {
+                    eyre::bail!("invalid chain id for healthy node: {chain_id}")
+                }
+
+                Ok(client)
+            })
             .transpose()?;
 
         let output_directory = self.data_dir().invalid_block_hooks();
