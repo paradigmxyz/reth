@@ -79,6 +79,13 @@ where
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
         )
     }
+
+    fn block_access_list_executor<DB>(&self, db: DB) -> BlockAccessListExecutor<EvmConfig, DB>
+    where
+        DB: Database<Error: Into<ProviderError>>,
+    {
+        BlockAccessListExecutor { executor: self.eth_executor(db) }
+    }
 }
 
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
@@ -88,6 +95,9 @@ where
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBlockExecutor<EvmConfig, DB>;
 
+    type BlockAccessListExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
+        BlockAccessListExecutor<EvmConfig, DB>;
+
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBatchExecutor<EvmConfig, DB>;
 
@@ -96,6 +106,13 @@ where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.eth_executor(db)
+    }
+
+    fn trace_executor<DB>(&self, db: DB) -> Self::BlockAccessListExecutor<DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>,
+    {
+        self.block_access_list_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>

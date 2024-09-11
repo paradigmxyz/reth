@@ -114,6 +114,15 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         Error = BlockExecutionError,
     >;
 
+    /// An executor that returns not only the changes in the block, but all state accessed in the
+    /// block.
+    type BlockAccessListExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
+        DB,
+        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
+        Output = BlockExecutionOutput<Receipt>,
+        Error = BlockExecutionError,
+    >;
+
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
@@ -126,6 +135,12 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
+    where
+        DB: Database<Error: Into<ProviderError> + Display>;
+
+    /// Creates a new executor which traces block execution, including any system calls or system
+    /// transactions pre- and post-block.
+    fn trace_executor<DB>(&self, db: DB) -> Self::BlockAccessListExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>;
 
