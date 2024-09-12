@@ -150,7 +150,7 @@ impl<TX: DbTx + 'static> DatabaseProvider<TX> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)));
+            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -246,7 +246,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break;
+            break
         }
         cursor.delete_current()?;
 
@@ -255,7 +255,7 @@ where
         let first = list.iter().next().expect("List can't be empty");
         if first >= block_number {
             item = cursor.prev()?;
-            continue;
+            continue
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
@@ -470,7 +470,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         ) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -618,7 +618,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -680,7 +680,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
         let block_headers = self.get::<tables::Headers>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let block_header_hashes = self.get::<tables::CanonicalHeaders>(range.clone())?;
@@ -957,7 +957,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     3. Set the local state to the value in the changeset
     pub fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         if range.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         // We are not removing block meta as it is used to get block changesets.
@@ -1052,7 +1052,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<ExecutionOutcome> {
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default());
+            return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
 
@@ -1192,7 +1192,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_bodies = self.take::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         // Compute the first and last tx ID in the range
@@ -1201,7 +1201,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(());
+            return Ok(())
         }
 
         // Get transactions so we can then remove
@@ -1247,7 +1247,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // Compute the first and last tx ID in the range
@@ -1256,7 +1256,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -1334,7 +1334,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         let block_headers = self.remove::<tables::Headers>(range.clone())?;
         if block_headers == 0 {
-            return Ok(());
+            return Ok(())
         }
 
         self.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -1377,7 +1377,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let block_headers = self.take::<tables::Headers>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         self.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -1491,7 +1491,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break;
+                break
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -1543,7 +1543,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break;
+                break
             }
 
             let row = cursor.seek_exact(key)?;
@@ -1586,7 +1586,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break false;
+                break false
             }
 
             let done = self.prune_table_with_range_step(
@@ -1644,7 +1644,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter().collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -1789,7 +1789,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
             }
             Ordering::Equal => {}
         }
@@ -1834,7 +1834,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1891,7 +1891,7 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
                     let sealed = header.seal(hash);
                     if !predicate(&sealed) {
-                        break;
+                        break
                     }
                     headers.push(sealed);
                 }
@@ -1989,13 +1989,7 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
                     None => return Ok(None),
                 };
 
-                return Ok(Some(Block {
-                    header,
-                    body: transactions,
-                    ommers,
-                    withdrawals,
-                    requests,
-                }));
+                return Ok(Some(Block { header, body: transactions, ommers, withdrawals, requests }))
             }
         }
 
@@ -2023,11 +2017,11 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()));
+                return Ok(Some(Vec::new()))
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers);
+            return Ok(ommers)
         }
 
         Ok(None)
@@ -2280,7 +2274,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                                 timestamp: header.timestamp,
                             };
 
-                            return Ok(Some((transaction, meta)));
+                            return Ok(Some((transaction, meta)))
                         }
                     }
                 }
@@ -2313,7 +2307,7 @@ impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
                             .map(Into::into)
                             .collect(),
                     ))
-                };
+                }
             }
         }
         Ok(None)
@@ -2391,7 +2385,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
                     Ok(Some(Vec::new()))
                 } else {
                     self.receipts_by_tx_range(tx_range).map(Some)
-                };
+                }
             }
         }
         Ok(None)
@@ -2426,7 +2420,7 @@ impl<TX: DbTx> WithdrawalsProvider for DatabaseProvider<TX> {
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals));
+                return Ok(Some(withdrawals))
             }
         }
         Ok(None)
@@ -2450,7 +2444,7 @@ impl<TX: DbTx> RequestsProvider for DatabaseProvider<TX> {
                 // If we are past Prague, then all blocks should have a requests list, even if
                 // empty
                 let requests = self.tx.get::<tables::BlockRequests>(number)?.unwrap_or_default();
-                return Ok(Some(requests));
+                return Ok(Some(requests))
             }
         }
         Ok(None)
@@ -2824,7 +2818,7 @@ impl<TX: DbTxMut + DbTx> TrieWriter for DatabaseProvider<TX> {
     /// Writes trie updates. Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0);
+            return Ok(0)
         }
 
         // Track the number of inserted entries.
@@ -2898,7 +2892,7 @@ impl<TX: DbTxMut + DbTx> StorageTrieWriter for DatabaseProvider<TX> {
         updates: &StorageTrieUpdates,
     ) -> ProviderResult<usize> {
         if updates.is_empty() {
-            return Ok(0);
+            return Ok(0)
         }
 
         let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
@@ -3100,7 +3094,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })));
+                })))
             }
             self.write_trie_updates(&trie_updates)?;
         }
@@ -3315,7 +3309,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })));
+            })))
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3403,7 +3397,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })));
+            })))
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3626,7 +3620,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(());
+            return Ok(())
         }
 
         let first_number = blocks.first().unwrap().number;
