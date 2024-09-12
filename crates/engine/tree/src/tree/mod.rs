@@ -2171,6 +2171,12 @@ where
 
         let root_time = Instant::now();
         let mut state_root_result = None;
+
+        // We attempt to compute state root in parallel if we are currently not persisting anything
+        // to database. This is safe, because the database state cannot change until we
+        // finish parallel computation. It is important that nothing is being persisted as
+        // we are computing in parallel, because we initialize a different database transaction
+        // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
             state_root_result = match self
@@ -2185,12 +2191,11 @@ where
             };
         }
 
-        let (state_root, trie_output) = match state_root_result {
-            Some(result) => result,
-            None => {
-                debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
-                state_provider.state_root_with_updates(hashed_state.clone())?
-            }
+        let (state_root, trie_output) = if let Some(result) = state_root_result {
+            result
+        } else {
+            debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+            state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
         if state_root != block.state_root {
