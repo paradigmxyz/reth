@@ -193,7 +193,7 @@ pub enum DownloadError {
     /// Error while executing the request.
     RequestError(RequestError),
     /// Provider error.
-    Provider(#[error(source)] ProviderError),
+    Provider(ProviderError),
 }
 
 impl From<DatabaseError> for DownloadError {
