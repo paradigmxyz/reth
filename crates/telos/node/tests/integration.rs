@@ -177,8 +177,9 @@ async fn testing_chain_sync() {
             break;
         }
     }
+    // run_tests(&rpc_url.to_string(), "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48").await;
 
-    match start_consensus(reth_handle, ship_port, chain_port).await {
+    match consensus_run_future.await {
         Ok((shutdown_sender, consensus_handle)) => {
             tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
             shutdown_sender.send(()).unwrap();
@@ -186,9 +187,5 @@ async fn testing_chain_sync() {
         Err(error) => {
             panic!("Error with consensus client: {error:?}");
         }
-    // run_tests(&rpc_url.to_string(), "26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48").await;
-
-    if let Err(error) = consensus_run_future.await {
-        panic!("Error with consensus client: {error:?}");
     }
 }

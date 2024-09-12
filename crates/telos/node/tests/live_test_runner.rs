@@ -83,6 +83,7 @@ pub async fn test_blocknum_onchain(url: &str, private_key: &str) {
     println!("Deployed contract with tx hash: {deploy_tx_hash}");
     let receipt = deploy_result.get_receipt().await.unwrap();
     println!("Receipt: {:?}", receipt);
+
 }
 
 fn create_provider(url: &str, private_key: &str) -> (Address, EthereumWallet, SignerProvider) {
