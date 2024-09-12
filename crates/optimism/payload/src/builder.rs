@@ -163,13 +163,15 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         let mut op_block_attributes =
             OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
 
+        // add sequencer transactions to block
         op_block_attributes.add_sequencer_transactions(
             &payload_config.attributes.transactions,
             db,
             &cancel,
         )?;
 
-        //TODO: add pooled transactions
+        // add pooled transactions to block
+        op_block_attributes.add_pooled_transactions(&pool, db, &cancel)?;
 
         // TODO: into built payload
         todo!()
@@ -184,6 +186,7 @@ pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
     is_regolith: bool,
     block_gas_limit: u64,
     base_fee: u64,
+    total_fees: U256,
     cumulative_gas_used: u64,
     evm_config: EvmConfig,
     payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
@@ -221,6 +224,7 @@ where
             is_regolith,
             block_gas_limit,
             base_fee,
+            total_fees: U256::ZERO,
             cumulative_gas_used: 0,
             evm_config,
             payload_config,
@@ -261,7 +265,7 @@ where
                     )
                 })?;
 
-            if let Err(err) = self.insert_transaction(&sequencer_tx, db) {
+            if let Err(err) = self.insert_sequencer_transaction(&sequencer_tx, db) {
                 match err {
                     PayloadBuilderError::EvmExecutionError(EVMError::Transaction(err)) => {
                         trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
@@ -277,7 +281,58 @@ where
         Ok(())
     }
 
-    pub fn insert_transaction<DB>(
+    pub fn add_pooled_transactions<DB, Pool>(
+        &mut self,
+        pool: &Pool,
+        db: &mut revm::State<DB>,
+        cancel: &Cancelled,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: revm::Database<Error = ProviderError>,
+        Pool: TransactionPool,
+    {
+        if self.payload_config.attributes.no_tx_pool {
+            return Ok(());
+        }
+
+        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
+            self.base_fee,
+            self.payload_config
+                .initialized_block_env
+                .get_blob_gasprice()
+                .map(|gasprice| gasprice as u64),
+        ));
+
+        while let Some(pool_tx) = best_txs.next() {
+            // ensure we still have capacity for this transaction
+            if self.cumulative_gas_used + pool_tx.gas_limit() > self.block_gas_limit {
+                // we can't fit this transaction into the block, so we need to mark it as
+                // invalid which also removes all dependent transaction from
+                // the iterator before we can continue
+                best_txs.mark_invalid(&pool_tx);
+                continue;
+            }
+
+            // A sequencer's block should never contain blob or deposit transactions from the pool.
+            if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
+                best_txs.mark_invalid(&pool_tx);
+                continue;
+            }
+
+            // Check if the job was cancelled, if so we can exit early.
+            if cancel.is_cancelled() {
+                return Err(PayloadBuilderError::BuildOutcomeCancelled);
+            }
+
+            // convert tx to a signed transaction
+            let tx = pool_tx.to_recovered_transaction();
+            self.insert_pooled_transaction(&tx, db)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn insert_sequencer_transaction<DB>(
         &mut self,
         tx: &TransactionSignedEcRecovered,
         db: &mut revm::State<DB>,
@@ -302,7 +357,7 @@ where
             })?;
 
         let execution_result = evm_transact_commit(
-            &tx,
+            tx,
             self.payload_config.initialized_cfg.clone(),
             self.payload_config.initialized_block_env.clone(),
             self.evm_config.clone(),
@@ -327,6 +382,48 @@ where
                 )
                 .then_some(1),
         };
+
+        self.receipts.push(Some(receipt));
+        self.executed_senders.push(tx.signer());
+        self.executed_txs.push(tx.to_owned().into_signed());
+
+        Ok(())
+    }
+
+    pub fn insert_pooled_transaction<DB>(
+        &mut self,
+        tx: &TransactionSignedEcRecovered,
+        db: &mut revm::State<DB>,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: revm::Database<Error = ProviderError>,
+    {
+        let execution_result = evm_transact_commit(
+            tx,
+            self.payload_config.initialized_cfg.clone(),
+            self.payload_config.initialized_block_env.clone(),
+            self.evm_config.clone(),
+            db,
+        )
+        .map_err(PayloadBuilderError::EvmExecutionError)?;
+
+        let gas_used = execution_result.gas_used();
+        self.cumulative_gas_used += gas_used;
+
+        let receipt = Receipt {
+            tx_type: tx.tx_type(),
+            success: execution_result.is_success(),
+            cumulative_gas_used: self.cumulative_gas_used,
+            logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+        };
+
+        // update add to total fees
+        let miner_fee = tx
+            .effective_tip_per_gas(Some(self.base_fee))
+            .expect("fee is always valid; execution succeeded");
+        self.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         self.receipts.push(Some(receipt));
         self.executed_senders.push(tx.signer());
