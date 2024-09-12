@@ -141,6 +141,10 @@ impl EthApiError {
     pub const fn is_gas_too_high(&self) -> bool {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
     }
+    /// Returns `true` if error is a header/block not found error.
+    pub const fn is_header_not_found(&self) -> bool {
+        matches!(self, Self::HeaderNotFound(_))
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {

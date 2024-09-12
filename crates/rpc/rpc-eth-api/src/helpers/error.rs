@@ -56,7 +56,6 @@ pub trait AsEthApiError {
         if let Some(err) = self.as_err() {
             return err.is_gas_too_high()
         }
-
         false
     }
 }

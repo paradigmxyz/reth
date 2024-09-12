@@ -425,6 +425,7 @@ where
         full: bool,
     ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
+        // TODO: map error here?
         Ok(EthBlocks::rpc_block(self, number.into(), full).await?)
     }
 
