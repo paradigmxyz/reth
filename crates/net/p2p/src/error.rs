@@ -191,7 +191,7 @@ pub enum DownloadError {
     #[display("received empty response")]
     EmptyResponse,
     /// Error while executing the request.
-    RequestError(#[error(source)] RequestError),
+    RequestError(RequestError),
     /// Provider error.
     Provider(#[error(source)] ProviderError),
 }
