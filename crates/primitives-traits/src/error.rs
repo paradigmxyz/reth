@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use alloc::boxed::Box;
 use core::{
     fmt,
