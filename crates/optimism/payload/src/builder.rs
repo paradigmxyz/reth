@@ -86,10 +86,11 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             .build();
 
         self.init_pre_block_state(&config, evm_config, &mut db)?;
+        // NOTE: if cancelled, cancel
         self.construct_block(&config, pool, &mut db, cancel)
     }
 
-    fn init_pre_block_state<DB>(
+    pub fn init_pre_block_state<DB>(
         &self,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
@@ -156,29 +157,16 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         DB: revm::Database<Error = ProviderError>,
     {
         let mut op_block_attributes =
-            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
-
-        // Add sequencer transactions to the block
-        for sequencer_tx in &payload_config.attributes.transactions {
-            // Check if the job was cancelled, if so we can exit early.
-            if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled);
-            }
-
-            if let Err(err) = op_block_attributes.add_sequencer_transaction(sequencer_tx, db) {
-                match err {
-                    PayloadBuilderError::EvmExecutionError(EVMError::Transaction(err)) => {
-                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue;
-                    }
-                    other => {
-                        return Err(other);
-                    }
-                }
-            }
-        }
+            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone(), cancel);
 
         //TODO: add transactions from the pool
+
+        op_block_attributes
+            .add_sequencer_transactions(&payload_config.attributes.transactions, db)?;
+
+        //TODO: add pooled transactions
+
+        // TODO: into built payload
         todo!()
     }
 }
@@ -194,6 +182,7 @@ pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
     cumulative_gas_used: u64,
     evm_config: EvmConfig,
     payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
+    cancel: Cancelled,
 }
 
 impl<'a, EvmConfig> OptimismBlockAttributes<'a, EvmConfig>
@@ -234,48 +223,82 @@ where
         }
     }
 
-    pub fn add_sequencer_transaction<DB>(
+    pub fn add_sequencer_transactions<DB>(
         &mut self,
-        sequencer_tx: &WithEncoded<TransactionSigned>,
+        transactions: &[WithEncoded<TransactionSigned>],
+        db: &mut revm::State<DB>,
+        cancel: &Cancelled,
+    ) -> Result<(), PayloadBuilderError>
+    where
+        DB: revm::Database<Error = ProviderError>,
+    {
+        // Add sequencer transactions to the block
+        for sequencer_tx in transactions {
+            // Check if the job was cancelled, if so we can exit early.
+            if cancel.is_cancelled() {
+                return Err(PayloadBuilderError::other());
+            }
+
+            // Payload attributes transactions should never contain blob transactions.
+            if sequencer_tx.value().is_eip4844() {
+                return Err(PayloadBuilderError::other(
+                    OptimismPayloadBuilderError::BlobTransactionRejected,
+                ));
+            }
+
+            // Convert the transaction to a [TransactionSignedEcRecovered]. This is
+            // purely for the purposes of utilizing the `evm_config.tx_env`` function.
+            // Deposit transactions do not have signatures, so if the tx is a deposit, this
+            // will just pull in its `from` address.
+            let sequencer_tx =
+                sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
+                    PayloadBuilderError::other(
+                        OptimismPayloadBuilderError::TransactionEcRecoverFailed,
+                    )
+                })?;
+
+            if let Err(err) = self.insert_transaction(&sequencer_tx, db) {
+                match err {
+                    PayloadBuilderError::EvmExecutionError(EVMError::Transaction(err)) => {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                        continue;
+                    }
+                    other => {
+                        return Err(other);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn insert_transaction<DB>(
+        &mut self,
+        tx: &TransactionSignedEcRecovered,
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
         DB: revm::Database<Error = ProviderError>,
     {
-        // Payload attributes transactions should never contain blob transactions.
-        if sequencer_tx.value().is_eip4844() {
-            return Err(PayloadBuilderError::other(
-                OptimismPayloadBuilderError::BlobTransactionRejected,
-            ));
-        }
-
-        // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
-        // Deposit transactions do not have signatures, so if the tx is a deposit, this
-        // will just pull in its `from` address.
-        let sequencer_tx = sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
-            PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
-        })?;
-
         // Cache the depositor account prior to the state transition for the deposit nonce.
         //
         // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
         // were not introduced in Bedrock. In addition, regular transactions don't have deposit
         // nonces, so we don't need to touch the DB for those.
-        let depositor = (self.is_regolith && sequencer_tx.is_deposit())
+        let depositor = (self.is_regolith && tx.is_deposit())
             .then(|| {
-                db.load_cache_account(sequencer_tx.signer())
-                    .map(|acc| acc.account_info().unwrap_or_default())
+                db.load_cache_account(tx.signer()).map(|acc| acc.account_info().unwrap_or_default())
             })
             .transpose()
             .map_err(|_| {
                 PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
-                    sequencer_tx.signer(),
+                    tx.signer(),
                 ))
             })?;
 
         let execution_result = evm_transact_commit(
-            &sequencer_tx,
+            &tx,
             self.payload_config.initialized_cfg.clone(),
             self.payload_config.initialized_block_env.clone(),
             self.evm_config.clone(),
@@ -286,7 +309,7 @@ where
         self.cumulative_gas_used += execution_result.gas_used();
 
         let receipt = Receipt {
-            tx_type: sequencer_tx.tx_type(),
+            tx_type: tx.tx_type(),
             success: execution_result.is_success(),
             cumulative_gas_used: self.cumulative_gas_used,
             logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
@@ -302,8 +325,8 @@ where
         };
 
         self.receipts.push(Some(receipt));
-        self.executed_senders.push(sequencer_tx.signer());
-        self.executed_txs.push(sequencer_tx.into_signed());
+        self.executed_senders.push(tx.signer());
+        self.executed_txs.push(tx.to_owned().into_signed());
 
         Ok(())
     }
