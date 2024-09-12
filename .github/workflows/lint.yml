@@ -137,7 +137,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo install cargo-udeps --locked
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall cargo-udeps --no-confirm
       - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
 
   book:
