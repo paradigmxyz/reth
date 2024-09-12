@@ -39,7 +39,8 @@ impl AsEthApiError for OpEthApiError {
 impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: OpEthApiError) -> Self {
         match err {
-            OpEthApiError::Eth(_) | OpEthApiError::InvalidTransaction(_) => err.into(),
+            OpEthApiError::Eth(err) => err.into(),
+            OpEthApiError::InvalidTransaction(err) => err.into(),
             OpEthApiError::Evm(_) |
             OpEthApiError::L1BlockFeeError |
             OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
