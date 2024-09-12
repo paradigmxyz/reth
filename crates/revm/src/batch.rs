@@ -180,8 +180,6 @@ impl BlockBatchRecord {
 
 #[cfg(test)]
 mod tests {
-    extern crate alloc;
-
     use super::*;
     use alloc::collections::BTreeMap;
     use reth_primitives::{Address, Log, Receipt};
