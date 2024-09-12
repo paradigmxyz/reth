@@ -33,7 +33,6 @@ use revm_primitives::{Bytes, Env, OptimismFields, TxKind};
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct OptimismEvmConfig {
     chain_spec: Arc<OpChainSpec>,
 }
