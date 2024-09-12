@@ -113,7 +113,7 @@ pub struct InvalidBlockSelection(HashSet<InvalidBlockHook>);
 
 impl Default for InvalidBlockSelection {
     fn default() -> Self {
-        Self(HashSet::from([InvalidBlockHook::Witness]))
+        Self([InvalidBlockHook::Witness].into())
     }
 }
 
