@@ -10,10 +10,7 @@ Usage: reth db clear static-file [OPTIONS] <SEGMENT>
 
 Arguments:
   <SEGMENT>
-          Possible values:
-          - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions: Static File segment responsible for the `Transactions` table
-          - receipts:     Static File segment responsible for the `Receipts` table
+
 
 Options:
       --instance <INSTANCE>
