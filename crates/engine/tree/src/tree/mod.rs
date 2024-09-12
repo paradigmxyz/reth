@@ -2173,38 +2173,8 @@ where
         let mut state_root_result = None;
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-            let mut trie_nodes = TrieUpdates::default();
-            let mut state = HashedPostState::default();
-            let mut prefix_sets = TriePrefixSetsMut::default();
-
-            if let Some((historical, blocks)) =
-                self.state.tree_state.blocks_by_hash(block.parent_hash)
-            {
-                // Retrieve revert state for historical block.
-                let revert_state = consistent_view.revert_state(historical)?;
-                prefix_sets.extend(revert_state.construct_prefix_sets());
-                state.extend(revert_state);
-
-                // Extend with contents of parent in-memory blocks.
-                for block in blocks.iter().rev() {
-                    trie_nodes.extend_ref(block.trie.as_ref());
-                    state.extend_ref(block.hashed_state.as_ref());
-                }
-            }
-
-            // Extend with block we are validating root for.
-            prefix_sets.extend(hashed_state.construct_prefix_sets());
-            state.extend_ref(&hashed_state);
-
-            state_root_result = match ParallelStateRoot::new(
-                consistent_view,
-                trie_nodes,
-                state,
-                prefix_sets.freeze(),
-            )
-            .incremental_root_with_updates()
-            .map_err(ProviderError::from)
+            state_root_result = match self
+                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
                 Err(ProviderError::ConsistentView(error)) => {
@@ -2272,6 +2242,45 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+    }
+
+    /// Compute state root for the given hashed post state in parallel.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(_)` if computed successfully.
+    /// Returns `Err(_)` if error was encountered during computation.
+    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+    /// should be used instead.
+    fn compute_state_root_in_parallel(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let mut trie_nodes = TrieUpdates::default();
+        let mut state = HashedPostState::default();
+        let mut prefix_sets = TriePrefixSetsMut::default();
+
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+            // Retrieve revert state for historical block.
+            let revert_state = consistent_view.revert_state(historical)?;
+            prefix_sets.extend(revert_state.construct_prefix_sets());
+            state.extend(revert_state);
+
+            // Extend with contents of parent in-memory blocks.
+            for block in blocks.iter().rev() {
+                trie_nodes.extend_ref(block.trie.as_ref());
+                state.extend_ref(block.hashed_state.as_ref());
+            }
+        }
+
+        // Extend with block we are validating root for.
+        prefix_sets.extend(hashed_state.construct_prefix_sets());
+        state.extend_ref(&hashed_state);
+
+        Ok(ParallelStateRoot::new(consistent_view, trie_nodes, state, prefix_sets.freeze())
+            .incremental_root_with_updates()?)
     }
 
     /// Handles an error that occurred while inserting a block.
