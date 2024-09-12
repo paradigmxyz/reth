@@ -25,8 +25,8 @@ use reth_trie::HashedPostState;
 use revm::{
     db::{states::bundle_state::BundleRetention, WrapDatabaseRef},
     primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
-        ResultAndState,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ExecutionResult,
+        InvalidTransaction, ResultAndState,
     },
     Database, DatabaseCommit, State,
 };
@@ -274,7 +274,7 @@ where
                 ))
             })?;
 
-        let ResultAndState { result, state } = evm_transact(
+        let execution_result = evm_transact_commit(
             &sequencer_tx,
             self.payload_config.initialized_cfg.clone(),
             self.payload_config.initialized_block_env.clone(),
@@ -283,16 +283,13 @@ where
         )
         .map_err(PayloadBuilderError::EvmExecutionError)?;
 
-        // commit changes
-        db.commit(state);
-
-        self.cumulative_gas_used += result.gas_used();
+        self.cumulative_gas_used += execution_result.gas_used();
 
         let receipt = Receipt {
             tx_type: sequencer_tx.tx_type(),
-            success: result.is_success(),
+            success: execution_result.is_success(),
             cumulative_gas_used: self.cumulative_gas_used,
-            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
             deposit_nonce: depositor.map(|account| account.nonce),
             deposit_receipt_version: self
                 .payload_config
@@ -363,13 +360,13 @@ where
     }
 }
 
-fn evm_transact<EvmConfig, DB>(
+fn evm_transact_commit<EvmConfig, DB>(
     transaction: &TransactionSignedEcRecovered,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
     evm_config: EvmConfig,
     db: &mut revm::State<DB>,
-) -> Result<ResultAndState, EVMError<ProviderError>>
+) -> Result<ExecutionResult, EVMError<ProviderError>>
 where
     DB: revm::Database<Error = ProviderError>,
     EvmConfig: ConfigureEvm,
@@ -381,7 +378,7 @@ where
     );
     let mut evm = evm_config.evm_with_env(db, env);
 
-    evm.transact()
+    evm.transact_commit()
 }
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
