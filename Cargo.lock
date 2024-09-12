@@ -7347,6 +7347,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "eyre",
+ "futures",
  "jsonrpsee",
  "pretty_assertions",
  "reth-chainspec",
@@ -7359,7 +7360,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "serde_json",
- "tokio",
 ]
 
 [[package]]

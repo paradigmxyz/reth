@@ -868,16 +868,15 @@ where
                 let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
 
                 // Verify that the healthy node is running the same chain as the current node.
-                let chain_id = tokio::runtime::Handle::current()
-                    .block_on(async {
-                        EthApiClient::<
-                            reth_rpc_types::Transaction,
-                            reth_rpc_types::Block,
-                            reth_rpc_types::Receipt,
-                        >::chain_id(&client)
-                        .await
-                    })?
-                    .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+                let chain_id = futures::executor::block_on(async {
+                    EthApiClient::<
+                        reth_rpc_types::Transaction,
+                        reth_rpc_types::Block,
+                        reth_rpc_types::Receipt,
+                    >::chain_id(&client)
+                    .await
+                })?
+                .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
                 if chain_id.to::<u64>() != self.chain_id().id() {
                     eyre::bail!("invalid chain id for healthy node: {chain_id}")
                 }
