@@ -86,8 +86,12 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             .build();
 
         self.init_pre_block_state(&config, evm_config, &mut db)?;
-        // NOTE: if cancelled, cancel
-        self.construct_block(&config, pool, &mut db, cancel)
+
+        match self.construct_block(&config, pool, &mut db, cancel) {
+            Ok(outcome) => Ok(outcome),
+            Err(PayloadBuilderError::BuildOutcomeCancelled) => Ok(BuildOutcome::Cancelled),
+            Err(err) => Err(err),
+        }
     }
 
     pub fn init_pre_block_state<DB>(
@@ -157,12 +161,13 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         DB: revm::Database<Error = ProviderError>,
     {
         let mut op_block_attributes =
-            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone(), cancel);
+            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
 
-        //TODO: add transactions from the pool
-
-        op_block_attributes
-            .add_sequencer_transactions(&payload_config.attributes.transactions, db)?;
+        op_block_attributes.add_sequencer_transactions(
+            &payload_config.attributes.transactions,
+            db,
+            &cancel,
+        )?;
 
         //TODO: add pooled transactions
 
@@ -182,7 +187,6 @@ pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
     cumulative_gas_used: u64,
     evm_config: EvmConfig,
     payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
-    cancel: Cancelled,
 }
 
 impl<'a, EvmConfig> OptimismBlockAttributes<'a, EvmConfig>
@@ -236,7 +240,7 @@ where
         for sequencer_tx in transactions {
             // Check if the job was cancelled, if so we can exit early.
             if cancel.is_cancelled() {
-                return Err(PayloadBuilderError::other());
+                return Err(PayloadBuilderError::BuildOutcomeCancelled);
             }
 
             // Payload attributes transactions should never contain blob transactions.
