@@ -207,8 +207,7 @@ pub enum InvalidPoolTransactionError {
         "transaction overdraws from account, value or fee: {value_or_fee}, balance: {balance}"
     )]
     Overdraft {
-        /// Cost transaction is allowed to consume. See
-        /// [`PoolTransaction`](reth_transaction_pool::PoolTransaction).
+        /// Cost transaction is allowed to consume. See `reth_transaction_pool::PoolTransaction`.
         value_or_fee: U256,
         /// Balance of account.
         balance: U256,
