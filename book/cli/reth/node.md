@@ -548,7 +548,7 @@ Debug:
           [possible values: witness, pre-state, opcode]
 
       --debug.healthy-node-rpc-url <URL>
-          The RPC URL of a healthy node.
+          The RPC URL of a healthy node to use for comparing invalid block hook results against.
 
 Database:
       --db.log-level <LOG_LEVEL>

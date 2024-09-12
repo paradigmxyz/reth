@@ -74,7 +74,7 @@ pub struct DebugArgs {
     #[arg(long = "debug.invalid-block-hook", help_heading = "Debug", value_parser = InvalidBlockSelectionValueParser::default())]
     pub invalid_block_hook: Option<InvalidBlockSelection>,
 
-    /// The RPC URL of a healthy node.
+    /// The RPC URL of a healthy node to use for comparing invalid block hook results against.
     #[arg(
         long = "debug.healthy-node-rpc-url",
         help_heading = "Debug",
