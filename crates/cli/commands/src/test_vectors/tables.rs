@@ -21,6 +21,7 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;
+    println!("Seed for test vectors: {:?}", seed);
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
@@ -46,7 +47,6 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
                 tables = all_tables;
             }
 
-            println!("Seed for test vectors: {:?}", seed);
             for table in tables {
                 match table.as_str() {
                     $(
