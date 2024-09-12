@@ -17,7 +17,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView, ProviderNodeTypes},
-    FullExecutionDataProvider, ProviderError, StateRootProvider,
+    FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -198,7 +198,7 @@ impl AppendableChain {
             // State root calculation can take a while, and we're sure no write transaction
             // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/7509.
             .disable_long_read_transaction_safety()
-            .state_provider_by_block_number(canonical_fork.number)?;
+            .try_into_history_at_block(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
