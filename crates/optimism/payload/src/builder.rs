@@ -323,10 +323,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        //NOTE: make this a self.build_payload() function?
-        // self.build_payload()
-
-        optimism_payload(self.evm_config.clone(), args, self.compute_pending_block)
+        self.build_payload(self.evm_config.clone(), args, self.compute_pending_block)
     }
 
     fn on_missing_payload(
@@ -354,7 +351,8 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        optimism_payload(self.evm_config.clone(), args, false)?
+
+        self.build_payload(self.evm_config.clone(), args, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
