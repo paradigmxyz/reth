@@ -67,7 +67,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                         view.clone(),
                         Default::default(),
                         updated_state.clone(),
-                        updated_state.construct_prefix_sets(),
+                        updated_state.construct_prefix_sets().freeze(),
                     )
                 },
                 |calculator| async { calculator.incremental_root() },
