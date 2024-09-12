@@ -113,7 +113,7 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
-    pub fn execute_pre_and_transactions<Ext, DB>(
+    fn execute_pre_and_transactions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
