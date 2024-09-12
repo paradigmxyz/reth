@@ -3446,7 +3446,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     ///
     /// # Arguments
-    /// * `block` - Reference to the [SealedBlockWithSenders] to be inserted
+    /// * `block` - Reference to the [`SealedBlockWithSenders`] to be inserted
     ///
     /// # Returns
     /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
@@ -3571,7 +3571,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     /// * If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
     ///
     /// # Arguments
-    /// * `block` - Reference to the [SealedBlockWithSenders] containing the additional data
+    /// * `block` - Reference to the [`SealedBlockWithSenders`] containing the additional data
     ///
     /// # Returns
     /// * `ProviderResult<()>` - Ok if the insertion was successful, or an error if it failed
