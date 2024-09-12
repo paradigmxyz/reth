@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, U256};
 use reth_primitives::{BlobTransactionValidationError, InvalidTransactionError};
 
 /// Transaction pool result type.
@@ -203,8 +203,16 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction underpriced")]
     Underpriced,
     /// Thrown if the transaction's would require an account to be overdrawn
-    #[error("transaction overdraws from account")]
-    Overdraft,
+    #[error(
+        "transaction overdraws from account, value or fee: {value_or_fee}, balance: {balance}"
+    )]
+    Overdraft {
+        /// Cost transaction is allowed to consume. See
+        /// [`PoolTransaction`](reth_transaction_pool::PoolTransaction).
+        value_or_fee: U256,
+        /// Balance of account.
+        balance: U256,
+    },
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -274,7 +282,7 @@ impl InvalidPoolTransactionError {
                 false
             }
             Self::IntrinsicGasTooLow => true,
-            Self::Overdraft => false,
+            Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {

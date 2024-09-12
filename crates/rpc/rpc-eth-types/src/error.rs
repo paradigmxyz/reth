@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
@@ -305,8 +305,15 @@ pub enum RpcInvalidTransactionError {
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
     /// Represents the inability to cover max cost + value (account balance too low).
-    #[error("insufficient funds for gas * price + value")]
-    InsufficientFunds,
+    #[error(
+        "insufficient funds for gas * price + value: value or fee {value_or_fee}, balance {balance}"
+    )]
+    InsufficientFunds {
+        /// Value or max fee.
+        value_or_fee: U256,
+        /// Current balance of transaction sender.
+        balance: U256,
+    },
     /// Thrown when calculating gas usage
     #[error("gas uint64 overflow")]
     GasUintOverflow,
@@ -476,7 +483,9 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::CallerGasLimitMoreThanBlock |
             InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
-            InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
+            InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
+                Self::InsufficientFunds { value_or_fee: *fee, balance: *balance }
+            }
             InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
             InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
             InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
@@ -518,7 +527,9 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
-            InvalidTransactionError::InsufficientFunds { .. } => Self::InsufficientFunds,
+            InvalidTransactionError::InsufficientFunds(res) => {
+                Self::InsufficientFunds { value_or_fee: res.expected, balance: res.got }
+            }
             InvalidTransactionError::NonceNotConsistent { tx, state } => {
                 Self::NonceTooLow { tx, state }
             }
@@ -678,8 +689,11 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
-            InvalidPoolTransactionError::Overdraft => {
-                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+            InvalidPoolTransactionError::Overdraft { value_or_fee, balance } => {
+                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds {
+                    value_or_fee,
+                    balance,
+                })
             }
         }
     }

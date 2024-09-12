@@ -553,7 +553,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                     )),
                     InsertErr::Overdraft { transaction } => Err(PoolError::new(
                         *transaction.hash(),
-                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft),
+                        PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Overdraft {
+                            value_or_fee: transaction.cost(),
+                            balance: on_chain_balance,
+                        }),
                     )),
                     InsertErr::TxTypeConflict { transaction } => Err(PoolError::new(
                         *transaction.hash(),
