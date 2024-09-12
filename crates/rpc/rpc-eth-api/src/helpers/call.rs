@@ -304,7 +304,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                             tx,
                             gas_limit,
                             &mut db,
-                            Some(overrides),
+                            overrides,
                         )
                         .map(Into::into)?;
                     let (res, _) = this.transact(&mut db, env)?;
@@ -558,7 +558,7 @@ pub trait Call: LoadState + SpawnBlocking {
                     request,
                     this.call_gas_limit(),
                     &mut db,
-                    Some(overrides),
+                    overrides,
                 )?;
 
                 f(StateCacheDbRefMutWrapper(&mut db), env)
@@ -1096,7 +1096,7 @@ pub trait Call: LoadState + SpawnBlocking {
         mut request: TransactionRequest,
         gas_limit: u64,
         db: &mut CacheDB<DB>,
-        overrides: Option<EvmOverrides>,
+        overrides: EvmOverrides,
     ) -> Result<EnvWithHandlerCfg, Self::Error>
     where
         DB: DatabaseRef,
@@ -1118,13 +1118,11 @@ pub trait Call: LoadState + SpawnBlocking {
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
 
-        if let Some(overrides) = overrides {
-            if let Some(block_overrides) = overrides.block {
-                apply_block_overrides(*block_overrides, db, &mut block);
-            }
-            if let Some(state_overrides) = overrides.state {
-                apply_state_overrides(state_overrides, db)?;
-            }
+        if let Some(block_overrides) = overrides.block {
+            apply_block_overrides(*block_overrides, db, &mut block);
+        }
+        if let Some(state_overrides) = overrides.state {
+            apply_state_overrides(state_overrides, db)?;
         }
 
         let request_gas = request.gas;

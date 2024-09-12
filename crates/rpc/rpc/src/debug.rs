@@ -536,7 +536,7 @@ where
                             tx,
                             gas_limit,
                             &mut db,
-                            Some(overrides),
+                            overrides,
                         )?;
 
                         let (trace, state) =

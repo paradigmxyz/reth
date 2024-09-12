@@ -202,7 +202,7 @@ impl CallFees {
     }
 }
 
-/// Applies the given block overrides to the env
+/// Applies the given block overrides to the env and updates overriden block hashes in the db.
 pub fn apply_block_overrides<DB>(
     overrides: BlockOverrides,
     db: &mut CacheDB<DB>,
