@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
-use std::{cell::RefCell, thread_local};
+use core::cell::RefCell;
+use std::thread_local;
 use zstd::bulk::{Compressor, Decompressor};
 
 /// Compression/Decompression dictionary for `Receipt`.
