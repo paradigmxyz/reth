@@ -247,7 +247,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)));
+            return Ok(Box::new(LatestStateProvider::new(self.tx, self.static_file_provider)))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -345,7 +345,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break;
+            break
         }
         cursor.delete_current()?;
 
@@ -354,7 +354,7 @@ where
         let first = list.iter().next().expect("List can't be empty");
         if first >= block_number {
             item = cursor.prev()?;
-            continue;
+            continue
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>());
@@ -493,7 +493,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         F: FnMut(H, Range<TxNumber>, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize;
@@ -632,7 +632,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-           return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -696,7 +696,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         let block_headers = self.get::<tables::Headers>(range.clone())?;
         if block_headers.is_empty() {
-           return Ok(Vec::new())
+            return Ok(Vec::new())
         }
 
         let block_header_hashes = self.get::<tables::CanonicalHeaders>(range.clone())?;
@@ -959,7 +959,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///     3. Set the local state to the value in the changeset
     pub fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         if range.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         // We are not removing block meta as it is used to get block changesets.
@@ -1054,7 +1054,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<ExecutionOutcome> {
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default());
+            return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
 
@@ -1194,7 +1194,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let block_bodies = self.take::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         // Compute the first and last tx ID in the range
@@ -1203,7 +1203,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(());
+            return Ok(())
         }
 
         // Get transactions so we can then remove
@@ -1249,7 +1249,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // Compute the first and last tx ID in the range
@@ -1258,7 +1258,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         // If this is the case then all of the blocks in the range are empty
         if last_transaction < first_transaction {
-            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect());
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
         }
 
         // Get transactions and senders
@@ -1335,7 +1335,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<()> {
         let block_headers = self.remove::<tables::Headers>(range.clone())?;
         if block_headers == 0 {
-            return Ok(());
+            return Ok(())
         }
 
         self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -1378,7 +1378,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         let block_headers = self.take::<tables::Headers>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
@@ -1479,7 +1479,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
             if selector(entry_key.clone()) <= key {
-                break;
+                break
             }
             reverse_walker.delete_current()?;
             deleted += 1;
@@ -1529,7 +1529,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break;
+                break
             }
 
             let row = cursor.seek_exact(key)?;
@@ -1572,7 +1572,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
                     table = %T::NAME,
                     "Pruning limit reached"
                 );
-                break false;
+                break false
             }
 
             let done = self.prune_table_with_range_step(
@@ -1631,7 +1631,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             // delete old shard so new one can be inserted.
             self.tx.delete::<T>(shard_key, None)?;
             let list = list.iter().collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -1787,7 +1787,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> HeaderSyncGapProvider for DatabaseProvide
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
             }
             Ordering::Equal => {}
         }
@@ -1834,7 +1834,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1891,7 +1891,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> HeaderProvi
                         .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
                     let sealed = SealedHeader::new(header, hash);
                     if !predicate(&sealed) {
-                        break;
+                        break
                     }
                     headers.push(sealed);
                 }
@@ -2021,11 +2021,11 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> BlockReader
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
             if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()));
+                return Ok(Some(Vec::new()))
             }
 
             let ommers = self.tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers);
-            return Ok(ommers);
+            return Ok(ommers)
         }
 
         Ok(None)
@@ -2282,7 +2282,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
                                 timestamp: header.timestamp,
                             };
 
-                            return Ok(Some((transaction, meta)));
+                            return Ok(Some((transaction, meta)))
                         }
                     }
                 }
@@ -2315,7 +2315,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Transaction
                             .map(Into::into)
                             .collect(),
                     ))
-                };
+                }
             }
         }
         Ok(None)
@@ -2395,7 +2395,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> ReceiptProv
                     Ok(Some(Vec::new()))
                 } else {
                     self.receipts_by_tx_range(tx_range).map(Some)
-                };
+                }
             }
         }
         Ok(None)
@@ -2432,7 +2432,7 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
                     .get::<tables::BlockWithdrawals>(number)
                     .map(|w| w.map(|w| w.withdrawals))?
                     .unwrap_or_default();
-                return Ok(Some(withdrawals));
+                return Ok(Some(withdrawals))
             }
         }
         Ok(None)
@@ -3015,7 +3015,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Writes trie updates. Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0);
+            return Ok(0)
         }
 
         // Track the number of inserted entries.
@@ -3089,7 +3089,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         updates: &StorageTrieUpdates,
     ) -> ProviderResult<usize> {
         if updates.is_empty() {
-            return Ok(0);
+            return Ok(0)
         }
 
         let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
@@ -3311,7 +3311,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                     root: GotExpected { got: state_root, expected: expected_state_root },
                     block_number: *range.end(),
                     block_hash: end_block_hash,
-                })));
+                })))
             }
             self.write_trie_updates(&trie_updates)?;
         }
@@ -3542,7 +3542,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })));
+            })))
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3641,7 +3641,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
                 root: GotExpected { got: new_state_root, expected: parent_state_root },
                 block_number: parent_number,
                 block_hash: parent_hash,
-            })));
+            })))
         }
         self.write_trie_updates(&trie_updates)?;
 
@@ -3861,7 +3861,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(());
+            return Ok(())
         }
 
         let first_number = blocks.first().unwrap().number;
