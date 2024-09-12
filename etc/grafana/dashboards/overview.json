@@ -598,7 +598,7 @@
           "exemplar": false,
           "expr": "reth_info{instance=~\"$instance\"}",
           "instant": true,
-          "legendFormat": "{{cargo_features}}",
+          "legendFormat": "{{cargo_features}} ",
           "range": false,
           "refId": "A"
         }
@@ -8911,6 +8911,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
