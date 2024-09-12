@@ -28,8 +28,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
 type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
-type MaybePayloadFuture<P> =
-    Pin<Box<dyn Future<Output = Option<Result<P, PayloadBuilderError>>> + Send + Sync>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 #[derive(Debug)]
@@ -131,27 +129,16 @@ where
 
     /// Sends a message to the service to start building a new payload for the given payload
     /// attributes and returns a future that resolves to the payload.
-    pub fn send_and_resolve_payload(
+    pub async fn send_and_resolve_payload(
         &self,
         attr: T::PayloadBuilderAttributes,
-    ) -> MaybePayloadFuture<T::BuiltPayload> {
+    ) -> Result<PayloadFuture<T::BuiltPayload>, PayloadBuilderError> {
         let rx = self.send_new_payload(attr);
-        let to_service = self.to_service.clone();
+        let id = rx.await??;
 
-        Box::pin(async move {
-            let id = match rx.await {
-                Err(e) => return Some(Err(e.into())),
-                Ok(Err(e)) => return Some(Err(e)),
-                Ok(Ok(id)) => id,
-            };
-
-            let (tx, rx) = oneshot::channel();
-            to_service.send(PayloadServiceCommand::Resolve(id, tx)).ok()?;
-            match rx.await.transpose()? {
-                Ok(fut) => Some(fut.await),
-                Err(e) => Some(Err(e.into())),
-            }
-        })
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::Resolve(id, tx));
+        rx.await?.ok_or(PayloadBuilderError::MissingPayload)
     }
 
     /// Returns the best payload for the given identifier.
