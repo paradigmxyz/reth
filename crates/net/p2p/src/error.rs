@@ -141,6 +141,7 @@ pub enum DownloadError {
         /// Number of header failing validation
         number: u64,
         /// The details of validation failure
+        #[error(source)]
         error: Box<ConsensusError>,
     },
     /// Received an invalid tip.
@@ -190,9 +191,9 @@ pub enum DownloadError {
     #[display("received empty response")]
     EmptyResponse,
     /// Error while executing the request.
-    RequestError(RequestError),
+    RequestError(#[error(source)] RequestError),
     /// Provider error.
-    Provider(ProviderError),
+    Provider(#[error(source)] ProviderError),
 }
 
 impl From<DatabaseError> for DownloadError {

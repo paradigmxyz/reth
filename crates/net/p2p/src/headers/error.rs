@@ -17,6 +17,7 @@ pub enum HeadersDownloaderError {
         /// The header we attempted to attach.
         header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
+        #[error(source)]
         error: Box<ConsensusError>,
     },
 }

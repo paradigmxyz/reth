@@ -15,7 +15,7 @@ pub enum UnifiedStorageWriterError {
     #[display("Static file writer is of wrong segment: got {_0}, expected {_1}")]
     IncorrectStaticFileWriter(StaticFileSegment, StaticFileSegment),
     /// Database-related errors.
-    Database(DatabaseError),
+    Database(#[error(source)] DatabaseError),
 }
 
 impl From<DatabaseError> for UnifiedStorageWriterError {
