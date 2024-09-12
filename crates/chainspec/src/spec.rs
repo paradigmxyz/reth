@@ -1,8 +1,9 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-#[cfg(feature = "std")]
+extern crate alloc;
+
+use alloc::{boxed::Box,  vec::Vec};
+
 use std::sync::Arc;
 
 use alloy_chains::{Chain, ChainKind, NamedChain};
