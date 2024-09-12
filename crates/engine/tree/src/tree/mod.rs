@@ -2277,7 +2277,7 @@ where
 
         // Extend with block we are validating root for.
         prefix_sets.extend(hashed_state.construct_prefix_sets());
-        state.extend_ref(&hashed_state);
+        state.extend_ref(hashed_state);
 
         Ok(ParallelStateRoot::new(consistent_view, trie_nodes, state, prefix_sets.freeze())
             .incremental_root_with_updates()?)
