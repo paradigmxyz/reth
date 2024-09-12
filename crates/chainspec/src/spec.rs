@@ -1,9 +1,5 @@
-pub use alloy_eips::eip1559::BaseFeeParams;
-
-#[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-#[cfg(feature = "std")]
-use std::sync::Arc;
+pub use alloy_eips::eip1559::BaseFeeParams;
 
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;

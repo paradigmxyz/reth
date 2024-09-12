@@ -1,4 +1,3 @@
-#[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, format, string::String, vec};
 use core::{
     any::Any,
