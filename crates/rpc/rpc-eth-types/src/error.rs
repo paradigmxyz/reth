@@ -169,12 +169,18 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
-                rpc_error_with_code(
-                    EthRpcErrorCode::ResourceNotFound.code(),
-                    format!("{error}: {}", block_id_to_str(id)),
-                )
-            }
+            // TODO(onbjerg): We rewrite the error message here because op-node does string matching
+            // on the error message.
+            //
+            // Until https://github.com/ethereum-optimism/optimism/pull/11759 is released, this must be kept around.
+            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("block not found: {}", block_id_to_str(id)),
+            ),
+            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("{error}: {}", block_id_to_str(id)),
+            ),
             EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
                 EthRpcErrorCode::ResourceNotFound.code(),
                 format!(
@@ -738,24 +744,24 @@ mod tests {
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "header not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "header not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
-        assert_eq!(err.message(), "header not found: number 0x186a0");
+        assert_eq!(err.message(), "block not found: number 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::latest()).into();
-        assert_eq!(err.message(), "header not found: latest");
+        assert_eq!(err.message(), "block not found: latest");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::safe()).into();
-        assert_eq!(err.message(), "header not found: safe");
+        assert_eq!(err.message(), "block not found: safe");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
-        assert_eq!(err.message(), "header not found: finalized");
+        assert_eq!(err.message(), "block not found: finalized");
     }
 }
