@@ -95,7 +95,7 @@ where
 
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
-struct OpEvmExecutor<EvmConfig> {
+pub struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
@@ -113,7 +113,7 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    pub fn execute_pre_and_transactions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
@@ -249,14 +249,15 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
+    /// Returns the chain spec.
     #[inline]
-    fn chain_spec(&self) -> &ChainSpec {
+    pub fn chain_spec(&self) -> &ChainSpec {
         &self.executor.chain_spec
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    pub fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
 }
@@ -385,7 +386,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    pub fn state_mut(&mut self) -> &mut State<DB> {
         self.executor.state_mut()
     }
 }
