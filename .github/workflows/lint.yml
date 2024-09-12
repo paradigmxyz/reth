@@ -211,6 +211,7 @@ jobs:
       - crate-checks
       - docs
       - fmt
+      - udeps
       - book
       - codespell
       - grafana
