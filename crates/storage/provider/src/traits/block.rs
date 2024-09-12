@@ -42,55 +42,52 @@ pub trait BlockWriter: Send + Sync {
     fn insert_block(&self, block: SealedBlockWithSenders)
         -> ProviderResult<StoredBlockBodyIndices>;
 
-    /// Insert additional block data that is not part of the header or transactions.
+    /// Inserts additional block data that is not part of the header or transactions.
     ///
     /// This function handles the insertion of ommers, withdrawals, and requests data.
     ///
-    /// # Tables modified
-    /// * If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
-    /// * If withdrawals are not empty, this will modify
-    ///   [`BlockWithdrawals`](tables::BlockWithdrawals).
-    /// * If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
-    ///
     /// # Arguments
-    /// * `block` - Reference to the [SealedBlockWithSenders] containing the additional data
+    /// - `block` - The `SealedBlockWithSenders` containing the additional data to be inserted
+    /// - `durations_recorder` - A mutable reference to a `DurationsRecorder` for performance
+    ///   tracking
     ///
     /// # Returns
-    /// * `ProviderResult<()>` - Ok if the insertion was successful, or an error if it failed
+    /// - `ProviderResult<()>` - Ok if the insertion was successful, or an error if it failed
+    ///
+    /// # Tables modified
+    /// - `BlockOmmers` - If the block contains ommers
+    /// - `BlockWithdrawals` - If the block contains withdrawals
+    /// - `BlockRequests` - If the block contains requests
     fn insert_block_additional_data(
         &self,
         block: SealedBlockWithSenders,
         durations_recorder: &mut metrics::DurationsRecorder,
     ) -> ProviderResult<()>;
 
-    /// Insert block header data and transaction data, making the block canonical.
+    /// Inserts block header data and transaction data, making the block canonical.
     ///
     /// This function handles the insertion of header-related data and transaction data.
     /// It calculates the total difficulty and inserts all transaction-related information.
     ///
-    /// # Tables modified
-    /// Always modifies the following tables:
-    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
-    /// * [`Headers`](tables::Headers)
-    /// * [`HeaderNumbers`](tables::HeaderNumbers)
-    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
-    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
-    ///
-    /// If there are transactions in the block, the following tables will be modified:
-    /// * [`Transactions`](tables::Transactions)
-    /// * [`TransactionBlocks`](tables::TransactionBlocks)
-    ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
-    ///
-    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
-    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
-    ///
     /// # Arguments
-    /// * `block` - Reference to the [SealedBlockWithSenders] to be inserted
+    /// - `block` - The `SealedBlockWithSenders` to be inserted
+    /// - `durations_recorder` - A mutable reference to a `DurationsRecorder` for performance
+    ///   tracking
     ///
     /// # Returns
-    /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
+    /// - `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
+    ///
+    /// # Tables modified
+    /// - `CanonicalHeaders` - Stores the canonical header hash for each block number
+    /// - `Headers` - Stores the full header data
+    /// - `HeaderNumbers` - Maps block hashes to block numbers
+    /// - `HeaderTerminalDifficulties` - Stores the total difficulty for each block
+    /// - `Transactions` - Stores transaction data
+    /// - `TransactionSenders` - Stores transaction senders (if not fully pruned)
+    /// - `TransactionHashNumbers` - Maps transaction hashes to transaction numbers (if not fully
+    ///   pruned)
+    /// - `BlockBodyIndices` - Stores the indices of transactions for each block
+    /// - `TransactionBlocks` - Maps transaction numbers to block numbers
     fn insert_block_header_and_transaction_data(
         &self,
         block: SealedBlockWithSenders,
