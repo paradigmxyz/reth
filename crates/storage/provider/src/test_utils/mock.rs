@@ -1,26 +1,29 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
+    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
+    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StageCheckpointReader, StateProofProvider, StorageRootProvider};
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_api::{
+    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+};
+use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
     HashedStorage,
@@ -138,6 +141,15 @@ impl MockEthProvider {
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
+    }
+}
+
+impl DatabaseProviderFactory for MockEthProvider {
+    type DB = DatabaseMock;
+    type Provider = DatabaseProvider<TxMock>;
+
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 }
 

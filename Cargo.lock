@@ -6977,6 +6977,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-trie",
+ "reth-trie-parallel",
  "thiserror",
  "tokio",
  "tracing",
