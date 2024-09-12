@@ -85,16 +85,13 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             .with_bundle_update()
             .build();
 
-        self.init_pre_block_state(config, evm_config, &mut db)?;
-
-        // self.construct_block();
-
-        todo!()
+        self.init_pre_block_state(&config, evm_config, &mut db)?;
+        self.construct_block(&config, pool, &mut db, cancel)
     }
 
     fn init_pre_block_state<DB>(
         &self,
-        payload_config: PayloadConfig<OptimismPayloadBuilderAttributes>,
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
@@ -148,17 +145,15 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
     fn construct_block<Pool, DB>(
         &self,
-        payload_config: PayloadConfig<OptimismPayloadBuilderAttributes>,
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         pool: Pool,
-        chain_spec: &ChainSpec,
         db: &mut revm::State<DB>,
         cancel: Cancelled,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm,
         Pool: TransactionPool,
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
+        DB: revm::Database<Error = ProviderError>,
     {
         let mut op_block_attributes =
             OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
@@ -170,17 +165,17 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
                 return Ok(BuildOutcome::Cancelled);
             }
 
-            // TODO: handle and check the result, continue if evmerror transaction
-
-        
-            let ResultAndState { result, state } =     op_block_attributes.add_sequencer_transaction(sequencer_tx, db)
-            .map_err(|err| match err {
-                EVMError::Transaction(inner_err) => {
-                    trace!(target: "payload_builder", %inner_err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                    None 
+            if let Err(err) = op_block_attributes.add_sequencer_transaction(sequencer_tx, db) {
+                match err {
+                    PayloadBuilderError::EvmExecutionError(EVMError::Transaction(err)) => {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                        continue;
+                    }
+                    other => {
+                        return Err(other);
+                    }
                 }
-                other => Some(PayloadBuilderError::EvmExecutionError(other_err)),
-            })?;
+            }
         }
 
         //TODO: add transactions from the pool
@@ -189,7 +184,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 }
 
 #[derive(Debug)]
-pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
+pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
     receipts: Vec<Option<Receipt>>,
     executed_txs: Vec<TransactionSigned>,
     executed_senders: Vec<Address>,
@@ -197,17 +192,16 @@ pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
     block_gas_limit: u64,
     base_fee: u64,
     cumulative_gas_used: u64,
-    initialized_cfg: CfgEnvWithHandlerCfg,
-    initialized_block_env: BlockEnv,
     evm_config: EvmConfig,
+    payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
 }
 
-impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
+impl<'a, EvmConfig> OptimismBlockAttributes<'a, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
     pub fn new(
-        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
     ) -> Self {
         let attributes = &payload_config.attributes;
@@ -235,9 +229,8 @@ where
             block_gas_limit,
             base_fee,
             cumulative_gas_used: 0,
-            initialized_cfg: payload_config.initialized_cfg.clone(),
-            initialized_block_env,
             evm_config,
+            payload_config,
         }
     }
 
@@ -247,8 +240,7 @@ where
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
-        DB: revm::Database,
-        DB::Error: Display,
+        DB: revm::Database<Error = ProviderError>,
     {
         // Payload attributes transactions should never contain blob transactions.
         if sequencer_tx.value().is_eip4844() {
@@ -282,56 +274,41 @@ where
                 ))
             })?;
 
-        // let result_and_state = evm_transact(
-        //     &sequencer_tx,
-        //     self.initialized_cfg.clone(),
-        //     self.initialized_block_env.clone(),
-        //     self.evm_config.clone(),
-        //     db,
-        // )
-        // .map_err(|err| PayloadBuilderError::EvmExecutionError(err))?;
-
-        let result_and_state = evm_transact(
+        let ResultAndState { result, state } = evm_transact(
             &sequencer_tx,
-            self.initialized_cfg.clone(),
-            self.initialized_block_env.clone(),
+            self.payload_config.initialized_cfg.clone(),
+            self.payload_config.initialized_block_env.clone(),
             self.evm_config.clone(),
             db,
-        ).map_err(PayloadBuilderError::EvmExecutionError)?;
+        )
+        .map_err(PayloadBuilderError::EvmExecutionError)?;
 
-        // // to release the db reference drop evm.
-        // drop(evm);
-        // // commit changes
-        // db.commit(state);
+        // commit changes
+        db.commit(state);
 
-        // let gas_used = result.gas_used();
+        self.cumulative_gas_used += result.gas_used();
 
-        // // add gas used by the transaction to cumulative gas used, before creating the receipt
-        // cumulative_gas_used += gas_used;
+        let receipt = Receipt {
+            tx_type: sequencer_tx.tx_type(),
+            success: result.is_success(),
+            cumulative_gas_used: self.cumulative_gas_used,
+            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            deposit_nonce: depositor.map(|account| account.nonce),
+            deposit_receipt_version: self
+                .payload_config
+                .chain_spec
+                .is_fork_active_at_timestamp(
+                    OptimismHardfork::Canyon,
+                    self.payload_config.attributes.payload_attributes.timestamp,
+                )
+                .then_some(1),
+        };
 
-        // // Push transaction changeset and calculate header bloom filter for receipt.
-        // receipts.push(Some(Receipt {
-        //     tx_type: sequencer_tx.tx_type(),
-        //     success: result.is_success(),
-        //     cumulative_gas_used,
-        //     logs: result.into_logs().into_iter().map(Into::into).collect(),
-        //     deposit_nonce: depositor.map(|account| account.nonce),
-        //     // The deposit receipt version was introduced in Canyon to indicate an update to how
-        //     // receipt hashes should be computed when set. The state transition process
-        //     // ensures this is only set for post-Canyon deposit transactions.
-        //     deposit_receipt_version: chain_spec
-        //         .is_fork_active_at_timestamp(
-        //             OptimismHardfork::Canyon,
-        //             attributes.payload_attributes.timestamp,
-        //         )
-        //         .then_some(1),
-        // }));
+        self.receipts.push(Some(receipt));
+        self.executed_senders.push(sequencer_tx.signer());
+        self.executed_txs.push(sequencer_tx.into_signed());
 
-        // // append sender and transaction to the respective lists
-        // executed_senders.push(sequencer_tx.signer());
-        // executed_txs.push(sequencer_tx.into_signed());
-
-        todo!()
+        Ok(())
     }
 }
 
@@ -394,8 +371,7 @@ fn evm_transact<EvmConfig, DB>(
     db: &mut revm::State<DB>,
 ) -> Result<ResultAndState, EVMError<ProviderError>>
 where
-    DB: revm::Database,
-    DB::Error: Display,
+    DB: revm::Database<Error = ProviderError>,
     EvmConfig: ConfigureEvm,
 {
     let env = EnvWithHandlerCfg::new_with_cfg_env(
@@ -406,7 +382,6 @@ where
     let mut evm = evm_config.evm_with_env(db, env);
 
     evm.transact()
-
 }
 
 /// Constructs an Ethereum transaction payload from the transactions sent through the
