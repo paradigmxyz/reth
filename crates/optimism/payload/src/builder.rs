@@ -87,7 +87,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
         self.init_pre_block_state(&config, evm_config, &mut db)?;
 
-        match self.construct_block(&config, pool, &mut db, cancel) {
+        match self.construct_block(args, &mut db) {
             Ok(outcome) => Ok(outcome),
             Err(PayloadBuilderError::BuildOutcomeCancelled) => Ok(BuildOutcome::Cancelled),
             Err(err) => Err(err),
@@ -148,30 +148,39 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         })
     }
 
-    fn construct_block<Pool, DB>(
+    fn construct_block<Pool, DB, Client>(
         &self,
-        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
-        pool: Pool,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
         db: &mut revm::State<DB>,
-        cancel: Cancelled,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm,
         Pool: TransactionPool,
         DB: revm::Database<Error = ProviderError>,
     {
+        let BuildArguments { pool, cached_reads, config, cancel, best_payload, .. } = args;
+
         let mut op_block_attributes =
-            OptimismBlockAttributes::new(&payload_config, self.evm_config.clone());
+            OptimismBlockAttributes::new(&config, self.evm_config.clone());
 
         // add sequencer transactions to block
         op_block_attributes.add_sequencer_transactions(
-            &payload_config.attributes.transactions,
+            &config.attributes.transactions,
             db,
             &cancel,
         )?;
 
         // add pooled transactions to block
         op_block_attributes.add_pooled_transactions(&pool, db, &cancel)?;
+
+        // check if we have a better block
+        if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
+            // can skip building the block
+            return Ok(BuildOutcome::Aborted {
+                fees: op_block_attributes.total_fees,
+                cached_reads,
+            });
+        }
 
         // TODO: into built payload
         todo!()
