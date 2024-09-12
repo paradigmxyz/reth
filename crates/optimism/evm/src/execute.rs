@@ -256,7 +256,6 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
-    #[allow(unused)]
     pub fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
@@ -385,7 +384,6 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
-    #[allow(unused)]
     pub fn state_mut(&mut self) -> &mut State<DB> {
         self.executor.state_mut()
     }
