@@ -13,10 +13,10 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, transaction::WithEncoded,
-    Address, Block, Header, IntoRecoveredTransaction, Receipt, TransactionSigned, TxType, B256,
-    EMPTY_OMMER_ROOT_HASH,
+    Address, Block, Header, IntoRecoveredTransaction, Receipt, TransactionSigned,
+    TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
 };
-use reth_provider::{StateProvider, StateProviderFactory};
+use reth_provider::{ProviderError, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
@@ -99,7 +99,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
-        DB: Database + DatabaseCommit,
+        DB: revm::Database,
         DB::Error: Display,
         EvmConfig: ConfigureEvm,
     {
@@ -170,13 +170,20 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
                 return Ok(BuildOutcome::Cancelled);
             }
 
-            op_block_attributes.add_sequencer_transaction(sequencer_tx, db);
+            // TODO: handle and check the result, continue if evmerror transaction
 
-            // TODO: add payload attributes txs
-
-            //TODO: add transactions from the pool
+        
+            let ResultAndState { result, state } =     op_block_attributes.add_sequencer_transaction(sequencer_tx, db)
+            .map_err(|err| match err {
+                EVMError::Transaction(inner_err) => {
+                    trace!(target: "payload_builder", %inner_err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                    None 
+                }
+                other => Some(PayloadBuilderError::EvmExecutionError(other_err)),
+            })?;
         }
 
+        //TODO: add transactions from the pool
         todo!()
     }
 }
@@ -240,7 +247,7 @@ where
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
-        DB: Database + DatabaseCommit,
+        DB: revm::Database,
         DB::Error: Display,
     {
         // Payload attributes transactions should never contain blob transactions.
@@ -275,30 +282,22 @@ where
                 ))
             })?;
 
-        // TODO: abstract into function
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
+        // let result_and_state = evm_transact(
+        //     &sequencer_tx,
+        //     self.initialized_cfg.clone(),
+        //     self.initialized_block_env.clone(),
+        //     self.evm_config.clone(),
+        //     db,
+        // )
+        // .map_err(|err| PayloadBuilderError::EvmExecutionError(err))?;
+
+        let result_and_state = evm_transact(
+            &sequencer_tx,
             self.initialized_cfg.clone(),
             self.initialized_block_env.clone(),
-            self.evm_config.tx_env(&sequencer_tx),
-        );
-
-        let mut evm = self.evm_config.evm_with_env(db, env);
-
-        // let ResultAndState { result, state } = match evm.transact() {
-        //     Ok(res) => res,
-        //     Err(err) => {
-        //         match err {
-        //             EVMError::Transaction(err) => {
-        //                 trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-        //                 continue;
-        //             }
-        //             err => {
-        //                 // this is an error that we should treat as fatal for this attempt
-        //                 return Err(PayloadBuilderError::EvmExecutionError(err));
-        //             }
-        //         }
-        //     }
-        // };
+            self.evm_config.clone(),
+            db,
+        ).map_err(PayloadBuilderError::EvmExecutionError)?;
 
         // // to release the db reference drop evm.
         // drop(evm);
@@ -387,6 +386,29 @@ where
     }
 }
 
+fn evm_transact<EvmConfig, DB>(
+    transaction: &TransactionSignedEcRecovered,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
+    evm_config: EvmConfig,
+    db: &mut revm::State<DB>,
+) -> Result<ResultAndState, EVMError<ProviderError>>
+where
+    DB: revm::Database,
+    DB::Error: Display,
+    EvmConfig: ConfigureEvm,
+{
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        initialized_cfg,
+        initialized_block_env,
+        evm_config.tx_env(transaction),
+    );
+    let mut evm = evm_config.evm_with_env(db, env);
+
+    evm.transact()
+
+}
+
 /// Constructs an Ethereum transaction payload from the transactions sent through the
 /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
 /// the payload attributes, the transaction pool will be ignored and the only transactions
@@ -396,7 +418,6 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 
-// NOTE: it seems we could make these functions impl on the struct itself?
 #[inline]
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
