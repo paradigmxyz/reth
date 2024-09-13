@@ -270,7 +270,7 @@ pub trait LoadState: EthApiTypes {
     {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id_or_latest(block_id)?;
-            let base_nonce = state
+            let nonce = state
                 .account_nonce(address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
@@ -281,15 +281,15 @@ pub trait LoadState: EthApiTypes {
                     .iter()
                     .map(|item| item.transaction.nonce())
                     .max()
-                    .unwrap_or(base_nonce);
+                    .unwrap_or(nonce);
 
                 let tx_count =
-                    highest_pool_nonce.max(base_nonce).checked_add(1).ok_or(Self::Error::from(
+                    nonce.max(highest_pool_nonce).checked_add(1).ok_or(Self::Error::from(
                         EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
                     ))?;
                 Ok(U256::from(tx_count))
             } else {
-                Ok(U256::from(base_nonce))
+                Ok(U256::from(nonce))
             }
         })
     }
