@@ -26,6 +26,7 @@ pub static OP_DEV: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
                 genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
                     .expect("Can't deserialize Dev testnet genesis json"),
                 genesis_hash: Some(DEV_GENESIS_HASH),
+                genesis_header: None,
                 paris_block_and_final_difficulty: Some((0, U256::from(0))),
                 hardforks: DEV_HARDFORKS.clone(),
                 base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),

@@ -24,6 +24,7 @@ pub static OP_SEPOLIA: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
             genesis_hash: Some(b256!(
                 "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
             )),
+            genesis_header: None,
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
             hardforks: OptimismHardfork::op_sepolia(),
             base_fee_params: BaseFeeParamsKind::Variable(

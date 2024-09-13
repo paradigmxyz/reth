@@ -39,6 +39,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: Some(MAINNET_GENESIS_HASH),
+        genesis_header: None,
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
@@ -66,6 +67,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
         genesis_hash: Some(SEPOLIA_GENESIS_HASH),
+        genesis_header: None,
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
         hardforks: EthereumHardfork::sepolia().into(),
@@ -90,6 +92,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(HOLESKY_GENESIS_HASH),
+        genesis_header: None,
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         hardforks: EthereumHardfork::holesky().into(),
         deposit_contract: Some(DepositContract::new(
@@ -184,6 +187,14 @@ pub struct ChainSpec {
     /// is also known ahead of time, and this will be `Some`.
     pub genesis_hash: Option<B256>,
 
+    /// The header of the genesis block.
+    ///
+    /// If this is set to `None`, one will be constructed based on what is in the genesis file, and
+    /// what forks are active. Most networks do not need to set this, as it is a temporary
+    /// workaround for experimenting on OP-stack.
+    // TODO(onbjerg): Remove this once we find a better solution for Alphanet
+    pub genesis_header: Option<Header>,
+
     /// The genesis block
     pub genesis: Genesis,
 
@@ -212,6 +223,7 @@ impl Default for ChainSpec {
         Self {
             chain: Default::default(),
             genesis_hash: Default::default(),
+            genesis_header: Default::default(),
             genesis: Default::default(),
             paris_block_and_final_difficulty: Default::default(),
             hardforks: Default::default(),
@@ -276,6 +288,10 @@ impl ChainSpec {
 
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> Header {
+        if let Some(header) = &self.genesis_header {
+            return header.clone()
+        }
+
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         let base_fee_per_gas = self.initial_base_fee();
 
@@ -699,6 +715,7 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
+            genesis_header: None,
             hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
@@ -944,6 +961,7 @@ impl ChainSpecBuilder {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
+            genesis_header: None,
             hardforks: self.hardforks,
             paris_block_and_final_difficulty,
             deposit_contract: None,
@@ -2316,6 +2334,7 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
+            genesis_header: None,
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Frontier.boxed(),
                 ForkCondition::Never,
@@ -2334,6 +2353,7 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
+            genesis_header: None,
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Shanghai.boxed(),
                 ForkCondition::Never,

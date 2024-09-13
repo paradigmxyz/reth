@@ -635,6 +635,7 @@ mod tests {
             },
             hardforks: Default::default(),
             genesis_hash: None,
+            genesis_header: None,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()

@@ -26,6 +26,7 @@ pub static OP_MAINNET: Lazy<Arc<OpChainSpec>> = Lazy::new(|| {
             genesis_hash: Some(b256!(
                 "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
             )),
+            genesis_header: None,
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
             hardforks: OptimismHardfork::op_mainnet(),
             base_fee_params: BaseFeeParamsKind::Variable(
