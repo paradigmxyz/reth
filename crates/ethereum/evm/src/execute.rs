@@ -25,13 +25,19 @@ use reth_primitives::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
-    batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
-    state_change::post_block_balance_increments, Evm, State,
+    batch::BlockBatchRecord,
+    db::{
+        states::{bundle_state::BundleRetention, StorageSlot},
+        BundleAccount, State,
+    },
+    state_change::post_block_balance_increments,
+    Evm,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
+use std::collections::hash_map::Entry;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -377,6 +383,88 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
+}
+
+/// An executor that retains all cache state from execution in its bundle state.
+#[derive(Debug)]
+pub struct BlockAccessListExecutor<EvmConfig, DB> {
+    /// The executor used to execute single blocks
+    ///
+    /// All state changes are committed to the [State].
+    executor: EthBlockExecutor<EvmConfig, DB>,
+}
+
+impl<EvmConfig, DB> Executor<DB> for BlockAccessListExecutor<EvmConfig, DB>
+where
+    EvmConfig: ConfigureEvm,
+    DB: Database<Error: Into<ProviderError> + Display>,
+{
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = BlockExecutionOutput<Receipt>;
+    type Error = BlockExecutionError;
+
+    /// Executes the block and commits the changes to the internal state.
+    ///
+    /// Returns the receipts of the transactions in the block.
+    ///
+    /// This also returns the accounts from the internal state cache in the bundle state, allowing
+    /// access to not only the state that changed during execution, but also the state accessed
+    /// during execution.
+    ///
+    /// Returns an error if the block could not be executed or failed verification.
+    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+        let EthExecuteOutput { receipts, requests, gas_used } =
+            self.executor.execute_without_verification(block, total_difficulty)?;
+
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.executor.state.merge_transitions(BundleRetention::Reverts);
+
+        // now, ensure each account from the state is included in the bundle state
+        let mut bundle_state = self.executor.state.take_bundle();
+        for (address, account) in self.executor.state.cache.accounts {
+            // convert all slots, insert all slots
+            let account_info = account.account_info();
+            let account_storage = account.account.map(|a| a.storage).unwrap_or_default();
+
+            match bundle_state.state.entry(address) {
+                Entry::Vacant(entry) => {
+                    // we have to add the entire account here
+                    let extracted_storage = account_storage
+                        .into_iter()
+                        .map(|(k, v)| {
+                            (k, StorageSlot { previous_or_original_value: v, present_value: v })
+                        })
+                        .collect();
+
+                    let bundle_account = BundleAccount {
+                        info: account_info.clone(),
+                        original_info: account_info,
+                        storage: extracted_storage,
+                        status: account.status,
+                    };
+                    entry.insert(bundle_account);
+                }
+                Entry::Occupied(mut entry) => {
+                    // only add slots that are unchanged
+                    let current_account = entry.get_mut();
+
+                    // iterate over all storage slots, checking keys that are not in the bundle
+                    // state
+                    for (k, v) in account_storage {
+                        if let Entry::Vacant(storage_entry) = current_account.storage.entry(k) {
+                            storage_entry.insert(StorageSlot {
+                                previous_or_original_value: v,
+                                present_value: v,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(BlockExecutionOutput { state: bundle_state, receipts, requests, gas_used })
     }
 }
 
