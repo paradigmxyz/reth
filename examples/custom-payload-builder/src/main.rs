@@ -22,7 +22,7 @@ use reth::{
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
 use reth_node_api::NodeTypesWithEngine;
-use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthereumNode};
+use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
 
 pub mod generator;
@@ -57,7 +57,9 @@ where
             ctx.task_executor().clone(),
             payload_job_config,
             ctx.chain_spec().clone(),
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::default(),
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
+                ctx.chain_spec(),
+            )),
         );
 
         let (payload_service, payload_builder) =

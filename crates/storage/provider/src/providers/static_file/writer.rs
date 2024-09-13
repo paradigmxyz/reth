@@ -313,7 +313,7 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<BlockNumber> {
         let segment = self.writer.user_header().segment();
 
-        self.check_next_block_number(expected_block_number, segment)?;
+        self.check_next_block_number(expected_block_number)?;
 
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
@@ -347,11 +347,7 @@ impl StaticFileProviderRW {
 
     /// Verifies if the incoming block number matches the next expected block number
     /// for a static file. This ensures data continuity when adding new blocks.
-    fn check_next_block_number(
-        &self,
-        expected_block_number: u64,
-        segment: StaticFileSegment,
-    ) -> ProviderResult<()> {
+    fn check_next_block_number(&self, expected_block_number: u64) -> ProviderResult<()> {
         // The next static file block number can be found by checking the one after block_end.
         // However if it's a new file that hasn't been added any data, its block range will actually
         // be None. In that case, the next block will be found on `expected_block_start`.
@@ -364,7 +360,7 @@ impl StaticFileProviderRW {
 
         if expected_block_number != next_static_file_block {
             return Err(ProviderError::UnexpectedStaticFileBlockNumber(
-                segment,
+                self.writer.user_header().segment(),
                 expected_block_number,
                 next_static_file_block,
             ))
@@ -379,15 +375,10 @@ impl StaticFileProviderRW {
     ///
     /// # Note
     /// Commits to the configuration file at the end.
-    fn truncate(
-        &mut self,
-        segment: StaticFileSegment,
-        num_rows: u64,
-        last_block: Option<u64>,
-    ) -> ProviderResult<()> {
+    fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
         while remaining_rows > 0 {
-            let len = match segment {
+            let len = match self.writer.user_header().segment() {
                 StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
                 }
@@ -482,12 +473,9 @@ impl StaticFileProviderRW {
     /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
         &mut self,
-        segment: StaticFileSegment,
         tx_num: TxNumber,
         value: V,
     ) -> ProviderResult<TxNumber> {
-        debug_assert!(self.writer.user_header().segment() == segment);
-
         if self.writer.user_header().tx_range().is_none() {
             self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         } else {
@@ -547,7 +535,8 @@ impl StaticFileProviderRW {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
-        let result = self.append_with_tx_number(StaticFileSegment::Transactions, tx_num, tx)?;
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
+        let result = self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -574,7 +563,8 @@ impl StaticFileProviderRW {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
-        let result = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
+        let result = self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -595,6 +585,8 @@ impl StaticFileProviderRW {
         I: Iterator<Item = Result<(TxNumber, R), ProviderError>>,
         R: Borrow<Receipt>,
     {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
+
         let mut receipts_iter = receipts.into_iter().peekable();
         // If receipts are empty, we can simply return None
         if receipts_iter.peek().is_none() {
@@ -610,8 +602,7 @@ impl StaticFileProviderRW {
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
-            tx_number =
-                self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt.borrow())?;
+            tx_number = self.append_with_tx_number(tx_num, receipt.borrow())?;
             count += 1;
         }
 
@@ -689,10 +680,9 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Transactions;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
 
-        self.truncate(segment, to_delete, Some(last_block))?;
+        self.truncate(to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -713,10 +703,9 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Receipts;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
 
-        self.truncate(segment, to_delete, Some(last_block))?;
+        self.truncate(to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -733,10 +722,9 @@ impl StaticFileProviderRW {
     fn prune_header_data(&mut self, to_delete: u64) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Headers;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        self.truncate(segment, to_delete, None)?;
+        self.truncate(to_delete, None)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(

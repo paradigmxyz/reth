@@ -25,7 +25,7 @@ alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-serde.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"], optional = true }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "serde", "jsonrpsee-types"], optional = true }
 
 # optimism
 op-alloy-rpc-types.workspace = true

@@ -1,5 +1,6 @@
+use alloy_primitives::{Bytes, B256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, Bytes, B256};
+use reth_primitives::BlockId;
 use reth_rpc_types::{
     state::StateOverride,
     trace::{

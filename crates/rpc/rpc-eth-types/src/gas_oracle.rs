@@ -3,8 +3,9 @@
 
 use std::fmt::{self, Debug, Formatter};
 
+use alloy_primitives::{B256, U256};
 use derive_more::{Deref, DerefMut, From, Into};
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
 use reth_rpc_server_types::constants;
 use reth_rpc_types::BlockId;
 use reth_storage_api::BlockReaderIdExt;

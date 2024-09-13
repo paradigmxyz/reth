@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+use alloy_primitives::{BlockNumber, B256, U256};
 use futures::Future;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -18,9 +19,8 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockNumber, Header, IntoRecoveredTransaction, Receipt, Requests,
-    SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
+    SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,

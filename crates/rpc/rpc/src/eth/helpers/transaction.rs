@@ -52,9 +52,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::{hex_literal::hex, Bytes};
+    use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
+    use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
     use reth_rpc_eth_types::{
@@ -73,8 +75,8 @@ mod tests {
 
         let pool = testing_pool();
 
-        let evm_config = EthEvmConfig::default();
-        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);
+        let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
+        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config.clone());
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(

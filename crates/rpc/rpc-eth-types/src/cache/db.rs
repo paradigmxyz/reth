@@ -2,8 +2,8 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
+use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_primitives::{Address, B256, U256};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_storage_api::StateProvider;
 use reth_trie::HashedStorage;
@@ -75,7 +75,7 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
         &self,
         overlay: reth_trie::HashedPostState,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, reth_primitives::Bytes>> {
+    ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, alloy_primitives::Bytes>> {
         self.0.witness(overlay, target)
     }
 }
@@ -92,15 +92,15 @@ impl<'a> reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'a> {
 impl<'a> reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'a> {
     fn block_hash(
         &self,
-        block_number: reth_primitives::BlockNumber,
+        block_number: alloy_primitives::BlockNumber,
     ) -> reth_errors::ProviderResult<Option<B256>> {
         self.0.block_hash(block_number)
     }
 
     fn canonical_hashes_range(
         &self,
-        start: reth_primitives::BlockNumber,
-        end: reth_primitives::BlockNumber,
+        start: alloy_primitives::BlockNumber,
+        end: alloy_primitives::BlockNumber,
     ) -> reth_errors::ProviderResult<Vec<B256>> {
         self.0.canonical_hashes_range(start, end)
     }
@@ -145,8 +145,8 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
     fn storage(
         &self,
         account: revm_primitives::Address,
-        storage_key: reth_primitives::StorageKey,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives::StorageValue>> {
+        storage_key: alloy_primitives::StorageKey,
+    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
         self.0.storage(account, storage_key)
     }
 }

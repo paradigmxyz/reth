@@ -1,8 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
+use alloy_primitives::B256;
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::B256;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},

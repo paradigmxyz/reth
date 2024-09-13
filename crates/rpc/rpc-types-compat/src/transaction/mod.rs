@@ -1,10 +1,11 @@
 //! Compatibility functions for rpc `Transaction` type.
 
+use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
     TransactionInfo,
 };
-use reth_primitives::{Address, TransactionSignedEcRecovered, TxKind, TxType};
+use reth_primitives::{TransactionSignedEcRecovered, TxType};
 use reth_rpc_types::{Transaction, WithOtherFields};
 use signature::from_primitive_signature;
 pub use typed::*;

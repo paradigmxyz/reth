@@ -45,9 +45,12 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::node::{
-    EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
-    EthereumPoolBuilder,
+use reth_node_ethereum::{
+    node::{
+        EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+        EthereumPoolBuilder,
+    },
+    EthEvmConfig,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -287,7 +290,10 @@ where
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        reth_ethereum_payload_builder::EthereumPayloadBuilder::default().try_build(BuildArguments {
+        reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
+            chain_spec.clone(),
+        ))
+        .try_build(BuildArguments {
             client,
             pool,
             cached_reads,

@@ -11,7 +11,7 @@ use reth_node_types::NodeTypesWithDB;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
-    DatabaseProviderFactory<N::DB>
+    DatabaseProviderFactory<DB = N::DB>
     + StaticFileProviderFactory
     + BlockReaderIdExt
     + AccountReader
@@ -29,7 +29,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 }
 
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
-    T: DatabaseProviderFactory<N::DB>
+    T: DatabaseProviderFactory<DB = N::DB>
         + StaticFileProviderFactory
         + BlockReaderIdExt
         + AccountReader

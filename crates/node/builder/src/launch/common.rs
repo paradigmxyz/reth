@@ -522,13 +522,13 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())?;
+        init_genesis(self.provider_factory())?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())
+        init_genesis(self.provider_factory())
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -620,7 +620,7 @@ where
     /// If the database is empty, returns the genesis block.
     pub fn lookup_head(&self) -> eyre::Result<Head> {
         self.node_config()
-            .lookup_head(self.provider_factory().clone())
+            .lookup_head(self.provider_factory())
             .wrap_err("the head block is missing")
     }
 
@@ -671,11 +671,11 @@ where
         let consensus: Arc<dyn Consensus> = Arc::new(components.consensus().clone());
 
         let tree_externals = TreeExternals::new(
-            self.provider_factory().clone(),
+            self.provider_factory().clone().with_prune_modes(self.prune_modes()),
             consensus.clone(),
             components.block_executor().clone(),
         );
-        let tree = BlockchainTree::new(tree_externals, *self.tree_config(), self.prune_modes())?
+        let tree = BlockchainTree::new(tree_externals, *self.tree_config())?
             .with_sync_metrics_tx(self.sync_metrics_tx())
             // Note: This is required because we need to ensure that both the components and the
             // tree are using the same channel for canon state notifications. This will be removed
@@ -744,7 +744,7 @@ where
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<T::Types> {
+    pub fn static_file_producer(&self) -> StaticFileProducer<ProviderFactory<T::Types>> {
         StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 

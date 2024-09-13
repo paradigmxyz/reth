@@ -19,7 +19,7 @@ reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
-reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -39,7 +39,6 @@ reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-optimism-chainspec = { workspace = true, optional = true }
-reth-node-types.workspace = true
 
 # ethereum
 alloy-genesis.workspace = true
@@ -85,7 +84,6 @@ tempfile.workspace = true
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
     "dep:reth-optimism-chainspec",

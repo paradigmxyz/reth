@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
+use alloy_primitives::{Bytes, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -7,7 +8,7 @@ use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{BlockId, Bytes, Header, B256, U256};
+use reth_primitives::{BlockId, Header};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;

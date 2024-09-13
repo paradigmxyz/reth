@@ -1,12 +1,13 @@
 #![allow(missing_docs)]
 
-// We use jemalloc for performance reasons.
-#[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-/// clap [Args] for Engine related arguments.
-use clap::Args;
+use clap::{Args, Parser};
+use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
+use reth_node_builder::EngineNodeLauncher;
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_provider::providers::BlockchainProvider2;
 
 /// Parameters for configuring the engine
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -18,12 +19,6 @@ pub struct EngineArgs {
 }
 
 fn main() {
-    use clap::Parser;
-    use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
-    use reth_node_builder::EngineNodeLauncher;
-    use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-    use reth_provider::providers::BlockchainProvider2;
-
     reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.

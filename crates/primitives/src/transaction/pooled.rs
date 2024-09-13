@@ -7,14 +7,12 @@ use crate::{
     TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxHash,
     TxLegacy, B256, EIP4844_TX_TYPE_ID,
 };
+use alloc::vec::Vec;
 use alloy_consensus::{SignableTransaction, TxEip4844WithSidecar};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE};
 use bytes::Buf;
 use derive_more::{AsRef, Deref};
 use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// A response to `GetPooledTransactions`. This can include either a blob transaction, or a
 /// non-4844 signed transaction.
