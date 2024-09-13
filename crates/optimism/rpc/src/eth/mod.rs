@@ -1,7 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
 pub mod receipt;
-pub mod rpc;
 pub mod transaction;
 
 mod block;
@@ -38,7 +37,7 @@ use reth_tasks::{
 };
 use reth_transaction_pool::TransactionPool;
 
-use crate::{eth::rpc::SequencerClient, OpEthApiError};
+use crate::{OpEthApiError, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
