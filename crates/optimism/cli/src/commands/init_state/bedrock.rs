@@ -1,5 +1,5 @@
 use alloy_primitives::B256;
-use reth_db::{ Database};
+use reth_db::Database;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{
     BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, U256,
