@@ -91,8 +91,8 @@ pub struct DebugArgs {
 /// Create a [`InvalidBlockSelection`] from a selection.
 ///
 /// ```
-/// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
-/// let config: InvalidBlockSelection = vec![InvalidBlockHook::Witness].into();
+/// use reth_node_core::args::{InvalidBlockHookType, InvalidBlockSelection};
+/// let config: InvalidBlockSelection = vec![InvalidBlockHookType::Witness].into();
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref)]
 pub struct InvalidBlockSelection(HashSet<InvalidBlockHookType>);
@@ -106,34 +106,34 @@ impl InvalidBlockSelection {
     ///
     /// # Example
     ///
-    /// Create a selection from the [`InvalidBlockHook`] string identifiers
+    /// Create a selection from the [`InvalidBlockHookType`] string identifiers
     ///
     /// ```
-    /// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
+    /// use reth_node_core::args::{InvalidBlockHookType, InvalidBlockSelection};
     /// let selection = vec!["witness", "prestate", "opcode"];
     /// let config = InvalidBlockSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(
     ///     config,
     ///     InvalidBlockSelection::from([
-    ///         InvalidBlockHook::Witness,
-    ///         InvalidBlockHook::PreState,
-    ///         InvalidBlockHook::Opcode
+    ///         InvalidBlockHookType::Witness,
+    ///         InvalidBlockHookType::PreState,
+    ///         InvalidBlockHookType::Opcode
     ///     ])
     /// );
     /// ```
     ///
-    /// Create a unique selection from the [`InvalidBlockHook`] string identifiers
+    /// Create a unique selection from the [`InvalidBlockHookType`] string identifiers
     ///
     /// ```
-    /// use reth_node_core::args::{InvalidBlockHook, InvalidBlockSelection};
+    /// use reth_node_core::args::{InvalidBlockHookType, InvalidBlockSelection};
     /// let selection = vec!["witness", "prestate", "opcode", "witness", "prestate"];
     /// let config = InvalidBlockSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(
     ///     config,
     ///     InvalidBlockSelection::from([
-    ///         InvalidBlockHook::Witness,
-    ///         InvalidBlockHook::PreState,
-    ///         InvalidBlockHook::Opcode
+    ///         InvalidBlockHookType::Witness,
+    ///         InvalidBlockHookType::PreState,
+    ///         InvalidBlockHookType::Opcode
     ///     ])
     /// );
     /// ```
@@ -145,7 +145,7 @@ impl InvalidBlockSelection {
         selection.into_iter().map(TryInto::try_into).collect()
     }
 
-    /// Clones the set of configured [`InvalidBlockHook`].
+    /// Clones the set of configured [`InvalidBlockHookType`].
     pub fn to_selection(&self) -> HashSet<InvalidBlockHookType> {
         self.0.clone()
     }
