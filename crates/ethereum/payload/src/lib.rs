@@ -63,12 +63,6 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     }
 }
 
-impl Default for EthereumPayloadBuilder {
-    fn default() -> Self {
-        Self::new(EthEvmConfig::default())
-    }
-}
-
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
@@ -336,7 +330,7 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+    db.merge_transitions(BundleRetention::Reverts);
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),

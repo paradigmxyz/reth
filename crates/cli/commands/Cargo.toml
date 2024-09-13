@@ -38,7 +38,7 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
-reth-static-file-types.workspace = true
+reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }

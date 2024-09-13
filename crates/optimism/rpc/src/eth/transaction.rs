@@ -18,7 +18,7 @@ use reth_rpc_types::TransactionInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use revm::L1BlockInfo;
 
-use crate::{eth::rpc::SequencerClient, OpEthApi};
+use crate::{OpEthApi, SequencerClient};
 
 impl<N, Eth> EthTransactions for OpEthApi<N, Eth>
 where
@@ -84,14 +84,17 @@ impl<N, Eth> OpEthApi<N, Eth>
 where
     N: FullNodeComponents,
 {
-    /// Sets a `SequencerClient` for `eth_sendRawTransaction` to forward transactions to.
-    pub fn set_sequencer_client(&self, sequencer_client: SequencerClient) {
-        *self.sequencer_client.write() = Some(sequencer_client);
+    /// Sets a [`SequencerClient`] for `eth_sendRawTransaction` to forward transactions to.
+    pub fn set_sequencer_client(
+        &self,
+        sequencer_client: SequencerClient,
+    ) -> Result<(), tokio::sync::SetError<SequencerClient>> {
+        self.sequencer_client.set(sequencer_client)
     }
 
-    /// Returns the `SequencerClient` if one is set.
+    /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
-        self.sequencer_client.read().clone()
+        self.sequencer_client.get().cloned()
     }
 }
 

@@ -19,7 +19,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine, PayloadBuilderAttributes};
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     revm_primitives::KzgSettings, Address, BlobTransaction, BlobTransactionSidecar, Bytes,
@@ -30,7 +30,6 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_prune::PruneModes;
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
@@ -131,11 +130,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(
-            tree_externals,
-            BlockchainTreeConfig::default(),
-            PruneModes::none(),
-        )?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
@@ -243,7 +238,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             None,
         );
 
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         match payload_builder.try_build(args)? {
             BuildOutcome::Better { payload, .. } => {

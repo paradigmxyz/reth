@@ -1,7 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
 pub mod receipt;
-pub mod rpc;
 pub mod transaction;
 
 mod block;
@@ -38,8 +37,9 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use tokio::sync::OnceCell;
 
-use crate::{eth::rpc::SequencerClient, OpEthApiError, OpTxBuilder};
+use crate::{OpEthApiError, OpTxBuilder, SequencerClient};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -61,9 +61,12 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
 pub struct OpEthApi<N: FullNodeComponents, Eth> {
+    /// Gateway to node's core components.
     #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
-    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: OnceCell<SequencerClient>,
     /// L1 RPC type builders.
     _eth_ty_builders: PhantomData<Eth>,
 }
@@ -92,7 +95,7 @@ impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
 
         Self {
             inner: Arc::new(inner),
-            sequencer_client: Arc::new(parking_lot::RwLock::new(None)),
+            sequencer_client: OnceCell::new(),
             _eth_ty_builders: PhantomData,
         }
     }

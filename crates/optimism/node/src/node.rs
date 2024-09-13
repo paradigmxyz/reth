@@ -16,6 +16,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     BuilderContext, Node, PayloadBuilderConfig,
 };
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -67,10 +68,7 @@ impl OptimismNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
-            .payload(OptimismPayloadBuilder::new(
-                compute_pending_block,
-                OptimismEvmConfig::default(),
-            ))
+            .payload(OptimismPayloadBuilder::new(compute_pending_block))
             .network(OptimismNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -137,8 +135,9 @@ where
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let chain_spec = ctx.chain_spec();
-        let evm_config = OptimismEvmConfig::default();
-        let executor = OpExecutorProvider::new(chain_spec, evm_config);
+        let evm_config =
+            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() }));
+        let executor = OpExecutorProvider::new(chain_spec, evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -226,7 +225,7 @@ where
 
 /// A basic optimism payload service builder
 #[derive(Debug, Default, Clone)]
-pub struct OptimismPayloadBuilder<EVM = OptimismEvmConfig> {
+pub struct OptimismPayloadBuilder {
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
     /// this flag enables computing of the pending block
@@ -236,32 +235,30 @@ pub struct OptimismPayloadBuilder<EVM = OptimismEvmConfig> {
     /// will use the payload attributes from the latest block. Note
     /// that this flag is not yet functional.
     pub compute_pending_block: bool,
-    /// The EVM configuration to use for the payload builder.
-    pub evm_config: EVM,
 }
 
-impl<EVM> OptimismPayloadBuilder<EVM> {
-    /// Create a new instance with the given `compute_pending_block` flag and evm config.
-    pub const fn new(compute_pending_block: bool, evm_config: EVM) -> Self {
-        Self { compute_pending_block, evm_config }
+impl OptimismPayloadBuilder {
+    /// Create a new instance with the given `compute_pending_block` flag.
+    pub const fn new(compute_pending_block: bool) -> Self {
+        Self { compute_pending_block }
     }
-}
 
-impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder<EVM>
-where
-    Node: FullNodeTypes<
-        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
-    >,
-    Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
-{
-    async fn spawn_payload_service(
+    /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
+    pub fn spawn<Node, Evm, Pool>(
         self,
+        evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
+    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>>
+    where
+        Node: FullNodeTypes<
+            Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+        >,
+        Pool: TransactionPool + Unpin + 'static,
+        Evm: ConfigureEvm,
+    {
         let payload_builder =
-            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.evm_config)
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(evm_config)
                 .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
@@ -286,6 +283,26 @@ where
         ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
         Ok(payload_builder)
+    }
+}
+
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuilder
+where
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
+    >,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    async fn spawn_payload_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+    ) -> eyre::Result<PayloadBuilderHandle<OptimismEngineTypes>> {
+        self.spawn(
+            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*ctx.chain_spec()).clone() })),
+            ctx,
+            pool,
+        )
     }
 }
 
