@@ -87,11 +87,24 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
         self.init_pre_block_state(&config, evm_config, &mut db)?;
 
-        match self.construct_block(args, &mut db) {
+        let op_block_attributes = match self
+            .construct_block_attributes(pool, &config, &mut db, &cancel)
+        {
             Ok(outcome) => Ok(outcome),
-            Err(PayloadBuilderError::BuildOutcomeCancelled) => Ok(BuildOutcome::Cancelled),
+            Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
             Err(err) => Err(err),
+        }?;
+
+        // check if we have a better block
+        if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
+            // can skip building the block
+            return Ok(BuildOutcome::Aborted {
+                fees: op_block_attributes.total_fees,
+                cached_reads,
+            });
         }
+
+        todo!()
     }
 
     pub fn init_pre_block_state<DB>(
@@ -148,24 +161,24 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         })
     }
 
-    fn construct_block<Pool, DB, Client>(
+    fn construct_block_attributes<Pool, DB>(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        pool: Pool,
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         db: &mut revm::State<DB>,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+        cancel: &Cancelled,
+    ) -> Result<OptimismBlockAttributes<EvmConfig>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm,
         Pool: TransactionPool,
         DB: revm::Database<Error = ProviderError>,
     {
-        let BuildArguments { pool, cached_reads, config, cancel, best_payload, .. } = args;
-
         let mut op_block_attributes =
-            OptimismBlockAttributes::new(&config, self.evm_config.clone());
+            OptimismBlockAttributes::new(payload_config, self.evm_config.clone());
 
         // add sequencer transactions to block
         op_block_attributes.add_sequencer_transactions(
-            &config.attributes.transactions,
+            &payload_config.attributes.transactions,
             db,
             &cancel,
         )?;
@@ -173,22 +186,12 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         // add pooled transactions to block
         op_block_attributes.add_pooled_transactions(&pool, db, &cancel)?;
 
-        // check if we have a better block
-        if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
-            // can skip building the block
-            return Ok(BuildOutcome::Aborted {
-                fees: op_block_attributes.total_fees,
-                cached_reads,
-            });
-        }
-
-        // TODO: into built payload
-        todo!()
+        Ok(op_block_attributes)
     }
 }
 
 #[derive(Debug)]
-pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
+pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
     receipts: Vec<Option<Receipt>>,
     executed_txs: Vec<TransactionSigned>,
     executed_senders: Vec<Address>,
@@ -198,15 +201,18 @@ pub struct OptimismBlockAttributes<'a, EvmConfig: ConfigureEvm> {
     total_fees: U256,
     cumulative_gas_used: u64,
     evm_config: EvmConfig,
-    payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
+    initialized_block_env: BlockEnv,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    chain_spec: Arc<ChainSpec>,
+    builder_attributes: OptimismPayloadBuilderAttributes,
 }
 
-impl<'a, EvmConfig> OptimismBlockAttributes<'a, EvmConfig>
+impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
     pub fn new(
-        payload_config: &'a PayloadConfig<OptimismPayloadBuilderAttributes>,
+        payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
     ) -> Self {
         let attributes = &payload_config.attributes;
@@ -236,7 +242,10 @@ where
             total_fees: U256::ZERO,
             cumulative_gas_used: 0,
             evm_config,
-            payload_config,
+            initialized_block_env,
+            initialized_cfg: payload_config.initialized_cfg.clone(),
+            chain_spec: payload_config.chain_spec.clone(),
+            builder_attributes: attributes.clone(),
         }
     }
 
@@ -300,16 +309,13 @@ where
         DB: revm::Database<Error = ProviderError>,
         Pool: TransactionPool,
     {
-        if self.payload_config.attributes.no_tx_pool {
+        if self.builder_attributes.no_tx_pool {
             return Ok(());
         }
 
         let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
             self.base_fee,
-            self.payload_config
-                .initialized_block_env
-                .get_blob_gasprice()
-                .map(|gasprice| gasprice as u64),
+            self.initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
         ));
 
         while let Some(pool_tx) = best_txs.next() {
@@ -367,8 +373,8 @@ where
 
         let execution_result = evm_transact_commit(
             tx,
-            self.payload_config.initialized_cfg.clone(),
-            self.payload_config.initialized_block_env.clone(),
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
             self.evm_config.clone(),
             db,
         )
@@ -383,11 +389,10 @@ where
             logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
             deposit_nonce: depositor.map(|account| account.nonce),
             deposit_receipt_version: self
-                .payload_config
                 .chain_spec
                 .is_fork_active_at_timestamp(
                     OptimismHardfork::Canyon,
-                    self.payload_config.attributes.payload_attributes.timestamp,
+                    self.builder_attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
         };
@@ -409,8 +414,8 @@ where
     {
         let execution_result = evm_transact_commit(
             tx,
-            self.payload_config.initialized_cfg.clone(),
-            self.payload_config.initialized_block_env.clone(),
+            self.initialized_cfg.clone(),
+            self.initialized_block_env.clone(),
             self.evm_config.clone(),
             db,
         )
