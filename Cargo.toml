@@ -274,6 +274,11 @@ inherits = "release"
 debug = 2
 strip = false
 
+# `instrumentation` profile enables unstable tokio features
+[profile.instrumentation]
+inherits = "profiling"
+rustflags = ["--cfg", "tokio_unstable"]
+
 # Make sure debug symbols are in the bench profile
 [profile.bench]
 inherits = "profiling"
