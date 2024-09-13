@@ -10604,7 +10604,8 @@ dependencies = [
 [[package]]
 name = "tracy-client"
 version = "0.17.3"
-source = "git+https://github.com/danipopes/rust_tracy_client?branch=custom-demangler#36655950b6a68d40e8b946bd0cdfb55efcd4d701"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373db47331c3407b343538df77eea2516884a0b126cdfb4b135acfd400015dd7"
 dependencies = [
  "loom",
  "once_cell",
@@ -10615,7 +10616,8 @@ dependencies = [
 [[package]]
 name = "tracy-client-sys"
 version = "0.24.0"
-source = "git+https://github.com/danipopes/rust_tracy_client?branch=custom-demangler#36655950b6a68d40e8b946bd0cdfb55efcd4d701"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49cf0064dcb31c99aa1244c1b93439359e53f72ed217eef5db50abd442241e9a"
 dependencies = [
  "cc",
 ]
