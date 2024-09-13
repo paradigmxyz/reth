@@ -544,7 +544,7 @@ mod tests {
     use reth_provider::test_utils::{
         create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
     };
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -590,7 +590,7 @@ mod tests {
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
+        let genesis_hash = init_genesis(&ProviderFactory::<MockNodeTypesWithDB>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
