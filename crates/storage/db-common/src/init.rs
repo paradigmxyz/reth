@@ -108,7 +108,7 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let static_file_provider = factory.static_file_provider();
     insert_genesis_header(&provider_rw, &static_file_provider, &chain)?;
 
-    insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
+    insert_genesis_state(&provider_rw, alloc.iter())?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -132,19 +132,18 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-    capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(provider, capacity, alloc, 0)
+    insert_state::<DB>(provider, alloc, 0)
 }
 
 /// Inserts state at given block into database.
 pub fn insert_state<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-    capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
 ) -> ProviderResult<()> {
+    let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
     let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
@@ -203,7 +202,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     let execution_outcome = ExecutionOutcome::new_init(
         state_init,
         all_reverts_init,
-        contracts.into_iter().collect(),
+        contracts,
         Receipts::default(),
         block,
         Vec::new(),
@@ -455,7 +454,6 @@ fn dump_state<DB: Database>(
             // block is already written to static files
             insert_state::<DB>(
                 provider_rw,
-                accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
             )?;
