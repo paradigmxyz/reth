@@ -1,6 +1,5 @@
 use alloy_primitives::B256;
-use reth_db::{tables, Database};
-use reth_db_api::transaction::DbTxMut;
+use reth_db::{ Database};
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{
     BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, U256,
@@ -54,12 +53,6 @@ fn append_bedrock_block<DB: Database>(
         )
         .expect("no senders or txes"),
     )?;
-
-    // Method above also inserts the header into the DB table, however, we can insert it directly to
-    // static files.
-    provider_rw
-        .tx_ref()
-        .delete::<tables::Headers>(BEDROCK_HEADER.number, Some(BEDROCK_HEADER.clone()))?;
 
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         &BEDROCK_HEADER,
