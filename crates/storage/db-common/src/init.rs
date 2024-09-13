@@ -23,11 +23,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::BufRead,
-    sync::Arc,
-};
+use std::{collections::HashMap, io::BufRead};
 use tracing::{debug, error, info, trace};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
@@ -75,7 +71,7 @@ impl From<DatabaseError> for InitDatabaseError {
 
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-    factory: ProviderFactory<N>,
+    factory: &ProviderFactory<N>,
 ) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
@@ -110,7 +106,7 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 
     // Insert header
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header(&provider_rw, &static_file_provider, chain.clone())?;
+    insert_genesis_header(&provider_rw, &static_file_provider, &chain)?;
 
     insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
 
@@ -235,13 +231,7 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
-            (
-                *addr,
-                storage
-                    .clone()
-                    .into_iter()
-                    .map(|(key, value)| StorageEntry { key, value: value.into() }),
-            )
+            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
@@ -265,16 +255,14 @@ pub fn insert_history<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
     block: u64,
 ) -> ProviderResult<()> {
-    let account_transitions =
-        alloc.clone().map(|(addr, _)| (*addr, vec![block])).collect::<BTreeMap<_, _>>();
+    let account_transitions = alloc.clone().map(|(addr, _)| (*addr, [block]));
     provider.insert_account_history_index(account_transitions)?;
 
     trace!(target: "reth::cli", "Inserted account history");
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![block])))
-        .collect::<BTreeMap<_, _>>();
+        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), [block])));
     provider.insert_storage_history_index(storage_transitions)?;
 
     trace!(target: "reth::cli", "Inserted storage history");
@@ -286,15 +274,15 @@ pub fn insert_history<'a, 'b, DB: Database>(
 pub fn insert_genesis_header<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     static_file_provider: &StaticFileProvider,
-    chain: Arc<ChainSpec>,
+    chain: &ChainSpec,
 ) -> ProviderResult<()> {
-    let (header, block_hash) = chain.sealed_genesis_header().split();
+    let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(&header, difficulty, &hash)?;
+            writer.append_header(header, difficulty, &hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -563,6 +551,7 @@ mod tests {
     use reth_provider::test_utils::{
         create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
     };
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -577,7 +566,7 @@ mod tests {
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -586,7 +575,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -595,7 +584,7 @@ mod tests {
     #[test]
     fn success_init_genesis_holesky() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
@@ -605,10 +594,10 @@ mod tests {
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
         let static_file_provider = factory.static_file_provider();
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
+        let genesis_hash = init_genesis(&ProviderFactory::<MockNodeTypesWithDB>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
@@ -647,14 +636,14 @@ mod tests {
                 ..Default::default()
             },
             hardforks: Default::default(),
-            genesis_hash: None,
+            genesis_hash: Default::default(),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()
         });
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         let provider = factory.provider().unwrap();
 
