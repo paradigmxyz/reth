@@ -199,7 +199,6 @@ impl OptimismHardfork {
         ChainHardforks::new(vec![
             (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-            (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),

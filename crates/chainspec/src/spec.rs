@@ -706,7 +706,6 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     // Block-based hardforks
     let hardfork_opts = [
         (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
-        (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
         (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
         (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
         (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
@@ -2547,7 +2546,6 @@ Post-merge hard forks (timestamp based):
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
             EthereumHardfork::Homestead.boxed(),
-            EthereumHardfork::Dao.boxed(),
             EthereumHardfork::Tangerine.boxed(),
             EthereumHardfork::SpuriousDragon.boxed(),
             EthereumHardfork::Byzantium.boxed(),
