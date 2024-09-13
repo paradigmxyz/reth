@@ -671,11 +671,11 @@ where
         let consensus: Arc<dyn Consensus> = Arc::new(components.consensus().clone());
 
         let tree_externals = TreeExternals::new(
-            self.provider_factory().clone(),
+            self.provider_factory().clone().with_prune_modes(self.prune_modes()),
             consensus.clone(),
             components.block_executor().clone(),
         );
-        let tree = BlockchainTree::new(tree_externals, *self.tree_config(), self.prune_modes())?
+        let tree = BlockchainTree::new(tree_externals, *self.tree_config())?
             .with_sync_metrics_tx(self.sync_metrics_tx())
             // Note: This is required because we need to ensure that both the components and the
             // tree are using the same channel for canon state notifications. This will be removed
