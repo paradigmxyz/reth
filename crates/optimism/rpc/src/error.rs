@@ -6,7 +6,7 @@ use reth_primitives::revm_primitives::{InvalidTransaction, OptimismInvalidTransa
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use reth_rpc_types::{error::EthRpcErrorCode, ToRpcError};
+use reth_rpc_types::error::EthRpcErrorCode;
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
