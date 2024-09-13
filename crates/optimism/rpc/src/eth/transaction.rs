@@ -10,7 +10,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{eth::rpc::SequencerClient, OpEthApi};
+use crate::{OpEthApi, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where

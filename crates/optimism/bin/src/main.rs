@@ -7,7 +7,7 @@ use clap::Parser;
 use reth_node_builder::EngineNodeLauncher;
 use reth_node_optimism::{args::RollupArgs, node::OptimismAddOns, OptimismNode};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
-use reth_optimism_rpc::eth::rpc::SequencerClient;
+use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 
 // We use jemalloc for performance reasons

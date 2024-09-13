@@ -2,33 +2,9 @@
 
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use jsonrpsee_types::error::{ErrorObject, INTERNAL_ERROR_CODE};
 use reqwest::Client;
-use reth_rpc_eth_types::error::EthApiError;
-use reth_rpc_types::ToRpcError;
 
-/// Error type when interacting with the Sequencer
-#[derive(Debug, thiserror::Error)]
-pub enum SequencerRpcError {
-    /// Wrapper around an [`reqwest::Error`].
-    #[error(transparent)]
-    HttpError(#[from] reqwest::Error),
-    /// Thrown when serializing transaction to forward to sequencer
-    #[error("invalid sequencer transaction")]
-    InvalidSequencerTransaction,
-}
-
-impl ToRpcError for SequencerRpcError {
-    fn to_rpc_error(&self) -> ErrorObject<'static> {
-        ErrorObject::owned(INTERNAL_ERROR_CODE, self.to_string(), None::<String>)
-    }
-}
-
-impl From<SequencerRpcError> for EthApiError {
-    fn from(err: SequencerRpcError) -> Self {
-        Self::other(err)
-    }
-}
+use crate::SequencerClientError;
 
 /// A client to interact with a Sequencer
 #[derive(Debug, Clone)]
@@ -69,7 +45,7 @@ impl SequencerClient {
     }
 
     /// Forwards a transaction to the sequencer endpoint.
-    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerRpcError> {
+    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
         let body = serde_json::to_string(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
@@ -81,7 +57,7 @@ impl SequencerClient {
                 target = "rpc::eth",
                 "Failed to serialize transaction for forwarding to sequencer"
             );
-            SequencerRpcError::InvalidSequencerTransaction
+            SequencerClientError::InvalidSequencerTransaction
         })?;
 
         self.http_client()
@@ -96,8 +72,7 @@ impl SequencerClient {
                     %err,
                     "Failed to forward transaction to sequencer",
                 );
-            })
-            .map_err(SequencerRpcError::HttpError)?;
+            })?;
 
         Ok(())
     }
