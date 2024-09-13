@@ -146,7 +146,6 @@ pub mod transaction_pool {
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-
     /// Re-exported from `reth_rpc_builder`.
     pub mod builder {
         pub use reth_rpc_builder::*;
@@ -189,9 +188,6 @@ pub mod rpc {
 // re-export for convenience
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
-
-#[cfg(all(feature = "jemalloc", unix))]
-use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;
