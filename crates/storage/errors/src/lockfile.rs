@@ -1,7 +1,5 @@
-use reth_fs_util::FsPathError;
-
-#[cfg(not(feature = "std"))]
 use alloc::string::{String, ToString};
+use reth_fs_util::FsPathError;
 
 /// Storage lock error.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]

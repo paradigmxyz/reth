@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use bytes::BufMut;
 use core::fmt;
 use derive_more::Deref;
@@ -7,9 +8,6 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.

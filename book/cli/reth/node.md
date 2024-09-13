@@ -58,7 +58,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
 Networking:
@@ -541,7 +541,7 @@ Debug:
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
       --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
-          Determines which type of bad block hook to install
+          Determines which type of invalid block hook to install
 
           Example: `witness,prestate`
 

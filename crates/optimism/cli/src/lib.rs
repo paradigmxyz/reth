@@ -61,7 +61,7 @@ pub struct Cli<
 > {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Ext>,
+    command: Commands<Spec, Ext>,
 
     /// The chain this node is running.
     ///

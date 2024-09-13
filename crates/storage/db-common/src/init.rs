@@ -9,15 +9,15 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_node_types::NodeTypesWithDB;
-use reth_primitives::{Account, Bytecode, Receipts, StaticFileSegment, StorageEntry};
+use reth_primitives::{Account, Bytecode, GotExpected, Receipts, StaticFileSegment, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
     writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
-    ExecutionOutcome, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    TrieWriter,
+    ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
+    ProviderError, ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -62,16 +62,9 @@ pub enum InitDatabaseError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
-    /// Computed state root doesn't match state root in state dump file.
-    #[error(
-        "state root mismatch, state dump: {expected_state_root}, computed: {computed_state_root}"
-    )]
-    StateRootMismatch {
-        /// Expected state root.
-        expected_state_root: B256,
-        /// Actual state root.
-        computed_state_root: B256,
-    },
+    /// State root doesn't match the expected one.
+    #[error("state root mismatch: {_0}")]
+    StateRootMismatch(GotExpected<B256>),
 }
 
 impl From<DatabaseError> for InitDatabaseError {
@@ -326,15 +319,31 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;
     let hash = factory.block_hash(block)?.unwrap();
+    let expected_state_root = factory
+        .header_by_number(block)?
+        .ok_or(ProviderError::HeaderNotFound(block.into()))?
+        .state_root;
+
+    // first line can be state root
+    let dump_state_root = parse_state_root(&mut reader)?;
+    if expected_state_root != dump_state_root {
+        error!(target: "reth::cli",
+            ?dump_state_root,
+            ?expected_state_root,
+            "State root from state dump does not match state root in current header."
+        );
+        return Err(InitDatabaseError::StateRootMismatch(GotExpected {
+            got: dump_state_root,
+            expected: expected_state_root,
+        })
+        .into())
+    }
 
     debug!(target: "reth::cli",
         block,
         chain=%factory.chain_spec().chain,
         "Initializing state at block"
     );
-
-    // first line can be state root, then it can be used for verifying against computed state root
-    let expected_state_root = parse_state_root(&mut reader)?;
 
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
@@ -357,7 +366,11 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
             "Computed state root does not match state root in state dump"
         );
 
-        Err(InitDatabaseError::StateRootMismatch { expected_state_root, computed_state_root })?
+        return Err(InitDatabaseError::StateRootMismatch(GotExpected {
+            got: computed_state_root,
+            expected: expected_state_root,
+        })
+        .into())
     }
 
     // insert sync stages for stages that require state

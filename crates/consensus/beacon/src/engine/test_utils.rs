@@ -389,12 +389,8 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(
-                externals,
-                BlockchainTreeConfig::new(1, 2, 3, 2),
-                PruneModes::default(),
-            )
-            .expect("failed to create tree"),
+            BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
+                .expect("failed to create tree"),
         ));
         let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
 
