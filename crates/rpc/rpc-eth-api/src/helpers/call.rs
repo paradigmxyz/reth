@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance,
         cap_tx_gas_limit_with_caller_allowance, get_precompiles, CallFees,
     },
-    simulate::{self, EthSimulateError, TransferInspector},
+    simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_rpc_server_types::constants::gas_oracle::{
@@ -36,7 +36,7 @@ use reth_rpc_types::{
     WithOtherFields,
 };
 use revm::{Database, DatabaseCommit, GetInspector};
-use revm_inspectors::access_list::AccessListInspector;
+use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
@@ -169,7 +169,11 @@ pub trait EthCall: Call + LoadPendingBlock {
 
                         let (res, env) = {
                             if trace_transfers {
-                                this.transact_with_inspector(&mut db, env, TransferInspector)?
+                                this.transact_with_inspector(
+                                    &mut db,
+                                    env,
+                                    TransferInspector::new(false).with_logs(true),
+                                )?
                             } else {
                                 this.transact(&mut db, env)?
                             }

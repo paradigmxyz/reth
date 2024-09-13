@@ -1,7 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
-use alloy_sol_types::SolValue;
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
     BlockWithSenders, Signature, Transaction, TransactionSigned, TransactionSignedNoHash,
@@ -12,48 +11,10 @@ use reth_rpc_types::{
     Block, BlockTransactionsKind, ToRpcError, TransactionRequest, WithOtherFields,
 };
 use reth_rpc_types_compat::block::from_block;
-use revm::{interpreter::CallValue, Database, Inspector};
-use revm_primitives::{
-    address, b256, Address, BlockEnv, Bytes, ExecutionResult, Log, LogData, TxKind, B256, U256,
-};
+use revm::Database;
+use revm_primitives::{Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
 use crate::{EthApiError, RevertError, RpcInvalidTransactionError};
-
-/// Sender of ETH transfer log per `eth_simulateV1` spec.
-///
-/// <https://github.com/ethereum/execution-apis/pull/484>
-pub const TRANSFER_LOG_EMITTER: Address = address!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
-
-/// Topic of `Transfer(address,address,uint256)` event.
-pub const TRANSFER_EVENT_TOPIC: B256 =
-    b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
-
-/// Helper inspector for `eth_simulateV1` which injects `Transfer` logs for all ETH transfers.
-#[derive(Debug, Default, Clone)]
-pub struct TransferInspector;
-
-impl<DB: Database> Inspector<DB> for TransferInspector {
-    fn call(
-        &mut self,
-        context: &mut revm::EvmContext<DB>,
-        inputs: &mut revm::interpreter::CallInputs,
-    ) -> Option<revm::interpreter::CallOutcome> {
-        if let CallValue::Transfer(value) = inputs.value {
-            if !value.is_zero() {
-                let from = B256::from_slice(&inputs.caller.abi_encode());
-                let to = B256::from_slice(&inputs.target_address.abi_encode());
-                let data = value.abi_encode();
-
-                context.journaled_state.log(Log {
-                    address: TRANSFER_LOG_EMITTER,
-                    data: LogData::new_unchecked(vec![TRANSFER_EVENT_TOPIC, from, to], data.into()),
-                });
-            }
-        }
-
-        None
-    }
-}
 
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
