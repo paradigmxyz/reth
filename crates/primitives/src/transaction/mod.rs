@@ -58,7 +58,6 @@ pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(test)]
 use reth_codecs::Compact;
 
-#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
