@@ -8,7 +8,7 @@ use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_optimism_primitives::bedrock::BEDROCK_HEADER;
 use reth_provider::{
-    writer::UnifiedStorageWriter, BlockNumReader, ChainSpecProvider, StaticFileProviderFactory,
+    BlockNumReader, ChainSpecProvider, StaticFileProviderFactory, StaticFileWriter,
 };
 use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
@@ -63,6 +63,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 
         let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
+        let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.provider_rw()?;
 
         // OP-Mainnet may want to bootstrap a chain without OVM historical data
@@ -70,7 +71,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                bedrock::setup_op_mainnet_without_ovm(&provider_rw)?;
+                bedrock::setup_op_mainnet_without_ovm(&provider_rw, &static_file_provider)?;
+
+                // SAFETY: it's safe to commit static files, since in the event of a crash, they
+                // will be unwinded according to database checkpoints.
+                //
+                // Necessary to commit, so the BEDROCK_HEADER is accessible to provider_rw and
+                // init_state_dump
+                static_file_provider.commit()?;
             } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
@@ -83,7 +91,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
         let reader = BufReader::new(File::open(self.state)?);
         let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
 
-        UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
+        provider_rw.commit()?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

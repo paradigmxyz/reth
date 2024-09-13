@@ -1,5 +1,5 @@
 use alloy_primitives::B256;
-use reth_db::{models::StoredBlockBodyIndices, tables, Database};
+use reth_db::{tables, Database};
 use reth_db_api::transaction::DbTxMut;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{
@@ -16,28 +16,19 @@ use tracing::info;
 /// first valid Bedrock block.
 pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
     provider_rw: &DatabaseProviderRW<DB>,
+    static_file_provider: &StaticFileProvider,
 ) -> Result<(), eyre::Error> {
     info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
-    let static_file_provider = provider_rw.static_file_provider();
 
     // Write OVM dummy data up to `BEDROCK_HEADER - 1` block
-    insert_dummy_chain(&static_file_provider)?;
+    append_dummy_chain(static_file_provider)?;
 
-    info!(target: "reth::cli", "Inserting first Bedrock header.");
+    info!(target: "reth::cli", "Appending Bedrock block.");
 
-    append_bedrock_block(&provider_rw, &static_file_provider)?;
+    append_bedrock_block(provider_rw, static_file_provider)?;
 
-    // Writes `BlockBodyIndices` and  `StageCheckpoint`
-    {
-        provider_rw.tx_ref().put::<tables::BlockBodyIndices>(
-            BEDROCK_HEADER.number,
-            StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
-        )?;
-
-        for stage in StageId::ALL {
-            provider_rw
-                .save_stage_checkpoint(stage, StageCheckpoint::new(BEDROCK_HEADER.number))?;
-        }
+    for stage in StageId::ALL {
+        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(BEDROCK_HEADER.number))?;
     }
 
     info!(target: "reth::cli", "Set up finished.");
@@ -92,7 +83,7 @@ fn append_bedrock_block<DB: Database>(
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
-fn insert_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
+fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
     let mut headers_writer = sf_provider.latest_writer(StaticFileSegment::Headers)?;
     let txs_writer = sf_provider.latest_writer(StaticFileSegment::Transactions)?;
     let receipts_writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
