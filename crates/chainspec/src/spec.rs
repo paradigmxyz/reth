@@ -1,4 +1,4 @@
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_lock_set, EthChainSpec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
@@ -33,7 +33,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: once_lock_set(MAINNET_GENESIS_HASH),
+        genesis_hash: once_cell_set(MAINNET_GENESIS_HASH),
         genesis_header: Default::default(),
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
@@ -61,7 +61,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: once_lock_set(SEPOLIA_GENESIS_HASH),
+        genesis_hash: once_cell_set(SEPOLIA_GENESIS_HASH),
         genesis_header: Default::default(),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
@@ -86,7 +86,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: once_lock_set(HOLESKY_GENESIS_HASH),
+        genesis_hash: once_cell_set(HOLESKY_GENESIS_HASH),
         genesis_header: Default::default(),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         hardforks: EthereumHardfork::holesky().into(),
@@ -112,7 +112,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: once_lock_set(DEV_GENESIS_HASH),
+        genesis_hash: once_cell_set(DEV_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
@@ -176,16 +176,19 @@ pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
 
-    /// The hash of the genesis block.
-    ///
-    /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
-    /// is also known ahead of time, and this will be `Some`.
-    pub genesis_hash: OnceCell<B256>,
-
     /// The genesis block.
     pub genesis: Genesis,
 
+    /// The hash of the genesis block.
+    ///
+    /// This is either stored at construction time if it is known using [`once_cell_set`], or
+    /// computed once on the first access.
+    pub genesis_hash: OnceCell<B256>,
+
     /// The header corresponding to the genesis block.
+    ///
+    /// This is either stored at construction time if it is known using [`once_cell_set`], or
+    /// computed once on the first access.
     pub genesis_header: OnceCell<Header>,
 
     /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
