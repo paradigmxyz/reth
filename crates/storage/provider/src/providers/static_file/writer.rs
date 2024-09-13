@@ -680,7 +680,7 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        debug_assert!(self.writer.user_header().segment() ==  StaticFileSegment::Transactions);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
 
         self.truncate(to_delete, Some(last_block))?;
 
