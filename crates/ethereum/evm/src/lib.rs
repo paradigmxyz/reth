@@ -9,18 +9,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
-use std::sync::Arc;
-
+use alloc::vec::Vec;
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use std::sync::Arc;
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};

@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -31,11 +32,6 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
-
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-#[cfg(feature = "std")]
-use std::sync::Arc;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]

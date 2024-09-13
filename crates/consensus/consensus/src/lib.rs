@@ -9,19 +9,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{fmt::Debug, vec::Vec};
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, GotExpected, GotExpectedBoxed, Header,
     InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
 };
-
-#[cfg(feature = "std")]
-use std::fmt::Debug;
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
-#[cfg(not(feature = "std"))]
-use alloc::{fmt::Debug, vec::Vec};
 
 /// A consensus implementation that does nothing.
 pub mod noop;
