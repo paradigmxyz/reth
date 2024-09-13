@@ -26,6 +26,7 @@ default = ["jemalloc"]
 
 jemalloc = ["reth-cli-util/jemalloc"]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-node-optimism/asm-keccak"]
 
