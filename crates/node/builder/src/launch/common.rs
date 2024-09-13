@@ -23,6 +23,7 @@ use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
+    args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     version::{
@@ -859,8 +860,36 @@ where
         let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
             return Ok(Box::new(NoopInvalidBlockHook::default()))
         };
-        let healthy_node_rpc_client = self
-            .node_config()
+        let healthy_node_rpc_client = self.get_healthy_node_client()?;
+
+        let output_directory = self.data_dir().invalid_block_hooks();
+        let hooks = hook
+            .iter()
+            .copied()
+            .map(|hook| {
+                let output_directory = output_directory.join(hook.to_string());
+                fs::create_dir_all(&output_directory)?;
+
+                Ok(match hook {
+                    InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
+                        self.blockchain_db().clone(),
+                        self.components().evm_config().clone(),
+                        output_directory,
+                        healthy_node_rpc_client.clone(),
+                    )),
+                    InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
+                        eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                    }
+                } as Box<dyn InvalidBlockHook>)
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Box::new(InvalidBlockHooks(hooks)))
+    }
+
+    /// Returns an RPC client for the healthy node, if configured in the node config.
+    fn get_healthy_node_client(&self) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
+        self.node_config()
             .debug
             .healthy_node_rpc_url
             .as_ref()
@@ -883,34 +912,7 @@ where
 
                 Ok(client)
             })
-            .transpose()?;
-
-        let output_directory = self.data_dir().invalid_block_hooks();
-        let hooks = hook
-            .iter()
-            .copied()
-            .map(|hook| {
-                let output_directory = output_directory.join(hook.to_string());
-                fs::create_dir_all(&output_directory)?;
-
-                Ok(match hook {
-                    reth_node_core::args::InvalidBlockHook::Witness => {
-                        Box::new(InvalidBlockWitnessHook::new(
-                            self.blockchain_db().clone(),
-                            self.components().evm_config().clone(),
-                            output_directory,
-                            healthy_node_rpc_client.clone(),
-                        )) as Box<dyn InvalidBlockHook>
-                    }
-                    reth_node_core::args::InvalidBlockHook::PreState |
-                    reth_node_core::args::InvalidBlockHook::Opcode => {
-                        eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                    }
-                })
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Box::new(InvalidBlockHooks(hooks)))
+            .transpose()
     }
 }
 
