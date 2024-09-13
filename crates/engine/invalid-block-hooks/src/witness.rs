@@ -163,11 +163,12 @@ where
 
         // Write the witness to the output directory.
         let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
-        File::options()
-            .write(true)
-            .create_new(true)
-            .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?
-            .write_all(serde_json::to_string(&response)?.as_bytes())?;
+        File::create_new(self.output_directory.join(format!(
+            "{}_{}.json",
+            block.number,
+            block.hash()
+        )))?
+        .write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
         if bundle_state != output.state {
@@ -205,15 +206,12 @@ where
             })?;
 
             // Write the healthy node witness to the output directory.
-            File::options()
-                .write(true)
-                .create_new(true)
-                .open(self.output_directory.join(format!(
-                    "{}_{}.healthy_witness.json",
-                    block.number,
-                    block.hash()
-                )))?
-                .write_all(serde_json::to_string(&healthy_node_witness)?.as_bytes())?;
+            File::create_new(self.output_directory.join(format!(
+                "{}_{}.healthy_witness.json",
+                block.number,
+                block.hash()
+            )))?
+            .write_all(serde_json::to_string(&healthy_node_witness)?.as_bytes())?;
 
             // If the witnesses are different, write the diff to the output directory.
             if response != healthy_node_witness {
@@ -235,11 +233,7 @@ where
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        File::options()
-            .write(true)
-            .create_new(true)
-            .open(&path)?
-            .write_all(diff.to_string().as_bytes())?;
+        File::create_new(&path)?.write_all(diff.to_string().as_bytes())?;
 
         Ok(path)
     }
