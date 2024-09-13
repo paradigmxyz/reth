@@ -151,33 +151,40 @@ pub enum ConsensusError {
 
     /// Error when the hash of block ommer is different from the expected hash.
     #[display("mismatched block ommer hash: {_0}")]
+    #[error(not(source))]
     BodyOmmersHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when the state root in the block is different from the expected state root.
     #[display("mismatched block state root: {_0}")]
+    #[error(not(source))]
     BodyStateRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the transaction root in the block is different from the expected transaction
     /// root.
     #[display("mismatched block transaction root: {_0}")]
+    #[error(not(source))]
     BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the receipt root in the block is different from the expected receipt root.
     #[display("receipt root mismatch: {_0}")]
+    #[error(not(source))]
     BodyReceiptRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when header bloom filter is different from the expected bloom filter.
     #[display("header bloom filter mismatch: {_0}")]
+    #[error(not(source))]
     BodyBloomLogDiff(GotExpectedBoxed<Bloom>),
 
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
     #[display("mismatched block withdrawals root: {_0}")]
+    #[error(not(source))]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the requests root in the block is different from the expected requests
     /// root.
     #[display("mismatched block requests root: {_0}")]
+    #[error(not(source))]
     BodyRequestsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
@@ -209,6 +216,7 @@ pub enum ConsensusError {
 
     /// Error when the parent hash does not match the expected parent hash.
     #[display("mismatched parent hash: {_0}")]
+    #[error(not(source))]
     ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block timestamp is in the future compared to our clock time.
@@ -330,6 +338,7 @@ pub enum ConsensusError {
 
     /// Error when the blob gas used in the header does not match the expected blob gas used.
     #[display("blob gas used mismatch: {_0}")]
+    #[error(not(source))]
     BlobGasUsedDiff(GotExpected<u64>),
 
     /// Error for a transaction that violates consensus.
@@ -337,6 +346,7 @@ pub enum ConsensusError {
 
     /// Error when the block's base fee is different from the expected base fee.
     #[display("block base fee mismatch: {_0}")]
+    #[error(not(source))]
     BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
