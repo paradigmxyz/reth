@@ -10,10 +10,8 @@ use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_rpc::SequencerClient;
 use reth_provider::providers::BlockchainProvider2;
 
-// We use jemalloc for performance reasons
-#[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
 fn main() {
     reth_cli_util::sigsegv_handler::install();
