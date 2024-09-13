@@ -238,13 +238,7 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
-            (
-                *addr,
-                storage
-                    .clone()
-                    .into_iter()
-                    .map(|(key, value)| StorageEntry { key, value: value.into() }),
-            )
+            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
