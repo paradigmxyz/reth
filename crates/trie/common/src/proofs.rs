@@ -10,7 +10,7 @@ use alloy_trie::{
 };
 use reth_primitives_traits::{constants::KECCAK_EMPTY, Account};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{hash_map, BTreeMap, HashMap};
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -73,6 +73,21 @@ impl MultiProof {
             storage_proofs.push(proof);
         }
         Ok(AccountProof { address, info, proof, storage_root, storage_proofs })
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        self.account_subtree.extend(other.account_subtree);
+        for (key, storage) in other.storages {
+            match self.storages.entry(key) {
+                hash_map::Entry::Occupied(mut e) => {
+                    assert_eq!(e.get().root, storage.root);
+                    e.get_mut().subtree.extend(storage.subtree);
+                }
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(storage);
+                }
+            }
+        }
     }
 }
 

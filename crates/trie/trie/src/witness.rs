@@ -8,7 +8,7 @@ use itertools::Either;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
-    BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
+    BranchNode, BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -116,7 +116,12 @@ where
             };
             let key = Nibbles::unpack(hashed_address);
             let proof = account_multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
-            account_trie_nodes.extend(self.target_nodes(key.clone(), value, proof)?);
+            account_trie_nodes.extend(target_nodes(
+                key.clone(),
+                value,
+                proof,
+                Some(&mut self.witness),
+            )?);
 
             // Gather and record storage trie nodes for this account.
             let mut storage_trie_nodes = BTreeMap::default();
@@ -128,36 +133,40 @@ where
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
                 let proof = storage_multiproof.subtree.iter().filter(|e| slot_key.starts_with(e.0));
-                storage_trie_nodes.extend(self.target_nodes(
+                storage_trie_nodes.extend(target_nodes(
                     slot_key.clone(),
                     slot_value,
                     proof,
+                    Some(&mut self.witness),
                 )?);
             }
 
-            let storage_root = Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
-                // Right pad the target with 0s.
-                let mut padded_key = key.pack();
-                padded_key.resize(32, 0);
-                let target_key = B256::from_slice(&padded_key);
-                let mut proof = Proof::new(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_target((hashed_address, HashSet::from([target_key])))
-                .storage_multiproof(hashed_address)?;
+            let (storage_root, _) =
+                Self::next_root_from_proofs(storage_trie_nodes, false, |key: Nibbles| {
+                    // Right pad the target with 0s.
+                    let mut padded_key = key.pack();
+                    padded_key.resize(32, 0);
+                    let target_key = B256::from_slice(&padded_key);
+                    let mut proof = Proof::new(
+                        self.trie_cursor_factory.clone(),
+                        self.hashed_cursor_factory.clone(),
+                    )
+                    .with_prefix_sets_mut(self.prefix_sets.clone())
+                    .with_target((hashed_address, HashSet::from([target_key])))
+                    .storage_multiproof(hashed_address)?;
 
-                // The subtree only contains the proof for a single target.
-                let node =
-                    proof.subtree.remove(&key).ok_or(TrieWitnessError::MissingTargetNode(key))?;
-                self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
-                Ok(node)
-            })?;
+                    // The subtree only contains the proof for a single target.
+                    let node = proof
+                        .subtree
+                        .remove(&key)
+                        .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+                    self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
+                    Ok(node)
+                })?;
             debug_assert_eq!(storage_multiproof.root, storage_root);
         }
 
-        Self::next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
+        Self::next_root_from_proofs(account_trie_nodes, false, |key: Nibbles| {
             // Right pad the target with 0s.
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
@@ -179,53 +188,12 @@ where
         Ok(self.witness)
     }
 
-    /// Decodes and unrolls all nodes from the proof. Returns only sibling nodes
-    /// in the path of the target and the final leaf node with updated value.
-    fn target_nodes<'b>(
-        &mut self,
-        key: Nibbles,
-        value: Option<Vec<u8>>,
-        proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
-    ) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
-        let mut trie_nodes = BTreeMap::default();
-        for (path, encoded) in proof {
-            // Record the node in witness.
-            self.witness.insert(keccak256(encoded.as_ref()), encoded.clone());
-
-            let mut next_path = path.clone();
-            match TrieNode::decode(&mut &encoded[..])? {
-                TrieNode::Branch(branch) => {
-                    next_path.push(key[path.len()]);
-                    let children = branch_node_children(path.clone(), &branch);
-                    for (child_path, node_hash) in children {
-                        if !key.starts_with(&child_path) {
-                            trie_nodes.insert(child_path, Either::Left(node_hash));
-                        }
-                    }
-                }
-                TrieNode::Extension(extension) => {
-                    next_path.extend_from_slice(&extension.key);
-                }
-                TrieNode::Leaf(leaf) => {
-                    next_path.extend_from_slice(&leaf.key);
-                    if next_path != key {
-                        trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
-                    }
-                }
-            };
-        }
-
-        if let Some(value) = value {
-            trie_nodes.insert(key, Either::Right(value));
-        }
-
-        Ok(trie_nodes)
-    }
-
-    fn next_root_from_proofs(
+    pub fn next_root_from_proofs(
         trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
+        retain_updates: bool,
         mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
-    ) -> Result<B256, TrieWitnessError> {
+    ) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError>
+    {
         // Ignore branch child hashes in the path of leaves or lower child hashes.
         let mut keys = trie_nodes.keys().peekable();
         let mut ignored = HashSet::<Nibbles>::default();
@@ -235,7 +203,7 @@ where
             }
         }
 
-        let mut hash_builder = HashBuilder::default();
+        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
         let mut trie_nodes = trie_nodes.into_iter().filter(|e| !ignored.contains(&e.0)).peekable();
         while let Some((path, value)) = trie_nodes.next() {
             match value {
@@ -278,7 +246,10 @@ where
                 }
             }
         }
-        Ok(hash_builder.root())
+
+        let root = hash_builder.root();
+        let (_, updates) = hash_builder.split();
+        Ok((root, updates))
     }
 }
 
@@ -295,4 +266,49 @@ fn branch_node_children(prefix: Nibbles, node: &BranchNode) -> Vec<(Nibbles, B25
         }
     }
     children
+}
+
+/// Decodes and unrolls all nodes from the proof. Returns only sibling nodes
+/// in the path of the target and the final leaf node with updated value.
+pub fn target_nodes<'b>(
+    key: Nibbles,
+    value: Option<Vec<u8>>,
+    proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
+    mut witness: Option<&mut HashMap<B256, Bytes>>,
+) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
+    let mut trie_nodes = BTreeMap::default();
+    for (path, encoded) in proof {
+        // Record the node in witness.
+        if let Some(witness) = &mut witness {
+            witness.insert(keccak256(encoded.as_ref()), encoded.clone());
+        }
+
+        let mut next_path = path.clone();
+        match TrieNode::decode(&mut &encoded[..])? {
+            TrieNode::Branch(branch) => {
+                next_path.push(key[path.len()]);
+                let children = branch_node_children(path.clone(), &branch);
+                for (child_path, node_hash) in children {
+                    if !key.starts_with(&child_path) {
+                        trie_nodes.insert(child_path, Either::Left(node_hash));
+                    }
+                }
+            }
+            TrieNode::Extension(extension) => {
+                next_path.extend_from_slice(&extension.key);
+            }
+            TrieNode::Leaf(leaf) => {
+                next_path.extend_from_slice(&leaf.key);
+                if next_path != key {
+                    trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                }
+            }
+        };
+    }
+
+    if let Some(value) = value {
+        trie_nodes.insert(key, Either::Right(value));
+    }
+
+    Ok(trie_nodes)
 }

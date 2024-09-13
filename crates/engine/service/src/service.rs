@@ -91,6 +91,7 @@ where
             blockchain_db,
             executor_factory,
             consensus,
+            pipeline_task_spawner.clone(),
             payload_validator,
             persistence_handle,
             payload_builder,

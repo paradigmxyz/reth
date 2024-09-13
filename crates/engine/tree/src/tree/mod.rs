@@ -1,9 +1,10 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
-    engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    engine::{DownloadRequest, EngineApiEvent, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
 };
+use alloy_rlp::BufMut;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -19,6 +20,7 @@ use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_execution_errors::TrieWitnessError;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -28,8 +30,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    ProviderError, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -40,7 +42,11 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_tasks::TaskSpawner;
+use reth_trie::{
+    updates::TrieUpdates, witness::TrieWitness, HashedPostState, MultiProof, Nibbles, TrieAccount,
+    TrieInput, EMPTY_ROOT_HASH,
+};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
@@ -53,20 +59,24 @@ use std::{
     },
     time::Instant,
 };
+use streaming_database::{StateAccess, StreamingDatabase};
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-    oneshot::error::TryRecvError,
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
 
 mod config;
-mod invalid_block_hook;
-mod metrics;
-use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
 pub use config::TreeConfig;
+
+mod invalid_block_hook;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use reth_engine_primitives::InvalidBlockHook;
+
+mod metrics;
+use metrics::EngineApiMetrics;
+
+mod streaming_database;
 
 /// Keeps track of the state of the tree.
 ///
@@ -461,6 +471,7 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
+    task_spawner: Box<dyn TaskSpawner>,
     payload_validator: ExecutionPayloadValidator,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
@@ -531,6 +542,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
+        task_spawner: Box<dyn TaskSpawner>,
         payload_validator: ExecutionPayloadValidator,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
@@ -545,6 +557,7 @@ where
             provider,
             executor_provider,
             consensus,
+            task_spawner,
             payload_validator,
             incoming,
             outgoing,
@@ -576,6 +589,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
+        task_spawner: Box<dyn TaskSpawner>,
         payload_validator: ExecutionPayloadValidator,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
@@ -604,6 +618,7 @@ where
             provider,
             executor_provider,
             consensus,
+            task_spawner,
             payload_validator,
             tx,
             state,
@@ -2127,6 +2142,7 @@ where
                 missing_ancestor,
             }))
         };
+        let proof_provider = self.state_provider(block.parent_hash)?.unwrap();
 
         // now validate against the parent
         let parent_block = self.sealed_header_by_hash(block.parent_hash)?.ok_or_else(|| {
@@ -2139,7 +2155,35 @@ where
             return Err(e.into())
         }
 
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let (database, mut rx) = StreamingDatabase::new_with_rx(&state_provider);
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(database));
+
+        // Spawn proof gathering task
+        let (multiproof_tx, multiproof_rx) = oneshot::channel();
+        self.task_spawner.spawn(Box::pin(async move {
+            let mut multiproof = MultiProof::default();
+            while let Some(next) = rx.recv().await {
+                let mut targets = HashMap::from([match next {
+                    StateAccess::Account(address) => (address, HashSet::default()),
+                    StateAccess::StorageSlot(address, slot) => (address, HashSet::from(slot)),
+                }]);
+
+                while let Ok(next) = rx.try_recv() {
+                    match next {
+                        StateAccess::Account(address) => {
+                            targets.entry(address).or_default();
+                        }
+                        StateAccess::StorageSlot(address, slot) => {
+                            targets.entry(address).or_default().insert(slot);
+                        }
+                    }
+                }
+
+                multiproof.extend(proof_provider.multiproof(Default::default(), targets).unwrap());
+            }
+
+            let _ = multiproof_tx.send((proof_provider, multiproof));
+        }));
 
         let block_number = block.number;
         let block_hash = block.hash();
@@ -2168,6 +2212,8 @@ where
         }
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
+
+        let (proof_provider, multiproof) = multiproof_rx.blocking_recv().unwrap();
 
         let root_time = Instant::now();
         let mut state_root_result = None;
@@ -2247,6 +2293,100 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+    }
+
+    fn compute_state_root_from_proofs(
+        &self,
+        state_provider: Box<dyn StateProvider>,
+        state: &HashedPostState,
+        multiproof: MultiProof,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let mut input = TrieInput::from_state(state);
+
+        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_trie_nodes = BTreeMap::default();
+        for (hashed_address, hashed_slots) in proof_targets {
+            let storage_multiproof =
+                multiproof.storages.remove(&hashed_address).unwrap_or_default();
+
+            // Gather and record account trie nodes.
+            let account = state
+                .accounts
+                .get(&hashed_address)
+                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
+            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
+                account_rlp.clear();
+                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
+                    .encode(&mut account_rlp as &mut dyn BufMut);
+                Some(account_rlp.clone())
+            } else {
+                None
+            };
+            let key = Nibbles::unpack(hashed_address);
+            let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
+            account_trie_nodes.extend(self.target_nodes(key.clone(), value, proof)?);
+
+            // Gather and record storage trie nodes for this account.
+            let mut storage_trie_nodes = BTreeMap::default();
+            let storage = state.storages.get(&hashed_address);
+            for hashed_slot in hashed_slots {
+                let slot_key = Nibbles::unpack(hashed_slot);
+                let slot_value = storage
+                    .and_then(|s| s.storage.get(&hashed_slot))
+                    .filter(|v| !v.is_zero())
+                    .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
+                let proof = storage_multiproof.subtree.iter().filter(|e| slot_key.starts_with(e.0));
+                storage_trie_nodes.extend(self.target_nodes(
+                    slot_key.clone(),
+                    slot_value,
+                    proof,
+                )?);
+            }
+
+            let (storage_root, storage_trie_updates) =
+                TrieWitness::next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
+                    // Right pad the target with 0s.
+                    let mut padded_key = key.pack();
+                    padded_key.resize(32, 0);
+                    let proof = state_provider.multiproof(
+                        input,
+                        HashMap::from([(
+                            hashed_address,
+                            Vec::from([B256::from_slice(&padded_key)]),
+                        )]),
+                    )?;
+
+                    // The subtree only contains the proof for a single target.
+                    let node = proof
+                        .storages
+                        .get(&hashed_address)
+                        .and_then(|storage_multiproof| storage_multiproof.subtree.get(&key))
+                        .cloned()
+                        .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+                    Ok(node)
+                })?;
+            debug_assert_eq!(storage_multiproof.root, storage_root);
+        }
+
+        let (state_root, trie_updates) =
+            TrieWitness::next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
+                // Right pad the target with 0s.
+                let mut padded_key = key.pack();
+                padded_key.resize(32, 0);
+                let mut proof = state_provider.multiproof(
+                    input,
+                    HashMap::from([(B256::from_slice(&padded_key), Default::default())]),
+                )?;
+
+                // The subtree only contains the proof for a single target.
+                let node = proof
+                    .account_subtree
+                    .remove(&key)
+                    .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+                Ok(node)
+            })?;
+
+        todo!()
     }
 
     /// Compute state root for the given hashed post state in parallel.

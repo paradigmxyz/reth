@@ -20,6 +20,7 @@ reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
+reth-execution-errors.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
@@ -34,6 +35,7 @@ reth-tasks.workspace = true
 reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-trie-parallel.workspace = true
+alloy-rlp.workspace = true
 
 # common
 futures.workspace = true
