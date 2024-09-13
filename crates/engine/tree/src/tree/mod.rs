@@ -2691,7 +2691,7 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let header = chain_spec.genesis_header().seal_slow();
+            let header = chain_spec.genesis_header().clone().seal_slow();
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 
