@@ -133,14 +133,11 @@ where
             )
             .map_err(|_| eyre::eyre!("failed to fetch payload attributes"))?;
 
-        let rx = self.payload_builder.send_new_payload(payload_builder_attributes);
-        let id = rx.await??;
-
         let payload = self
             .payload_builder
-            .best_payload(id)
-            .await
-            .ok_or_else(|| eyre::eyre!("failed to fetch best payload"))??;
+            .send_and_resolve_payload(payload_builder_attributes)
+            .await?
+            .await?;
 
         let block = payload.executed_block().map(|block| vec![block]).unwrap_or_default();
         let (tx, rx) = oneshot::channel();
