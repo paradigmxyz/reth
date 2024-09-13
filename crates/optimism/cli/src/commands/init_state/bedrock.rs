@@ -4,8 +4,7 @@ use reth_db_api::transaction::DbTxMut;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{Header, StaticFileSegment, U256};
 use reth_provider::{
-    providers::StaticFileProvider, DatabaseProviderRW, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter,
+    providers::StaticFileProvider, DatabaseProviderRW, StageCheckpointWriter, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use tracing::info;
