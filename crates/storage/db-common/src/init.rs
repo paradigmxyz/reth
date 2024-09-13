@@ -78,7 +78,7 @@ impl From<DatabaseError> for InitDatabaseError {
 
 /// Write the genesis block if it has not already been written
 pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-    factory: ProviderFactory<N>,
+    factory: &ProviderFactory<N>,
 ) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn success_init_genesis_holesky() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
@@ -587,7 +587,7 @@ mod tests {
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
         let static_file_provider = factory.static_file_provider();
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
         let genesis_hash = init_genesis(ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -636,7 +636,7 @@ mod tests {
         });
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         let provider = factory.provider().unwrap();
 
