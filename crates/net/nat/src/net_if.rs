@@ -24,6 +24,8 @@ pub enum NetInterfaceError {
 pub fn resolve_net_if_ip(if_name: &str) -> Result<IpAddr, NetInterfaceError> {
     match if_addrs::get_if_addrs() {
         Ok(ifs) => {
+            // log ifs
+            println!("Interfaces: {:?}", ifs);
             let ip = ifs.iter().find(|i| i.name == if_name).map(|i| i.ip());
             match ip {
                 Some(ip) => Ok(ip),
