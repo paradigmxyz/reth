@@ -34,6 +34,13 @@ pub use spec::{
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
 
+/// Simple utility to create a `OnceLock` with a value set.
+pub fn once_lock_set<T>(value: T) -> std::sync::OnceLock<T> {
+    let once = std::sync::OnceLock::new();
+    let _ = once.set(value);
+    once
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

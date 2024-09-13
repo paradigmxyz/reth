@@ -23,11 +23,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::BufRead,
-    sync::Arc,
-};
+use std::{collections::HashMap, io::BufRead};
 use tracing::{debug, error, info, trace};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
@@ -117,7 +113,7 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 
     // Insert header
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header(&provider_rw, &static_file_provider, chain.clone())?;
+    insert_genesis_header(&provider_rw, &static_file_provider, &chain)?;
 
     insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
 
@@ -272,16 +268,14 @@ pub fn insert_history<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
     block: u64,
 ) -> ProviderResult<()> {
-    let account_transitions =
-        alloc.clone().map(|(addr, _)| (*addr, vec![block])).collect::<BTreeMap<_, _>>();
+    let account_transitions = alloc.clone().map(|(addr, _)| (*addr, [block]));
     provider.insert_account_history_index(account_transitions)?;
 
     trace!(target: "reth::cli", "Inserted account history");
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![block])))
-        .collect::<BTreeMap<_, _>>();
+        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), [block])));
     provider.insert_storage_history_index(storage_transitions)?;
 
     trace!(target: "reth::cli", "Inserted storage history");
@@ -293,15 +287,15 @@ pub fn insert_history<'a, 'b, DB: Database>(
 pub fn insert_genesis_header<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     static_file_provider: &StaticFileProvider,
-    chain: Arc<ChainSpec>,
+    chain: &ChainSpec,
 ) -> ProviderResult<()> {
-    let (header, block_hash) = chain.sealed_genesis_header().split();
+    let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 
     match static_file_provider.block_hash(0) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(&header, difficulty, &hash)?;
+            writer.append_header(header, difficulty, &hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
@@ -550,6 +544,7 @@ mod tests {
     use reth_provider::test_utils::{
         create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
     };
+    use std::collections::BTreeMap;
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -634,7 +629,7 @@ mod tests {
                 ..Default::default()
             },
             hardforks: Default::default(),
-            genesis_hash: None,
+            genesis_hash: Default::default(),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()

@@ -392,7 +392,7 @@ where
             BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
                 .expect("failed to create tree"),
         ));
-        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
+        let genesis_block = self.base_config.chain_spec.genesis_header().clone().seal_slow();
 
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
