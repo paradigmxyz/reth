@@ -71,5 +71,9 @@ pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let file = File::open(state_dump_path)?;
     let reader = BufReader::new(file);
 
-    init_from_state_dump(reader, factory, etl_config)
+    let provider_rw = factory.provider_rw()?;
+    let hash = init_from_state_dump(reader, &provider_rw, etl_config)?;
+    provider_rw.commit()?;
+
+    Ok(hash)
 }

@@ -1,39 +1,35 @@
 use alloy_primitives::B256;
-use reth_chainspec::ChainSpec;
-use reth_db::{models::StoredBlockBodyIndices, tables, DatabaseEnv};
+use reth_db::{models::StoredBlockBodyIndices, tables, Database};
 use reth_db_api::transaction::DbTxMut;
-use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_optimism_primitives::ovm::{LAST_OVM_HEADER, LAST_OVM_HEADER_HASH, LAST_OVM_HEADER_TTD};
 use reth_primitives::{Header, StaticFileSegment, U256};
 use reth_provider::{
-    providers::StaticFileProvider, writer::UnifiedStorageWriter, ProviderFactory,
-    StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
+    providers::StaticFileProvider, DatabaseProviderRW, StageCheckpointWriter,
+    StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
-use std::sync::Arc;
 use tracing::info;
 
 /// Creates a dummy chain (with no transactions) up to the last OVM block inclusive.
 ///
 /// The last OVM header needs to be valid so the node can validate the parent header of the first
 /// bedrock header.
-pub(crate) fn setup_op_mainnet_without_ovm<N: NodeTypesWithEngine<ChainSpec = ChainSpec>>(
-    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
+pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
+    provider_rw: &DatabaseProviderRW<DB>,
 ) -> Result<(), eyre::Error> {
     info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
 
     // Write OVM dummy data up to `LAST_OVM_HEADER - 1` block
-    insert_dummy_chain(provider_factory.static_file_provider())?;
+    insert_dummy_chain(provider_rw.static_file_provider())?;
 
     info!(target: "reth::cli", "Inserting last OVM header.");
 
     // Insert last OVM header
-    insert_last_ovm_header(provider_factory.static_file_provider())?;
+    insert_last_ovm_header(provider_rw.static_file_provider())?;
 
     // Writes `BlockBodyIndices` and  `StageCheckpoint`
-    let mut provider_rw = provider_factory.provider_rw()?;
     {
-        provider_rw.tx_mut().put::<tables::BlockBodyIndices>(
+        provider_rw.tx_ref().put::<tables::BlockBodyIndices>(
             LAST_OVM_HEADER.number,
             StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
         )?;
@@ -43,8 +39,6 @@ pub(crate) fn setup_op_mainnet_without_ovm<N: NodeTypesWithEngine<ChainSpec = Ch
                 .save_stage_checkpoint(stage, StageCheckpoint::new(LAST_OVM_HEADER.number))?;
         }
     }
-
-    UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
 
     info!(target: "reth::cli", "Set up finished.");
 
@@ -56,7 +50,7 @@ pub(crate) fn setup_op_mainnet_without_ovm<N: NodeTypesWithEngine<ChainSpec = Ch
 ///
 /// By appending it, static file writer also verifies that all segments are at the same
 /// height.
-fn insert_last_ovm_header(sf_provider: StaticFileProvider) -> Result<(), eyre::Error> {
+fn insert_last_ovm_header(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         &LAST_OVM_HEADER,
         LAST_OVM_HEADER_TTD,
@@ -79,7 +73,7 @@ fn insert_last_ovm_header(sf_provider: StaticFileProvider) -> Result<(), eyre::E
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
-fn insert_dummy_chain(sf_provider: StaticFileProvider) -> Result<(), eyre::Error> {
+fn insert_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
     let mut headers_writer = sf_provider.latest_writer(StaticFileSegment::Headers)?;
     let txs_writer = sf_provider.latest_writer(StaticFileSegment::Transactions)?;
     let receipts_writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;

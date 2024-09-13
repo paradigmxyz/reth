@@ -1,15 +1,15 @@
 //! Command that initializes the node from a genesis file.
 
-use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
-use reth_config::config::EtlConfig;
 use reth_db_common::init::init_from_state_dump;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::NodeTypesWithEngine;
 use reth_optimism_primitives::ovm::LAST_OVM_HEADER;
-use reth_provider::{BlockNumReader, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    writer::UnifiedStorageWriter, BlockNumReader, ChainSpecProvider, StaticFileProviderFactory,
+};
 use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
 
@@ -63,11 +63,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 
         let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
+        let provider_rw = provider_factory.provider_rw()?;
+
+        // OP-Mainnet may want to bootstrap a chain without OVM historical data
         if provider_factory.chain_spec().is_optimism_mainnet() && self.without_ovm {
-            let last_block_number = provider_factory.last_block_number()?;
+            let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                ovm::setup_op_mainnet_without_ovm(provider_factory.clone())?;
+                ovm::setup_op_mainnet_without_ovm(&provider_rw)?;
             } else if last_block_number > 0 && last_block_number < LAST_OVM_HEADER.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
@@ -77,25 +80,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let hash = init_at_state(self.state, provider_factory, config.stages.etl)?;
+        let reader = BufReader::new(File::open(self.state)?);
+        let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
+
+        UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
     }
-}
-
-/// Initialize chain with state at specific block, from a file with state dump.
-pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-    state_dump_path: PathBuf,
-    factory: ProviderFactory<N>,
-    etl_config: EtlConfig,
-) -> eyre::Result<B256> {
-    info!(target: "reth::cli",
-        path=?state_dump_path,
-        "Opening state dump");
-
-    let file = File::open(state_dump_path)?;
-    let reader = BufReader::new(file);
-
-    init_from_state_dump(reader, factory, etl_config)
 }

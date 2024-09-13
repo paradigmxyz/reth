@@ -319,17 +319,17 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<N>,
+    provider_rw: &DatabaseProviderRW<DB>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
-    let block = factory.last_block_number()?;
-    let hash = factory.block_hash(block)?.unwrap();
+    let block = provider_rw.last_block_number()?;
+    let hash = provider_rw.block_hash(block)?.unwrap();
 
     debug!(target: "reth::cli",
         block,
-        chain=%factory.chain_spec().chain,
+        chain=%provider_rw.chain_spec().chain,
         "Initializing state at block"
     );
 
@@ -340,11 +340,10 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    let provider_rw = factory.provider_rw()?;
-    dump_state(collector, &provider_rw, block)?;
+    dump_state(collector, provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(&provider_rw)?;
+    let computed_state_root = compute_state_root(provider_rw)?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -364,8 +363,6 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     for stage in StageId::STATE_REQUIRED {
         provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
     }
-
-    provider_rw.commit()?;
 
     Ok(hash)
 }
