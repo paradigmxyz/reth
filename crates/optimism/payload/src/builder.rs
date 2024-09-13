@@ -11,10 +11,11 @@ use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, transaction::WithEncoded,
-    Address, Block, Header, IntoRecoveredTransaction, Receipt, TransactionSigned,
-    TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
+    Address, Block, Bytes, Header, IntoRecoveredTransaction, Receipt, SealedBlock,
+    TransactionSigned, TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ProviderError, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -104,7 +105,13 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             });
         }
 
-        todo!()
+        let payload = op_block_attributes.into_built_payload(
+            config.parent_block,
+            config.extra_data,
+            &mut db,
+        )?;
+
+        Ok(BuildOutcome::Better { payload, cached_reads })
     }
 
     pub fn init_pre_block_state<DB>(
@@ -114,8 +121,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
-        DB: revm::Database,
-        DB::Error: Display,
+        DB: revm::Database<Error = ProviderError>,
         EvmConfig: ConfigureEvm,
     {
         let PayloadConfig {
@@ -161,7 +167,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         })
     }
 
-    fn construct_block_attributes<Pool, DB>(
+    pub fn construct_block_attributes<Pool, DB>(
         &self,
         pool: Pool,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
@@ -169,9 +175,9 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         cancel: &Cancelled,
     ) -> Result<OptimismBlockAttributes<EvmConfig>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm,
         Pool: TransactionPool,
         DB: revm::Database<Error = ProviderError>,
+        EvmConfig: ConfigureEvm,
     {
         let mut op_block_attributes =
             OptimismBlockAttributes::new(payload_config, self.evm_config.clone());
@@ -204,7 +210,7 @@ pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
     initialized_block_env: BlockEnv,
     initialized_cfg: CfgEnvWithHandlerCfg,
     chain_spec: Arc<ChainSpec>,
-    builder_attributes: OptimismPayloadBuilderAttributes,
+    payload_attributes: OptimismPayloadBuilderAttributes,
 }
 
 impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
@@ -245,7 +251,7 @@ where
             initialized_block_env,
             initialized_cfg: payload_config.initialized_cfg.clone(),
             chain_spec: payload_config.chain_spec.clone(),
-            builder_attributes: attributes.clone(),
+            payload_attributes: attributes.clone(),
         }
     }
 
@@ -309,7 +315,7 @@ where
         DB: revm::Database<Error = ProviderError>,
         Pool: TransactionPool,
     {
-        if self.builder_attributes.no_tx_pool {
+        if self.payload_attributes.no_tx_pool {
             return Ok(());
         }
 
@@ -392,7 +398,7 @@ where
                 .chain_spec
                 .is_fork_active_at_timestamp(
                     OptimismHardfork::Canyon,
-                    self.builder_attributes.payload_attributes.timestamp,
+                    self.payload_attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
         };
@@ -444,6 +450,137 @@ where
         self.executed_txs.push(tx.to_owned().into_signed());
 
         Ok(())
+    }
+
+    pub fn into_built_payload<DB>(
+        self,
+        parent_block: Arc<SealedBlock>,
+        extra_data: Bytes,
+        &mut db: &mut revm::State<DB>,
+    ) -> Result<OptimismBuiltPayload, PayloadBuilderError>
+    where
+        DB: revm::Database<Error = ProviderError>,
+    {
+        let timestamp = self.payload_attributes.timestamp();
+
+        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
+            &mut db,
+            &self.chain_spec,
+            timestamp,
+            self.payload_attributes.withdrawals().to_owned(),
+        )?;
+
+        // merge all transitions into bundle state, this would apply the withdrawal balance changes
+        // and 4788 contract call
+        db.merge_transitions(BundleRetention::PlainState);
+
+        let block_number = self.initialized_block_env.number.to::<u64>();
+
+        let execution_outcome = ExecutionOutcome::new(
+            db.take_bundle(),
+            vec![self.receipts].into(),
+            block_number,
+            Vec::new(),
+        );
+
+        let chain_spec = self.chain_spec;
+
+        let receipts_root = execution_outcome
+            .optimism_receipts_root_slow(block_number, chain_spec.as_ref(), timestamp)
+            .expect("Number is in range");
+
+        let logs_bloom =
+            execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
+
+        // calculate the state root
+        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let (state_root, trie_output) = {
+            let state_provider = db.database.0.inner.borrow_mut();
+            state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+            })?
+        };
+
+        // create the block header
+        let transactions_root = proofs::calculate_transaction_root(&self.executed_txs);
+
+        // initialize empty blob sidecars. There are no blob transactions on L2.
+        let blob_sidecars = Vec::new();
+        let mut excess_blob_gas = None;
+        let mut blob_gas_used = None;
+
+        // only determine cancun fields when active
+        if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
+                let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
+                let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
+                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            } else {
+                // for the first post-fork block, both parent.blob_gas_used and
+                // parent.excess_blob_gas are evaluated as 0
+                Some(calculate_excess_blob_gas(0, 0))
+            };
+
+            blob_gas_used = Some(0);
+        }
+
+        let header = Header {
+            parent_hash: parent_block.hash(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            beneficiary: self.initialized_block_env.coinbase,
+            state_root,
+            transactions_root,
+            receipts_root,
+            withdrawals_root,
+            logs_bloom,
+            timestamp,
+            mix_hash: self.payload_attributes.prev_randao(),
+            nonce: BEACON_NONCE,
+            base_fee_per_gas: Some(self.base_fee),
+            number: parent_block.number + 1,
+            gas_limit: self.block_gas_limit,
+            difficulty: U256::ZERO,
+            gas_used: self.cumulative_gas_used,
+            extra_data,
+            parent_beacon_block_root: self.payload_attributes.parent_beacon_block_root(),
+            blob_gas_used,
+            excess_blob_gas,
+            requests_root: None,
+        };
+
+        // seal the block
+        let block =
+            Block { header, body: self.executed_txs, ommers: vec![], withdrawals, requests: None };
+
+        let sealed_block = block.seal_slow();
+        debug!(target: "payload_builder", ?sealed_block, "sealed built block");
+
+        // create the executed block data
+        let executed = ExecutedBlock {
+            block: Arc::new(sealed_block.clone()),
+            senders: Arc::new(self.executed_senders),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(hashed_state),
+            trie: Arc::new(trie_output),
+        };
+
+        let mut payload = OptimismBuiltPayload::new(
+            self.payload_attributes.payload_id(),
+            sealed_block,
+            self.total_fees,
+            chain_spec,
+            self.payload_attributes,
+            Some(executed),
+        );
+
+        // extend the payload with the blob sidecars from the executed txs
+        payload.extend_sidecars(blob_sidecars);
+
+        Ok(payload)
     }
 }
 
