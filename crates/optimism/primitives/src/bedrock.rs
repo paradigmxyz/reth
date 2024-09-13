@@ -96,5 +96,3 @@ mod tests {
         assert_eq!(BEDROCK_HEADER.hash_slow(), BEDROCK_HEADER_HASH);
     }
 }
-
-

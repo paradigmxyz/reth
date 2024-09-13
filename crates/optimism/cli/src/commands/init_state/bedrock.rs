@@ -10,7 +10,8 @@ use reth_provider::{
 use reth_stages::{StageCheckpoint, StageId};
 use tracing::info;
 
-/// Creates a dummy chain (with no transactions) up to the last OVM block . It then, appends the first valid Bedrock block.
+/// Creates a dummy chain (with no transactions) up to the last OVM block . It then, appends the
+/// first valid Bedrock block.
 pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
     provider_rw: &DatabaseProviderRW<DB>,
 ) -> Result<(), eyre::Error> {
