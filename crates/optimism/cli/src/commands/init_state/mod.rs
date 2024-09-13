@@ -46,7 +46,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// Specifies whether to initialize the state without relying on OVM historical data.
     ///
     /// When enabled, and before inserting the state, it creates a dummy chain up to the last OVM
-    /// block (#105235062) (14GB / 90 seconds).
+    /// block (#105235062) (14GB / 90 seconds). It then, appends the Bedrock block.
     ///
     /// - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be
     ///   ignored.

@@ -2,8 +2,8 @@
 
 To sync OP mainnet, bedrock state needs to be imported as a starting point. There are currently two ways:
 
-* Minimal bootstrap: only OVM state is imported without any OVM historical data.
-* Full bootstrap: OVM state, blocks and receipts are imported.
+* Minimal bootstrap: only state is imported without any OVM historical data.
+* Full bootstrap: state, blocks and receipts are imported.
 
 ## Minimal bootstrap
 
