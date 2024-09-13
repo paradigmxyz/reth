@@ -10,12 +10,15 @@ use reth_node_telos::{TelosArgs, TelosNode};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use telos_consensus_client::client::ConsensusClient;
+use std::thread::sleep;
+use telos_consensus_client::main_utils::{build_consensus_client, run_client};
+use telos_consensus_client::client::{ConsensusClient, Shutdown};
 use telos_consensus_client::config::{AppConfig, CliArgs};
+use telos_translator_rs::block::TelosEVMBlock;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tracing::{info};
 
 struct TelosRethNodeHandle {
@@ -93,7 +96,7 @@ async fn start_consensus(
     reth_handle: TelosRethNodeHandle,
     ship_port: u16,
     chain_port: u16,
-) -> eyre::Result<(Sender<()>, ())> {
+) -> eyre::Result<Shutdown> {
     let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: 41,
@@ -111,15 +114,16 @@ async fn start_consensus(
         block_checkpoint_interval: 1000,
         maximum_sync_range: 100000,
         latest_blocks_in_db_num: 100,
+        max_retry: None,
+        retry_interval: None,
     };
-    let (sender, receiver) = oneshot::channel();
 
     let cli_args = CliArgs {
         config: "".to_string(),
         clean: false,
     };
-    let mut client_under_test = ConsensusClient::new(&cli_args, config).await?;
-    Ok((sender, client_under_test.run(receiver).await?))
+    let client_shutdown = run_client(cli_args, config.clone()).await?;
+    Ok(client_shutdown)
 }
 
 #[tokio::test]
@@ -158,13 +162,8 @@ async fn testing_chain_sync() {
     let node_context = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
     info!("Started Reth on RPC port {}!", rpc_port);
 
-    match start_consensus(reth_handle, ship_port, chain_port).await {
-        Ok((shutdown_sender, consensus_handle)) => {
-            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-            shutdown_sender.send(()).unwrap();
-        }
-        Err(error) => {
-            panic!("Error with consensus client: {error:?}");
-        }
-    }
+    let client_shutdown = start_consensus(reth_handle, ship_port, chain_port).await.unwrap();
+
+    sleep(std::time::Duration::from_secs(10));
+    client_shutdown.shutdown().await.unwrap();
 }
