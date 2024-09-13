@@ -23,6 +23,9 @@ cfg_if::cfg_if! {
     }
 }
 
+#[cfg(feature = "tracy-allocator")]
+tracy_client::register_demangler!();
+
 /// Custom allocator.
 pub type Allocator = AllocatorWrapper;
 

@@ -14,10 +14,8 @@ workspace = true
 
 [dependencies]
 # reth
-reth-provider = { workspace = true }
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
 reth-node-core.workspace = true
 reth-node-api.workspace = true
 reth-rpc-types.workspace = true
@@ -38,7 +36,6 @@ alloy-transport-ipc.workspace = true
 alloy-pubsub.workspace = true
 alloy-json-rpc.workspace = true
 alloy-rpc-client.workspace = true
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 # reqwest
@@ -54,7 +51,6 @@ tracing.workspace = true
 
 # io
 serde.workspace = true
-serde_json.workspace = true
 
 # async
 tokio = { workspace = true, features = [
@@ -63,7 +59,6 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
-tokio-util.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 
@@ -93,11 +88,7 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-node-core/optimism",
-]
+optimism = ["reth-primitives/optimism", "reth-node-core/optimism"]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
