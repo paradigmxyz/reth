@@ -127,6 +127,20 @@ where
         }
     }
 
+    /// Sends a message to the service to start building a new payload for the given payload
+    /// attributes and returns a future that resolves to the payload.
+    pub async fn send_and_resolve_payload(
+        &self,
+        attr: T::PayloadBuilderAttributes,
+    ) -> Result<PayloadFuture<T::BuiltPayload>, PayloadBuilderError> {
+        let rx = self.send_new_payload(attr);
+        let id = rx.await??;
+
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::Resolve(id, tx));
+        rx.await?.ok_or(PayloadBuilderError::MissingPayload)
+    }
+
     /// Returns the best payload for the given identifier.
     ///
     /// Note: this does not resolve the job if it's still in progress.

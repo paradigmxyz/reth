@@ -1,12 +1,10 @@
 use crate::{Compact, CompactPlaceholder};
+use alloc::vec::Vec;
 use alloy_consensus::transaction::TxEip4844 as AlloyTxEip4844;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, ChainId, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///

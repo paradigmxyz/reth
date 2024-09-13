@@ -1,9 +1,6 @@
 //! Chain specification in dev mode for custom chain.
 
-#[cfg(not(feature = "std"))]
 use alloc::sync::Arc;
-#[cfg(feature = "std")]
-use std::sync::Arc;
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
