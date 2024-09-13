@@ -195,3 +195,6 @@ use tikv_jemallocator as _;
 
 // for rendering diagrams
 use aquamarine as _;
+
+// explicitly import the static file types to print segment names in the help message
+use reth_static_file_types as _;

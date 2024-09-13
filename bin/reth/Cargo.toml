@@ -53,6 +53,7 @@ reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-static-file.workspace = true
+reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-node-api.workspace = true
