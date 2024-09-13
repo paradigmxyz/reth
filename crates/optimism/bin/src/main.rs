@@ -38,7 +38,7 @@ fn main() {
                             if let Some(sequencer_http) = sequencer_http_arg {
                                 ctx.registry
                                     .eth_api()
-                                    .set_sequencer_client(SequencerClient::new(sequencer_http));
+                                    .set_sequencer_client(SequencerClient::new(sequencer_http))?;
                             }
 
                             Ok(())
@@ -62,7 +62,7 @@ fn main() {
                             if let Some(sequencer_http) = sequencer_http_arg {
                                 ctx.registry
                                     .eth_api()
-                                    .set_sequencer_client(SequencerClient::new(sequencer_http));
+                                    .set_sequencer_client(SequencerClient::new(sequencer_http))?;
                             }
 
                             Ok(())
