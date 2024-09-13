@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 
 use crate::{EthApiTypes, FromEthApiError, FromEvmError};
+use alloy_primitives::{BlockNumber, B256, U256};
 use futures::Future;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
@@ -18,9 +19,8 @@ use reth_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
     },
-    Block, BlockNumber, Header, IntoRecoveredTransaction, Receipt, Requests,
-    SealedBlockWithSenders, SealedHeader, TransactionSignedEcRecovered, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Requests, SealedBlockWithSenders,
+    SealedHeader, TransactionSignedEcRecovered, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderError,
@@ -30,6 +30,7 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_types::BlockNumberOrTag;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use reth_trie::HashedPostState;
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -82,7 +83,7 @@ pub trait LoadPendingBlock: EthApiTypes {
                 .provider()
                 .latest_header()
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
             let (mut latest_header, block_hash) = latest.split();
             // child block

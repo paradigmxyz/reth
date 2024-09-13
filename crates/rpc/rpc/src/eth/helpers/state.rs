@@ -43,10 +43,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, StorageKey, StorageValue, U256};
+    use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, Address, StorageKey, StorageValue, KECCAK_EMPTY, U256,
-    };
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, KECCAK_EMPTY};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
     use reth_rpc_eth_types::{
@@ -59,9 +59,10 @@ mod tests {
 
     fn noop_eth_api() -> EthApi<NoopProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::default();
+        let evm_config = EthEvmConfig::new(MAINNET.clone());
 
-        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config);
+        let cache =
+            EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config.clone());
         EthApi::new(
             NoopProvider::default(),
             pool,
@@ -81,12 +82,13 @@ mod tests {
         accounts: HashMap<Address, ExtendedAccount>,
     ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
         let pool = testing_pool();
-        let evm_config = EthEvmConfig::default();
-
         let mock_provider = MockEthProvider::default();
+
+        let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
 
-        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config);
+        let cache =
+            EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config.clone());
         EthApi::new(
             mock_provider.clone(),
             pool,

@@ -1,3 +1,4 @@
+use alloy_primitives::{BlockNumber, B256};
 use futures::{stream::BoxStream, Future, StreamExt};
 use itertools::Either;
 use reth_blockchain_tree_api::{
@@ -15,8 +16,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    constants::EPOCH_SLOTS, BlockNumHash, BlockNumber, Head, Header, SealedBlock, SealedHeader,
-    B256,
+    constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
@@ -2177,10 +2177,10 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
+        use alloy_primitives::U256;
         use generators::BlockParams;
         use reth_db::{tables, test_utils::create_test_static_files_dir, Database};
         use reth_db_api::transaction::DbTxMut;
-        use reth_primitives::U256;
         use reth_provider::{providers::StaticFileProvider, test_utils::MockNodeTypesWithDB};
         use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
@@ -2578,9 +2578,10 @@ mod tests {
     mod new_payload {
         use super::*;
         use alloy_genesis::Genesis;
+        use alloy_primitives::U256;
         use generators::BlockParams;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::{EthereumHardfork, U256};
+        use reth_primitives::EthereumHardfork;
         use reth_provider::{
             providers::StaticFileProvider,
             test_utils::{blocks::BlockchainTestData, MockNodeTypesWithDB},

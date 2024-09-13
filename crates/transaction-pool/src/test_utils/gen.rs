@@ -1,9 +1,10 @@
 use crate::EthPooledTransaction;
+use alloy_primitives::{Address, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
 use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
-    TransactionSigned, TxEip1559, TxEip4844, TxKind, TxLegacy, B256, U256,
+    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Bytes, Transaction,
+    TransactionSigned, TxEip1559, TxEip4844, TxKind, TxLegacy,
 };
 
 /// A generator for transactions for testing purposes.

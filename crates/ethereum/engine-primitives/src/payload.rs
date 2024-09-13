@@ -1,12 +1,13 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_evm_ethereum::revm_spec_by_timestamp_after_merge;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, Address, BlobTransactionSidecar, EthereumHardfork, Header,
-    Receipt, SealedBlock, Withdrawals, B256, U256,
+    SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -30,13 +31,13 @@ pub struct EthBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: SealedBlock,
+    /// Block execution data for the payload, if any.
+    pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
     pub(crate) sidecars: Vec<BlobTransactionSidecar>,
-    /// The receipts of the block
-    pub(crate) receipts: Vec<Receipt>,
 }
 
 // === impl BuiltPayload ===
@@ -47,9 +48,9 @@ impl EthBuiltPayload {
         id: PayloadId,
         block: SealedBlock,
         fees: U256,
-        receipts: Vec<Receipt>,
+        executed_block: Option<ExecutedBlock>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), receipts }
+        Self { id, block, executed_block, fees, sidecars: Vec::new() }
     }
 
     /// Returns the identifier of the payload.
@@ -87,8 +88,8 @@ impl BuiltPayload for EthBuiltPayload {
         self.fees
     }
 
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
     }
 }
 
@@ -101,8 +102,8 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
         (**self).fees()
     }
 
-    fn receipts(&self) -> &[Receipt] {
-        &self.receipts
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
     }
 }
 
@@ -416,7 +417,7 @@ mod tests {
 
         // use cfg_and_block_env
         let cfg_and_block_env =
-            payload_builder_attributes.cfg_and_block_env(&chainspec, &chainspec.genesis_header());
+            payload_builder_attributes.cfg_and_block_env(&chainspec, chainspec.genesis_header());
 
         // ensure the base fee is non zero
         assert_eq!(cfg_and_block_env.1.basefee, U256::from(EIP1559_INITIAL_BASE_FEE));

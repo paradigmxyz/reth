@@ -1,10 +1,10 @@
 //! clap [Args](clap::Args) for debugging purposes
 
+use alloy_primitives::B256;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_primitives::B256;
 use std::{collections::HashSet, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 

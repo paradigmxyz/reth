@@ -3,9 +3,11 @@
 
 use std::fmt::{self, Debug, Formatter};
 
+use alloy_primitives::{B256, U256};
 use derive_more::{Deref, DerefMut, From, Into};
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
+use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
 use reth_rpc_server_types::constants;
+use reth_rpc_types::BlockId;
 use reth_storage_api::BlockReaderIdExt;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
@@ -118,7 +120,7 @@ where
         let header = self
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
         let mut inner = self.inner.lock().await;
 
@@ -153,7 +155,7 @@ where
                     let (parent_hash, block_values) = self
                         .get_block_values(current_hash, SAMPLE_NUMBER)
                         .await?
-                        .ok_or(EthApiError::UnknownBlockNumber)?;
+                        .ok_or(EthApiError::HeaderNotFound(current_hash.into()))?;
                     inner
                         .lowest_effective_tip_cache
                         .insert(current_hash, (parent_hash, block_values.clone()));

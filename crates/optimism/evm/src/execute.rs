@@ -1,6 +1,9 @@
 //! Optimism block executor.
 
-use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use crate::{
+    l1::ensure_create2_deployer, OpChainSpec, OptimismBlockExecutionError, OptimismEvmConfig,
+};
+use alloy_primitives::{BlockNumber, U256};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
@@ -12,7 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_primitives::{BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, U256};
+use reth_primitives::{BlockWithSenders, Header, Receipt, Receipts, TxType};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::BlockBatchRecord, db::states::bundle_state::BundleRetention,
@@ -35,7 +38,10 @@ pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
 impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec, Default::default())
+        Self::new(
+            chain_spec.clone(),
+            OptimismEvmConfig::new(Arc::new(OpChainSpec { inner: (*chain_spec).clone() })),
+        )
     }
 }
 
@@ -89,7 +95,7 @@ where
 
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
-struct OpEvmExecutor<EvmConfig> {
+pub struct OpEvmExecutor<EvmConfig> {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
@@ -243,14 +249,14 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 
+    /// Returns the chain spec.
     #[inline]
-    fn chain_spec(&self) -> &ChainSpec {
+    pub fn chain_spec(&self) -> &ChainSpec {
         &self.executor.chain_spec
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
-    #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    pub fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
 }
@@ -269,7 +275,6 @@ where
         self.executor.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
-            self.chain_spec(),
             header,
             total_difficulty,
         );
@@ -379,8 +384,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
     }
 
     /// Returns mutable reference to the state that wraps the underlying database.
-    #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    pub fn state_mut(&mut self) -> &mut State<DB> {
         self.executor.state_mut()
     }
 }
@@ -441,10 +445,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OpChainSpec;
+    use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        b256, Account, Address, Block, Signature, StorageKey, StorageValue, Transaction,
-        TransactionSigned, TxEip1559, BASE_MAINNET,
+        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -479,7 +484,12 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider { chain_spec, evm_config: Default::default() }
+        OpExecutorProvider {
+            evm_config: OptimismEvmConfig::new(Arc::new(OpChainSpec {
+                inner: (*chain_spec).clone(),
+            })),
+            chain_spec,
+        }
     }
 
     #[test]

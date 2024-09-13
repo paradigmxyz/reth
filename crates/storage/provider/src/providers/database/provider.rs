@@ -7,7 +7,7 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
+    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
@@ -45,6 +45,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -141,9 +142,8 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTx + 'static> DatabaseProvider<TX> {
-    /// Storage provider for state at that given block
-    pub fn state_provider_by_block_number(
+impl<TX: DbTx + 'static> TryIntoHistoricalStateProvider for DatabaseProvider<TX> {
+    fn try_into_history_at_block(
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
@@ -1658,7 +1658,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// This function is used by history indexing stages.
     fn append_history_index<P, T>(
         &self,
-        index_updates: BTreeMap<P, Vec<u64>>,
+        index_updates: impl IntoIterator<Item = (P, impl IntoIterator<Item = u64>)>,
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
     ) -> ProviderResult<()>
     where
@@ -1666,21 +1666,17 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         T: Table<Value = BlockNumberList>,
     {
         for (partial_key, indices) in index_updates {
-            let last_shard = self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
-            // chunk indices and insert them in shards of N size.
-            let indices = last_shard.iter().chain(indices.iter());
-            let chunks = indices
-                .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
-                .into_iter()
-                .map(|chunks| chunks.copied().collect())
-                .collect::<Vec<Vec<_>>>();
-
-            let mut chunks = chunks.into_iter().peekable();
+            let mut last_shard =
+                self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
+            last_shard.extend(indices);
+            // Chunk indices and insert them in shards of N size.
+            let indices = last_shard;
+            let mut chunks = indices.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
             while let Some(list) = chunks.next() {
                 let highest_block_number = if chunks.peek().is_some() {
                     *list.last().expect("`chunks` does not return empty list")
                 } else {
-                    // Insert last list with u64::MAX
+                    // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
                 self.tx.put::<T>(
@@ -2480,13 +2476,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_and_block_env(
-            cfg,
-            block_env,
-            &self.chain_spec,
-            header,
-            total_difficulty,
-        );
+        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
         Ok(())
     }
 
@@ -2516,7 +2506,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
     }
 }
@@ -3145,7 +3135,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
     fn insert_account_history_index(
         &self,
-        account_transitions: BTreeMap<Address, Vec<u64>>,
+        account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
@@ -3195,7 +3185,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
     fn insert_storage_history_index(
         &self,
-        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::StoragesHistory>(
             storage_transitions,
@@ -3697,6 +3687,18 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
+    type Tx = TX;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
     }
 }
 

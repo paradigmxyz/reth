@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
+use alloy_primitives::{Address, Bytes};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
-use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
+use reth_primitives::{revm_primitives::InvalidHeader, BlockId};
 use reth_rpc_server_types::result::{
-    internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
+    block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
@@ -37,18 +38,15 @@ pub enum EthApiError {
     /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(RpcPoolError),
-    /// When an unknown block number is encountered
-    #[error("unknown block number")]
-    UnknownBlockNumber,
-    /// Thrown when querying for `finalized` or `safe` block before the merge transition is
-    /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
-    ///
-    /// op-node now checks for either `Unknown block` OR `unknown block`:
-    /// <https://github.com/ethereum-optimism/optimism/blob/3b374c292e2b05cc51b52212ba68dd88ffce2a3b/op-service/sources/l2_client.go#L105>
-    ///
-    /// TODO(#8045): Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
-    #[error("unknown block")]
-    UnknownSafeOrFinalizedBlock,
+    /// Header not found for block hash/number/tag
+    #[error("header not found")]
+    HeaderNotFound(BlockId),
+    /// Header range not found for start block hash/number/tag to end block hash/number/tag
+    #[error("header range not found, start block {0:?}, end block {1:?}")]
+    HeaderRangeNotFound(BlockId, BlockId),
+    /// Receipts not found for block hash/number/tag
+    #[error("receipts not found")]
+    ReceiptsNotFound(BlockId),
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
@@ -168,12 +166,29 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EvmCustom(_) |
             EthApiError::EvmPrecompile(_) |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
+            EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            EthApiError::UnknownSafeOrFinalizedBlock => {
-                rpc_error_with_code(EthRpcErrorCode::UnknownBlock.code(), error.to_string())
-            }
+            // TODO(onbjerg): We rewrite the error message here because op-node does string matching
+            // on the error message.
+            //
+            // Until https://github.com/ethereum-optimism/optimism/pull/11759 is released, this must be kept around.
+            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("block not found: {}", block_id_to_str(id)),
+            ),
+            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!("{error}: {}", block_id_to_str(id)),
+            ),
+            EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                format!(
+                    "{error}: start block: {}, end block: {}",
+                    block_id_to_str(start_id),
+                    block_id_to_str(end_id),
+                ),
+            ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
@@ -216,15 +231,15 @@ impl From<reth_errors::ProviderError> for EthApiError {
     fn from(error: reth_errors::ProviderError) -> Self {
         use reth_errors::ProviderError;
         match error {
-            ProviderError::HeaderNotFound(_) |
-            ProviderError::BlockHashNotFound(_) |
-            ProviderError::BestBlockNotFound |
-            ProviderError::BlockNumberForTransactionIndexNotFound |
-            ProviderError::TotalDifficultyNotFound { .. } |
-            ProviderError::UnknownBlockHash(_) => Self::UnknownBlockNumber,
-            ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
-                Self::UnknownSafeOrFinalizedBlock
+            ProviderError::HeaderNotFound(hash) => Self::HeaderNotFound(hash.into()),
+            ProviderError::BlockHashNotFound(hash) | ProviderError::UnknownBlockHash(hash) => {
+                Self::HeaderNotFound(hash.into())
             }
+            ProviderError::BestBlockNotFound => Self::HeaderNotFound(BlockId::latest()),
+            ProviderError::BlockNumberForTransactionIndexNotFound => Self::UnknownBlockOrTxIndex,
+            ProviderError::TotalDifficultyNotFound(num) => Self::HeaderNotFound(num.into()),
+            ProviderError::FinalizedBlockNotFound => Self::HeaderNotFound(BlockId::finalized()),
+            ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             err => Self::Internal(err.into()),
         }
     }
@@ -712,11 +727,41 @@ pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use revm_primitives::b256;
+
     use super::*;
 
     #[test]
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn header_not_found_message() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::hash(b256!(
+                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+            )))
+            .into();
+        assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
+                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+            )))
+            .into();
+        assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::number(100000)).into();
+        assert_eq!(err.message(), "block not found: number 0x186a0");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::latest()).into();
+        assert_eq!(err.message(), "block not found: latest");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::safe()).into();
+        assert_eq!(err.message(), "block not found: safe");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::HeaderNotFound(BlockId::finalized()).into();
+        assert_eq!(err.message(), "block not found: finalized");
     }
 }

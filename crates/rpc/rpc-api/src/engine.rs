@@ -3,10 +3,11 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
+use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
         ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2,
@@ -14,8 +15,8 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, SyncStatus,
-    TransactionRequest,
+    BlobAndProofV1, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
+    SyncStatus, TransactionRequest,
 };
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
@@ -213,6 +214,13 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
+
+    /// Fetch blobs for the consensus layer from the in-memory blob cache.
+    #[method(name = "getBlobsV1")]
+    async fn get_blobs_v1(
+        &self,
+        transaction_ids: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -238,14 +246,14 @@ pub trait EngineEthApi<B: RpcObject> {
     async fn call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes>;
 
     /// Returns code at a given address at given block number.
     #[method(name = "getCode")]
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes>;
+    async fn get_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<Bytes>;
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]

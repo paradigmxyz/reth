@@ -45,7 +45,7 @@ pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fm
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = C::help_messge(),
+        long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
         value_parser = C::parser(),
         global = true,

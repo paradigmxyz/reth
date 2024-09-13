@@ -26,7 +26,7 @@ reth-node-core.workspace = true
 reth-node-optimism.workspace = true
 reth-primitives.workspace = true
 
-## optimisim
+## optimism
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
@@ -42,11 +42,9 @@ reth-cli-runner.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 
-
 # eth
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
 
 # misc
 futures-util.workspace = true
@@ -68,10 +66,17 @@ tempfile.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 
-[features] 
- optimism = [ 
+[features]
+optimism = [
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
     "reth-provider/optimism",
+    "reth-node-core/optimism",
     "reth-node-optimism/optimism",
- ] 
+]
+asm-keccak = [
+    "alloy-primitives/asm-keccak",
+    "reth-node-core/asm-keccak",
+    "reth-node-optimism/asm-keccak",
+    "reth-primitives/asm-keccak",
+]
