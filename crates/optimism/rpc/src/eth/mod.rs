@@ -36,6 +36,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use tokio::sync::OnceCell;
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -59,8 +60,11 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
 pub struct OpEthApi<N: FullNodeComponents> {
+    /// Gateway to node's core components.
     inner: Arc<EthApiNodeBackend<N>>,
-    sequencer_client: Arc<parking_lot::RwLock<Option<SequencerClient>>>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: OnceCell<SequencerClient>,
 }
 
 impl<N> OpEthApi<N>
@@ -90,7 +94,7 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), sequencer_client: Arc::new(parking_lot::RwLock::new(None)) }
+        Self { inner: Arc::new(inner), sequencer_client: OnceCell::new() }
     }
 }
 
