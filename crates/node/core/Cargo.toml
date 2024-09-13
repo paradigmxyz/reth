@@ -14,12 +14,12 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-cli.workspace = true
 reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-db-api.workspace = true
 reth-storage-errors.workspace = true
-reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -42,8 +42,8 @@ reth-optimism-chainspec = { workspace = true, optional = true }
 
 # ethereum
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
-
 
 # misc
 eyre.workspace = true
@@ -54,13 +54,13 @@ rand.workspace = true
 derive_more.workspace = true
 toml.workspace = true
 serde.workspace = true
+strum = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 
 # io
 dirs-next = "2.0.0"
 shellexpand.workspace = true
 serde_json.workspace = true
-
-
 
 # tracing
 tracing.workspace = true
@@ -75,7 +75,6 @@ secp256k1 = { workspace = true, features = [
 # async
 futures.workspace = true
 
-
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
@@ -85,7 +84,6 @@ tempfile.workspace = true
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
     "dep:reth-optimism-chainspec",

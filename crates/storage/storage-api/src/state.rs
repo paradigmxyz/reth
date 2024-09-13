@@ -2,11 +2,11 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
+use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, StorageKey,
-    StorageValue, B256, KECCAK_EMPTY, U256,
+    BlockId, BlockNumHash, BlockNumberOrTag, Bytecode, StorageKey, StorageValue, KECCAK_EMPTY,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
@@ -82,6 +82,15 @@ pub trait StateProvider:
     }
 }
 
+/// Trait implemented for database providers that can be converted into a historical state provider.
+pub trait TryIntoHistoricalStateProvider {
+    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
+    fn try_into_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox>;
+}
+
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
 /// `BlockNumber`, the latest state, or the pending state.
 ///
@@ -140,7 +149,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_[StateProvider] with matching block hash.
+    /// Returns _any_ [StateProvider] with matching block hash.
     ///
     /// This will return a [StateProvider] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;

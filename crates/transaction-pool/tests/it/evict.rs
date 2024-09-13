@@ -1,7 +1,8 @@
 //! Transaction pool eviction tests.
 
+use alloy_primitives::{Address, B256};
 use rand::distributions::Uniform;
-use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, Address, B256};
+use reth_primitives::constants::MIN_PROTOCOL_BASE_FEE;
 use reth_transaction_pool::{
     error::PoolErrorKind,
     test_utils::{

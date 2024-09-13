@@ -22,7 +22,7 @@ pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     ) -> ProviderResult<()>;
 }
 
-/// BlockExecution Writer
+/// BlockExecution Reader
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockExecutionReader: BlockReader + Send + Sync {
     /// Get range of blocks and its execution result
@@ -30,6 +30,13 @@ pub trait BlockExecutionReader: BlockReader + Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
+}
+
+/// This just receives state, or [`ExecutionOutcome`], from the provider
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait StateReader: Send + Sync {
+    /// Get the [`ExecutionOutcome`] for the given block
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>>;
 }
 
 /// Block Writer

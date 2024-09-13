@@ -6,9 +6,10 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy_primitives::{TxHash, B256};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, TxHash, B256};
+use reth_primitives::{BlockId, Receipt};
 use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 use reth_rpc_types::{
     trace::{
@@ -77,7 +78,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block> + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block, Receipt> + DebugApiClient + Sync,
 {
     type Provider = T;
 

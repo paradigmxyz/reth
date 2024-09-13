@@ -5,13 +5,11 @@ use crate::{
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
     TxEip4844, TxLegacy, TxType,
 };
+use alloc::{string::ToString, vec::Vec};
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
-
-#[cfg(not(feature = "std"))]
-use alloc::{string::ToString, vec::Vec};
 
 impl TryFrom<alloy_rpc_types::Block<WithOtherFields<alloy_rpc_types::Transaction>>> for Block {
     type Error = alloy_rpc_types::ConversionError;
@@ -102,10 +100,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    gas_limit: tx.gas,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
@@ -116,10 +111,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                 Ok(Self::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    gas_limit: tx.gas,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
@@ -138,10 +130,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     max_fee_per_gas: tx
                         .max_fee_per_gas
                         .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    gas_limit: tx.gas,
                     to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
@@ -159,11 +148,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     max_fee_per_gas: tx
                         .max_fee_per_gas
                         .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    placeholder: tx.to.map(drop),
+                    gas_limit: tx.gas,
                     to: tx.to.unwrap_or_default(),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
@@ -217,10 +202,7 @@ impl TryFrom<WithOtherFields<alloy_rpc_types::Transaction>> for Transaction {
                     to: TxKind::from(tx.to),
                     mint: fields.mint.filter(|n| *n != 0),
                     value: tx.value,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    gas_limit: tx.gas,
                     is_system_transaction: fields.is_system_tx.unwrap_or(false),
                     input: tx.input,
                 }))

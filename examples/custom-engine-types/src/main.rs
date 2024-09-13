@@ -27,7 +27,7 @@ use reth::{
     api::PayloadTypes,
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
-        node::NodeTypes,
+        node::{NodeTypes, NodeTypesWithEngine},
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
     primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -45,9 +45,12 @@ use reth_node_api::{
     validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::node::{
-    EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
-    EthereumPoolBuilder,
+use reth_node_ethereum::{
+    node::{
+        EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+        EthereumPoolBuilder,
+    },
+    EthEvmConfig,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -194,9 +197,12 @@ struct MyCustomNode;
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
-    // use the custom engine types
-    type Engine = CustomEngineTypes;
     type ChainSpec = ChainSpec;
+}
+
+/// Configure the node types with the custom engine types
+impl NodeTypesWithEngine for MyCustomNode {
+    type Engine = CustomEngineTypes;
 }
 
 /// Implement the Node trait for the custom node
@@ -204,7 +210,7 @@ impl NodeTypes for MyCustomNode {
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+    N: FullNodeTypes<Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -234,14 +240,16 @@ pub struct CustomPayloadServiceBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
-    Node: FullNodeTypes<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+    >,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
         let payload_builder = CustomPayloadBuilder::default();
         let conf = ctx.payload_builder_config();
 
@@ -297,7 +305,10 @@ where
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        reth_ethereum_payload_builder::EthereumPayloadBuilder::default().try_build(BuildArguments {
+        reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
+            chain_spec.clone(),
+        ))
+        .try_build(BuildArguments {
             client,
             pool,
             cached_reads,
@@ -327,7 +338,7 @@ where
             attributes,
             chain_spec,
         } = config;
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::default(),client,
+        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(chain_spec.clone())),client,
                                                                                                                      PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec })
     }
 }

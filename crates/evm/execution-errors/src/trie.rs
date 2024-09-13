@@ -1,12 +1,10 @@
 //! Errors when computing the state root.
 
+use alloc::string::ToString;
 use alloy_primitives::B256;
 use derive_more::Display;
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-
-#[cfg(not(feature = "std"))]
-use alloc::string::ToString;
 
 /// State root errors.
 #[derive(Display, Debug, PartialEq, Eq, Clone)]
@@ -125,9 +123,6 @@ pub enum TrieWitnessError {
     Proof(StateProofError),
     /// RLP decoding error.
     Rlp(alloy_rlp::Error),
-    /// Missing storage multiproof.
-    #[display("missing storage multiproof for {_0}")]
-    MissingStorageMultiProof(B256),
     /// Missing account.
     #[display("missing account {_0}")]
     MissingAccount(B256),

@@ -2,7 +2,8 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
-use reth_primitives::{Address, EIP4844_TX_TYPE_ID};
+use alloy_primitives::Address;
+use reth_primitives::EIP4844_TX_TYPE_ID;
 use std::collections::HashSet;
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;

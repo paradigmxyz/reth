@@ -1,13 +1,14 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_primitives::{Address, Bytes, B256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256};
 use reth_rpc_types::{
+    debug::ExecutionWitness,
     trace::geth::{
         BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
         TraceResult,
     },
     Block, Bundle, StateContext, TransactionRequest,
 };
-use std::collections::HashMap;
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -106,7 +107,7 @@ pub trait DebugApi {
     async fn debug_trace_call(
         &self,
         request: TransactionRequest,
-        block_number: Option<BlockId>,
+        block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
 
@@ -138,12 +139,14 @@ pub trait DebugApi {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first and only argument is the block number or block hash.
+    /// The first argument is the block number or block hash. The second argument is a boolean
+    /// indicating whether to include the preimages of keys in the response.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(
         &self,
         block: BlockNumberOrTag,
-    ) -> RpcResult<HashMap<B256, Bytes>>;
+        include_preimages: bool,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

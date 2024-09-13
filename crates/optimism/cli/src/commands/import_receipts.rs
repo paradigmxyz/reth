@@ -4,14 +4,16 @@
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
-use reth_db_api::database::Database;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::Receipts;
@@ -23,13 +25,13 @@ use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, error, info, trace};
 
-use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
+use crate::receipt_file_codec::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct ImportReceiptsOpCommand {
+pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -43,9 +45,11 @@ pub struct ImportReceiptsOpCommand {
     path: PathBuf,
 }
 
-impl ImportReceiptsOpCommand {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> ImportReceiptsOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         debug!(target: "reth::cli",
@@ -53,7 +57,7 @@ impl ImportReceiptsOpCommand {
             "Chunking receipts import"
         );
 
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         import_receipts_from_file(
             provider_factory,
@@ -76,14 +80,14 @@ impl ImportReceiptsOpCommand {
 }
 
 /// Imports receipts to static files from file in chunks. See [`import_receipts_from_reader`].
-pub async fn import_receipts_from_file<DB, P, F>(
-    provider_factory: ProviderFactory<DB>,
+pub async fn import_receipts_from_file<N, P, F>(
+    provider_factory: ProviderFactory<N>,
     path: P,
     chunk_len: Option<u64>,
     filter: F,
 ) -> eyre::Result<()>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     P: AsRef<Path>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
@@ -168,13 +172,13 @@ where
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
 /// indices in the [`Receipts`] list, to map to sequential block numbers.
-pub async fn import_receipts_from_reader<DB, F>(
-    provider_factory: &ProviderFactory<DB>,
+pub async fn import_receipts_from_reader<N, F>(
+    provider_factory: &ProviderFactory<N>,
     mut reader: ChunkedFileReader,
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    DB: Database,
+    N: NodeTypesWithDB<ChainSpec = ChainSpec>,
     F: FnMut(u64, &mut Receipts) -> usize,
 {
     let mut total_decoded_receipts = 0;
@@ -248,8 +252,8 @@ pub struct ImportReceiptsResult {
 
 #[cfg(test)]
 mod test {
+    use alloy_primitives::hex;
     use reth_db_common::init::init_genesis;
-    use reth_primitives::hex;
     use reth_stages::test_utils::TestStageDB;
     use tempfile::tempfile;
     use tokio::{
@@ -257,7 +261,7 @@ mod test {
         io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
     };
 
-    use crate::file_codec_ovm_receipt::test::{
+    use crate::receipt_file_codec::test::{
         HACK_RECEIPT_ENCODED_BLOCK_1, HACK_RECEIPT_ENCODED_BLOCK_2, HACK_RECEIPT_ENCODED_BLOCK_3,
     };
 
@@ -281,7 +285,7 @@ mod test {
             ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE).await.unwrap();
 
         let db = TestStageDB::default();
-        init_genesis(db.factory.clone()).unwrap();
+        init_genesis(&db.factory).unwrap();
 
         // todo: where does import command init receipts ? probably somewhere in pipeline
 

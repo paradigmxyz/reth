@@ -4,6 +4,8 @@ Debug block building
 
 ```bash
 $ reth debug build-block --help
+```
+```txt
 Usage: reth debug build-block [OPTIONS] --prev-randao <PREV_RANDAO> --timestamp <TIMESTAMP> --suggested-fee-recipient <SUGGESTED_FEE_RECIPIENT>
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

@@ -7,7 +7,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
 pub mod constants;
@@ -28,7 +27,7 @@ use derive_more::{Constructor, Deref, Into};
 use reth_chainspec::ChainSpec;
 
 /// OP stack chain spec type.
-#[derive(Debug, Deref, Into, Constructor)]
+#[derive(Debug, Clone, Deref, Into, Constructor)]
 pub struct OpChainSpec {
     /// [`ChainSpec`].
     pub inner: ChainSpec,

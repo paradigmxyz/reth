@@ -16,6 +16,9 @@ reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-consensus.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 [dev-dependencies]
 reth-storage-api.workspace = true
 rand.workspace = true

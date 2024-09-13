@@ -1,6 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_evm_ethereum::revm_spec_by_timestamp_after_merge;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -30,6 +31,8 @@ pub struct EthBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: SealedBlock,
+    /// Block execution data for the payload, if any.
+    pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -41,8 +44,13 @@ pub struct EthBuiltPayload {
 
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub const fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
-        Self { id, block, fees, sidecars: Vec::new() }
+    pub const fn new(
+        id: PayloadId,
+        block: SealedBlock,
+        fees: U256,
+        executed_block: Option<ExecutedBlock>,
+    ) -> Self {
+        Self { id, block, executed_block, fees, sidecars: Vec::new() }
     }
 
     /// Returns the identifier of the payload.
@@ -79,6 +87,10 @@ impl BuiltPayload for EthBuiltPayload {
     fn fees(&self) -> U256 {
         self.fees
     }
+
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
+    }
 }
 
 impl<'a> BuiltPayload for &'a EthBuiltPayload {
@@ -88,6 +100,10 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 
     fn fees(&self) -> U256 {
         (**self).fees()
+    }
+
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        self.executed_block.clone()
     }
 }
 
@@ -401,7 +417,7 @@ mod tests {
 
         // use cfg_and_block_env
         let cfg_and_block_env =
-            payload_builder_attributes.cfg_and_block_env(&chainspec, &chainspec.genesis_header());
+            payload_builder_attributes.cfg_and_block_env(&chainspec, chainspec.genesis_header());
 
         // ensure the base fee is non zero
         assert_eq!(cfg_and_block_env.1.basefee, U256::from(EIP1559_INITIAL_BASE_FEE));

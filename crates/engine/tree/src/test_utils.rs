@@ -1,8 +1,10 @@
 use reth_chainspec::ChainSpec;
-use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives::{BlockBody, SealedHeader, B256};
-use reth_provider::{test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome};
+use reth_provider::{
+    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+    ExecutionOutcome,
+};
 use reth_prune_types::PruneModes;
 use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
 use reth_stages_api::Pipeline;
@@ -40,12 +42,12 @@ impl TestPipelineBuilder {
     }
 
     /// Builds the pipeline.
-    pub fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
+    pub fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
         reth_tracing::init_test_tracing();
 
         // Setup pipeline
         let (tip_tx, _tip_rx) = watch::channel(B256::default());
-        let pipeline = Pipeline::builder()
+        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
             .with_tip_sender(tip_tx);
 

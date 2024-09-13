@@ -39,6 +39,9 @@ reth-optimism-rpc.workspace = true
 reth-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 async-trait.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
@@ -80,4 +83,5 @@ optimism = [
     "reth-auto-seal-consensus/optimism",
     "reth-optimism-rpc/optimism"
 ]
+asm-keccak = ["reth-primitives/asm-keccak"]
 test-utils = ["reth-node-builder/test-utils"]

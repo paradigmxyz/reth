@@ -21,13 +21,19 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
+use reth_node_api::{
+    FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+    rpc::{
+        eth::{helpers::AddDevSigners, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
@@ -46,8 +52,12 @@ use crate::{
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB>>;
+pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
+    NodeTypesWithDBAdapter<Types, DB>,
+    BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
+>;
 
+#[allow(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///
@@ -57,8 +67,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ## Order
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
-/// example) and then proceeds to configure the core static types of the node: [`NodeTypes`], these
-/// include the node's primitive types and the node's engine types.
+/// example) and then proceeds to configure the core static types of the node:
+/// [`NodeTypesWithEngine`], these include the node's primitive types and the node's engine types.
 ///
 /// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
@@ -120,14 +130,14 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// The following diagram shows the flow of the node builder from CLI to a launched node.
 ///
-/// `include_mmd!("docs/mermaid/builder.mmd`")
+/// include_mmd!("docs/mermaid/builder.mmd")
 ///
 /// ## Internals
 ///
-/// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that all
-/// components are configured with the correct types. However the database types and with that the
-/// provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
+/// The node builder is fully type safe, it uses the [`NodeTypesWithEngine`] trait to enforce that
+/// all components are configured with the correct types. However the database types and with that
+/// the provider trait implementations are currently created by the builder itself during the launch
+/// process, hence the database type is not part of the [`NodeTypesWithEngine`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the
 /// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
@@ -207,7 +217,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     {
         self.with_types_and_provider()
     }
@@ -215,10 +225,10 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
-        P: FullProvider<DB, T::ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
@@ -265,7 +275,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -273,10 +283,12 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
+    ) -> WithLaunchContext<
+        NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>,
+    >
     where
-        T: NodeTypes<ChainSpec = ChainSpec>,
-        P: FullProvider<DB, T::ChainSpec>,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+        P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         WithLaunchContext {
             builder: self.builder.with_types_and_provider(),
@@ -332,6 +344,7 @@ where
                         + FullEthApiServer<
                             NetworkTypes: alloy_network::Network<
                                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                                ReceiptResponse = AnyTransactionReceipt,
                             >,
                         >
                         + AddDevSigners
@@ -474,7 +487,7 @@ where
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypes<ChainSpec = ChainSpec>,
+    T: NodeTypesWithEngine<ChainSpec = ChainSpec>,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: NodeAddOns<
         NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
@@ -482,6 +495,7 @@ where
                     + FullEthApiServer<
             NetworkTypes: alloy_network::Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + AddDevSigners,
     >,
@@ -548,7 +562,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the chain spec of the node.
-    pub fn chain_spec(&self) -> Arc<Node::ChainSpec> {
+    pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider().chain_spec()
     }
 

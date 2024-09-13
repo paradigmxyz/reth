@@ -1,8 +1,9 @@
 use crate::ChainSpec;
 use alloy_chains::Chain;
+use core::fmt::Debug;
 
 /// Trait representing type configuring a chain spec.
-pub trait EthChainSpec: Send + Sync + Unpin + 'static {
+pub trait EthChainSpec: Send + Sync + Unpin + Debug + 'static {
     // todo: make chain spec type generic over hardfork
     //type Hardfork: Clone + Copy + 'static;
 
