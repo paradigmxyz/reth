@@ -46,7 +46,7 @@ fn append_bedrock_block<DB: Database>(
     provider_rw.insert_block(
         SealedBlockWithSenders::new(
             SealedBlock::new(
-                SealedHeader::new(BEDROCK_HEADER.clone(), BEDROCK_HEADER_HASH),
+                SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
                 BlockBody::default(),
             ),
             vec![],
