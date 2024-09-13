@@ -367,7 +367,7 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
         );
 
         return Err(InitDatabaseError::StateRootMismatch(GotExpected {
-            got: dump_state_root,
+            got: computed_state_root,
             expected: expected_state_root,
         })
         .into())
