@@ -227,7 +227,7 @@ mod tests {
         tokio::time::sleep(4 * period).await;
 
         // Assert a block has been build
-        let block = provider.block_by_number(0)?.map(|b| b.seal_slow());
+        let block = provider.block_by_number(0)?;
         assert!(block.is_some());
 
         Ok(())
@@ -286,7 +286,7 @@ mod tests {
         tokio::time::sleep(period).await;
 
         // Assert a block has been build
-        let block = provider.block_by_number(0)?.map(|b| b.seal_slow());
+        let block = provider.block_by_number(0)?;
         assert!(block.is_some());
 
         Ok(())
