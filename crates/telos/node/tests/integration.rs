@@ -34,7 +34,7 @@ async fn start_ship() -> ContainerAsync<GenericImage> {
     //   and should be the tag for linux/amd64
     let container: ContainerAsync<GenericImage> = GenericImage::new(
         "ghcr.io/telosnetwork/testcontainer-nodeos-evm",
-        "v0.1.5@sha256:d66a3d5347a31be0419385f1326b3f122b124fc95d5365a464f90626a451cbeb",
+        "v0.1.9@sha256:6d4946f112e5c26712a938ea332b76e742035e64af93149227d97dd67e1a9012",
     )
     .with_exposed_port(Tcp(8888))
     .with_exposed_port(Tcp(18999))
