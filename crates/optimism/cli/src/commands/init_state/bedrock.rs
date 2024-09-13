@@ -2,9 +2,12 @@ use alloy_primitives::B256;
 use reth_db::{models::StoredBlockBodyIndices, tables, Database};
 use reth_db_api::transaction::DbTxMut;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
-use reth_primitives::{Header, StaticFileSegment, U256};
+use reth_primitives::{
+    BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, U256,
+};
 use reth_provider::{
-    providers::StaticFileProvider, DatabaseProviderRW, StageCheckpointWriter, StaticFileWriter,
+    providers::StaticFileProvider, BlockWriter, DatabaseProviderRW, StageCheckpointWriter,
+    StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use tracing::info;
@@ -15,13 +18,14 @@ pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
     provider_rw: &DatabaseProviderRW<DB>,
 ) -> Result<(), eyre::Error> {
     info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
+    let static_file_provider = provider_rw.static_file_provider();
 
     // Write OVM dummy data up to `BEDROCK_HEADER - 1` block
-    insert_dummy_chain(provider_rw.static_file_provider())?;
+    insert_dummy_chain(&static_file_provider)?;
 
     info!(target: "reth::cli", "Inserting first Bedrock header.");
 
-    insert_first_bedrock_header(provider_rw.static_file_provider())?;
+    append_bedrock_block(&provider_rw, &static_file_provider)?;
 
     // Writes `BlockBodyIndices` and  `StageCheckpoint`
     {
@@ -41,11 +45,31 @@ pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
     Ok(())
 }
 
-/// Appends the first bedrock header.
+/// Appends the first bedrock block.
 ///
 /// By appending it, static file writer also verifies that all segments are at the same
 /// height.
-fn insert_first_bedrock_header(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
+fn append_bedrock_block<DB: Database>(
+    provider_rw: &DatabaseProviderRW<DB>,
+    sf_provider: &StaticFileProvider,
+) -> Result<(), eyre::Error> {
+    provider_rw.insert_block(
+        SealedBlockWithSenders::new(
+            SealedBlock::new(
+                SealedHeader::new(BEDROCK_HEADER.clone(), BEDROCK_HEADER_HASH),
+                BlockBody::default(),
+            ),
+            vec![],
+        )
+        .expect("no senders or txes"),
+    )?;
+
+    // Method above also inserts the header into the DB table, however, we can insert it directly to
+    // static files.
+    provider_rw
+        .tx_ref()
+        .delete::<tables::Headers>(BEDROCK_HEADER.number, Some(BEDROCK_HEADER.clone()))?;
+
     sf_provider.latest_writer(StaticFileSegment::Headers)?.append_header(
         &BEDROCK_HEADER,
         BEDROCK_HEADER_TTD,
