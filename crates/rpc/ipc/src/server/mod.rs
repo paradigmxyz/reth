@@ -789,6 +789,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     }
 }
 
+/// Returns a random name for the IPC endpoint.
 #[cfg(test)]
 pub fn dummy_name() -> String {
     let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
