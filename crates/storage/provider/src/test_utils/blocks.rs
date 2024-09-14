@@ -5,9 +5,12 @@ use once_cell::sync::Lazy;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
-    alloy_primitives, b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header,
-    Receipt, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader, Signature, Transaction,
-    TransactionSigned, TxKind, TxLegacy, TxType, Withdrawal, Withdrawals, B256, U256,
+    alloy_primitives::{self, Parity},
+    b256,
+    hex_literal::hex,
+    Account, Address, BlockNumber, Bytes, Header, Receipt, Requests, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, Signature, Transaction, TransactionSigned, TxKind,
+    TxLegacy, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{
@@ -85,17 +88,17 @@ pub(crate) static TEST_BLOCK: Lazy<SealedBlock> = Lazy::new(|| SealedBlock {
     ),
     body: vec![TransactionSigned {
         hash: hex!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397").into(),
-        signature: Signature {
-            r: U256::from_str(
+        signature: Signature::new(
+            U256::from_str(
                 "51983300959770368863831494747186777928121405155922056726144551509338672451120",
             )
             .unwrap(),
-            s: U256::from_str(
+            U256::from_str(
                 "29056683545955299640297374067888344259176096769870751649153779895496107008675",
             )
             .unwrap(),
-            odd_y_parity: false,
-        },
+            Parity::Parity(false),
+        ),
         transaction: Transaction::Legacy(TxLegacy {
             gas_price: 10,
             gas_limit: 400_000,

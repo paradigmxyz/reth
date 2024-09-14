@@ -449,7 +449,8 @@ mod tests {
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
     use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
-        Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
+        optimism_deposit_tx_signature, Account, Block, Signature, Transaction, TransactionSigned,
+        TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -525,7 +526,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -535,7 +536,7 @@ mod tests {
                 gas_limit: 21_000,
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let provider = executor_provider(chain_spec);
@@ -609,7 +610,7 @@ mod tests {
                 to: addr.into(),
                 ..Default::default()
             }),
-            Signature::default(),
+            Signature::test_signature(),
         );
 
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
@@ -619,7 +620,7 @@ mod tests {
                 gas_limit: 21_000,
                 ..Default::default()
             }),
-            Signature::optimism_deposit_tx_signature(),
+            optimism_deposit_tx_signature(),
         );
 
         let provider = executor_provider(chain_spec);

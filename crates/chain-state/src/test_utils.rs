@@ -11,7 +11,7 @@ use reth_primitives::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     Address, BlockNumber, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
-    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, B256, U256,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, B256, U256,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -96,15 +96,8 @@ impl TestBlockBuilder {
             let signature_hash = tx.signature_hash();
             let signature = self.signer_pk.sign_hash_sync(&signature_hash).unwrap();
 
-            TransactionSigned::from_transaction_and_signature(
-                tx,
-                Signature {
-                    r: signature.r(),
-                    s: signature.s(),
-                    odd_y_parity: signature.v().y_parity(),
-                },
-            )
-            .with_signer(self.signer)
+            TransactionSigned::from_transaction_and_signature(tx, signature)
+                .with_signer(self.signer)
         };
 
         let num_txs = rng.gen_range(0..5);

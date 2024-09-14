@@ -469,6 +469,7 @@ pub fn random_request<R: Rng>(rng: &mut R) -> Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Parity;
     use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
     use std::str::FromStr;
 
@@ -533,17 +534,17 @@ mod tests {
                 .unwrap();
         let signature = sign_message(secret, hash).unwrap();
 
-        let expected = Signature {
-            r: U256::from_str(
+        let expected = Signature::new(
+            U256::from_str(
                 "18515461264373351373200002665853028612451056578545711640558177340181847433846",
             )
             .unwrap(),
-            s: U256::from_str(
+            U256::from_str(
                 "46948507304638947509940763649030358759909902576025900602547168820602576006531",
             )
             .unwrap(),
-            odd_y_parity: false,
-        };
+            Parity::Parity(false),
+        );
         assert_eq!(expected, signature);
     }
 }
