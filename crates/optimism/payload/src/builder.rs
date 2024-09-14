@@ -63,6 +63,19 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 
+    /// Initializes the pre-block state for payload building.
+    ///
+    /// # Arguments
+    ///
+    /// * `payload_config` - Payload configuration containing attributes and environments for the block
+    /// * `evm_config` - EVM configuration for the execution environment
+    /// * `db` - Mutable reference to the database
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the pre-block state is successfully initialized.
+    /// * `Err(PayloadBuilderError::Internal(_))` if applying the beacon root contract call fails.
+    /// * `Err(PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail))` if ensuring the create2 deployer fails.
     pub fn init_pre_block_state<DB>(
         &self,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
@@ -116,6 +129,24 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         })
     }
 
+    /// Constructs new block attributes with a populated list of transactions
+    /// This method uses the provided payload attributes and transaction pool to populate the
+    /// block attributes.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool` - The transaction pool from which to retrieve pooled transactions
+    /// * `payload_config` - Reference to the payload configuration containing attributes and environments
+    /// * `db` - Mutable reference to the database
+    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(OptimismBlockAttributes<EvmConfig>)` with populated block attributes on success
+    /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
+    /// * `Err(PayloadBuilderError::BlobTransactionRejected)` if a blob transaction is encountered
+    /// * `Err(PayloadBuilderError::TransactionEcRecoverFailed)` if EC recovery fails for a transaction
+    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
     pub fn construct_block_attributes<Pool, DB>(
         &self,
         pool: Pool,
@@ -144,6 +175,26 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         Ok(op_block_attributes)
     }
 
+    /// Constructs a built payload from the block attributes and execution outcomes
+    ///
+    /// This method assembles the final `OptimismBuiltPayload` by combining the block attributes,
+    /// execution outcomes, state roots, and other necessary components. It ensures that all
+    /// parts of the payload are correctly integrated and sealed for submission.
+    ///
+    /// # Arguments
+    ///
+    /// * `op_block_attributes` - The populated `OptimismBlockAttributes` containing block details
+    /// * `parent_block` - Reference to the parent sealed block
+    /// * `execution_outcome` - The outcome of executing transactions within the block
+    /// * `state_root` - The resulting state root after transaction execution
+    /// * `withdrawals_outcome` - The outcome of processing withdrawals
+    /// * `hashed_state` - The hashed post-state after applying all transitions
+    /// * `trie_output` - Updates to the trie based on state changes
+    /// * `extra_data` - Additional data to include in the block header
+    ///
+    /// # Returns
+    ///
+    /// An `OptimismBuiltPayload` representing the fully constructed block payload.
     pub fn construct_built_payload(
         &self,
         op_block_attributes: OptimismBlockAttributes<EvmConfig>,
@@ -249,6 +300,17 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         payload
     }
 
+    /// Constructs the execution and withdrawal outcomes resulting from transactions in the block.
+    ///
+    /// # Arguments
+    ///
+    /// * `op_block_attributes` - Reference to the `OptimismBlockAttributes` containing block details
+    /// * `db` - Mutable reference to the database
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((WithdrawalsOutcome, ExecutionOutcome))` containing the outcomes of withdrawals and transaction executions.
+    /// * `Err(ProviderError)` if processing withdrawals fails or state merging encounters an error.
     pub fn construct_outcome<DB>(
         &self,
         op_block_attributes: &OptimismBlockAttributes<EvmConfig>,
@@ -411,20 +473,38 @@ where
     }
 }
 
+/// Represents the attributes and state required to build an Optimism block
+///
+/// This struct holds all necessary data for constructing a block on the Optimism
+/// network, including executed transactions, receipts, gas usage, and EVM-specific
+/// configuration parameters
 #[derive(Debug)]
 pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
+    /// Receipts corresponding to each transaction in the block
     pub receipts: Vec<Option<Receipt>>,
+    /// Signed transactions executed in the block
     pub executed_txs: Vec<TransactionSigned>,
+    /// Addresses of the senders of the executed transactions
     pub executed_senders: Vec<Address>,
+    /// Indicates if the Regolith hardfork is active at the block's timestamp
     pub is_regolith: bool,
+    /// Gas limit for the block
     pub block_gas_limit: u64,
+    /// Base fee per execution gas
     pub base_fee: u64,
+    /// Total fees collected from all transactions
     pub total_fees: U256,
+    /// Cumulative gas used by all transactions
     pub cumulative_gas_used: u64,
+    /// Configuration parameters for the EVM environment
     pub evm_config: EvmConfig,
+    /// Initialized block environment containing block-specific information
     pub initialized_block_env: BlockEnv,
+    /// Initialized configuration environment with handler settings
     pub initialized_cfg: CfgEnvWithHandlerCfg,
+    /// Shared reference to the chain specification
     pub chain_spec: Arc<ChainSpec>,
+    /// Payload attributes sent from op-node for block construction
     pub payload_attributes: OptimismPayloadBuilderAttributes,
 }
 
@@ -432,6 +512,18 @@ impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
+    /// Creates a new `OptimismBlockAttributes` instance.
+    ///
+    /// Initializes the block attributes based on the provided payload configuration
+    /// and EVM configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `payload_config` - The `PayloadConfig` containing
+    ///   `OptimismPayloadBuilderAttributes`, initialized block environment, configuration
+    ///   environment, and chain specification.
+    /// * `evm_config` - The EVM configuration implementing the `ConfigureEvm` trait,
+    ///   which dictates how the EVM should behave during transaction execution.
     pub fn new(
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
@@ -470,6 +562,21 @@ where
         }
     }
 
+    /// Adds sequencer transactions to the block
+    ///
+    /// # Arguments
+    ///
+    /// * `transactions` - Slice of encoded, signed transactions
+    /// * `db` - Mutable reference to the databsae
+    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` on successful addition of all valid sequencer transactions
+    /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
+    /// * `Err(PayloadBuilderError::BlobTransactionRejected)` if a blob transaction is encountered
+    /// * `Err(PayloadBuilderError::TransactionEcRecoverFailed)` if EC recovery fails for a transaction
+    /// * `Err(PayloadBuilderError::EvmExecutionError(EVMError::Transaction(_)))` if an EVM execution error occurs
     pub fn add_sequencer_transactions<DB>(
         &mut self,
         transactions: &[WithEncoded<TransactionSigned>],
@@ -520,6 +627,19 @@ where
         Ok(())
     }
 
+    /// Adds transactions to the block from the transaction pool
+    ///
+    /// # Arguments
+    ///
+    /// * `pool` - Reference to the transaction pool to retrieve transactions from
+    /// * `db` - Mutable reference to the database
+    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` on successful addition of all valid pooled transactions
+    /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
+    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
     pub fn add_pooled_transactions<DB, Pool>(
         &mut self,
         pool: &Pool,
@@ -568,6 +688,18 @@ where
         Ok(())
     }
 
+    /// Insert a transaction derived from payload attributes into the block, committing state to the db
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - Reference to the signed and recovered sequencer transaction
+    /// * `db` - Mutable reference to the database
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` on successful execution and insertion of the sequencer transaction
+    /// * `Err(PayloadBuilderError::AccountLoadFailed(_))` if loading the depositor account fails
+    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
     pub fn insert_sequencer_transaction<DB>(
         &mut self,
         tx: &TransactionSignedEcRecovered,
@@ -625,6 +757,17 @@ where
         Ok(())
     }
 
+    /// Inserts a transaction from the transaction pool into the block, committing state to the db
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - Reference to the signed and recovered pooled transaction
+    /// * `db` - Mutable reference to the database
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` on successful execution and insertion of the pooled transaction
+    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
     pub fn insert_pooled_transaction<DB>(
         &mut self,
         tx: &TransactionSignedEcRecovered,
@@ -668,6 +811,20 @@ where
     }
 }
 
+/// Executes a transaction within the EVM and commits the state changes to the db
+///
+/// # Arguments
+///
+/// * `transaction` - Reference to the recovered transaction to execute
+/// * `initialized_cfg` - Initialized configuration environment with handler settings
+/// * `initialized_block_env` - Initialized block environment containing block-specific information
+/// * `evm_config` - EVM configuration
+/// * `db` - Mutable reference to the database
+///
+/// # Returns
+///
+/// * `Ok(ExecutionResult)` with the result of the transaction execution on success
+/// * `Err(EVMError<ProviderError>)` if the transaction execution fails due to EVM-related errors
 pub fn evm_transact_commit<EvmConfig, DB>(
     transaction: &TransactionSignedEcRecovered,
     initialized_cfg: CfgEnvWithHandlerCfg,
