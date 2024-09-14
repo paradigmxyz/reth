@@ -2,13 +2,12 @@ use alloy_primitives::BlockNumber;
 use reth_db::{BlockNumberList, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     models::ShardedKey,
     table::Table,
     transaction::DbTxMut,
     DatabaseError,
 };
-use reth_provider::{DBProvider, DatabaseProviderRW};
+use reth_provider::DBProvider;
 
 enum PruneShardOutcome {
     Deleted,

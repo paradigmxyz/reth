@@ -5,11 +5,8 @@ use crate::{
 };
 use itertools::Itertools;
 use reth_db::{tables, transaction::DbTxMut};
-use reth_db_api::{
-    database::Database,
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
-};
-use reth_provider::{DBProvider, DatabaseProviderRW};
+use reth_db_api::models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress};
+use reth_provider::DBProvider;
 use reth_prune_types::{
     PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
     SegmentOutputCheckpoint,
@@ -143,7 +140,7 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
@@ -210,7 +207,7 @@ mod tests {
             };
             let segment = StorageHistory::new(prune_mode);
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

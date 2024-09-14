@@ -9,11 +9,10 @@ use alloy_primitives::BlockNumber;
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, RangeWalker},
-    database::Database,
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{providers::StaticFileProvider, DBProvider, DatabaseProviderRW};
+use reth_provider::{providers::StaticFileProvider, DBProvider};
 use reth_prune_types::{
     PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
@@ -200,7 +199,10 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::transaction::DbTx;
-    use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory};
+    use reth_provider::{
+        DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, SegmentOutputCheckpoint,
@@ -252,7 +254,7 @@ mod tests {
                 .map(|block_number| block_number + 1)
                 .unwrap_or_default();
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
             trace!(target: "pruner::test",
@@ -323,7 +325,7 @@ mod tests {
             limiter,
         };
 
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let segment = super::Headers::new(db.factory.static_file_provider());
         let result = segment.prune(&provider, input).unwrap();
         assert_eq!(

@@ -21,7 +21,7 @@ use crate::metrics::Metrics;
 pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
-pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
+pub use pruner::{Pruner, PrunerResult, PrunerWithFactory, PrunerWithResult};
 
 // Re-export prune types
 #[doc(inline)]

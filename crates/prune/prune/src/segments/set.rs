@@ -3,7 +3,6 @@ use crate::segments::{
     UserReceipts,
 };
 use reth_db::transaction::DbTxMut;
-use reth_db_api::database::Database;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, PruneCheckpointWriter,
     TransactionsProvider,

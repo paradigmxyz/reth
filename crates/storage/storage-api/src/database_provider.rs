@@ -1,17 +1,8 @@
-use std::{fmt::Debug, ops::RangeBounds};
-
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, RangeWalker},
-    database::Database,
-    table::{Table, TableRow},
-    transaction::{DbTx, DbTxMut},
-    DatabaseError,
-};
-use reth_prune_types::PruneLimiter;
+use reth_db_api::{database::Database, transaction::DbTx};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Database provider.
-pub trait DBProvider: Send + Sync + Sized {
+pub trait DBProvider: Send + Sync + Sized + 'static {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
 

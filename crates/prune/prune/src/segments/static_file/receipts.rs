@@ -3,10 +3,9 @@ use crate::{
     PrunerError,
 };
 use reth_db::transaction::DbTxMut;
-use reth_db_api::database::Database;
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, BlockReader, DBProvider,
-    DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider,
+    PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;

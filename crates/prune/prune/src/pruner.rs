@@ -5,12 +5,9 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use alloy_primitives::BlockNumber;
-use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::{
-    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, DatabaseProviderRW,
-    ProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+    DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
@@ -25,6 +22,9 @@ pub type PrunerResult = Result<PrunerOutput, PrunerError>;
 pub type PrunerWithResult<S, DB> = (Pruner<S, DB>, PrunerResult);
 
 type PrunerStats = Vec<(PruneSegment, usize, PruneProgress)>;
+
+/// Pruner with preset provider factory.
+pub type PrunerWithFactory<PF> = Pruner<<PF as DatabaseProviderFactory>::ProviderRW, PF>;
 
 /// Pruning routine. Main pruning logic happens in [`Pruner::run`].
 #[derive(Debug)]
@@ -50,11 +50,37 @@ pub struct Pruner<Provider, PF> {
     event_sender: EventSender<PrunerEvent>,
 }
 
-impl<Provider, PF> Pruner<Provider, PF> {
-    /// Crates a new pruner with the given provider factory.
+impl<Provider> Pruner<Provider, ()> {
+    /// Creates a new [Pruner] without a provider factory.
     pub fn new(
-        provider_factory: PF,
         segments: Vec<Box<dyn Segment<Provider>>>,
+        min_block_interval: usize,
+        delete_limit: usize,
+        timeout: Option<Duration>,
+        finished_exex_height: watch::Receiver<FinishedExExHeight>,
+    ) -> Self {
+        Self {
+            provider_factory: (),
+            segments,
+            min_block_interval,
+            previous_tip_block_number: None,
+            delete_limit,
+            timeout,
+            finished_exex_height,
+            metrics: Metrics::default(),
+            event_sender: Default::default(),
+        }
+    }
+}
+
+impl<PF> Pruner<PF::ProviderRW, PF>
+where
+    PF: DatabaseProviderFactory,
+{
+    /// Crates a new pruner with the given provider factory.
+    pub fn new_with_factory(
+        provider_factory: PF,
+        segments: Vec<Box<dyn Segment<PF::ProviderRW>>>,
         min_block_interval: usize,
         delete_limit: usize,
         timeout: Option<Duration>,
@@ -84,7 +110,7 @@ where
     }
 
     /// Run the pruner with the given provider. This will only prune data up to the highest finished
-    /// ExEx height, if there are no ExExes.
+    /// `ExEx` height, if there are no `ExExes`.
     ///
     /// Returns a [`PruneProgress`], indicating whether pruning is finished, or there is more data
     /// to prune.
@@ -307,7 +333,7 @@ where
 mod tests {
     use crate::Pruner;
     use reth_exex_types::FinishedExExHeight;
-    use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
+    use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]
     fn is_pruning_needed() {
@@ -316,14 +342,8 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner = Pruner::<_, ProviderFactory<_>>::new(
-            provider_factory,
-            vec![],
-            5,
-            0,
-            None,
-            finished_exex_height_rx,
-        );
+        let mut pruner =
+            Pruner::new_with_factory(provider_factory, vec![], 5, 0, None, finished_exex_height_rx);
 
         // No last pruned block number was set before
         let first_block_number = 1;

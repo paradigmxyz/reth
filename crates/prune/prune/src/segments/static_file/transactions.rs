@@ -4,11 +4,7 @@ use crate::{
     PrunerError,
 };
 use reth_db::{tables, transaction::DbTxMut};
-use reth_db_api::database::Database;
-use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderRW,
-    TransactionsProvider,
-};
+use reth_provider::{providers::StaticFileProvider, BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -94,7 +90,10 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory};
+    use reth_provider::{
+        DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, SegmentOutput,
@@ -144,7 +143,7 @@ mod tests {
                 .map(|tx_number| tx_number + 1)
                 .unwrap_or_default();
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input.clone()).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

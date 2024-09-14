@@ -23,13 +23,13 @@ use reth_db::{
 };
 use reth_db_api::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::{Table, TableRow},
+    table::Table,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -43,7 +43,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, Withdrawals, B256, U256,
 };
-use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -3577,7 +3577,7 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
+impl<TX: DbTx + 'static> DBProvider for DatabaseProvider<TX> {
     type Tx = TX;
 
     fn tx_ref(&self) -> &Self::Tx {

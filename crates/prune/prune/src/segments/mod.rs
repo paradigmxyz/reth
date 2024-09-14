@@ -5,10 +5,7 @@ mod user;
 
 use crate::PrunerError;
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_db_api::database::Database;
-use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
-};
+use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
 use reth_prune_types::{
     PruneCheckpoint, PruneLimiter, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
 };

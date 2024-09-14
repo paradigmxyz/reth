@@ -2,12 +2,10 @@ use crate::{segments::SegmentSet, Pruner};
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db::transaction::DbTxMut;
-use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_node_types::NodeTypesWithDB;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    ProviderFactory, PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
+    PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -84,7 +82,7 @@ impl PrunerBuilder {
         let segments =
             SegmentSet::from_components(provider_factory.static_file_provider(), self.segments);
 
-        Pruner::<_, PF>::new(
+        Pruner::new_with_factory(
             provider_factory,
             segments.into_vec(),
             self.block_interval,
@@ -103,7 +101,6 @@ impl PrunerBuilder {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 
         Pruner::new(
-            (),
             segments.into_vec(),
             self.block_interval,
             self.delete_limit,

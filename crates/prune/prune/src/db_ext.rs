@@ -9,7 +9,7 @@ use reth_db::{
 use reth_prune_types::PruneLimiter;
 use tracing::debug;
 
-pub trait DbTxPruneExt: DbTxMut {
+pub(crate) trait DbTxPruneExt: DbTxMut {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.

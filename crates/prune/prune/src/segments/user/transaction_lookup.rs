@@ -5,8 +5,7 @@ use crate::{
 };
 use rayon::prelude::*;
 use reth_db::{tables, transaction::DbTxMut};
-use reth_db_api::database::Database;
-use reth_provider::{BlockReader, DBProvider, DatabaseProviderRW, TransactionsProvider};
+use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
 };
@@ -119,7 +118,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
     };
@@ -206,7 +205,7 @@ mod tests {
                 .into_inner()
                 .0;
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

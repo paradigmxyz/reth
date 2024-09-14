@@ -3,10 +3,9 @@ use crate::{
     PrunerError,
 };
 use reth_db::transaction::DbTxMut;
-use reth_db_api::database::Database;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, DatabaseProviderRW,
-    PruneCheckpointWriter, TransactionsProvider,
+    errors::provider::ProviderResult, BlockReader, DBProvider, PruneCheckpointWriter,
+    TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use tracing::instrument;
