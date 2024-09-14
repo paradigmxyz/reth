@@ -63,6 +63,79 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 
+    /// Constructs an Ethereum transaction payload from the transactions sent through the
+    /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
+    /// the payload attributes, the transaction pool will be ignored and the only transactions
+    /// included in the payload will be those sent through the attributes.
+    ///
+    /// Given build arguments including an Ethereum client, transaction pool,
+    /// and configuration, this function creates a transaction payload. Returns
+    /// a result indicating success with the payload or an error in case of failure.
+    fn build_payload<Pool, Client>(
+        &self,
+        evm_config: EvmConfig,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+        _compute_pending_block: bool,
+    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
+    where
+        EvmConfig: ConfigureEvm,
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
+    {
+        let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+
+        let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db = State::builder()
+            .with_database_ref(cached_reads.as_db(state))
+            .with_bundle_update()
+            .build();
+
+        self.init_pre_block_state(&config, evm_config, &mut db)?;
+
+        let op_block_attributes = match self
+            .construct_block_attributes(pool, &config, &mut db, &cancel)
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
+            Err(err) => Err(err),
+        }?;
+
+        // check if we have a better block
+        if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
+            // can skip building the block
+            return Ok(BuildOutcome::Aborted { fees: op_block_attributes.total_fees, cached_reads });
+        }
+
+        let (withdrawals_outcome, execution_outcome) =
+            self.construct_outcome(&op_block_attributes, &mut db)?;
+
+        // calculate the state root
+        let parent_block = config.parent_block;
+        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+        let (state_root, trie_output) = {
+            let state_provider = db.database.0.inner.borrow_mut();
+            state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+                warn!(target: "payload_builder",
+                    parent_hash=%parent_block.hash(),
+                    %err,
+                    "failed to calculate state root for empty payload"
+                );
+            })?
+        };
+
+        let payload = self.construct_built_payload(
+            op_block_attributes,
+            execution_outcome,
+            state_root,
+            withdrawals_outcome,
+            hashed_state,
+            trie_output,
+        );
+
+        Ok(BuildOutcome::Better { payload, cached_reads })
+    }
+
     /// Initializes the pre-block state for payload building.
     ///
     /// # Returns
@@ -309,79 +382,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             ExecutionOutcome::new(db.take_bundle(), receipts, block_number, Vec::new());
 
         Ok((withdrawals_outcome, execution_outcome))
-    }
-
-    /// Constructs an Ethereum transaction payload from the transactions sent through the
-    /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
-    /// the payload attributes, the transaction pool will be ignored and the only transactions
-    /// included in the payload will be those sent through the attributes.
-    ///
-    /// Given build arguments including an Ethereum client, transaction pool,
-    /// and configuration, this function creates a transaction payload. Returns
-    /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<Pool, Client>(
-        &self,
-        evm_config: EvmConfig,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-        _compute_pending_block: bool,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
-    where
-        EvmConfig: ConfigureEvm,
-        Client: StateProviderFactory,
-        Pool: TransactionPool,
-    {
-        let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
-
-        let state_provider = client.state_by_block_hash(config.parent_block.hash())?;
-        let state = StateProviderDatabase::new(state_provider);
-        let mut db = State::builder()
-            .with_database_ref(cached_reads.as_db(state))
-            .with_bundle_update()
-            .build();
-
-        self.init_pre_block_state(&config, evm_config, &mut db)?;
-
-        let op_block_attributes = match self
-            .construct_block_attributes(pool, &config, &mut db, &cancel)
-        {
-            Ok(outcome) => Ok(outcome),
-            Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
-            Err(err) => Err(err),
-        }?;
-
-        // check if we have a better block
-        if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
-            // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: op_block_attributes.total_fees, cached_reads });
-        }
-
-        let (withdrawals_outcome, execution_outcome) =
-            self.construct_outcome(&op_block_attributes, &mut db)?;
-
-        // calculate the state root
-        let parent_block = config.parent_block;
-        let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
-        let (state_root, trie_output) = {
-            let state_provider = db.database.0.inner.borrow_mut();
-            state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
-                warn!(target: "payload_builder",
-                    parent_hash=%parent_block.hash(),
-                    %err,
-                    "failed to calculate state root for empty payload"
-                );
-            })?
-        };
-
-        let payload = self.construct_built_payload(
-            op_block_attributes,
-            execution_outcome,
-            state_root,
-            withdrawals_outcome,
-            hashed_state,
-            trie_output,
-        );
-
-        Ok(BuildOutcome::Better { payload, cached_reads })
     }
 }
 
