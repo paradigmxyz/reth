@@ -436,8 +436,8 @@ where
 
 /// Represents the attributes and state required to build an Optimism block
 ///
-/// This struct holds all necessary data for constructing a block on the Optimism
-/// network, including executed transactions, receipts, gas usage, and EVM-specific
+/// This struct holds all necessary data for constructing a block on Optimism
+/// including executed transactions, receipts, gas usage, and EVM-specific
 /// configuration parameters
 #[derive(Debug)]
 pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
