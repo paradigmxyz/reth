@@ -1,10 +1,14 @@
 use crate::{
+    db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::tables;
+use reth_db::{tables, transaction::DbTxMut};
 use reth_db_api::database::Database;
-use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW, TransactionsProvider};
+use reth_provider::{
+    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderRW,
+    TransactionsProvider,
+};
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -22,7 +26,10 @@ impl Transactions {
     }
 }
 
-impl<DB: Database> Segment<DB> for Transactions {
+impl<Provider> Segment<Provider> for Transactions
+where
+    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
     }
@@ -37,11 +44,7 @@ impl<DB: Database> Segment<DB> for Transactions {
         PrunePurpose::StaticFile
     }
 
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
@@ -53,7 +56,7 @@ impl<DB: Database> Segment<DB> for Transactions {
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.prune_table_with_range::<tables::Transactions>(
+        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions>(
             tx_range,
             &mut limiter,
             |_| false,

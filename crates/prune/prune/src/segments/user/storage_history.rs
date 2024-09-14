@@ -1,14 +1,15 @@
 use crate::{
+    db_ext::DbTxPruneExt,
     segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::tables;
+use reth_db::{tables, transaction::DbTxMut};
 use reth_db_api::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
 };
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DBProvider, DatabaseProviderRW};
 use reth_prune_types::{
     PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
     SegmentOutputCheckpoint,
@@ -33,7 +34,10 @@ impl StorageHistory {
     }
 }
 
-impl<DB: Database> Segment<DB> for StorageHistory {
+impl<Provider> Segment<Provider> for StorageHistory
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::StorageHistory
     }
@@ -47,11 +51,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -83,8 +83,8 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_storages = FxHashMap::default();
-        let (pruned_changesets, done) = provider
-            .prune_table_with_range::<tables::StorageChangeSets>(
+        let (pruned_changesets, done) =
+            provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,
@@ -114,7 +114,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
                     block_number.min(last_changeset_pruned_block),
                 )
             });
-        let outcomes = prune_history_indices::<DB, tables::StoragesHistory, _>(
+        let outcomes = prune_history_indices::<Provider, tables::StoragesHistory, _>(
             provider,
             highest_sharded_keys,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
