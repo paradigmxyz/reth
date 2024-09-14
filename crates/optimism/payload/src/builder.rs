@@ -620,7 +620,7 @@ where
     }
 }
 
-fn evm_transact_commit<EvmConfig, DB>(
+pub fn evm_transact_commit<EvmConfig, DB>(
     transaction: &TransactionSignedEcRecovered,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
