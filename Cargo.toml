@@ -33,7 +33,6 @@ members = [
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
-    "crates/ethereum-forks/",
     "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
@@ -242,9 +241,9 @@ future_not_send = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
-too_long_first_doc_paragraph = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
 
 # Speed up tests.
 [profile.dev.package]
@@ -256,22 +255,22 @@ unarray.opt-level = 3
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
-opt-level = 3
 lto = "thin"
+opt-level = 3
 
 [profile.release]
-opt-level = 3
-lto = "thin"
-debug = "line-tables-only"
-strip = true
-panic = "unwind"
 codegen-units = 16
+debug = "line-tables-only"
+lto = "thin"
+opt-level = 3
+panic = "unwind"
+strip = true
 
 # Use the `--profile profiling` flag to show symbols in release mode.
 # e.g. `cargo build --profile profiling`
 [profile.profiling]
-inherits = "release"
 debug = 2
+inherits = "release"
 strip = false
 
 # Make sure debug symbols are in the bench profile
@@ -279,12 +278,13 @@ strip = false
 inherits = "profiling"
 
 [profile.maxperf]
+codegen-units = 1
 inherits = "release"
 lto = "fat"
-codegen-units = 1
 
 [workspace.dependencies]
 # reth
+op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
@@ -358,7 +358,6 @@ reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
-op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
