@@ -6,8 +6,6 @@ use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::{Lazy, OnceCell};
-#[cfg(feature = "optimism")]
-use reth_ethereum_forks::OptimismHardfork;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
@@ -256,7 +254,8 @@ impl ChainSpec {
     #[inline]
     #[cfg(feature = "optimism")]
     pub fn is_optimism(&self) -> bool {
-        self.chain.is_optimism() || self.hardforks.get(OptimismHardfork::Bedrock).is_some()
+        self.chain.is_optimism() ||
+            self.hardforks.get(reth_ethereum_forks::OptimismHardfork::Bedrock).is_some()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -698,7 +697,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
     ChainSpec {
         chain: genesis.config.chain_id.into(),
         genesis,
-        genesis_hash: None,
+        genesis_hash: OnceCell::new(),
         hardforks: ChainHardforks::new(ordered_hardforks),
         paris_block_and_final_difficulty,
         deposit_contract,
@@ -709,6 +708,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
 #[cfg(feature = "optimism")]
 /// Convert the given [`Genesis`] into an Optimism [`ChainSpec`].
 fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
+    use reth_ethereum_forks::OptimismHardfork;
     let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
     let genesis_info = optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
@@ -795,7 +795,7 @@ fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     ChainSpec {
         chain: genesis.config.chain_id.into(),
         genesis,
-        genesis_hash: OnceCell::new(),,
+        genesis_hash: OnceCell::new(),
         hardforks: ChainHardforks::new(ordered_hardforks),
         paris_block_and_final_difficulty,
         deposit_contract,
@@ -972,7 +972,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
         self = self.paris_activated();
-        self.hardforks.insert(OptimismHardfork::Bedrock, ForkCondition::Block(0));
+        self.hardforks.insert(crate::OptimismHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
@@ -980,7 +980,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.hardforks.insert(crate::OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -990,7 +990,7 @@ impl ChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.hardforks.insert(OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.hardforks.insert(crate::OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -999,7 +999,7 @@ impl ChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.hardforks.insert(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.hardforks.insert(OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.hardforks.insert(crate::OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1007,7 +1007,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.hardforks.insert(OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.hardforks.insert(crate::OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1015,7 +1015,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.hardforks.insert(OptimismHardfork::Granite, ForkCondition::Timestamp(0));
+        self.hardforks.insert(crate::OptimismHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1110,7 +1110,7 @@ impl OptimismGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                OptimismHardfork::Canyon.boxed(),
+                                reth_ethereum_forks::OptimismHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
