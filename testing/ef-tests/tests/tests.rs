@@ -1,4 +1,5 @@
 #![cfg(feature = "ef-tests")]
+#![expect(missing_docs)]
 
 use ef_tests::{cases::blockchain_test::BlockchainTests, suite::Suite};
 
