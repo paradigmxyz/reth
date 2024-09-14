@@ -238,6 +238,7 @@ pub fn build_block(
         };
 
         receipts.push(
+            #[allow(clippy::needless_update)]
             Receipt {
                 tx_type: tx.tx_type(),
                 success: call.status,
