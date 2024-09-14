@@ -65,13 +65,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
     /// Initializes the pre-block state for payload building.
     ///
-    /// # Arguments
-    ///
-    /// * `payload_config` - Payload configuration containing attributes and environments for the
-    ///   block
-    /// * `evm_config` - EVM configuration for the execution environment
-    /// * `db` - Mutable reference to the database
-    ///
     /// # Returns
     ///
     /// * `Ok(())` if the pre-block state is successfully initialized.
@@ -135,14 +128,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// This method uses the provided payload attributes and transaction pool to populate the
     /// block attributes.
     ///
-    /// # Arguments
-    ///
-    /// * `pool` - The transaction pool from which to retrieve pooled transactions
-    /// * `payload_config` - Reference to the payload configuration containing attributes and
-    ///   environments
-    /// * `db` - Mutable reference to the database
-    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
-    ///
     /// # Returns
     ///
     /// * `Ok(OptimismBlockAttributes<EvmConfig>)` with populated block attributes on success
@@ -179,22 +164,10 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         Ok(op_block_attributes)
     }
 
-    /// Constructs a built payload from the block attributes and execution outcomes
-    ///
+    /// Constructs a built payload from the block attributes and execution outcomes.
     /// This method assembles the final `OptimismBuiltPayload` by combining the block attributes,
     /// execution outcomes, state roots, and other necessary components. It ensures that all
     /// parts of the payload are correctly integrated and sealed for submission.
-    ///
-    /// # Arguments
-    ///
-    /// * `op_block_attributes` - The populated `OptimismBlockAttributes` containing block details
-    /// * `parent_block` - Reference to the parent sealed block
-    /// * `execution_outcome` - The outcome of executing transactions within the block
-    /// * `state_root` - The resulting state root after transaction execution
-    /// * `withdrawals_outcome` - The outcome of processing withdrawals
-    /// * `hashed_state` - The hashed post-state after applying all transitions
-    /// * `trie_output` - Updates to the trie based on state changes
-    /// * `extra_data` - Additional data to include in the block header
     ///
     /// # Returns
     ///
@@ -302,12 +275,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 
     /// Constructs the execution and withdrawal outcomes resulting from transactions in the block.
-    ///
-    /// # Arguments
-    ///
-    /// * `op_block_attributes` - Reference to the `OptimismBlockAttributes` containing block
-    ///   details
-    /// * `db` - Mutable reference to the database
     ///
     /// # Returns
     ///
@@ -511,16 +478,8 @@ where
     EvmConfig: ConfigureEvm,
 {
     /// Creates a new `OptimismBlockAttributes` instance.
-    ///
     /// Initializes the block attributes based on the provided payload configuration
     /// and EVM configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `payload_config` - The `PayloadConfig` containing `OptimismPayloadBuilderAttributes`,
-    ///   initialized block environment, configuration environment, and chain specification.
-    /// * `evm_config` - The EVM configuration implementing the `ConfigureEvm` trait, which dictates
-    ///   how the EVM should behave during transaction execution.
     pub fn new(
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
@@ -562,12 +521,6 @@ where
     }
 
     /// Adds sequencer transactions to the block
-    ///
-    /// # Arguments
-    ///
-    /// * `transactions` - Slice of encoded, signed transactions
-    /// * `db` - Mutable reference to the database
-    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
     ///
     /// # Returns
     ///
@@ -630,12 +583,6 @@ where
 
     /// Adds transactions to the block from the transaction pool
     ///
-    /// # Arguments
-    ///
-    /// * `pool` - Reference to the transaction pool to retrieve transactions from
-    /// * `db` - Mutable reference to the database
-    /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
-    ///
     /// # Returns
     ///
     /// * `Ok(())` on successful addition of all valid pooled transactions
@@ -689,13 +636,8 @@ where
         Ok(())
     }
 
-    /// Insert a transaction derived from payload attributes into the block, committing state to the
-    /// db
-    ///
-    /// # Arguments
-    ///
-    /// * `tx` - Reference to the signed and recovered sequencer transaction
-    /// * `db` - Mutable reference to the database
+    /// Insert a transaction derived from payload attributes into the block,
+    /// committing state to the db
     ///
     /// # Returns
     ///
@@ -761,11 +703,6 @@ where
 
     /// Inserts a transaction from the transaction pool into the block, committing state to the db
     ///
-    /// # Arguments
-    ///
-    /// * `tx` - Reference to the signed and recovered pooled transaction
-    /// * `db` - Mutable reference to the database
-    ///
     /// # Returns
     ///
     /// * `Ok(())` on successful execution and insertion of the pooled transaction
@@ -814,14 +751,6 @@ where
 }
 
 /// Executes a transaction within the EVM and commits the state changes to the db
-///
-/// # Arguments
-///
-/// * `transaction` - Reference to the recovered transaction to execute
-/// * `initialized_cfg` - Initialized configuration environment with handler settings
-/// * `initialized_block_env` - Initialized block environment containing block-specific information
-/// * `evm_config` - EVM configuration
-/// * `db` - Mutable reference to the database
 ///
 /// # Returns
 ///
