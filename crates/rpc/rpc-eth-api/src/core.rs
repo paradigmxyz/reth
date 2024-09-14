@@ -11,9 +11,8 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    AnyTransactionReceipt, Block, BlockOverrides, Bundle, EIP1186AccountProofResponse,
-    EthCallResponse, FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest,
-    WithOtherFields, Work,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, StateContext, SyncStatus, TransactionRequest, Work,
 };
 use tracing::trace;
 
@@ -621,7 +620,7 @@ where
         &self,
         payload: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>>> {
+    ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
