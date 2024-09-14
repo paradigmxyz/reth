@@ -14,7 +14,7 @@ use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, transaction::WithEncoded,
-    Address, Block, Bytes, Header, IntoRecoveredTransaction, Receipt, SealedBlock,
+    Address, Block, Bytes, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
     TransactionSigned, TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ProviderError, StateProviderFactory};
@@ -338,13 +338,9 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         db.merge_transitions(BundleRetention::PlainState);
 
         let block_number = op_block_attributes.initialized_block_env.number.to::<u64>();
-
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            op_block_attributes.receipts.clone(),
-            block_number,
-            Vec::new(),
-        );
+        let receipts = Receipts { receipt_vec: vec![op_block_attributes.receipts.clone()] };
+        let execution_outcome =
+            ExecutionOutcome::new(db.take_bundle(), receipts, block_number, Vec::new());
 
         Ok((withdrawals_outcome, execution_outcome))
     }
