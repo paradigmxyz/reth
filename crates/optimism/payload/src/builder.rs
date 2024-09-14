@@ -330,12 +330,11 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             });
         }
 
-        let parent_block = config.parent_block;
-
         let (withdrawals_outcome, execution_outcome) =
             self.construct_outcome(&op_block_attributes, &mut db)?;
 
         // calculate the state root
+        let parent_block = config.parent_block;
         let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
         let (state_root, trie_output) = {
             let state_provider = db.database.0.inner.borrow_mut();
@@ -363,21 +362,70 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 }
 
+/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
+impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
+where
+    Client: StateProviderFactory,
+    Pool: TransactionPool,
+    EvmConfig: ConfigureEvm,
+{
+    type Attributes = OptimismPayloadBuilderAttributes;
+    type BuiltPayload = OptimismBuiltPayload;
+
+    fn try_build(
+        &self,
+        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
+        self.build_payload(self.evm_config.clone(), args, self.compute_pending_block)
+    }
+
+    fn on_missing_payload(
+        &self,
+        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        // we want to await the job that's already in progress because that should be returned as
+        // is, there's no benefit in racing another job
+        MissingPayloadBehaviour::AwaitInProgress
+    }
+
+    // NOTE: this should only be used for testing purposes because this doesn't have access to L1
+    // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
+    fn build_empty_payload(
+        &self,
+        client: &Client,
+        config: PayloadConfig<Self::Attributes>,
+    ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
+        let args = BuildArguments {
+            client,
+            config,
+            // we use defaults here because for the empty payload we don't need to execute anything
+            pool: NoopTransactionPool::default(),
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
+        };
+
+        self.build_payload(self.evm_config.clone(), args, false)?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+    }
+}
+
 #[derive(Debug)]
 pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
-    receipts: Vec<Option<Receipt>>,
-    executed_txs: Vec<TransactionSigned>,
-    executed_senders: Vec<Address>,
-    is_regolith: bool,
-    block_gas_limit: u64,
-    base_fee: u64,
-    total_fees: U256,
-    cumulative_gas_used: u64,
-    evm_config: EvmConfig,
-    initialized_block_env: BlockEnv,
-    initialized_cfg: CfgEnvWithHandlerCfg,
-    chain_spec: Arc<ChainSpec>,
-    payload_attributes: OptimismPayloadBuilderAttributes,
+    pub receipts: Vec<Option<Receipt>>,
+    pub executed_txs: Vec<TransactionSigned>,
+    pub executed_senders: Vec<Address>,
+    pub is_regolith: bool,
+    pub block_gas_limit: u64,
+    pub base_fee: u64,
+    pub total_fees: U256,
+    pub cumulative_gas_used: u64,
+    pub evm_config: EvmConfig,
+    pub initialized_block_env: BlockEnv,
+    pub initialized_cfg: CfgEnvWithHandlerCfg,
+    pub chain_spec: Arc<ChainSpec>,
+    pub payload_attributes: OptimismPayloadBuilderAttributes,
 }
 
 impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
@@ -639,53 +687,4 @@ where
     let mut evm = evm_config.evm_with_env(db, env);
 
     evm.transact_commit()
-}
-
-/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
-impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
-where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
-{
-    type Attributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = OptimismBuiltPayload;
-
-    fn try_build(
-        &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        self.build_payload(self.evm_config.clone(), args, self.compute_pending_block)
-    }
-
-    fn on_missing_payload(
-        &self,
-        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
-        // we want to await the job that's already in progress because that should be returned as
-        // is, there's no benefit in racing another job
-        MissingPayloadBehaviour::AwaitInProgress
-    }
-
-    // NOTE: this should only be used for testing purposes because this doesn't have access to L1
-    // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
-    fn build_empty_payload(
-        &self,
-        client: &Client,
-        config: PayloadConfig<Self::Attributes>,
-    ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments {
-            client,
-            config,
-            // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
-            cached_reads: Default::default(),
-            cancel: Default::default(),
-            best_payload: None,
-        };
-
-        self.build_payload(self.evm_config.clone(), args, false)?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
-    }
 }
