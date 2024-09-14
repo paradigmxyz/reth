@@ -3,18 +3,25 @@
 use alloy_consensus::{TxEip4844Variant, TxType, TypedTransaction};
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{
-    BlockWithSenders, Signature, Transaction, TransactionSigned, TransactionSignedNoHash,
+    logs_bloom,
+    proofs::{calculate_receipt_root, calculate_transaction_root},
+    BlockWithSenders, Receipt, Signature, Transaction, TransactionSigned, TransactionSignedNoHash,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     Block, BlockTransactionsKind, ToRpcError, TransactionRequest, WithOtherFields,
 };
 use reth_rpc_types_compat::block::from_block;
-use revm::Database;
-use revm_primitives::{Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
+use reth_storage_api::StateRootProvider;
+use reth_trie::{HashedPostState, HashedStorage};
+use revm::{db::CacheDB, Database};
+use revm_primitives::{keccak256, Address, BlockEnv, Bytes, ExecutionResult, TxKind, B256, U256};
 
-use crate::{EthApiError, RevertError, RpcInvalidTransactionError};
+use crate::{
+    cache::db::StateProviderTraitObjWrapper, EthApiError, RevertError, RpcInvalidTransactionError,
+};
 
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
@@ -67,7 +74,11 @@ where
             return Err(EthApiError::Other(Box::new(EthSimulateError::BlockGasLimitExceeded)))
         }
 
-        (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u128
+        if txs_without_gas_limit > 0 {
+            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u128
+        } else {
+            0
+        }
     };
 
     for tx in txs {
@@ -164,9 +175,11 @@ pub fn build_block(
     parent_hash: B256,
     total_difficulty: U256,
     full_transactions: bool,
+    db: &CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'_>>>,
 ) -> Result<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>, EthApiError> {
-    let mut calls = Vec::with_capacity(results.len());
+    let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
     let mut senders = Vec::with_capacity(results.len());
+    let mut receipts = Vec::new();
 
     let mut log_index = 0;
     for (transaction_index, ((sender, result), tx)) in
@@ -224,8 +237,38 @@ pub fn build_block(
             },
         };
 
+        receipts.push(
+            Receipt {
+                tx_type: tx.tx_type(),
+                success: call.status,
+                cumulative_gas_used: call.gas_used + calls.iter().map(|c| c.gas_used).sum::<u64>(),
+                logs: call.logs.iter().map(|log| &log.inner).cloned().collect(),
+                ..Default::default()
+            }
+            .into(),
+        );
+
         calls.push(call);
     }
+
+    let mut hashed_state = HashedPostState::default();
+    for (address, account) in &db.accounts {
+        let hashed_address = keccak256(address);
+        hashed_state.accounts.insert(hashed_address, Some(account.info.clone().into()));
+
+        let storage = hashed_state
+            .storages
+            .entry(hashed_address)
+            .or_insert_with(|| HashedStorage::new(account.account_state.is_storage_cleared()));
+
+        for (slot, value) in &account.storage {
+            let slot = B256::from(*slot);
+            let hashed_slot = keccak256(slot);
+            storage.storage.insert(hashed_slot, *value);
+        }
+    }
+
+    let state_root = db.db.0.state_root(hashed_state)?;
 
     let header = reth_primitives::Header {
         beneficiary: block_env.coinbase,
@@ -234,9 +277,14 @@ pub fn build_block(
         timestamp: block_env.timestamp.to(),
         base_fee_per_gas: Some(block_env.basefee.to()),
         gas_limit: block_env.gas_limit.to(),
-        gas_used: 0,
+        gas_used: calls.iter().map(|c| c.gas_used).sum::<u64>(),
         blob_gas_used: Some(0),
         parent_hash,
+        receipts_root: calculate_receipt_root(&receipts),
+        transactions_root: calculate_transaction_root(&transactions),
+        state_root,
+        logs_bloom: logs_bloom(receipts.iter().flat_map(|r| r.receipt.logs.iter())),
+        mix_hash: block_env.prevrandao.unwrap_or_default(),
         ..Default::default()
     };
 

@@ -114,9 +114,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                     block_env.number += U256::from(1);
                     block_env.timestamp += U256::from(1);
 
-                    if !validation {
-                        block_env.basefee = U256::ZERO;
-                    } else {
+                    if validation {
                         let chain_spec = LoadPendingBlock::provider(&this).chain_spec();
                         let base_fee_params =
                             chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
@@ -135,6 +133,8 @@ pub trait EthCall: Call + LoadPendingBlock {
                                 .unwrap_or_default() as u128
                         };
                         block_env.basefee = U256::from(base_fee);
+                    } else {
+                        block_env.basefee = U256::ZERO;
                     }
 
                     let SimBlock { block_overrides, state_overrides, mut calls } = block;
@@ -195,6 +195,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         parent_hash,
                         total_difficulty,
                         return_full_transactions,
+                        &db,
                     )?;
 
                     parent_hash = block.inner.header.hash;
