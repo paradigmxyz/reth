@@ -898,7 +898,7 @@ impl TransactionSignedNoHash {
     /// buffer before use.**
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`Signature::recover_signer_unchecked`].
+    /// [`recover_signer_unchecked`].
     ///
     /// # Optimism
     ///
@@ -1085,7 +1085,7 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`Signature::recover_signer`].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`recover_signer`].
     ///
     /// Note:
     ///
@@ -1107,7 +1107,7 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [`Signature::recover_signer_unchecked`].
+    /// [`recover_signer_unchecked`].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
