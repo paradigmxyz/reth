@@ -5,12 +5,12 @@ use reth_primitives::TxHash;
 use reth_transaction_pool::TransactionPool;
 use std::{
     future::Future,
-    pin::{pin, Pin},
+    pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 use tokio::time::Interval;
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::wrappers::ReceiverStream;
 
 /// A mining mode for the local dev engine.
 #[derive(Debug)]
@@ -44,7 +44,7 @@ impl Future for MiningMode {
         match this {
             Self::Instant(rx) => {
                 // drain all transactions notifications
-                if let Poll::Ready(Some(_)) = pin!(rx).poll_next(cx) {
+                if let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
                     return Poll::Ready(())
                 }
                 Poll::Pending

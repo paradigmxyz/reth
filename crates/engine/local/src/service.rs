@@ -90,7 +90,7 @@ where
         head: B256,
         mode: MiningMode,
     ) {
-        let mut engine = Self::new(
+        let engine = Self::new(
             payload_builder,
             payload_attributes_builder,
             provider,
@@ -101,31 +101,34 @@ where
         );
 
         // Spawn the engine
-        tokio::spawn(async move {
-            loop {
-                // Wait for the interval or the pool to receive a transaction
-                (&mut engine.mode).await;
+        tokio::spawn(engine.run());
+    }
 
-                // Start a new payload building job
-                let new_head = engine.build_and_save_payload().await;
+    /// Runs the [`LocalEngineService`] in a loop, polling the miner and building
+    /// payloads.
+    async fn run(mut self) {
+        loop {
+            // Wait for the interval or the pool to receive a transaction
+            (&mut self.mode).await;
 
-                if new_head.is_err() {
-                    debug!(target: "local_engine", err = ?new_head.unwrap_err(), "failed payload
-                building");
-                    continue
-                }
+            // Start a new payload building job
+            let new_head = self.build_and_save_payload().await;
 
-                // Update the head
-                engine.head = new_head.expect("not error");
+            if new_head.is_err() {
+                debug!(target: "local_engine", err = ?new_head.unwrap_err(), "failed payload building");
+                continue
             }
-        });
+
+            // Update the head
+            self.head = new_head.expect("not error");
+        }
     }
 
     /// Builds a payload by initiating a new payload job via the [`PayloadBuilderHandle`],
     /// saving the execution outcome to persistence and returning the current head of the
     /// chain.
     async fn build_and_save_payload(&self) -> eyre::Result<B256> {
-        let payload_attributes = self.payload_attributes_builder.build();
+        let payload_attributes = self.payload_attributes_builder.build()?;
         let payload_builder_attributes =
             <N::Engine as PayloadTypes>::PayloadBuilderAttributes::try_new(
                 self.head,
@@ -168,7 +171,7 @@ mod tests {
         test_utils::{testing_pool, MockTransaction},
         TransactionPool,
     };
-    use std::time::Duration;
+    use std::{convert::Infallible, time::Duration};
     use tokio::sync::mpsc::unbounded_channel;
 
     #[derive(Debug)]
@@ -176,15 +179,16 @@ mod tests {
 
     impl PayloadAttributesBuilder for TestPayloadAttributesBuilder {
         type PayloadAttributes = reth_rpc_types::engine::PayloadAttributes;
+        type Error = Infallible;
 
-        fn build(&self) -> Self::PayloadAttributes {
-            reth_rpc_types::engine::PayloadAttributes {
+        fn build(&self) -> Result<Self::PayloadAttributes, Self::Error> {
+            Ok(reth_rpc_types::engine::PayloadAttributes {
                 timestamp: 0,
                 prev_randao: Default::default(),
                 suggested_fee_recipient: Default::default(),
                 withdrawals: None,
                 parent_beacon_block_root: None,
-            }
+            })
         }
     }
 

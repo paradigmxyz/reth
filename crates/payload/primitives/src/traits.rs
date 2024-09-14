@@ -150,7 +150,9 @@ impl PayloadAttributes for OptimismPayloadAttributes {
 pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
     /// The payload attributes type returned by the builder.
     type PayloadAttributes: PayloadAttributes;
+    /// The error type returned by [`PayloadAttributesBuilder::build`].
+    type Error: std::error::Error + Send + Sync;
 
     /// Return a new payload attribute from the builder.
-    fn build(&self) -> Self::PayloadAttributes;
+    fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;
 }
