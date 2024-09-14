@@ -567,7 +567,7 @@ where
     /// # Arguments
     ///
     /// * `transactions` - Slice of encoded, signed transactions
-    /// * `db` - Mutable reference to the databsae
+    /// * `db` - Mutable reference to the database
     /// * `cancel` - Marker used to signal that the payload builder should cancel building the block
     ///
     /// # Returns
