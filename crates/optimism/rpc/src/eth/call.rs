@@ -31,6 +31,11 @@ where
     }
 
     #[inline]
+    fn max_simulate_blocks(&self) -> u64 {
+        self.inner.max_simulate_blocks()
+    }
+
+    #[inline]
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }

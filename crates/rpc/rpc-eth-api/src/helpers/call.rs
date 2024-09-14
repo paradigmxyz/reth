@@ -72,6 +72,10 @@ pub trait EthCall: Call + LoadPendingBlock {
         Self: LoadBlock,
     {
         async move {
+            if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+            }
+
             let SimulatePayload {
                 block_state_calls,
                 trace_transfers,
@@ -450,6 +454,9 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// Data access in default trait method implementations.
     fn call_gas_limit(&self) -> u64;
+
+    /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
+    fn max_simulate_blocks(&self) -> u64;
 
     /// Returns a handle for reading evm config.
     ///
