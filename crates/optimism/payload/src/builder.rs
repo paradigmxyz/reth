@@ -202,13 +202,11 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     pub fn construct_built_payload(
         &self,
         op_block_attributes: OptimismBlockAttributes<EvmConfig>,
-        parent_block: Arc<SealedBlock>,
         execution_outcome: ExecutionOutcome,
         state_root: B256,
         withdrawals_outcome: WithdrawalsOutcome,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
-        extra_data: Bytes,
     ) -> OptimismBuiltPayload
     where
         EvmConfig: ConfigureEvm,
@@ -232,6 +230,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         let mut blob_gas_used = None;
 
         // only determine cancun fields when active
+        let parent_block = op_block_attributes.parent_block;
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {
             excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
                 let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
@@ -263,7 +262,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             gas_limit: op_block_attributes.block_gas_limit,
             difficulty: U256::ZERO,
             gas_used: op_block_attributes.cumulative_gas_used,
-            extra_data,
+            extra_data: op_block_attributes.extra_data,
             parent_beacon_block_root: op_block_attributes
                 .payload_attributes
                 .parent_beacon_block_root(),
@@ -408,13 +407,11 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
         let payload = self.construct_built_payload(
             op_block_attributes,
-            parent_block,
             execution_outcome,
             state_root,
             withdrawals_outcome,
             hashed_state,
             trie_output,
-            config.extra_data,
         );
 
         Ok(BuildOutcome::Better { payload, cached_reads })
@@ -503,6 +500,10 @@ pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
     pub chain_spec: Arc<ChainSpec>,
     /// Payload attributes sent from op-node for block construction
     pub payload_attributes: OptimismPayloadBuilderAttributes,
+    /// Reference to the parent block
+    pub parent_block: Arc<SealedBlock>,
+    /// Extra data to include in the block header
+    pub extra_data: Bytes,
 }
 
 impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
@@ -555,6 +556,8 @@ where
             initialized_cfg: payload_config.initialized_cfg.clone(),
             chain_spec: payload_config.chain_spec.clone(),
             payload_attributes: attributes.clone(),
+            parent_block: payload_config.parent_block.clone(),
+            extra_data: payload_config.extra_data.clone(),
         }
     }
 
