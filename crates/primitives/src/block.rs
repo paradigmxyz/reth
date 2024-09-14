@@ -2,6 +2,7 @@ use crate::{
     Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
+use alloc::vec::Vec;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
@@ -13,9 +14,6 @@ use proptest::prelude::prop_compose;
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the

@@ -1,8 +1,14 @@
 //! Helpers for optimism specific RPC implementations.
 
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::{
+    atomic::{self, AtomicUsize},
+    Arc,
+};
 
+use alloy_primitives::hex;
 use reqwest::Client;
+use serde_json::json;
+use tracing::warn;
 
 use crate::SequencerClientError;
 
@@ -41,19 +47,19 @@ impl SequencerClient {
 
     /// Returns the next id for the request
     fn next_request_id(&self) -> usize {
-        self.inner.id.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.inner.id.fetch_add(1, atomic::Ordering::SeqCst)
     }
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        let body = serde_json::to_string(&serde_json::json!({
+        let body = serde_json::to_string(&json!({
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
-            "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
+            "params": [format!("0x{}", hex::encode(tx))],
             "id": self.next_request_id()
         }))
         .map_err(|_| {
-            tracing::warn!(
+            warn!(
                 target = "rpc::eth",
                 "Failed to serialize transaction for forwarding to sequencer"
             );
@@ -67,7 +73,7 @@ impl SequencerClient {
             .send()
             .await
             .inspect_err(|err| {
-                tracing::warn!(
+                warn!(
                     target = "rpc::eth",
                     %err,
                     "Failed to forward transaction to sequencer",

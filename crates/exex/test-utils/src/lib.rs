@@ -250,7 +250,7 @@ pub async fn test_exex_context_with_chain_spec(
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
     );
 
-    let genesis_hash = init_genesis(provider_factory.clone())?;
+    let genesis_hash = init_genesis(&provider_factory)?;
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
 
