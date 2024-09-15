@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66, 67, and 68.
+//! Implements Ethereum wire protocol for versions 66, 67, 68 and 69.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -50,9 +50,17 @@ impl ProtocolMessage {
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
+                if version == EthVersion::Eth69 {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
+                }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
-            EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
+            EthMessageID::NewBlock => {
+                if version >= EthVersion::Eth69 {
+                    return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
+                }
+                EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
+            }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
                 if version >= EthVersion::Eth68 {
@@ -184,9 +192,9 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 pub enum EthMessage {
     /// Represents a Status message required for the protocol handshake.
     Status(Status),
-    /// Represents a `NewBlockHashes` message broadcast to the network.
+    /// Represents a `NewBlockHashes` message broadcast to the network (pre-eth/69)
     NewBlockHashes(NewBlockHashes),
-    /// Represents a `NewBlock` message broadcast to the network.
+    /// Represents a `NewBlock` message broadcast to the network (pre-eth/69).
     NewBlock(Box<NewBlock>),
     /// Represents a Transactions message broadcast to the network.
     Transactions(Transactions),
@@ -294,7 +302,7 @@ impl Encodable for EthMessage {
 /// Note: This is only useful for outgoing messages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthBroadcastMessage {
-    /// Represents a new block broadcast message.
+    /// Represents a `NewBlock` message broadcast to the network (pre-eth/69).
     NewBlock(Arc<NewBlock>),
     /// Represents a transactions broadcast message.
     Transactions(SharedTransactions),
@@ -335,7 +343,7 @@ impl Encodable for EthBroadcastMessage {
 pub enum EthMessageID {
     /// Status message.
     Status = 0x00,
-    /// New block hashes message.
+    /// New block hashes message (pre-eth/69).
     NewBlockHashes = 0x01,
     /// Transactions message.
     Transactions = 0x02,
@@ -347,7 +355,7 @@ pub enum EthMessageID {
     GetBlockBodies = 0x05,
     /// Block bodies message.
     BlockBodies = 0x06,
-    /// New block message.
+    /// New block message (pre-eth/69).
     NewBlock = 0x07,
     /// New pooled transaction hashes message.
     NewPooledTransactionHashes = 0x08,

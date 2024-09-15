@@ -2,7 +2,7 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{ReceiptWithBloom, B256};
+use reth_primitives::{Receipt, B256};
 
 /// A request for transaction receipts from the given block hashes.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -22,7 +22,7 @@ pub struct GetReceipts(
 #[add_arbitrary_tests(rlp)]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
-    pub Vec<Vec<ReceiptWithBloom>>,
+    pub Vec<Vec<Receipt>>,
 );
 
 #[cfg(test)]
@@ -33,10 +33,8 @@ mod tests {
 
     #[test]
     fn roundtrip_eip1559() {
-        let receipts = Receipts(vec![vec![ReceiptWithBloom {
-            receipt: Receipt { tx_type: TxType::Eip1559, ..Default::default() },
-            bloom: Default::default(),
-        }]]);
+        let receipts =
+            Receipts(vec![vec![Receipt { tx_type: TxType::Eip1559, ..Default::default() }]]);
 
         let mut out = vec![];
         receipts.encode(&mut out);
@@ -88,27 +86,22 @@ mod tests {
         let mut data = vec![];
         let request = RequestPair::<Receipts> {
             request_id: 1111,
-            message: Receipts(vec![vec![
-                ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Legacy,
-                        cumulative_gas_used: 0x1u64,
-                        logs: vec![
-                            Log::new_unchecked(
-                                hex!("0000000000000000000000000000000000000011").into(),
-                                vec![
-                                    hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
-                                    hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
-                                ],
-                                hex!("0100ff")[..].into(),
-                            ),
-                        ],
-                        success: false,
-                        ..Default::default()
-                    },
-                    bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                },
-            ]]),
+            message: Receipts(vec![vec![Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 0x1u64,
+                logs: vec![Log::new_unchecked(
+                    hex!("0000000000000000000000000000000000000011").into(),
+                    vec![
+                        hex!("000000000000000000000000000000000000000000000000000000000000dead")
+                            .into(),
+                        hex!("000000000000000000000000000000000000000000000000000000000000beef")
+                            .into(),
+                    ],
+                    hex!("0100ff")[..].into(),
+                )],
+                success: false,
+                ..Default::default()
+            }]]),
         };
         request.encode(&mut data);
         assert_eq!(data, expected);
@@ -124,29 +117,26 @@ mod tests {
             request,
             RequestPair::<Receipts> {
                 request_id: 1111,
-                message: Receipts(vec![
-                    vec![
-                        ReceiptWithBloom {
-                            receipt: Receipt {
-                                tx_type: TxType::Legacy,
-                                cumulative_gas_used: 0x1u64,
-                                logs: vec![
-                                    Log::new_unchecked(
-                                        hex!("0000000000000000000000000000000000000011").into(),
-                                        vec![
-                                            hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
-                                            hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
-                                        ],
-                                        hex!("0100ff")[..].into(),
-                                    ),
-                                ],
-                                success: false,
-                                ..Default::default()
-                            },
-                            bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                        },
-                    ],
-                ]),
+                message: Receipts(vec![vec![Receipt {
+                    tx_type: TxType::Legacy,
+                    cumulative_gas_used: 0x1u64,
+                    logs: vec![Log::new_unchecked(
+                        hex!("0000000000000000000000000000000000000011").into(),
+                        vec![
+                            hex!(
+                                "000000000000000000000000000000000000000000000000000000000000dead"
+                            )
+                            .into(),
+                            hex!(
+                                "000000000000000000000000000000000000000000000000000000000000beef"
+                            )
+                            .into(),
+                        ],
+                        hex!("0100ff")[..].into(),
+                    ),],
+                    success: false,
+                    ..Default::default()
+                },],]),
             }
         );
     }

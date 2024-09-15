@@ -24,20 +24,23 @@ pub enum EthVersion {
 
     /// The `eth` protocol version 68.
     Eth68 = 68,
+
+    /// The `eth` protocol version 69.
+    Eth69 = 69,
 }
 
 impl EthVersion {
     /// The latest known eth version
-    pub const LATEST: Self = Self::Eth68;
+    pub const LATEST: Self = Self::Eth69;
 
     /// Returns the total number of messages the protocol version supports.
     pub const fn total_messages(&self) -> u8 {
         match self {
             Self::Eth66 => 15,
-            Self::Eth67 | Self::Eth68 => {
-                // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
-                13
-            }
+            Self::Eth67 | Self::Eth68 => 13, /* eth/67,68 are eth/66 minus GetNodeData and
+                                               * NodeData messages */
+            Self::Eth69 => 11, /* eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock
+                                * messages */
         }
     }
 
@@ -54,6 +57,11 @@ impl EthVersion {
     /// Returns true if the version is eth/68
     pub const fn is_eth68(&self) -> bool {
         matches!(self, Self::Eth68)
+    }
+
+    /// Returns true if the version is eth/69
+    pub const fn is_eth69(&self) -> bool {
+        matches!(self, Self::Eth69)
     }
 }
 
@@ -75,6 +83,7 @@ impl TryFrom<&str> for EthVersion {
             "66" => Ok(Self::Eth66),
             "67" => Ok(Self::Eth67),
             "68" => Ok(Self::Eth68),
+            "69" => Ok(Self::Eth69),
             _ => Err(ParseVersionError(s.to_string())),
         }
     }
@@ -98,6 +107,7 @@ impl TryFrom<u8> for EthVersion {
             66 => Ok(Self::Eth66),
             67 => Ok(Self::Eth67),
             68 => Ok(Self::Eth68),
+            69 => Ok(Self::Eth69),
             _ => Err(ParseVersionError(u.to_string())),
         }
     }
@@ -126,6 +136,7 @@ impl From<EthVersion> for &'static str {
             EthVersion::Eth66 => "66",
             EthVersion::Eth67 => "67",
             EthVersion::Eth68 => "68",
+            EthVersion::Eth69 => "69",
         }
     }
 }
@@ -179,7 +190,8 @@ mod tests {
         assert_eq!(EthVersion::Eth66, EthVersion::try_from("66").unwrap());
         assert_eq!(EthVersion::Eth67, EthVersion::try_from("67").unwrap());
         assert_eq!(EthVersion::Eth68, EthVersion::try_from("68").unwrap());
-        assert_eq!(Err(ParseVersionError("69".to_string())), EthVersion::try_from("69"));
+        assert_eq!(EthVersion::Eth69, EthVersion::try_from("69").unwrap());
+        assert_eq!(Err(ParseVersionError("70".to_string())), EthVersion::try_from("70"));
     }
 
     #[test]
@@ -187,6 +199,7 @@ mod tests {
         assert_eq!(EthVersion::Eth66, "66".parse().unwrap());
         assert_eq!(EthVersion::Eth67, "67".parse().unwrap());
         assert_eq!(EthVersion::Eth68, "68".parse().unwrap());
-        assert_eq!(Err(ParseVersionError("69".to_string())), "69".parse::<EthVersion>());
+        assert_eq!(EthVersion::Eth69, "69".parse().unwrap());
+        assert_eq!(Err(ParseVersionError("70".to_string())), "70".parse::<EthVersion>());
     }
 }

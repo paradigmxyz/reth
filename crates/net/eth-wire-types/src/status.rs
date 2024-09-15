@@ -16,6 +16,7 @@ use std::fmt::{Debug, Display};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
+#[rlp(trailing)]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.
@@ -24,9 +25,6 @@ pub struct Status {
     /// The chain id, as introduced in
     /// [EIP155](https://eips.ethereum.org/EIPS/eip-155#list-of-chain-ids).
     pub chain: Chain,
-
-    /// Total difficulty of the best chain.
-    pub total_difficulty: U256,
 
     /// The highest difficulty block hash the peer has seen
     pub blockhash: B256,
@@ -40,12 +38,15 @@ pub struct Status {
     /// [EIP-2124](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md).
     /// This was added in [`eth/64`](https://eips.ethereum.org/EIPS/eip-2364)
     pub forkid: ForkId,
+
+    /// Total difficulty of the best chain.
+    pub total_difficulty: Option<U256>,
 }
 
 impl From<Genesis> for Status {
     fn from(genesis: Genesis) -> Self {
         let chain = genesis.config.chain_id;
-        let total_difficulty = genesis.difficulty;
+        let total_difficulty = Some(genesis.difficulty);
         let chainspec = ChainSpec::from(genesis);
 
         Self {
@@ -79,7 +80,7 @@ impl Status {
             .chain(spec.chain)
             .genesis(spec.genesis_hash())
             .blockhash(head.hash)
-            .total_difficulty(head.total_difficulty)
+            .total_difficulty(Some(head.total_difficulty))
             .forkid(spec.fork_id(head))
     }
 }
@@ -90,10 +91,10 @@ impl Display for Status {
         let hexed_genesis = hex::encode(self.genesis);
         write!(
             f,
-            "Status {{ version: {}, chain: {}, total_difficulty: {}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
+            "Status {{ version: {}, chain: {}, total_difficulty: {:X?}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
             self.version,
             self.chain,
-            self.total_difficulty,
+            Some(self.total_difficulty),
             hexed_blockhash,
             hexed_genesis,
             self.forkid
@@ -136,9 +137,9 @@ impl Default for Status {
     fn default() -> Self {
         let mainnet_genesis = MAINNET.genesis_hash();
         Self {
-            version: EthVersion::Eth68 as u8,
+            version: EthVersion::Eth69 as u8,
             chain: Chain::from_named(NamedChain::Mainnet),
-            total_difficulty: U256::from(17_179_869_184u64),
+            total_difficulty: None,
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
             forkid: MAINNET
@@ -202,7 +203,7 @@ impl StatusBuilder {
     }
 
     /// Sets the total difficulty.
-    pub const fn total_difficulty(mut self, total_difficulty: U256) -> Self {
+    pub const fn total_difficulty(mut self, total_difficulty: Option<U256>) -> Self {
         self.status.total_difficulty = total_difficulty;
         self
     }
@@ -242,7 +243,30 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::from_named(NamedChain::Mainnet),
-            total_difficulty: U256::from(36206751599115524359527u128),
+            total_difficulty: Some(U256::from(36206751599115524359527u128)),
+            blockhash: B256::from_str(
+                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+            )
+            .unwrap(),
+            genesis: B256::from_str(
+                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+            )
+            .unwrap(),
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+        };
+
+        let mut rlp_status = vec![];
+        status.encode(&mut rlp_status);
+        assert_eq!(rlp_status, expected);
+    }
+
+    #[test]
+    fn encode_eth69_status_message() {
+        let expected = hex!("f85643018a07aac59dabcdd74bc567a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
+        let status = Status {
+            version: EthVersion::Eth67 as u8,
+            chain: Chain::from_named(NamedChain::Mainnet),
+            total_difficulty: None,
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
@@ -265,7 +289,7 @@ mod tests {
         let expected = Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::from_named(NamedChain::Mainnet),
-            total_difficulty: U256::from(36206751599115524359527u128),
+            total_difficulty: Some(U256::from(36206751599115524359527u128)),
             blockhash: B256::from_str(
                 "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
             )
@@ -286,7 +310,7 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth66 as u8,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
-            total_difficulty: U256::from(37851386u64),
+            total_difficulty: Some(U256::from(37851386u64)),
             blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
             )
@@ -309,7 +333,7 @@ mod tests {
         let expected = Status {
             version: EthVersion::Eth66 as u8,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
-            total_difficulty: U256::from(37851386u64),
+            total_difficulty: Some(U256::from(37851386u64)),
             blockhash: B256::from_str(
                 "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b",
             )
@@ -330,10 +354,12 @@ mod tests {
         let expected = Status {
             version: EthVersion::Eth66 as u8,
             chain: Chain::from_id(2100),
-            total_difficulty: U256::from_str(
-                "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
-            )
-            .unwrap(),
+            total_difficulty: Some(
+                U256::from_str(
+                    "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
+                )
+                .unwrap(),
+            ),
             blockhash: B256::from_str(
                 "523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c",
             )
@@ -400,7 +426,7 @@ mod tests {
 
         assert_eq!(status.chain, Chain::from_id(1337));
         assert_eq!(status.forkid, forkid);
-        assert_eq!(status.total_difficulty, total_difficulty);
+        assert_eq!(status.total_difficulty, Some(total_difficulty));
         assert_eq!(status.blockhash, head_hash);
         assert_eq!(status.genesis, genesis_hash);
     }
