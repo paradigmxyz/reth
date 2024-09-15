@@ -41,7 +41,7 @@ pub(crate) fn decode_with_eip155_chain_id(
 /// Using this for signature validation will succeed, even if the signature is malleable or not
 /// compliant with EIP-2. This is provided for compatibility with old signatures which have
 /// large `s` values.
-pub(crate) fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Address> {
+pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Address> {
     let mut sig: [u8; 65] = [0; 65];
 
     sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
@@ -58,7 +58,7 @@ pub(crate) fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Opt
 /// [EIP-2](https://eips.ethereum.org/EIPS/eip-2).
 ///
 /// If the S value is too large, then this will return `None`
-pub(crate) fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
+pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
     if signature.s() > SECP256K1N_HALF {
         return None
     }
