@@ -814,7 +814,7 @@ mod tests {
                 .build(),
         );
 
-        let mut header = chain_spec.genesis_header();
+        let mut header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
         let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
@@ -1036,7 +1036,7 @@ mod tests {
                 .build(),
         );
 
-        let header = chain_spec.genesis_header();
+        let header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
         let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
@@ -1207,7 +1207,7 @@ mod tests {
                 .build(),
         );
 
-        let mut header = chain_spec.genesis_header();
+        let mut header = chain_spec.genesis_header().clone();
         header.requests_root = Some(EMPTY_ROOT_HASH);
         let header_hash = header.hash_slow();
 
@@ -1365,7 +1365,7 @@ mod tests {
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
 
-        let mut header = chain_spec.genesis_header();
+        let mut header = chain_spec.genesis_header().clone();
         header.gas_limit = 1_500_000;
         header.gas_used = 134_807;
         header.receipts_root =
@@ -1454,7 +1454,7 @@ mod tests {
         assert_eq!(input.len(), 56);
 
         // Create a genesis block header with a specified gas limit and gas used
-        let mut header = chain_spec.genesis_header();
+        let mut header = chain_spec.genesis_header().clone();
         header.gas_limit = 1_500_000;
         header.gas_used = 134_807;
         header.receipts_root =

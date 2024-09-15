@@ -202,7 +202,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),
@@ -243,7 +243,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),

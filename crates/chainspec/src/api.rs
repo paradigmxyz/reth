@@ -1,7 +1,6 @@
-use core::fmt::Debug;
-
 use crate::ChainSpec;
 use alloy_chains::Chain;
+use core::fmt::Debug;
 
 /// Trait representing type configuring a chain spec.
 pub trait EthChainSpec: Send + Sync + Unpin + Debug + 'static {

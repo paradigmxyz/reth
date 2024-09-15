@@ -22,6 +22,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -163,7 +164,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
+        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
         Ok(state_provider)
     }
@@ -176,7 +177,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
 
-        let state_provider = self.provider()?.state_provider_by_block_number(block_number)?;
+        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
     }
