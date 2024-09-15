@@ -1329,7 +1329,7 @@ impl TransactionSigned {
 
         let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
-        Ok((transaction, hash, signature))
+        Ok((transaction, hash, signature.with_parity_bool()))
     }
 
     /// Decodes legacy transaction from the data buffer.
