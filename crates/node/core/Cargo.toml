@@ -43,7 +43,7 @@ reth-optimism-chainspec = { workspace = true, optional = true }
 # ethereum
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
 
 # misc
 eyre.workspace = true
