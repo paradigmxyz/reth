@@ -39,8 +39,11 @@ impl BlobStoreCanonTracker {
     /// blocks.
     pub fn add_new_chain_blocks(&mut self, blocks: &ChainBlocks<'_>) {
         let blob_txs = blocks.iter().map(|(num, blocks)| {
-            let iter =
-                blocks.body.iter().filter(|tx| tx.transaction.is_eip4844()).map(|tx| tx.hash);
+            let iter = blocks
+                .body
+                .transactions()
+                .filter(|tx| tx.transaction.is_eip4844())
+                .map(|tx| tx.hash);
             (*num, iter)
         });
         self.add_blocks(blob_txs);

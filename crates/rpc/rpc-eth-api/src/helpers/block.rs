@@ -75,7 +75,7 @@ pub trait EthBlocks: LoadBlock {
                 return Ok(LoadBlock::provider(self)
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body.len()));
+                    .map(|block| block.body.transactions.len()))
             }
 
             let block_hash = match LoadBlock::provider(self)
@@ -169,7 +169,7 @@ pub trait EthBlocks: LoadBlock {
                 LoadBlock::provider(self)
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.ommers)
+                    .map(|block| block.body.ommers)
             } else {
                 LoadBlock::provider(self)
                     .ommers_by_id(block_id)

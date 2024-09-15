@@ -172,7 +172,7 @@ where
             let block_indices = StoredBlockBodyIndices {
                 first_tx_num: next_tx_num,
                 tx_count: match &response {
-                    BlockResponse::Full(block) => block.body.len() as u64,
+                    BlockResponse::Full(block) => block.body.transactions.len() as u64,
                     BlockResponse::Empty(_) => 0,
                 },
             };
@@ -195,12 +195,12 @@ where
             match response {
                 BlockResponse::Full(block) => {
                     // write transaction block index
-                    if !block.body.is_empty() {
+                    if !block.body.transactions.is_empty() {
                         tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
                     }
 
                     // Write transactions
-                    for transaction in block.body {
+                    for transaction in block.body.transactions {
                         let appended_tx_number = static_file_producer
                             .append_transaction(next_tx_num, &transaction.into())?;
 
@@ -219,13 +219,15 @@ where
                     }
 
                     // Write ommers if any
-                    if !block.ommers.is_empty() {
-                        ommers_cursor
-                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
+                    if !block.body.ommers.is_empty() {
+                        ommers_cursor.append(
+                            block_number,
+                            StoredBlockOmmers { ommers: block.body.ommers },
+                        )?;
                     }
 
                     // Write withdrawals if any
-                    if let Some(withdrawals) = block.withdrawals {
+                    if let Some(withdrawals) = block.body.withdrawals {
                         if !withdrawals.is_empty() {
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
@@ -233,7 +235,7 @@ where
                     }
 
                     // Write requests if any
-                    if let Some(requests) = block.requests {
+                    if let Some(requests) = block.body.requests {
                         if !requests.0.is_empty() {
                             requests_cursor.append(block_number, requests)?;
                         }

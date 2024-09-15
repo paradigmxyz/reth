@@ -345,7 +345,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
                 if range.contains(&(tx_number as TxNumber)) {
@@ -366,7 +366,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         let transactions = lock
             .values()
-            .flat_map(|block| &block.body)
+            .flat_map(|block| &block.body.transactions)
             .enumerate()
             .filter_map(|(tx_number, tx)| {
                 if range.contains(&(tx_number as TxNumber)) {

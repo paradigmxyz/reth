@@ -10,7 +10,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, BlockHashOrNumber, SealedBlock, SealedHeader};
 use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,
@@ -94,10 +94,12 @@ where
     let block = response.unwrap();
     let block = SealedBlock {
         header,
-        body: block.transactions,
-        ommers: block.ommers,
-        withdrawals: block.withdrawals,
-        requests: block.requests,
+        body: BlockBody {
+            transactions: block.transactions,
+            ommers: block.ommers,
+            withdrawals: block.withdrawals,
+            requests: block.requests,
+        },
     };
 
     validate_block_pre_execution(&block, &chain_spec)?;

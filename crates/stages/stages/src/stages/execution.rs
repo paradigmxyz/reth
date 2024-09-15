@@ -271,7 +271,7 @@ where
             cumulative_gas += block.gas_used;
 
             // Configure the executor to use the current state.
-            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.transactions.len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();

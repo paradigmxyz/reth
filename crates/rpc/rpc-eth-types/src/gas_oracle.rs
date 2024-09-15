@@ -221,13 +221,13 @@ where
         let parent_hash = block.parent_hash;
 
         // sort the functions by ascending effective tip first
-        block.body.sort_by_cached_key(|tx| {
+        block.body.transactions.sort_by_cached_key(|tx| {
             tx.effective_tip_per_gas(base_fee_per_gas.map(|base_fee| base_fee as u64))
         });
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in &block.body {
+        for tx in block.body.transactions() {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
