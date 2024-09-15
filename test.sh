@@ -1,1 +1,0 @@
-cargo nextest run --locked --features "asm-keccak ethereum" --workspace --exclude ef-tests -E "!kind(test)"
