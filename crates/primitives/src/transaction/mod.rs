@@ -11,7 +11,7 @@ use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use bytes::Buf;
-use core::{mem, u64};
+use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -1563,7 +1563,8 @@ impl Decodable for TransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let transaction = Transaction::arbitrary(u)?;
+        #[allow(unused_mut)]
+        let mut transaction = Transaction::arbitrary(u)?;
         let mut signature = Signature::arbitrary(u)?;
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
