@@ -16,7 +16,11 @@ pub struct TrieInput {
 
 impl TrieInput {
     /// Create new trie input.
-    pub fn new(nodes: TrieUpdates, state: HashedPostState, prefix_sets: TriePrefixSetsMut) -> Self {
+    pub const fn new(
+        nodes: TrieUpdates,
+        state: HashedPostState,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> Self {
         Self { nodes, state, prefix_sets }
     }
 
