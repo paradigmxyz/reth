@@ -99,7 +99,7 @@ where
 
     /// Handler for `ots_getInternalOperations`
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
-        let internal_operations = self
+        let Some(transfer_operations) = self
             .eth
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
@@ -108,24 +108,29 @@ where
             )
             .await
             .map_err(Into::into)?
-            .map(|transfer_operations| {
-                transfer_operations
-                    .iter()
-                    .map(|op| InternalOperation {
-                        from: op.from,
-                        to: op.to,
-                        value: op.value,
-                        r#type: match op.kind {
-                            TransferKind::Call => OperationType::OpTransfer,
-                            TransferKind::Create => OperationType::OpCreate,
-                            TransferKind::Create2 => OperationType::OpCreate2,
-                            TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
-                            TransferKind::EofCreate => todo!(),
-                        },
-                    })
-                    .collect::<Vec<_>>()
+        else {
+            return Ok(Vec::new())
+        };
+
+        let mut internal_operations = Vec::with_capacity(transfer_operations.len());
+
+        for op in transfer_operations {
+            internal_operations.push(InternalOperation {
+                from: op.from,
+                to: op.to,
+                value: op.value,
+                r#type: match op.kind {
+                    TransferKind::Call => OperationType::OpTransfer,
+                    TransferKind::Create => OperationType::OpCreate,
+                    TransferKind::Create2 => OperationType::OpCreate2,
+                    TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
+                    TransferKind::EofCreate => {
+                        return Err(internal_rpc_err("EOFCREATE unsupported"))
+                    }
+                },
             })
-            .unwrap_or_default();
+        }
+
         Ok(internal_operations)
     }
 
