@@ -4,9 +4,10 @@ use reth_execution_errors::StateProofError;
 use reth_primitives::{Address, B256};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::Proof,
-    trie_cursor::InMemoryTrieCursorFactory, TrieInput,
+    trie_cursor::InMemoryTrieCursorFactory, HashedPostState, MultiProof, TrieInput,
 };
 use reth_trie_common::AccountProof;
+use std::collections::{HashMap, HashSet};
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a, TX> {
@@ -20,6 +21,13 @@ pub trait DatabaseProof<'a, TX> {
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError>;
+
+    /// Generates the state [`MultiProof`] for target hashed account and storage keys.
+    fn overlay_multiproof(
+        tx: &'a TX,
+        post_state: HashedPostState,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> Result<MultiProof, StateProofError>;
 }
 
 impl<'a, TX: DbTx> DatabaseProof<'a, TX>
@@ -49,5 +57,21 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
             ))
             .with_prefix_sets_mut(input.prefix_sets)
             .account_proof(address, slots)
+    }
+
+    fn overlay_multiproof(
+        tx: &'a TX,
+        post_state: HashedPostState,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> Result<MultiProof, StateProofError> {
+        let prefix_sets = post_state.construct_prefix_sets();
+        let sorted = post_state.into_sorted();
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted);
+        Self::from_tx(tx)
+            .with_hashed_cursor_factory(hashed_cursor_factory)
+            .with_prefix_sets_mut(prefix_sets)
+            .with_targets(targets)
+            .multiproof()
     }
 }

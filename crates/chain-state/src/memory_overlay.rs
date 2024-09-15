@@ -7,8 +7,13 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateProviderBox,
     StateRootProvider, StorageRootProvider,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
-use std::{collections::HashMap, sync::OnceLock};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::OnceLock,
+};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -145,6 +150,16 @@ impl StateProofProvider for MemoryOverlayStateProvider {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.proof(input, address, slots)
+    }
+
+    fn multiproof(
+        &self,
+        state: HashedPostState,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        let mut hashed_state = self.trie_state().state.clone();
+        hashed_state.extend(state);
+        self.historical.multiproof(hashed_state, targets)
     }
 
     fn witness(
