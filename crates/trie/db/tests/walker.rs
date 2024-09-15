@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
 use reth_primitives::B256;

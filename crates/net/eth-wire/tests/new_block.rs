@@ -1,5 +1,5 @@
 //! Decoding tests for [`NewBlock`]
-
+#![allow(missing_docs)]
 use alloy_rlp::Decodable;
 use reth_eth_wire::NewBlock;
 use reth_primitives::hex;

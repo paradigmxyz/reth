@@ -1,5 +1,4 @@
 //! Connection tests
-
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 use alloy_node_bindings::Geth;

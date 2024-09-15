@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};

@@ -1,5 +1,5 @@
 //! Round-trip encoding fuzzing for the `eth-wire` crate.
-
+#![allow(missing_docs)]
 use alloy_rlp::{Decodable, Encodable};
 use serde::Serialize;
 use std::fmt::Debug;

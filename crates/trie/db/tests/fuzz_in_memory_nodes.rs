@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use proptest::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},

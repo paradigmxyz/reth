@@ -1,5 +1,5 @@
 //! transaction-pool integration tests
-
+#![allow(missing_docs)]
 #[cfg(feature = "test-utils")]
 mod blobs;
 #[cfg(feature = "test-utils")]

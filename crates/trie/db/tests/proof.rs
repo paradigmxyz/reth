@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Account, Address, Bytes, B256, U256};
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};

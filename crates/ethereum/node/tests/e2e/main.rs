@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod blobs;
 mod dev;
 mod eth;
