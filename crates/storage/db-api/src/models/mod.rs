@@ -1,12 +1,12 @@
 //! Implements data structures specific to the database
 use crate::table::{Compress, Decompress};
-use reth_codecs::{add_arbitrary_tests, Compact};
 use alloy_primitives::{Address, Log, B256, U256};
-use reth_prune_types::PruneCheckpoint;
+use reth_codecs::{add_arbitrary_tests, Compact};
 use reth_primitives::{
     Account, Bytecode, GenesisAccount, Header, Receipt, Requests, SealedHeader, StorageEntry,
     TransactionSignedNoHash, TxType,
 };
+use reth_prune_types::PruneCheckpoint;
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};

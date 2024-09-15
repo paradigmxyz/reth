@@ -25,16 +25,11 @@ use bytes::{Buf, BufMut};
 extern crate alloc;
 use alloc::vec::Vec;
 
+pub use reth_db_serialization::{Decode, DecodeError, Encode};
+
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
-mod error;
-pub use error::DecodeError;
-
-mod encode;
-pub use encode::Encode;
-mod decode;
-pub use decode::Decode;
 /// Trait that implements the `Compact` codec.
 ///
 /// When deriving the trait for custom structs, be aware of certain limitations/recommendations:
@@ -483,33 +478,6 @@ fn decode_varuint(buf: &[u8]) -> (usize, &[u8]) {
 const fn decode_varuint_panic() -> ! {
     panic!("could not decode varuint");
 }
-
-/// Macro that implements [`Encode`] and [`Decode`] for uint types.
-macro_rules! impl_uints {
-    ($($name:tt),+) => {
-        $(
-            impl Encode for $name {
-                type Encoded = [u8; core::mem::size_of::<$name>()];
-
-                fn encode(self) -> Self::Encoded {
-                    self.to_be_bytes()
-                }
-            }
-
-            impl Decode for $name {
-                fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, $crate::DecodeError> {
-                    Ok(
-                        $name::from_be_bytes(
-                            value.as_ref().try_into().map_err(|_| $crate::DecodeError)?
-                        )
-                    )
-                }
-            }
-        )+
-    };
-}
-
-impl_uints!(u64, u32, u16, u8);
 
 #[cfg(test)]
 mod tests {

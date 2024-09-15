@@ -1,6 +1,6 @@
 //! Sharded key
-use reth_codecs::{Decode, DecodeError, Encode};
 use alloy_primitives::BlockNumber;
+use reth_codecs::{Decode, DecodeError, Encode};
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 

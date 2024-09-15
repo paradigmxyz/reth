@@ -6573,12 +6573,12 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "bytes",
- "derive_more",
  "modular-bitfield",
  "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
+ "reth-db-serialization",
  "serde",
  "serde_json",
  "test-fuzz",
@@ -6766,6 +6766,14 @@ dependencies = [
  "reth-primitives",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-db-serialization"
+version = "1.0.7"
+dependencies = [
+ "alloy-primitives",
+ "derive_more",
 ]
 
 [[package]]

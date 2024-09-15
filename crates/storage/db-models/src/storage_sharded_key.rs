@@ -1,7 +1,7 @@
 //! Storage sharded key
+use alloy_primitives::{Address, BlockNumber, B256};
 use derive_more::AsRef;
 use reth_codecs::{Decode, DecodeError, Encode};
-use alloy_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 
 use super::ShardedKey;
