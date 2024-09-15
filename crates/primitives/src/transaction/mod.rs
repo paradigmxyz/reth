@@ -6,7 +6,6 @@ use crate::{
 };
 
 use alloy_consensus::SignableTransaction;
-use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -1568,9 +1567,9 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         let mut signature = Signature::arbitrary(u)?;
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
-            signature.with_parity(Parity::NonEip155(bool::arbitrary(u)?))
+            signature.with_parity(alloy_primitives::Parity::NonEip155(bool::arbitrary(u)?))
         } else {
-            signature.with_parity(Parity::Eip155(u64::arbitrary(u)?))
+            signature.with_parity(alloy_primitives::Parity::Eip155(u64::arbitrary(u)?))
         };
 
         if let Some(chain_id) = transaction.chain_id() {
