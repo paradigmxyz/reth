@@ -1381,13 +1381,13 @@ impl TransactionSigned {
         };
 
         #[cfg(not(feature = "optimism"))]
-        let signature = Signature::decode(data)?;
+        let signature = Signature::decode_rlp_vrs(data)?;
 
         #[cfg(feature = "optimism")]
         let signature = if tx_type == TxType::Deposit {
             optimism_deposit_tx_signature()
         } else {
-            Signature::decode(data)?
+            Signature::decode_rlp_vrs(data)?
         };
 
         let bytes_consumed = remaining_len - data.len();

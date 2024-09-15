@@ -210,7 +210,7 @@ impl BlobTransaction {
         let transaction = TxEip4844::decode(data)?;
 
         // signature
-        let signature = Signature::decode(data)?;
+        let signature = Signature::decode_rlp_vrs(data)?;
 
         // the inner header only decodes the transaction and signature, so we check the length here
         let inner_consumed = inner_remaining_len - data.len();
