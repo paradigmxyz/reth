@@ -1567,14 +1567,16 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         let mut signature = Signature::arbitrary(u)?;
 
         signature = if matches!(transaction, Transaction::Legacy(_)) {
-            signature.with_parity(alloy_primitives::Parity::NonEip155(bool::arbitrary(u)?))
+            signature.with_parity(alloy_primitives::Parity::Parity(bool::arbitrary(u)?))
         } else {
-            signature.with_parity(alloy_primitives::Parity::Eip155(u64::arbitrary(u)?))
-        };
+            signature.with_parity(alloy_primitives::Parity::Eip155(u64::arbitrary(u)?));
 
-        if let Some(chain_id) = transaction.chain_id() {
-            signature = signature.with_chain_id(chain_id);
-        }
+            if let Some(chain_id) = transaction.chain_id() {
+                signature = signature.with_chain_id(chain_id);
+            }
+
+            signature
+        };
 
         #[cfg(feature = "optimism")]
         // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
