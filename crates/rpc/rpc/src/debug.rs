@@ -629,8 +629,8 @@ where
                 // Take the bundle state
                 let bundle_state = db.take_bundle();
 
-                // Initialize a map of preimages.
-                let mut state_preimages = HashMap::new();
+                // Initialize a map of key preimages.
+                let mut key_preimages = HashMap::new();
 
                 // Grab all account proofs for the data accessed during block execution.
                 //
@@ -651,8 +651,8 @@ where
 
                     if let Some(account) = account.account {
                         if include_preimages {
-                            state_preimages
-                                .insert(hashed_address, alloy_rlp::encode(address).into());
+                            key_preimages
+                                .insert(hashed_address, Bytes::copy_from_slice(&address[..]));
                         }
 
                         for (slot, value) in account.storage {
@@ -661,7 +661,8 @@ where
                             storage.storage.insert(hashed_slot, value);
 
                             if include_preimages {
-                                state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                                key_preimages
+                                    .insert(hashed_slot, Bytes::copy_from_slice(&slot[..]));
                             }
                         }
                     }
@@ -670,13 +671,13 @@ where
                 // Generate an execution witness for the aggregated state of accessed accounts.
                 // Destruct the cache database to retrieve the state provider.
                 let state_provider = db.database.into_inner();
-                let witness = state_provider
+                let state_preimages = state_provider
                     .witness(HashedPostState::default(), hashed_state)
                     .map_err(Into::into)?;
 
                 Ok(ExecutionWitness {
-                    witness,
-                    state_preimages: include_preimages.then_some(state_preimages),
+                    state: state_preimages,
+                    keys: include_preimages.then_some(state_preimages),
                 })
             })
             .await

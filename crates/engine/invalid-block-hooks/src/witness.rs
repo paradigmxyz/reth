@@ -111,7 +111,7 @@ where
         let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
-        let mut state_preimages = HashMap::new();
+        let mut key_preimages = HashMap::new();
 
         // Grab all account proofs for the data accessed during block execution.
         //
@@ -130,14 +130,14 @@ where
                 .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
             if let Some(account) = account.account {
-                state_preimages.insert(hashed_address, alloy_rlp::encode(address).into());
+                key_preimages.insert(hashed_address, alloy_rlp::encode(address).into());
 
                 for (slot, value) in account.storage {
                     let slot = B256::from(slot);
                     let hashed_slot = keccak256(slot);
                     storage.storage.insert(hashed_slot, value);
 
-                    state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                    key_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
                 }
             }
         }
@@ -145,14 +145,15 @@ where
         // Generate an execution witness for the aggregated state of accessed accounts.
         // Destruct the cache database to retrieve the state provider.
         let state_provider = db.database.into_inner();
-        let witness = state_provider.witness(HashedPostState::default(), hashed_state.clone())?;
+        let state_preimages =
+            state_provider.witness(HashedPostState::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
         let mut file = File::options()
             .write(true)
             .create_new(true)
             .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?;
-        let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
+        let response = ExecutionWitness { state: state_preimages, keys: Some(key_preimages) };
         file.write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
