@@ -9,9 +9,8 @@ use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, prefix_set::TriePrefixSetsMut,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedStorage,
-    StateRoot, StateRootProgress,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StateRootProgress, TrieInput,
 };
 use std::{
     collections::{hash_map, HashMap},
@@ -111,20 +110,13 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 
     /// Calculates the state root for provided [`HashedPostState`] using cached intermediate nodes.
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        intermediate_nodes: TrieUpdates,
-        post_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
-    ) -> Result<B256, StateRootError>;
+    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError>;
 
     /// Calculates the state root and trie updates for provided [`HashedPostState`] using
     /// cached intermediate nodes.
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        intermediate_nodes: TrieUpdates,
-        post_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        input: TrieInput,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
@@ -199,35 +191,28 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         .root_with_updates()
     }
 
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        intermediate_nodes: TrieUpdates,
-        post_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
-    ) -> Result<B256, StateRootError> {
-        let state_sorted = post_state.into_sorted();
-        let nodes_sorted = intermediate_nodes.into_sorted();
+    fn overlay_root_from_nodes(tx: &'a TX, input: TrieInput) -> Result<B256, StateRootError> {
+        let state_sorted = input.state.into_sorted();
+        let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
-        .with_prefix_sets(prefix_sets.freeze())
+        .with_prefix_sets(input.prefix_sets.freeze())
         .root()
     }
 
     fn overlay_root_from_nodes_with_updates(
         tx: &'a TX,
-        intermediate_nodes: TrieUpdates,
-        post_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        input: TrieInput,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
-        let state_sorted = post_state.into_sorted();
-        let nodes_sorted = intermediate_nodes.into_sorted();
+        let state_sorted = input.state.into_sorted();
+        let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
             InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
         )
-        .with_prefix_sets(prefix_sets.freeze())
+        .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()
     }
 }

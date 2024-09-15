@@ -27,11 +27,9 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
 
     fn state_root_from_nodes(
         &self,
-        nodes: reth_trie::updates::TrieUpdates,
-        hashed_state: reth_trie::HashedPostState,
-        prefix_sets: reth_trie::prefix_set::TriePrefixSetsMut,
+        input: reth_trie::TrieInput,
     ) -> reth_errors::ProviderResult<B256> {
-        self.0.state_root_from_nodes(nodes, hashed_state, prefix_sets)
+        self.0.state_root_from_nodes(input)
     }
 
     fn state_root_with_updates(
@@ -43,11 +41,9 @@ impl<'a> reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'a
 
     fn state_root_from_nodes_with_updates(
         &self,
-        nodes: reth_trie::updates::TrieUpdates,
-        hashed_state: reth_trie::HashedPostState,
-        prefix_sets: reth_trie::prefix_set::TriePrefixSetsMut,
+        input: reth_trie::TrieInput,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
-        self.0.state_root_from_nodes_with_updates(nodes, hashed_state, prefix_sets)
+        self.0.state_root_from_nodes_with_updates(input)
     }
 }
 

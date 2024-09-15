@@ -16,8 +16,8 @@ use reth_primitives::{
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, StateRoot, StorageRoot,
+    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
+    HashedStorage, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -292,17 +292,9 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_from_nodes(
-        &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
-        let mut revert_state = self.revert_state()?;
-        let mut revert_prefix_sets = revert_state.construct_prefix_sets();
-        revert_state.extend(hashed_state);
-        revert_prefix_sets.extend(prefix_sets);
-        StateRoot::overlay_root_from_nodes(self.tx, nodes, revert_state, revert_prefix_sets)
+    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        input.prepend(self.revert_state()?);
+        StateRoot::overlay_root_from_nodes(self.tx, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -318,21 +310,11 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut revert_state = self.revert_state()?;
-        let mut revert_prefix_sets = revert_state.construct_prefix_sets();
-        revert_state.extend(hashed_state);
-        revert_prefix_sets.extend(prefix_sets);
-        StateRoot::overlay_root_from_nodes_with_updates(
-            self.tx,
-            nodes,
-            revert_state,
-            revert_prefix_sets,
-        )
-        .map_err(|err| ProviderError::Database(err.into()))
+        input.prepend(self.revert_state()?);
+        StateRoot::overlay_root_from_nodes_with_updates(self.tx, input)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 
