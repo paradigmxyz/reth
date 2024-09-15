@@ -6,11 +6,12 @@ use crate::{
 };
 
 use alloy_consensus::SignableTransaction;
+use alloy_primitives::Parity;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use bytes::Buf;
-use core::mem;
+use core::{mem, u64};
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -136,7 +137,7 @@ pub enum Transaction {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Transaction {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(match TxType::arbitrary(u)? {
+        let mut tx = match TxType::arbitrary(u)? {
             TxType::Legacy => {
                 let mut tx = TxLegacy::arbitrary(u)?;
                 tx.gas_limit = (tx.gas_limit as u64).into();
@@ -169,7 +170,14 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
                 tx.gas_limit = (tx.gas_limit as u64).into();
                 Self::Deposit(tx)
             }
-        })
+        };
+
+        // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+        if let Some(chain_id) = tx.chain_id() {
+            tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        Ok(tx)
     }
 }
 
@@ -849,7 +857,6 @@ impl Encodable for Transaction {
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
@@ -950,6 +957,18 @@ impl TransactionSignedNoHash {
 impl Default for TransactionSignedNoHash {
     fn default() -> Self {
         Self { signature: Signature::test_signature(), transaction: Default::default() }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSignedNoHash {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let tx_signed = TransactionSigned::arbitrary(u)?;
+
+        Ok(Self {
+            signature: tx_signed.signature.with_parity_bool(),
+            transaction: tx_signed.transaction,
+        })
     }
 }
 
@@ -1544,10 +1563,17 @@ impl Decodable for TransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut transaction = Transaction::arbitrary(u)?;
+        let transaction = Transaction::arbitrary(u)?;
+        let mut signature = Signature::arbitrary(u)?;
+
+        signature = if matches!(transaction, Transaction::Legacy(_)) {
+            signature.with_parity(Parity::NonEip155(bool::arbitrary(u)?))
+        } else {
+            signature.with_parity(Parity::Eip155(u64::arbitrary(u)?))
+        };
+
         if let Some(chain_id) = transaction.chain_id() {
-            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+            signature = signature.with_chain_id(chain_id);
         }
 
         #[cfg(feature = "optimism")]
@@ -1559,8 +1585,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
                 tx_deposit.mint = None;
             }
         }
-
-        let signature = Signature::arbitrary(u)?;
 
         #[cfg(feature = "optimism")]
         let signature =
