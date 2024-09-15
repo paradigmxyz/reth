@@ -58,7 +58,7 @@ pub trait StateProofProvider: Send + Sync {
         slots: &[B256],
     ) -> ProviderResult<AccountProof>;
 
-    /// Generate [`Multiproof`] for target hashed account and corresponding
+    /// Generate [`MultiProof`] for target hashed account and corresponding
     /// hashed storage slot keys.
     fn multiproof(
         &self,
