@@ -429,19 +429,14 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	cargo +nightly docs \
 	--document-private-items
 
-test-reth-old:
+test-reth:
 	cargo test \
 	--workspace \
+	--bin "reth" \
 	--lib \
-	--features "ethereum $(BIN_OTHER_FEATURES)"
-
-
-test-reth:
-	cargo install cargo-nextest --locked
-	cargo nextest run \
-	--locked \
-	--workspace \
-	-E 'kind(lib)' \
+	--examples \
+	--tests \
+	--benches \
 	--features "ethereum $(BIN_OTHER_FEATURES)"
 
 test-op-reth:
