@@ -137,7 +137,7 @@ impl std::error::Error for BlockValidationError {
 }
 
 /// `BlockExecutor` Errors
-#[derive(Debug, From, Display)]
+#[derive(Debug, From, Display, derive_more:: Error)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     Validation(BlockValidationError),
@@ -185,19 +185,9 @@ impl From<ProviderError> for BlockExecutionError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for BlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Validation(source) => std::error::Error::source(source),
-            Self::Consensus(source) => std::error::Error::source(source),
-            Self::Internal(source) => std::error::Error::source(source),
-        }
-    }
-}
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
-#[derive(Display, Debug, From)]
+#[derive(Display, Debug, From, derive_more:: Error)]
 pub enum InternalBlockExecutionError {
     /// Pruning error, transparently wrapping [`PruneSegmentError`]
     #[from]
@@ -234,16 +224,5 @@ impl InternalBlockExecutionError {
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for InternalBlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Pruning(source) => std::error::Error::source(source),
-            Self::LatestBlock(source) => std::error::Error::source(source),
-            _ => Option::None,
-        }
     }
 }

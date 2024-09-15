@@ -7,22 +7,12 @@ use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 
 /// State root errors.
-#[derive(Display, Debug, From, PartialEq, Eq, Clone)]
+#[derive(Display, Debug, From, PartialEq, Eq, Clone, derive_more::Error)]
 pub enum StateRootError {
     /// Internal database error.
     Database(DatabaseError),
     /// Storage root error.
     StorageRootError(StorageRootError),
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for StateRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Database(source) => std::error::Error::source(source),
-            Self::StorageRootError(source) => std::error::Error::source(source),
-        }
-    }
 }
 
 impl From<StateRootError> for DatabaseError {
@@ -35,7 +25,7 @@ impl From<StateRootError> for DatabaseError {
 }
 
 /// Storage root error.
-#[derive(Display, From, PartialEq, Eq, Clone, Debug)]
+#[derive(Display, From, PartialEq, Eq, Clone, Debug, derive_more:: Error)]
 pub enum StorageRootError {
     /// Internal database error.
     Database(DatabaseError),
@@ -49,17 +39,8 @@ impl From<StorageRootError> for DatabaseError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StorageRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Database(source) => std::error::Error::source(source),
-        }
-    }
-}
-
 /// State proof errors.
-#[derive(Display, From, Debug, PartialEq, Eq, Clone)]
+#[derive(Display, From, Debug, PartialEq, Eq, Clone, derive_more:: Error)]
 pub enum StateProofError {
     /// Internal database error.
     Database(DatabaseError),
@@ -72,16 +53,6 @@ impl From<StateProofError> for ProviderError {
         match value {
             StateProofError::Database(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for StateProofError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Database(source) => std::error::Error::source(source),
-            Self::Rlp(source) => std::error::Error::source(source),
         }
     }
 }
