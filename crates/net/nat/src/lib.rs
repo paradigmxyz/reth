@@ -26,6 +26,7 @@ use std::{
     time::Duration,
 };
 
+use crate::net_if::resolve_net_if_ip;
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
@@ -48,6 +49,8 @@ pub enum NatResolver {
     PublicIp,
     /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
+    /// Resolve external IP via the network interface.
+    NetIf,
     /// Resolve nothing
     None,
 }
@@ -66,6 +69,7 @@ impl fmt::Display for NatResolver {
             Self::Upnp => f.write_str("upnp"),
             Self::PublicIp => f.write_str("publicip"),
             Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
+            Self::NetIf => f.write_str("networkinterface"),
             Self::None => f.write_str("none"),
         }
     }
@@ -185,6 +189,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
+        NatResolver::NetIf => resolve_net_if_ip(DEFAULT_NET_IF_NAME).ok(),
         NatResolver::None => None,
     }
 }
