@@ -113,7 +113,7 @@ impl BlobTransaction {
     /// Note: this should be used only when implementing other RLP encoding methods, and does not
     /// represent the full RLP encoding of the blob transaction.
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        self.transaction.encode_with_signature_fields(&self.signature.with_parity_bool(), out);
+        self.transaction.encode_with_signature_fields(&self.signature, out);
     }
 
     /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -238,7 +238,7 @@ impl BlobTransaction {
         // Instead, we use `encode_with_signature`, which RLP encodes the transaction with a
         // signature for hashing without a header. We then hash the result.
         let mut buf = Vec::new();
-        transaction.encode_with_signature(&signature.with_parity_bool(), &mut buf, false);
+        transaction.encode_with_signature(&signature, &mut buf, false);
         let hash = keccak256(&buf);
 
         // the outer header is for the entire transaction, so we check the length here

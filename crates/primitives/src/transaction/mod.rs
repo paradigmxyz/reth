@@ -533,21 +533,15 @@ impl Transaction {
                     out,
                 )
             }
-            Self::Eip2930(access_list_tx) => access_list_tx.encode_with_signature(
-                &signature.with_parity_bool(),
-                out,
-                with_header,
-            ),
-            Self::Eip1559(dynamic_fee_tx) => dynamic_fee_tx.encode_with_signature(
-                &signature.with_parity_bool(),
-                out,
-                with_header,
-            ),
-            Self::Eip4844(blob_tx) => {
-                blob_tx.encode_with_signature(&signature.with_parity_bool(), out, with_header)
+            Self::Eip2930(access_list_tx) => {
+                access_list_tx.encode_with_signature(signature, out, with_header)
             }
+            Self::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.encode_with_signature(signature, out, with_header)
+            }
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
             Self::Eip7702(set_code_tx) => {
-                set_code_tx.encode_with_signature(&signature.with_parity_bool(), out, with_header)
+                set_code_tx.encode_with_signature(signature, out, with_header)
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encode_inner(out, with_header),
@@ -1237,16 +1231,16 @@ impl TransactionSigned {
                 &with_eip155_parity(&self.signature, legacy_tx.chain_id),
             ),
             Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), true)
+                access_list_tx.encoded_len_with_signature(&self.signature, true)
             }
             Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), true)
+                dynamic_fee_tx.encoded_len_with_signature(&self.signature, true)
             }
             Transaction::Eip4844(blob_tx) => {
-                blob_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), true)
+                blob_tx.encoded_len_with_signature(&self.signature, true)
             }
             Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), true)
+                set_code_tx.encoded_len_with_signature(&self.signature, true)
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(true),
@@ -1445,16 +1439,16 @@ impl TransactionSigned {
                 &with_eip155_parity(&self.signature, legacy_tx.chain_id),
             ),
             Transaction::Eip2930(access_list_tx) => {
-                access_list_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), false)
+                access_list_tx.encoded_len_with_signature(&self.signature, false)
             }
             Transaction::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), false)
+                dynamic_fee_tx.encoded_len_with_signature(&self.signature, false)
             }
             Transaction::Eip4844(blob_tx) => {
-                blob_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), false)
+                blob_tx.encoded_len_with_signature(&self.signature, false)
             }
             Transaction::Eip7702(set_code_tx) => {
-                set_code_tx.encoded_len_with_signature(&self.signature.with_parity_bool(), false)
+                set_code_tx.encoded_len_with_signature(&self.signature, false)
             }
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.encoded_len(false),

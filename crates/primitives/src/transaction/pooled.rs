@@ -315,15 +315,15 @@ impl PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), false)
+                transaction.encoded_len_with_signature(signature, false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), false)
+                transaction.encoded_len_with_signature(signature, false)
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len without a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), false)
+                transaction.encoded_len_with_signature(signature, false)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding does not use a header, so we set `with_header` to false
@@ -363,13 +363,13 @@ impl PooledTransactionsElement {
                     out,
                 ),
             Self::Eip2930 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, false)
+                transaction.encode_with_signature(signature, out, false)
             }
             Self::Eip1559 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, false)
+                transaction.encode_with_signature(signature, out, false)
             }
             Self::Eip7702 { transaction, signature, .. } => {
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, false)
+                transaction.encode_with_signature(signature, out, false)
             }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
@@ -497,15 +497,15 @@ impl Encodable for PooledTransactionsElement {
                 ),
             Self::Eip2930 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, true)
+                transaction.encode_with_signature(signature, out, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, true)
+                transaction.encode_with_signature(signature, out, true)
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // encodes with string header
-                transaction.encode_with_signature(&signature.with_parity_bool(), out, true)
+                transaction.encode_with_signature(signature, out, true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // The inner encoding is used with `with_header` set to true, making the final
@@ -527,15 +527,15 @@ impl Encodable for PooledTransactionsElement {
             }
             Self::Eip2930 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), true)
+                transaction.encoded_len_with_signature(signature, true)
             }
             Self::Eip1559 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), true)
+                transaction.encoded_len_with_signature(signature, true)
             }
             Self::Eip7702 { transaction, signature, .. } => {
                 // method computes the payload len with a RLP header
-                transaction.encoded_len_with_signature(&signature.with_parity_bool(), true)
+                transaction.encoded_len_with_signature(signature, true)
             }
             Self::BlobTransaction(blob_tx) => {
                 // the encoding uses a header, so we set `with_header` to true
