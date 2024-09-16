@@ -137,13 +137,12 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
 
     fn multiproof(
         &self,
-        hashed_state: HashedPostState,
+        mut input: reth_trie::TrieInput,
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state);
-        self.state_provider.multiproof(state, targets)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.multiproof(input, targets)
     }
 
     fn witness(

@@ -349,13 +349,11 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
 
     fn multiproof(
         &self,
-        hashed_state: HashedPostState,
+        mut input: TrieInput,
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
-        let mut revert_state = self.revert_state()?;
-        revert_state.extend(hashed_state);
-        Proof::overlay_multiproof(self.tx, revert_state, targets)
-            .map_err(Into::<ProviderError>::into)
+        input.prepend(self.revert_state()?);
+        Proof::overlay_multiproof(self.tx, input, targets).map_err(Into::<ProviderError>::into)
     }
 
     fn witness(

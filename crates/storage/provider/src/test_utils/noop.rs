@@ -366,7 +366,7 @@ impl StateProofProvider for NoopProvider {
 
     fn multiproof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         _targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())

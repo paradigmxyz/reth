@@ -116,7 +116,7 @@ impl StateProofProvider for StateProviderTest {
 
     fn multiproof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         _targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
         unimplemented!("proof generation is not supported")

@@ -62,7 +62,7 @@ pub trait StateProofProvider: Send + Sync {
     /// hashed storage slot keys.
     fn multiproof(
         &self,
-        hashed_state: HashedPostState,
+        input: TrieInput,
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof>;
 

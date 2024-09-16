@@ -154,12 +154,12 @@ impl StateProofProvider for MemoryOverlayStateProvider {
 
     fn multiproof(
         &self,
-        state: HashedPostState,
+        mut input: TrieInput,
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
-        let mut hashed_state = self.trie_state().state.clone();
-        hashed_state.extend(state);
-        self.historical.multiproof(hashed_state, targets)
+        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
+        input.prepend_cached(nodes, state);
+        self.historical.multiproof(input, targets)
     }
 
     fn witness(

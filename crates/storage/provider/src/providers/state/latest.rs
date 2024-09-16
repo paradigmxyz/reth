@@ -131,11 +131,10 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
 
     fn multiproof(
         &self,
-        hashed_state: HashedPostState,
+        input: TrieInput,
         targets: HashMap<B256, HashSet<B256>>,
     ) -> ProviderResult<MultiProof> {
-        Proof::overlay_multiproof(self.tx, hashed_state, targets)
-            .map_err(Into::<ProviderError>::into)
+        Proof::overlay_multiproof(self.tx, input, targets).map_err(Into::<ProviderError>::into)
     }
 
     fn witness(
