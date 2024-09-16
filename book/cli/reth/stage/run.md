@@ -125,6 +125,9 @@ Networking:
       --enable-discv5-discovery
           Enable Discv5 discovery
 
+      --disable-nat
+          Disable Nat discovery
+
       --discovery.addr <DISCOVERY_ADDR>
           The UDP address to use for devp2p peer discovery version 4
 
