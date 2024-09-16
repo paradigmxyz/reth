@@ -2199,21 +2199,13 @@ where
                 .compute_state_root_async(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(AsyncStateRootError::Provider(error)) => {
-                    debug!(target: "engine", %error, "Async state root computation failed provider error, falling back");
+                Err(AsyncStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                    debug!(target: "engine", %error, "Async state root computation failed consistency check, falling back");
                     None
                 }
-                Err(AsyncStateRootError::StorageRoot(error)) => {
-                    debug!(target: "engine", %error, "Async state root computation failed, falling back");
-                    None
-                }
-                Err(AsyncStateRootError::StorageRootChannelClosed { hashed_address }) => {
-                    debug!(target: "engine", %hashed_address, "Async state root computation failed, channel closed, falling back");
-                    None
-                }
-                Err(AsyncStateRootError::Receive(error)) => {
-                    debug!(target: "engine", %error, "Async state root computation failed, receive error, falling back");
-                    None
+                Err(error) => {
+                    error!(target: "engine", %error, "Async state root computation failed");
+                    return Err(InsertBlockErrorKindTwo::Other(Box::new(error)))
                 }
             };
         }
