@@ -6,12 +6,15 @@ use serde::{Deserialize, Serialize};
 use reth_codecs::Compact;
 
 /// Identifier parameter for legacy transaction
+#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
 
 /// Identifier parameter for EIP-2930 transaction
+#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
 
 /// Identifier parameter for EIP-1559 transaction
+#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
