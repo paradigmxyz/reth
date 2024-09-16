@@ -2184,6 +2184,7 @@ where
                     }
                 }
 
+                info!(target: "engine", accounts_len = targets.len(), "Computing multiproof");
                 multiproof.extend(proof_provider.multiproof(Default::default(), targets).unwrap());
             }
 

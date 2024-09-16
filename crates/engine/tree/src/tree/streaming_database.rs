@@ -31,6 +31,7 @@ where
 {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         let _ = self.sender.send(StateAccess::Account(address));
+        tracing::info!(target: "engine", %address, "Loading account");
         self.inner.basic_account(address)
     }
 
@@ -40,6 +41,7 @@ where
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         let _ = self.sender.send(StateAccess::StorageSlot(account, storage_key));
+        tracing::info!(target: "engine", address = %account, slot = %storage_key, "Loading slot");
         self.inner.storage(account, storage_key)
     }
 
