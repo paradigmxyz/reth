@@ -1,22 +1,33 @@
-use crate::generic_db::{GenericBatchDB, GenericBatchWriter};
+use reth_db::{
+    cursor::{DbCursorRW, DbDupCursorRW},
+    tables, transaction::DbTxMut,
+};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    transaction::DbTx,
+};
+use reth_verkle_trie::generic_db::{GenericBatchDB, GenericBatchWriter};
+use reth_verkle_trie::verkle_trie_cursor::VerkleTrieCursorFactory;
 use std::collections::HashMap;
 use verkle_db::{BareMetalDiskDb, BareMetalKVDb, BatchDB, BatchWriter};
-use verkle_trie::database::{memory_db::MemoryDb, meta::{BranchChild, BranchMeta, StemMeta}, Flush, ReadOnlyHigherDb, WriteOnlyHigherDb};
-
+use verkle_trie::{from_to_bytes::{FromBytes, ToBytes}, database::{memory_db::MemoryDb, meta::{BranchChild, BranchMeta, StemMeta}, Flush, ReadOnlyHigherDb, WriteOnlyHigherDb}};
+use crate::verkle_trie_cursor::{DatabaseVerkleTrie, DatabaseVerkleTrieCursor};
 // A convenient structure that allows the end user to just implement BatchDb and BareMetalDiskDb
 // Then the methods needed for the Trie are auto implemented. In  particular, ReadOnlyHigherDb and WriteOnlyHigherDb
 // are implemented
 
 // All nodes at this level or above will be cached in memory
 const CACHE_DEPTH: u8 = 4;
-
+pub(crate) const LEAF_TABLE_MARKER: u8 = 0;
+pub(crate) const STEM_TABLE_MARKER: u8 = 1;
+pub(crate) const BRANCH_TABLE_MARKER: u8 = 2;
 
 // A wrapper database for those that just want to implement the permanent storage
 #[derive(Debug)]
-pub struct VerkleDb<Storage> {
+pub struct VerkleDb<'a, TX> {
     // The underlying key value database
     // We try to avoid fetching from this, and we only store at the end of a batch insert
-    pub storage: GenericBatchDB<Storage>,
+    pub tx: DatabaseVerkleTrie<'a, TX>,
     // This stores the key-value pairs that we need to insert into the storage
     // This is flushed after every batch insert
     pub batch: MemoryDb,
@@ -25,46 +36,68 @@ pub struct VerkleDb<Storage> {
     pub cache: MemoryDb,
 }
 
-impl<S: BareMetalDiskDb> BareMetalDiskDb for VerkleDb<S> {
-    fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
-        VerkleDb {
-            storage: GenericBatchDB::from_path(path),
-
-            batch: MemoryDb::new(),
-            cache: MemoryDb::new(),
-        }
-    }
-
-    const DEFAULT_PATH: &'static str = S::DEFAULT_PATH;
+impl<'a, TX> VerkleDb<'a, TX>{
+/// Create new [`VerkleDb`].
+pub fn new(tx: &'a TX) -> Self {
+    Self { tx: DatabaseVerkleTrie::new(tx), batch: MemoryDb::new(), cache: MemoryDb::new() }
+}
 }
 
-impl<S: BatchDB> Flush for VerkleDb<S> {
-    // flush the batch to the storage
+// impl<S: BareMetalDiskDb> BareMetalDiskDb for VerkleDb<S> {
+//     fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
+//         VerkleDb {
+//             storage: GenericBatchDB::from_path(path),
+
+//             batch: MemoryDb::new(),
+//             cache: MemoryDb::new(),
+//         }
+//     }
+
+//     const DEFAULT_PATH: &'static str = S::DEFAULT_PATH;
+// }
+
+impl<'a, TX: DbTxMut + DbTx> Flush for VerkleDb<'a, TX> 
+{
     fn flush(&mut self) {
-        let writer = S::BatchWrite::new();
-        let mut w = GenericBatchWriter { inner: writer };
-
         let now = std::time::Instant::now();
+        let mut trie_updates: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
 
+        // Process leaf table
         for (key, value) in self.batch.leaf_table.iter() {
-            w.insert_leaf(*key, *value, 0);
+            let mut labelled_key = Vec::with_capacity(key.len() + 1);
+            labelled_key.push(LEAF_TABLE_MARKER);
+            labelled_key.extend_from_slice(key);
+            trie_updates.insert(labelled_key, value.to_vec());
         }
 
+        // Process stem table
         for (key, meta) in self.batch.stem_table.iter() {
-            w.insert_stem(*key, *meta, 0);
+            let mut labelled_key = Vec::with_capacity(key.len() + 1);
+            labelled_key.push(STEM_TABLE_MARKER);
+            labelled_key.extend_from_slice(key);
+            trie_updates.insert(labelled_key, meta.to_bytes().unwrap());
         }
 
+        // Process branch table
         for (branch_id, b_child) in self.batch.branch_table.iter() {
-            let branch_id = branch_id.clone();
+            let mut labelled_key = Vec::with_capacity(branch_id.len() + 1);
+            labelled_key.push(BRANCH_TABLE_MARKER);
+            labelled_key.extend_from_slice(branch_id);
+
             match b_child {
                 BranchChild::Stem(stem_id) => {
-                    w.add_stem_as_branch_child(branch_id, *stem_id, 0);
+                    trie_updates.insert(labelled_key, stem_id.to_vec());
                 }
                 BranchChild::Branch(b_meta) => {
-                    w.insert_branch(branch_id, *b_meta, 0);
+                    trie_updates.insert(labelled_key, b_meta.to_bytes().unwrap());
                 }
-            };
+            }
         }
+
+        for (key, value) in trie_updates {
+            self.tx.put::<tables::VerkleTrie>(key, value).unwrap();
+        }
+        self.tx.commit().unwrap();
 
         let num_items = self.batch.num_items();
         println!(
@@ -73,13 +106,11 @@ impl<S: BatchDB> Flush for VerkleDb<S> {
             num_items
         );
 
-        self.storage.flush(w.inner);
-
         self.batch.clear();
     }
 }
 
-impl<S: BareMetalKVDb> ReadOnlyHigherDb for VerkleDb<S> {
+impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
     fn get_leaf(&self, key: [u8; 32]) -> Option<[u8; 32]> {
         // First try to get it from cache
         if let Some(val) = self.cache.get_leaf(key) {
@@ -90,7 +121,14 @@ impl<S: BareMetalKVDb> ReadOnlyHigherDb for VerkleDb<S> {
             return Some(val);
         }
         // Now try the disk
-        self.storage.get_leaf(key)
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut labelled_key = Vec::with_capacity(key.len() + 1);
+        labelled_key.push(LEAF_TABLE_MARKER);
+        labelled_key.extend_from_slice(&key);
+        trie_cursor.seek_exact(labelled_key)
+            .ok()
+            .and_then(|result| result)
+            .and_then(|(_, value)| value.try_into().ok())
     }
 
     fn get_stem_meta(&self, stem_key: [u8; 31]) -> Option<StemMeta> {

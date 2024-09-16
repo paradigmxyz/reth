@@ -387,6 +387,8 @@ tables! {
     /// From HashedAddress => NibblesSubKey => Intermediate value
     table StoragesTrie<Key = B256, Value = StorageTrieEntry, SubKey = StoredNibblesSubKey>;
 
+    /// Stores current state of verkle tree.
+    table VerkleTrie<Key = Vec<u8>, Value = Vec<u8>>;
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
