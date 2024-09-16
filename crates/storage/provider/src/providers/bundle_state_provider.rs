@@ -124,25 +124,23 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
 {
     fn proof(
         &self,
-        hashed_state: HashedPostState,
+        mut input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(hashed_state);
-        self.state_provider.proof(state, address, slots)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.proof(input, address, slots)
     }
 
     fn witness(
         &self,
-        overlay: HashedPostState,
+        mut input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        state.extend(overlay);
-        self.state_provider.witness(state, target)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.witness(input, target)
     }
 }
 

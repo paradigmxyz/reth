@@ -42,6 +42,16 @@ impl<T, H> Proof<T, H> {
         }
     }
 
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H> {
+        Proof {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+            targets: self.targets,
+        }
+    }
+
     /// Set the hashed cursor factory.
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF> {
         Proof {
