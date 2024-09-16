@@ -98,7 +98,7 @@ where
             }
 
             let mut targets = HashMap::<B256, HashSet<B256>>::default();
-            while let Poll::Ready(next) = this.state_stream.poll_recv(cx) {
+            'state: while let Poll::Ready(next) = this.state_stream.poll_recv(cx) {
                 match next {
                     Some(key) => {
                         info!(target: "engine", ?key, "New entry");
@@ -117,6 +117,7 @@ where
                     None => {
                         info!(target: "engine", pending = this.pending.len(), targets = targets.len(), "Channel closed.");
                         this.closed = true;
+                        break 'state
                     }
                 }
             }
