@@ -2165,7 +2165,8 @@ where
         // Spawn proof gathering task
         let (multiproof_tx, multiproof_rx) = oneshot::channel();
 
-        if self.persistence_state.in_progress() {
+        let persistence_in_progress = self.persistence_state.in_progress();
+        if persistence_in_progress {
             self.task_spawner.spawn(Box::pin(async move {
                 gather_proofs(proof_provider, state_rx, multiproof_tx).await
             }));
@@ -2274,7 +2275,7 @@ where
         ) {
             Ok((state_root_from_proofs, _)) => {
                 let computed_in = root_from_proofs_started_at.elapsed();
-                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
+                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
                 Some(computed_in.as_secs_f64())
             }
             Err(error) => {
