@@ -810,7 +810,14 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt + EthTransactions,
+        EthApi: TraceExt
+            + EthTransactions<
+                NetworkTypes: alloy_network::Network<
+                    TransactionResponse = reth_rpc_types::WithOtherFields<
+                        reth_rpc_types::Transaction,
+                    >,
+                >,
+            >,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -1087,9 +1094,7 @@ where
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => {
-                            TxPoolApi::<_, EthApi::TransactionCompat>::new(self.pool.clone())
-                                .into_rpc()
-                                .into()
+                            TxPoolApi::<_, EthApi>::new(self.pool.clone()).into_rpc().into()
                         }
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
