@@ -40,6 +40,7 @@ alloy-rlp.workspace = true
 # common
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tokio-stream.workspace = true
 thiserror.workspace = true
 
 # metrics

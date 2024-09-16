@@ -64,6 +64,7 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
 };
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod config;
@@ -535,7 +536,13 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTr
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
 where
-    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory
+        + BlockReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + Unpin
+        + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
@@ -2186,15 +2193,12 @@ where
                 }
             }
             let input = Arc::new(input.into_sorted());
+            let task_spawner = self.task_spawner.clone();
             self.task_spawner.spawn(Box::pin(async move {
-                gather_proofs_parallel(
-                    consistent_view,
-                    proof_provider,
-                    input,
-                    state_rx,
-                    multiproof_tx,
-                )
-                .await
+                let started_at = Instant::now();
+                let result =
+                    GatherProofsParallel::new(consistent_view, input, task_spawner, state_rx).await;
+                let _ = multiproof_tx.send((proof_provider, result, started_at.elapsed()));
             }));
         }
 
