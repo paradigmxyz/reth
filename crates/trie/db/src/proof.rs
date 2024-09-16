@@ -13,7 +13,7 @@ pub trait DatabaseProof<'a, TX> {
     /// Create a new [Proof] from database transaction.
     fn from_tx(tx: &'a TX) -> Self;
 
-    /// Generates the state proof for target account and slots on top of this [`HashedPostState`].
+    /// Generates the state proof for target account based on [`TrieInput`].
     fn overlay_account_proof(
         tx: &'a TX,
         input: TrieInput,

@@ -13,7 +13,7 @@ pub trait DatabaseTrieWitness<'a, TX> {
     /// Create a new [`TrieWitness`] from database transaction.
     fn from_tx(tx: &'a TX) -> Self;
 
-    /// Generates trie witness for target state on top of this [`HashedPostState`].
+    /// Generates trie witness for target state based on [`TrieInput`].
     fn overlay_witness(
         tx: &'a TX,
         input: TrieInput,
