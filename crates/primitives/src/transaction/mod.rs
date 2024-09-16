@@ -54,6 +54,7 @@ mod variant;
 pub use op_alloy_consensus::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
+#[cfg(any(test, feature = "reth-codec"))]
 use tx_type::{
     COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
     COMPACT_IDENTIFIER_LEGACY,

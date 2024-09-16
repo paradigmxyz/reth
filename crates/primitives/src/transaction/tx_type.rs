@@ -6,18 +6,22 @@ use serde::{Deserialize, Serialize};
 use reth_codecs::Compact;
 
 /// Identifier parameter for legacy transaction
-pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
+#[cfg(any(test, feature = "reth-codec"))]
+const COMPACT_IDENTIFIER_LEGACY: usize = 0;
 
 /// Identifier parameter for EIP-2930 transaction
-pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
+#[cfg(any(test, feature = "reth-codec"))]
+const COMPACT_IDENTIFIER_EIP2930: usize = 1;
 
 /// Identifier parameter for EIP-1559 transaction
-pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
+#[cfg(any(test, feature = "reth-codec"))]
+const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
 /// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
 /// read from the buffer as a single byte.
-pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
+#[cfg(any(test, feature = "reth-codec"))]
+const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
 /// typed.
