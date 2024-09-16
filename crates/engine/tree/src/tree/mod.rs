@@ -2367,7 +2367,7 @@ where
         );
 
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_trie_nodes = BTreeMap::default();
+        let mut account_trie_nodes = HashMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
             let storage_multiproof =
                 multiproof.storages.remove(&hashed_address).unwrap_or_default();
@@ -2390,7 +2390,7 @@ where
             account_trie_nodes.extend(target_nodes(key.clone(), value, proof, None)?);
 
             // Gather and record storage trie nodes for this account.
-            let mut storage_trie_nodes = BTreeMap::default();
+            let mut storage_trie_nodes = HashMap::default();
             let storage = state.storages.get(&hashed_address);
             for hashed_slot in hashed_slots {
                 let slot_key = Nibbles::unpack(hashed_slot);

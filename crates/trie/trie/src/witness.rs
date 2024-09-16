@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
-use itertools::Either;
+use itertools::{Either, Itertools};
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
@@ -96,7 +96,7 @@ where
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_trie_nodes = BTreeMap::default();
+        let mut account_trie_nodes = HashMap::default();
         for (hashed_address, hashed_slots) in proof_targets {
             let storage_multiproof =
                 account_multiproof.storages.remove(&hashed_address).unwrap_or_default();
@@ -124,7 +124,7 @@ where
             )?);
 
             // Gather and record storage trie nodes for this account.
-            let mut storage_trie_nodes = BTreeMap::default();
+            let mut storage_trie_nodes = HashMap::default();
             let storage = state.storages.get(&hashed_address);
             for hashed_slot in hashed_slots {
                 let slot_key = Nibbles::unpack(hashed_slot);
@@ -211,8 +211,8 @@ pub fn target_nodes<'b>(
     value: Option<Vec<u8>>,
     proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
     mut witness: Option<&mut HashMap<B256, Bytes>>,
-) -> Result<BTreeMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
-    let mut trie_nodes = BTreeMap::default();
+) -> Result<HashMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
+    let mut trie_nodes = HashMap::default();
     for (path, encoded) in proof {
         // Record the node in witness.
         if let Some(witness) = &mut witness {
@@ -251,15 +251,18 @@ pub fn target_nodes<'b>(
 
 /// TODO:
 pub fn next_root_from_proofs(
-    trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
+    trie_nodes: HashMap<Nibbles, Either<B256, Vec<u8>>>,
     retain_updates: bool,
     mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
 ) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError> {
+    let trie_nodes =
+        Vec::from_iter(trie_nodes.into_iter().sorted_by_key(|(nibbles, _)| nibbles.clone()));
+
     // Ignore branch child hashes in the path of leaves or lower child hashes.
-    let mut keys = trie_nodes.keys().peekable();
+    let mut keys = trie_nodes.iter().peekable();
     let mut ignored = HashSet::<Nibbles>::default();
-    while let Some(key) = keys.next() {
-        if keys.peek().map_or(false, |next| next.starts_with(key)) {
+    while let Some((key, _)) = keys.next() {
+        if keys.peek().map_or(false, |(next, _)| next.starts_with(key)) {
             ignored.insert(key.clone());
         }
     }
