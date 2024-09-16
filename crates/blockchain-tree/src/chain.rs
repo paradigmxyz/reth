@@ -20,7 +20,7 @@ use reth_provider::{
     FullExecutionDataProvider, ProviderError, StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -224,13 +224,9 @@ impl AppendableChain {
                 let mut execution_outcome =
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
-                let hashed_state = execution_outcome.hash_state_slow();
-                let prefix_sets = hashed_state.construct_prefix_sets().freeze();
                 ParallelStateRoot::new(
                     consistent_view,
-                    Default::default(),
-                    hashed_state,
-                    prefix_sets,
+                    TrieInput::from_state(execution_outcome.hash_state_slow()),
                 )
                 .incremental_root_with_updates()
                 .map(|(root, updates)| (root, Some(updates)))

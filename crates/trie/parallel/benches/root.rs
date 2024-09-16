@@ -11,6 +11,7 @@ use reth_provider::{
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
@@ -65,9 +66,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                 || {
                     ParallelStateRoot::new(
                         view.clone(),
-                        Default::default(),
-                        updated_state.clone(),
-                        updated_state.construct_prefix_sets().freeze(),
+                        TrieInput::from_state(updated_state.clone()),
                     )
                 },
                 |calculator| async { calculator.incremental_root() },
@@ -77,7 +76,13 @@ pub fn calculate_state_root(c: &mut Criterion) {
         // async root
         group.bench_function(BenchmarkId::new("async root", size), |b| {
             b.to_async(&runtime).iter_with_setup(
-                || AsyncStateRoot::new(view.clone(), blocking_pool.clone(), updated_state.clone()),
+                || {
+                    AsyncStateRoot::new(
+                        view.clone(),
+                        blocking_pool.clone(),
+                        TrieInput::from_state(updated_state.clone()),
+                    )
+                },
                 |calculator| calculator.incremental_root(),
             );
         });

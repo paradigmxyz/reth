@@ -839,7 +839,8 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
+    use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
+    use std::collections::HashSet;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -913,12 +914,7 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_from_nodes(
-            &self,
-            _nodes: TrieUpdates,
-            _post_state: HashedPostState,
-            _prefix_sets: TriePrefixSetsMut,
-        ) -> ProviderResult<B256> {
+        fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
@@ -931,9 +927,7 @@ mod tests {
 
         fn state_root_from_nodes_with_updates(
             &self,
-            _nodes: TrieUpdates,
-            _post_state: HashedPostState,
-            _prefix_sets: TriePrefixSetsMut,
+            _input: TrieInput,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
@@ -952,16 +946,24 @@ mod tests {
     impl StateProofProvider for MockStateProvider {
         fn proof(
             &self,
-            _hashed_state: HashedPostState,
+            _input: TrieInput,
             _address: Address,
             _slots: &[B256],
         ) -> ProviderResult<AccountProof> {
             Ok(AccountProof::new(Address::random()))
         }
 
+        fn multiproof(
+            &self,
+            _input: TrieInput,
+            _targets: HashMap<B256, HashSet<B256>>,
+        ) -> ProviderResult<MultiProof> {
+            Ok(MultiProof::default())
+        }
+
         fn witness(
             &self,
-            _overlay: HashedPostState,
+            _input: TrieInput,
             _target: HashedPostState,
         ) -> ProviderResult<HashMap<B256, Bytes>> {
             Ok(HashMap::default())

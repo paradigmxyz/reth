@@ -11,11 +11,10 @@ use reth_provider::{
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::TriePrefixSets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::collections::HashMap;
@@ -38,12 +37,8 @@ use tracing::*;
 pub struct ParallelStateRoot<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
-    /// Cached trie nodes.
-    trie_nodes: TrieUpdates,
-    /// Changed hashed state.
-    hashed_state: HashedPostState,
-    /// A set of prefix sets that have changed.
-    prefix_sets: TriePrefixSets,
+    /// Trie input.
+    input: TrieInput,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -51,17 +46,10 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(
-        view: ConsistentDbView<Factory>,
-        trie_nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSets,
-    ) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
         Self {
             view,
-            trie_nodes,
-            hashed_state,
-            prefix_sets,
+            input,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -89,14 +77,12 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let trie_nodes_sorted = self.trie_nodes.into_sorted();
-        let hashed_state_sorted = self.hashed_state.into_sorted();
+        let trie_nodes_sorted = self.input.nodes.into_sorted();
+        let hashed_state_sorted = self.input.state.into_sorted();
+        let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
-            self.prefix_sets
-                .account_prefix_set
-                .iter()
-                .map(|nibbles| B256::from_slice(&nibbles.pack())),
-            self.prefix_sets.storage_prefix_sets,
+            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets.storage_prefix_sets,
         );
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
@@ -142,7 +128,7 @@ where
 
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            self.prefix_sets.account_prefix_set,
+            prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::new(
@@ -192,7 +178,7 @@ where
         trie_updates.finalize(
             account_node_iter.walker,
             hash_builder,
-            self.prefix_sets.destroyed_accounts,
+            prefix_sets.destroyed_accounts,
         );
 
         let stats = tracker.finish();
@@ -243,7 +229,7 @@ mod tests {
     use rand::Rng;
     use reth_primitives::{keccak256, Account, Address, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::{test_utils, HashedStorage};
+    use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
     #[tokio::test]
     async fn random_parallel_root() {
@@ -291,14 +277,9 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(
-                consistent_view.clone(),
-                Default::default(),
-                HashedPostState::default(),
-                Default::default()
-            )
-            .incremental_root()
-            .unwrap(),
+            ParallelStateRoot::new(consistent_view.clone(), Default::default())
+                .incremental_root()
+                .unwrap(),
             test_utils::state_root(state.clone())
         );
 
@@ -327,9 +308,8 @@ mod tests {
             }
         }
 
-        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, Default::default(), hashed_state, prefix_sets)
+            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)
