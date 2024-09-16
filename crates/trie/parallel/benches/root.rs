@@ -83,7 +83,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                         blocking_pool.clone(),
                         Default::default(),
                         updated_state.clone(),
-                        updated_state.construct_prefix_sets(),
+                        updated_state.construct_prefix_sets().freeze(),
                     )
                 },
                 |calculator| calculator.incremental_root(),

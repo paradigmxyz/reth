@@ -343,7 +343,7 @@ mod tests {
             }
         }
 
-        let prefix_sets = hashed_state.construct_prefix_sets();
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         assert_eq!(
             AsyncStateRoot::new(
                 consistent_view.clone(),
