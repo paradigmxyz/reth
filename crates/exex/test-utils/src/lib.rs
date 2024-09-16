@@ -23,8 +23,7 @@ use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
 };
 use reth_node_builder::{
     components::{

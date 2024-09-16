@@ -1234,7 +1234,7 @@ mod tests {
         let node_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
-            BlockParams { parent: Some(genesis_hash), ..Default::default() },
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(
@@ -1260,7 +1260,7 @@ mod tests {
                 .seal_with_senders()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
-                Default::default(),
+                None,
             )),
         };
 
@@ -1275,9 +1275,25 @@ mod tests {
             notifications_rx,
         )
         .with_head(exex_head);
-        let new_notification = notifications.next().await.transpose()?;
 
-        assert_eq!(new_notification, Some(notification));
+        // First notification is the backfill of missing blocks from the canonical chain
+        assert_eq!(
+            notifications.next().await.transpose()?,
+            Some(ExExNotification::ChainCommitted {
+                new: Arc::new(
+                    BackfillJobFactory::new(
+                        notifications.executor.clone(),
+                        notifications.provider.clone()
+                    )
+                    .backfill(1..=1)
+                    .next()
+                    .ok_or_eyre("failed to backfill")??
+                )
+            })
+        );
+
+        // Second notification is the actual notification that we sent before
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
 
         Ok(())
     }
@@ -1309,7 +1325,7 @@ mod tests {
                 .seal_with_senders()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
-                Default::default(),
+                None,
             )),
         };
 
