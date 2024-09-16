@@ -47,7 +47,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub fn new(database: &'a ProviderDB, static_file: Option<ProviderSF>) -> Self {
+    pub const fn new(database: &'a ProviderDB, static_file: Option<ProviderSF>) -> Self {
         Self { database, static_file }
     }
 
