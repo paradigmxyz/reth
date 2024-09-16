@@ -205,6 +205,11 @@ Networking:
 
           [default: 25600]
 
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+
 Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
@@ -217,7 +222,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
 Database:

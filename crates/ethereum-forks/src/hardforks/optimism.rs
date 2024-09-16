@@ -17,6 +17,11 @@ pub trait OptimismHardforks: EthereumHardforks {
     fn is_fjord_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.fork(OptimismHardfork::Ecotone).active_at_timestamp(timestamp)
     }
+
+    /// Returns `true` if [`Granite`](OptimismHardfork::Granite) is active at given block timestamp.
+    fn is_granite_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp)
+    }
 }
 
 impl OptimismHardforks for ChainHardforks {}

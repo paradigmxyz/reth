@@ -1,5 +1,6 @@
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Account, Address, Bytes, B256, U256};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
 use reth_trie::{proof::Proof, Nibbles};
 use reth_trie_common::{AccountProof, StorageProof};

@@ -1,10 +1,11 @@
 //! Compatibility functions for rpc `Block` type.
 
 use crate::transaction::from_recovered_with_block_context;
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals,
 };
 use reth_rpc_types::{
     Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, WithOtherFields,

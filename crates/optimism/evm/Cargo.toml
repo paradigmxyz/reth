@@ -26,6 +26,7 @@ alloy-primitives.workspace = true
 
 # Optimism
 reth-optimism-consensus.workspace = true
+reth-optimism-chainspec.workspace = true
 
 # revm
 revm.workspace = true

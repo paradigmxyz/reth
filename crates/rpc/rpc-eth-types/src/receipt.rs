@@ -1,6 +1,7 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use reth_primitives::{Address, Receipt, TransactionMeta, TransactionSigned, TxKind};
+use alloy_primitives::{Address, TxKind};
+use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_types::{
     AnyReceiptEnvelope, AnyTransactionReceipt, Log, OtherFields, ReceiptWithBloom,
     TransactionReceipt, WithOtherFields,
@@ -13,9 +14,9 @@ use super::{EthApiError, EthResult};
 #[derive(Debug)]
 pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
-    base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
+    pub base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
     /// Additional L2 fields.
-    other: OtherFields,
+    pub other: OtherFields,
 }
 
 impl ReceiptBuilder {

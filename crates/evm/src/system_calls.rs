@@ -1,12 +1,7 @@
 //! System contract call functions.
 
-#[cfg(feature = "std")]
-use std::fmt::Display;
-#[cfg(not(feature = "std"))]
-use {
-    alloc::{boxed::Box, format, string::ToString, vec::Vec},
-    core::fmt::Display,
-};
+use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+use core::fmt::Display;
 
 use crate::ConfigureEvm;
 use alloy_eips::{

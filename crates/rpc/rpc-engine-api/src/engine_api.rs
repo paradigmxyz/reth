@@ -1,6 +1,7 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -12,9 +13,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64,
-};
+use reth_primitives::{Block, BlockHashOrNumber, EthereumHardfork};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::{
     engine::{
@@ -1147,7 +1146,7 @@ mod tests {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
         use super::*;
-        use reth_primitives::U256;
+        use alloy_primitives::U256;
         use reth_testing_utils::generators::{self, BlockParams};
 
         #[tokio::test]

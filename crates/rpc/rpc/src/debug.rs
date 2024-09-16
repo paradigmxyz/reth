@@ -1,3 +1,4 @@
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -6,9 +7,7 @@ use reth_evm::{
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
 };
-use reth_primitives::{
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
-};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
@@ -671,9 +670,8 @@ where
                 // Generate an execution witness for the aggregated state of accessed accounts.
                 // Destruct the cache database to retrieve the state provider.
                 let state_provider = db.database.into_inner();
-                let witness = state_provider
-                    .witness(HashedPostState::default(), hashed_state)
-                    .map_err(Into::into)?;
+                let witness =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
 
                 Ok(ExecutionWitness {
                     witness,

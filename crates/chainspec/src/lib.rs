@@ -9,7 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
 /// Chain specific constants
@@ -33,6 +32,13 @@ pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
+
+/// Simple utility to create a `OnceCell` with a value set.
+pub fn once_cell_set<T>(value: T) -> once_cell::sync::OnceCell<T> {
+    let once = once_cell::sync::OnceCell::new();
+    let _ = once.set(value);
+    once
+}
 
 #[cfg(test)]
 mod tests {

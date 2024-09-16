@@ -13,6 +13,13 @@ rpc-compat:
   - eth_getTransactionReceipt/get-access-list (reth)
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
+  - eth_getBlockByHash/get-block-by-hash (reth)
+  - eth_getBlockByNumber/get-block-n (reth)
+  - eth_getBlockByNumber/get-finalized (reth)
+  - eth_getBlockByNumber/get-genesis (reth)
+  - eth_getBlockByNumber/get-latest (reth)
+  - eth_getBlockByNumber/get-safe (reth)
+  - eth_sendRawTransaction/send-blob-tx (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:

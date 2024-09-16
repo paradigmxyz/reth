@@ -3,10 +3,9 @@
 use alloy_dyn_abi::TypedData;
 use alloy_json_rpc::RpcObject;
 use alloy_network::Network;
+use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{
-    transaction::AccessListResult, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
-};
+use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,

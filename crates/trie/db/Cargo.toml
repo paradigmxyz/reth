@@ -26,6 +26,7 @@ revm.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
+alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -71,7 +72,6 @@ tokio = { workspace = true, default-features = false, features = [
 tokio-stream.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
-criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]

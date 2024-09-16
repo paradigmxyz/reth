@@ -1,4 +1,5 @@
-use reth_primitives::{Signature as PrimitiveSignature, TxType, U256};
+use alloy_primitives::U256;
+use reth_primitives::{Signature as PrimitiveSignature, TxType};
 use reth_rpc_types::{Parity, Signature};
 
 /// Creates a new rpc signature from a legacy [primitive

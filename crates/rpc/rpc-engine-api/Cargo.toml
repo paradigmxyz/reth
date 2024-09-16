@@ -27,6 +27,9 @@ reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-transaction-pool.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 

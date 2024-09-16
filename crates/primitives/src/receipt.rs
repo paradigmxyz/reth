@@ -4,6 +4,7 @@ use crate::{
     logs_bloom, Bloom, Bytes, TxType, B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
+use alloc::{vec, vec::Vec};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -12,9 +13,6 @@ use derive_more::{DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
 use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
 #[derive(
