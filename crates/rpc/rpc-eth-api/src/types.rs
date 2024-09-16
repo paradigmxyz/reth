@@ -20,7 +20,6 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
-    // todo: remove restriction [`reth_rpc_types::Transaction`]
     type NetworkTypes: Network<HeaderResponse = reth_rpc_types::Header>;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;

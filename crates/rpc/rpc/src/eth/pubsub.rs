@@ -109,7 +109,6 @@ where
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
-    // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
     Eth: FullEthApiTypes,
 {
     match kind {

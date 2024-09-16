@@ -33,7 +33,6 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth> {
 impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
     Eth: FullEthApiTypes,
 {
     fn content(&self) -> TxpoolContent<RpcTransaction<Eth::NetworkTypes>> {
