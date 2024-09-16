@@ -55,9 +55,9 @@ where
     let value = env.value;
     // Subtract transferred value from the caller balance. Return error if the caller has
     // insufficient funds.
-    let balance = balance.checked_sub(env.value).ok_or_else(|| {
-        RpcInvalidTransactionError::InsufficientFunds { value_or_fee: value, balance }
-    })?;
+    let balance = balance
+        .checked_sub(env.value)
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
 
     Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.

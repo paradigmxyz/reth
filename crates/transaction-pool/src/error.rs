@@ -203,12 +203,10 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction underpriced")]
     Underpriced,
     /// Thrown if the transaction's would require an account to be overdrawn
-    #[error(
-        "transaction overdraws from account, value or fee: {value_or_fee}, balance: {balance}"
-    )]
+    #[error("transaction overdraws from account, balance: {balance}, cost: {cost}")]
     Overdraft {
         /// Cost transaction is allowed to consume. See `reth_transaction_pool::PoolTransaction`.
-        value_or_fee: U256,
+        cost: U256,
         /// Balance of account.
         balance: U256,
     },

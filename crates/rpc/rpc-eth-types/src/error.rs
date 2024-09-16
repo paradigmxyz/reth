@@ -304,13 +304,11 @@ pub enum RpcInvalidTransactionError {
     /// thrown if creation transaction provides the init code bigger than init code size limit.
     #[error("max initcode size exceeded")]
     MaxInitCodeSizeExceeded,
-    /// Represents the inability to cover max cost + value (account balance too low).
-    #[error(
-        "insufficient funds for gas * price + value: value or fee {value_or_fee}, balance {balance}"
-    )]
+    /// Represents the inability to cover max fee + value (account balance too low).
+    #[error("insufficient funds for gas * price + value: have {balance} want {cost}")]
     InsufficientFunds {
-        /// Value or max fee.
-        value_or_fee: U256,
+        /// Transaction cost.
+        cost: U256,
         /// Current balance of transaction sender.
         balance: U256,
     },
@@ -484,7 +482,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
-                Self::InsufficientFunds { value_or_fee: *fee, balance: *balance }
+                Self::InsufficientFunds { cost: *fee, balance: *balance }
             }
             InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
             InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
@@ -528,7 +526,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
             InvalidTransactionError::InsufficientFunds(res) => {
-                Self::InsufficientFunds { value_or_fee: res.expected, balance: res.got }
+                Self::InsufficientFunds { cost: res.expected, balance: res.got }
             }
             InvalidTransactionError::NonceNotConsistent { tx, state } => {
                 Self::NonceTooLow { tx, state }
@@ -689,11 +687,8 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
-            InvalidPoolTransactionError::Overdraft { value_or_fee, balance } => {
-                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds {
-                    value_or_fee,
-                    balance,
-                })
+            InvalidPoolTransactionError::Overdraft { cost, balance } => {
+                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
             }
         }
     }
