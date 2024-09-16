@@ -1,8 +1,7 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
-    BlockExecutionWriter, BlockWriter, DatabaseProviderRW, HistoryWriter, StateChangeWriter,
-    StateWriter, TrieWriter,
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -10,7 +9,6 @@ use reth_db::{
     models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
-    Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
