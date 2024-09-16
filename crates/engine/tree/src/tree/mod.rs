@@ -42,8 +42,9 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
+use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::parallel_root::ParallelStateRoot;
+use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -2191,14 +2192,25 @@ where
         let persistence_in_progress = self.persistence_state.in_progress();
         if !persistence_in_progress {
             state_root_result = match self
-                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
+                .compute_state_root_async(block.parent_hash, &hashed_state)
             {
                 Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(ProviderError::ConsistentView(error)) => {
-                    debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
+                Err(AsyncStateRootError::Provider(error)) => {
+                    debug!(target: "engine", %error, "Async state root computation failed provider error, falling back");
                     None
                 }
-                Err(error) => return Err(error.into()),
+                Err(AsyncStateRootError::StorageRoot(error)) => {
+                    debug!(target: "engine", %error, "Async state root computation failed, falling back");
+                    None
+                }
+                Err(AsyncStateRootError::StorageRootChannelClosed { hashed_address }) => {
+                    debug!(target: "engine", %hashed_address, "Async state root computation failed, channel closed, falling back");
+                    None
+                }
+                Err(AsyncStateRootError::Receive(error)) => {
+                    debug!(target: "engine", %error, "Async state root computation failed, receive error, falling back");
+                    None
+                }
             };
         }
 
@@ -2261,19 +2273,20 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
-    /// Compute state root for the given hashed post state in parallel.
+    /// Compute state root for the given hashed post state asynchronously.
     ///
     /// # Returns
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
     /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+
     /// should be used instead.
-    fn compute_state_root_in_parallel(
+    fn compute_state_root_async(
         &self,
         parent_hash: B256,
         hashed_state: &HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let mut input = TrieInput::default();
 
@@ -2295,7 +2308,16 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        Ok(ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()?)
+        let (tx, mut rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let blocking_task_pool = BlockingTaskPool::build().unwrap();
+            let res =
+                AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates().await;
+            let _ = tx.send(res);
+        });
+
+        rx.try_recv()?
     }
 
     /// Handles an error that occurred while inserting a block.

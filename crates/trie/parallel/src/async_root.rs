@@ -227,6 +227,9 @@ pub enum AsyncStateRootError {
         /// The hashed address for which channel was closed.
         hashed_address: B256,
     },
+    /// Receive error
+    #[error(transparent)]
+    Receive(#[from] oneshot::error::TryRecvError),
     /// Error while calculating storage root.
     #[error(transparent)]
     StorageRoot(#[from] StorageRootError),
