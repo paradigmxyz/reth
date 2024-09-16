@@ -549,6 +549,7 @@ where
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
+        let blocking_task_pool = BlockingTaskPool::build().unwrap();
         Self {
             provider,
             executor_provider,
@@ -2312,12 +2313,12 @@ where
         input.append_ref(hashed_state);
 
         let (tx, mut rx) = oneshot::channel();
+        let blocking_task_pool = self.blocking_task_pool.clone();
 
         self.state_root_task_spawner.spawn_critical_blocking(
             "state root task",
             Box::pin(async move {
-                let blocking_task_pool = BlockingTaskPool::build().unwrap();
-                let res = AsyncStateRoot::new(consistent_view, input)
+                let res = AsyncStateRoot::new(consistent_view, blocking_task_pool, input)
                     .incremental_root_with_updates()
                     .await;
                 let _ = tx.send(res);
@@ -2626,12 +2627,16 @@ mod tests {
     use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
+    use reth_tasks::TaskManager;
     use reth_trie::updates::TrieUpdates;
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
-    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::{
+        runtime::{Handle, Runtime},
+        sync::mpsc::unbounded_channel,
+    };
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
@@ -2737,6 +2742,13 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
+            let handle = Handle::try_current().unwrap_or_else(|_| {
+                let runtime = Runtime::new().unwrap();
+                runtime.handle().clone()
+            });
+            let manager = TaskManager::new(handle.clone());
+            let state_root_task_spawner = Box::new(manager.executor());
+
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
                 executor_provider.clone(),
@@ -2748,6 +2760,7 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
+                state_root_task_spawner,
                 TreeConfig::default(),
             );
 
