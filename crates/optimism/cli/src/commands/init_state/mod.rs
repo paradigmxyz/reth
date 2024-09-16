@@ -23,8 +23,8 @@ pub struct InitStateCommand<C: ChainSpecParser> {
 
     /// JSONL file with state dump.
     ///
-    /// Must contain accounts in following format, additional account fields are ignored. Must
-    /// also contain { "root": \<state-root\> } as first line.
+    /// Must contain accounts in following format, additional account fields are ignored
+    /// ```
     /// {
     ///     "balance": "\<balance\>",
     ///     "nonce": \<nonce\>,
@@ -35,6 +35,8 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     ///     },
     ///     "address": "\<address\>",
     /// }
+    /// ```
+    /// Must also contain `{ "root": \<state-root\> }` as first line.
     ///
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
     /// and including the non-genesis block to init chain at. See 'import' command.
