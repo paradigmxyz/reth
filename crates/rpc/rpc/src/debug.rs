@@ -670,9 +670,8 @@ where
                 // Generate an execution witness for the aggregated state of accessed accounts.
                 // Destruct the cache database to retrieve the state provider.
                 let state_provider = db.database.into_inner();
-                let witness = state_provider
-                    .witness(HashedPostState::default(), hashed_state)
-                    .map_err(Into::into)?;
+                let witness =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
 
                 Ok(ExecutionWitness {
                     witness,

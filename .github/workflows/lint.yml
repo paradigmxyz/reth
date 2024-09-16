@@ -127,6 +127,20 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  udeps:
+    name: udeps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall cargo-udeps --no-confirm
+      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
+
   book:
     name: book
     runs-on: ubuntu-latest
@@ -203,6 +217,7 @@ jobs:
       - crate-checks
       - docs
       - fmt
+      - udeps
       - book
       - codespell
       - grafana

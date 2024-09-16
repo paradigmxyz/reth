@@ -417,7 +417,7 @@ mod tests {
 
         // use cfg_and_block_env
         let cfg_and_block_env =
-            payload_builder_attributes.cfg_and_block_env(&chainspec, &chainspec.genesis_header());
+            payload_builder_attributes.cfg_and_block_env(&chainspec, chainspec.genesis_header());
 
         // ensure the base fee is non zero
         assert_eq!(cfg_and_block_env.1.basefee, U256::from(EIP1559_INITIAL_BASE_FEE));

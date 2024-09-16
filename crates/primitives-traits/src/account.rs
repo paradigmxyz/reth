@@ -65,7 +65,7 @@ impl Bytecode {
     /// Returns an error on incorrect Bytecode format.
     #[inline]
     pub fn new_raw_checked(bytecode: Bytes) -> Result<Self, BytecodeDecodeError> {
-        Ok(Self(RevmBytecode::new_raw(bytecode)))
+        RevmBytecode::new_raw_checked(bytecode).map(Self)
     }
 }
 

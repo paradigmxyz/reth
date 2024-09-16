@@ -73,7 +73,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -86,7 +86,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -107,7 +107,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     Default::default(),
                 )?;
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
+                insert_genesis_state(&provider_rw, alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -173,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
             }
         }
 

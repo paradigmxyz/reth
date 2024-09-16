@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[test]
 fn compile_test() {
     let t = trybuild::TestCases::new();
