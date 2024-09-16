@@ -615,7 +615,7 @@ impl ChainSpec<ChainHardforks> {
     }
 }
 
-impl From<Genesis> for ChainSpec<ChainHardforks> {
+impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         #[cfg(not(feature = "optimism"))]
         {
@@ -631,7 +631,7 @@ impl From<Genesis> for ChainSpec<ChainHardforks> {
 
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]
-fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec<ChainHardforks> {
+fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
     // Block-based hardforks
     let hardfork_opts = [
         (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
@@ -720,7 +720,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec<ChainHardforks> {
 
 #[cfg(feature = "optimism")]
 /// Convert the given [`Genesis`] into an Optimism [`ChainSpec`].
-fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec<ChainHardforks> {
+fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
     use reth_ethereum_forks::OptimismHardfork;
     let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
     let genesis_info = optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
@@ -1060,8 +1060,8 @@ impl ChainSpecBuilder {
     }
 }
 
-impl From<&Arc<ChainSpec<ChainHardforks>>> for ChainSpecBuilder {
-    fn from(value: &Arc<ChainSpec<ChainHardforks>>) -> Self {
+impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
+    fn from(value: &Arc<ChainSpec>) -> Self {
         Self {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
