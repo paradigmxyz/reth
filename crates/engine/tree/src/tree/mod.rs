@@ -2247,7 +2247,8 @@ where
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
-            debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+            // debug!(target: "engine", persistence_in_progress, "Failed to compute state root in
+            // parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
