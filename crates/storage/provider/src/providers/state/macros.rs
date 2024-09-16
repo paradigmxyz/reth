@@ -52,6 +52,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProofProvider $(where [$($generics)*])? {
                 fn proof(&self, input: reth_trie::TrieInput, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
+                fn multiproof(&self, input: reth_trie::TrieInput, targets: std::collections::HashMap<reth_primitives::B256, std::collections::HashSet<reth_primitives::B256>>) -> reth_storage_errors::provider::ProviderResult<reth_trie::MultiProof>;
                 fn witness(&self, input: reth_trie::TrieInput, target: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<std::collections::HashMap<reth_primitives::B256, reth_primitives::Bytes>>;
             }
         );

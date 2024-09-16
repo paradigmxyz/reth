@@ -67,6 +67,14 @@ impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'
         self.0.proof(input, address, slots)
     }
 
+    fn multiproof(
+        &self,
+        input: reth_trie::TrieInput,
+        targets: std::collections::HashMap<B256, std::collections::HashSet<B256>>,
+    ) -> ProviderResult<reth_trie::MultiProof> {
+        self.0.multiproof(input, targets)
+    }
+
     fn witness(
         &self,
         input: reth_trie::TrieInput,

@@ -15,10 +15,10 @@ use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    HashedStorage, StateRoot, StorageRoot, TrieInput,
+    HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -127,6 +127,14 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     ) -> ProviderResult<AccountProof> {
         Proof::overlay_account_proof(self.tx, input, address, slots)
             .map_err(Into::<ProviderError>::into)
+    }
+
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Proof::overlay_multiproof(self.tx, input, targets).map_err(Into::<ProviderError>::into)
     }
 
     fn witness(

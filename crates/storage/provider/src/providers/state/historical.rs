@@ -17,13 +17,16 @@ use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    HashedStorage, StateRoot, StorageRoot, TrieInput,
+    HashedStorage, MultiProof, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageRoot, DatabaseTrieWitness,
 };
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+};
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -342,6 +345,15 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
         input.prepend(self.revert_state()?);
         Proof::overlay_account_proof(self.tx, input, address, slots)
             .map_err(Into::<ProviderError>::into)
+    }
+
+    fn multiproof(
+        &self,
+        mut input: TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        input.prepend(self.revert_state()?);
+        Proof::overlay_multiproof(self.tx, input, targets).map_err(Into::<ProviderError>::into)
     }
 
     fn witness(
