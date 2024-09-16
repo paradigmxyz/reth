@@ -1,4 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -6,7 +7,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
+use reth_primitives::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,

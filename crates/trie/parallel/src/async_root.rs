@@ -1,10 +1,10 @@
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
+use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
-use reth_primitives::B256;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
 };
@@ -240,9 +240,10 @@ pub enum AsyncStateRootError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
     use rayon::ThreadPoolBuilder;
-    use reth_primitives::{keccak256, Account, Address, StorageEntry, U256};
+    use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 

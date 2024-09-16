@@ -8890,6 +8890,7 @@ dependencies = [
 name = "reth-trie-db"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "auto_impl",
  "derive_more",
@@ -8924,6 +8925,7 @@ dependencies = [
 name = "reth-trie-parallel"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "criterion",
  "derive_more",
