@@ -50,6 +50,6 @@ where
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        self.bytecode_by_hash(code_hash)
+        self.inner.bytecode_by_hash(code_hash)
     }
 }

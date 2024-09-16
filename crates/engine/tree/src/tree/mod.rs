@@ -2257,12 +2257,13 @@ where
             // parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
+        let root_elapsed = root_time.elapsed();
 
         // Test state root from proofs
         let root_from_proofs_started_at = Instant::now();
         match self.compute_state_root_from_proofs(proof_provider, &hashed_state, multiproof) {
             Ok((state_root_from_proofs, _)) => {
-                info!(target: "engine", %state_root, %state_root_from_proofs, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
+                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
             }
             Err(error) => {
                 error!(target: "engine", %error, "Error computing root from proofs");
@@ -2283,7 +2284,6 @@ where
             .into())
         }
 
-        let root_elapsed = root_time.elapsed();
         self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, ?block_number, "Calculated state root");
 
