@@ -1,7 +1,7 @@
 use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 
 /// Inputs for trie-related computations.
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct TrieInput {
     /// The collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
@@ -31,19 +31,45 @@ impl TrieInput {
         Self { nodes: TrieUpdates::default(), state, prefix_sets }
     }
 
-    /// Prepend state to the input and extend the prefix sets
+    /// Prepend state to the input and extend the prefix sets.
     pub fn prepend(&mut self, mut state: HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
         std::mem::swap(&mut self.state, &mut state);
         self.state.extend(state);
     }
 
-    /// Prepend intermediate nodes and state to the input. Prefix sets for incoming state will be
-    /// ignored.
+    /// Prepend intermediate nodes and state to the input.
+    /// Prefix sets for incoming state will be ignored.
     pub fn prepend_cached(&mut self, mut nodes: TrieUpdates, mut state: HashedPostState) {
         std::mem::swap(&mut self.nodes, &mut nodes);
         self.nodes.extend(nodes);
         std::mem::swap(&mut self.state, &mut state);
         self.state.extend(state);
+    }
+
+    /// Append state to the input and extend the prefix sets.
+    pub fn append(&mut self, state: HashedPostState) {
+        self.prefix_sets.extend(state.construct_prefix_sets());
+        self.state.extend(state);
+    }
+
+    /// Append state to the input by reference and extend the prefix sets.
+    pub fn append_ref(&mut self, state: &HashedPostState) {
+        self.prefix_sets.extend(state.construct_prefix_sets());
+        self.state.extend_ref(state);
+    }
+
+    /// Append intermediate nodes and state to the input.
+    /// Prefix sets for incoming state will be ignored.
+    pub fn append_cached(&mut self, nodes: TrieUpdates, state: HashedPostState) {
+        self.nodes.extend(nodes);
+        self.state.extend(state);
+    }
+
+    /// Append intermediate nodes and state to the input by reference.
+    /// Prefix sets for incoming state will be ignored.
+    pub fn append_cached_ref(&mut self, nodes: &TrieUpdates, state: &HashedPostState) {
+        self.nodes.extend_ref(nodes);
+        self.state.extend_ref(state);
     }
 }
