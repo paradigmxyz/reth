@@ -1,6 +1,6 @@
 //! Telos node implementation
 
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainSpec};
 use crate::args::TelosArgs;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthEngineTypes, EthPayloadAttributes, EthPayloadBuilderAttributes,
@@ -10,9 +10,10 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_builder::components::ComponentsBuilder;
 use reth_node_builder::{Node, PayloadTypes};
 use reth_node_ethereum::node::{
-    EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+    EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
     EthereumPayloadBuilder, EthereumPoolBuilder,
 };
+use reth_telos_rpc::eth::TelosEthApi;
 
 /// Type configuration for a regular Telos node.
 #[derive(Debug, Default, Clone)]
@@ -60,15 +61,15 @@ impl NodeTypes for TelosNode {
     type Engine = EthEngineTypes;
     type ChainSpec = ChainSpec;
 }
-//
-// /// Add-ons for Telos
-// #[derive(Debug, Clone)]
-// pub struct TelosAddOns;
-//
-// impl<N: FullNodeComponents> NodeAddOns<N> for TelosAddOns {
-//     type EthApi = TelosEthApi<N>;
-// }
-//
+
+/// Add-ons for Telos
+#[derive(Debug, Clone)]
+pub struct TelosAddOns;
+
+impl<N: FullNodeComponents> NodeAddOns<N> for TelosAddOns {
+    type EthApi = TelosEthApi<N>;
+}
+
 impl<N> Node<N> for TelosNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
@@ -82,7 +83,7 @@ where
         EthereumConsensusBuilder,
     >;
 
-    type AddOns = EthereumAddOns;
+    type AddOns = TelosAddOns;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()

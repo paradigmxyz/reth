@@ -28,6 +28,7 @@ reth-payload-builder.workspace = true
 reth-provider.workspace = true
 reth-rpc.workspace = true
 reth-stages.workspace = true
+reth-telos-rpc.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 
@@ -61,16 +62,25 @@ telos = [
 ]
 
 [dev-dependencies]
+alloy-contract = "0.3.0"
+alloy-provider.workspace = true
+alloy-network.workspace = true
+alloy-rpc-types.workspace = true
+alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
+alloy-transport-http.workspace = true
+reqwest.workspace = true
+
 reth.workspace = true
 reth-chainspec.workspace = true
 reth-e2e-test-utils.workspace = true
 eyre.workspace = true
 
-telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", rev = "f26dc4ff646e14dd197604f5e1718e712e0422fe" }
-telos-translator-rs = { git = "https://github.com/telosnetwork/telos-consensus-client", rev = "f26dc4ff646e14dd197604f5e1718e712e0422fe" }
+telos-consensus-client = { git = "https://github.com/telosnetwork/telos-consensus-client", rev = "37e9cccb14fdf749efa04564a87293634a5a52db" }
+telos-translator-rs = { git = "https://github.com/telosnetwork/telos-consensus-client", rev = "37e9cccb14fdf749efa04564a87293634a5a52db" }
 #telos-consensus-client = { path = "../../../../telos-consensus-client/client" }
 #telos-translator-rs = { path = "../../../../telos-consensus-client/translator" }
 
+env_logger = "0.11.5"
 testcontainers = "0.21.1"
 
-alloy-provider = { workspace = true }
