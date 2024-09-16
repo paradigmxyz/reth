@@ -42,7 +42,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_tasks::pool::BlockingTaskPool;
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
 use std::{
@@ -545,6 +545,7 @@ where
         persistence: PersistenceHandle,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
+        state_root_task_spawner: Box<dyn TaskSpawner>,
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
@@ -589,6 +590,7 @@ where
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
+        state_root_task_spawner: Box<dyn TaskSpawner>,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -617,6 +619,7 @@ where
             persistence,
             persistence_state,
             payload_builder,
+            state_root_task_spawner,
             config,
         );
         task.set_invalid_block_hook(invalid_block_hook);
@@ -2310,12 +2313,16 @@ where
 
         let (tx, mut rx) = oneshot::channel();
 
-        tokio::task::spawn(async move {
-            let blocking_task_pool = BlockingTaskPool::build().unwrap();
-            let res =
-                AsyncStateRoot::new(consistent_view, input).incremental_root_with_updates().await;
-            let _ = tx.send(res);
-        });
+        self.state_root_task_spawner.spawn_critical_blocking(
+            "state root task",
+            Box::pin(async move {
+                let blocking_task_pool = BlockingTaskPool::build().unwrap();
+                let res = AsyncStateRoot::new(consistent_view, input)
+                    .incremental_root_with_updates()
+                    .await;
+                let _ = tx.send(res);
+            }),
+        );
 
         rx.try_recv()?
     }

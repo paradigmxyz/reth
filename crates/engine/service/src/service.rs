@@ -71,6 +71,7 @@ where
         incoming_requests: EngineMessageStream<N::Engine>,
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
+        state_root_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -97,6 +98,7 @@ where
             canonical_in_memory_state,
             tree_config,
             invalid_block_hook,
+            state_root_task_spawner,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
