@@ -6966,6 +6966,7 @@ dependencies = [
  "futures",
  "metrics",
  "rand 0.8.5",
+ "rayon",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",

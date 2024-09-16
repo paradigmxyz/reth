@@ -5,6 +5,7 @@ use crate::{
     persistence::PersistenceHandle,
 };
 use alloy_rlp::{BufMut, Encodable};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -2351,7 +2352,7 @@ where
         &self,
         state: &HashedPostState,
         input: Arc<TrieInputSorted>,
-        mut multiproof: MultiProof,
+        multiproof: MultiProof,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
         let provider_ro = consistent_view.provider_ro()?;
@@ -2366,71 +2367,89 @@ where
                 })),
         );
 
-        let mut account_rlp = Vec::with_capacity(128);
-        let mut account_trie_nodes = HashMap::default();
-        for (hashed_address, hashed_slots) in proof_targets {
-            let storage_multiproof =
-                multiproof.storages.remove(&hashed_address).unwrap_or_default();
-
-            // Gather and record account trie nodes.
-            let account = state
-                .accounts
-                .get(&hashed_address)
-                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
-            let value = if account.is_some() || storage_multiproof.root != EMPTY_ROOT_HASH {
-                account_rlp.clear();
-                TrieAccount::from((account.unwrap_or_default(), storage_multiproof.root))
-                    .encode(&mut account_rlp as &mut dyn BufMut);
-                Some(account_rlp.clone())
-            } else {
-                None
-            };
-            let key = Nibbles::unpack(hashed_address);
-            let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
-            account_trie_nodes.extend(target_nodes(key.clone(), value, proof, None)?);
-
-            // Gather and record storage trie nodes for this account.
-            let mut storage_trie_nodes = HashMap::default();
-            let storage = state.storages.get(&hashed_address);
-            for hashed_slot in hashed_slots {
-                let slot_key = Nibbles::unpack(hashed_slot);
-                let slot_value = storage
-                    .and_then(|s| s.storage.get(&hashed_slot))
-                    .filter(|v| !v.is_zero())
-                    .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
-                let proof = storage_multiproof.subtree.iter().filter(|e| slot_key.starts_with(e.0));
-                storage_trie_nodes.extend(target_nodes(slot_key.clone(), slot_value, proof, None)?);
-            }
-
-            let (storage_root, _storage_trie_updates) =
-                next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
-                    // Right pad the target with 0s.
-                    let mut padded_key = key.pack();
-                    padded_key.resize(32, 0);
-                    let mut proof = Proof::new(
-                        InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                            &input.nodes,
-                        ),
-                        HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                            &input.state,
-                        ),
-                    )
-                    .with_target((hashed_address, HashSet::from([B256::from_slice(&padded_key)])))
-                    .multiproof()
-                    .unwrap();
-
-                    // The subtree only contains the proof for a single target.
-                    let node = proof
+        let account_trie_nodes = proof_targets
+            .into_par_iter()
+            .map(|(hashed_address, hashed_slots)| {
+                // Gather and record storage trie nodes for this account.
+                let mut storage_trie_nodes = HashMap::default();
+                let storage = state.storages.get(&hashed_address);
+                for hashed_slot in hashed_slots {
+                    let slot_key = Nibbles::unpack(hashed_slot);
+                    let slot_value = storage
+                        .and_then(|s| s.storage.get(&hashed_slot))
+                        .filter(|v| !v.is_zero())
+                        .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
+                    let proof = multiproof
                         .storages
-                        .get_mut(&hashed_address)
-                        .and_then(|storage_multiproof| storage_multiproof.subtree.remove(&key))
-                        .ok_or(TrieWitnessError::MissingTargetNode(key))?;
-                    Ok(node)
-                })?;
-            debug_assert_eq!(storage_multiproof.root, storage_root);
-        }
+                        .get(&hashed_address)
+                        .map(|proof| {
+                            proof
+                                .subtree
+                                .iter()
+                                .filter(|e| slot_key.starts_with(e.0))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    storage_trie_nodes.extend(target_nodes(
+                        slot_key.clone(),
+                        slot_value,
+                        proof,
+                        None,
+                    )?);
+                }
+
+                let (storage_root, _storage_trie_updates) =
+                    next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
+                        // Right pad the target with 0s.
+                        let mut padded_key = key.pack();
+                        padded_key.resize(32, 0);
+                        let mut proof = Proof::new(
+                            InMemoryTrieCursorFactory::new(
+                                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                                &input.nodes,
+                            ),
+                            HashedPostStateCursorFactory::new(
+                                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                                &input.state,
+                            ),
+                        )
+                        .with_target((
+                            hashed_address,
+                            HashSet::from([B256::from_slice(&padded_key)]),
+                        ))
+                        .multiproof()
+                        .unwrap();
+
+                        // The subtree only contains the proof for a single target.
+                        let node = proof
+                            .storages
+                            .get_mut(&hashed_address)
+                            .and_then(|storage_multiproof| storage_multiproof.subtree.remove(&key))
+                            .ok_or(TrieWitnessError::MissingTargetNode(key))?;
+                        Ok(node)
+                    })?;
+
+                // Gather and record account trie nodes.
+                let account = state
+                    .accounts
+                    .get(&hashed_address)
+                    .ok_or(TrieWitnessError::MissingAccount(hashed_address))?;
+                let value = if account.is_some() || storage_root != EMPTY_ROOT_HASH {
+                    let mut encoded = Vec::with_capacity(128);
+                    TrieAccount::from((account.unwrap_or_default(), storage_root))
+                        .encode(&mut encoded as &mut dyn BufMut);
+                    Some(encoded)
+                } else {
+                    None
+                };
+                let key = Nibbles::unpack(hashed_address);
+                let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
+                Ok(target_nodes(key.clone(), value, proof, None)?)
+            })
+            .collect::<ProviderResult<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<HashMap<_, _>>();
 
         let (state_root, _trie_updates) =
             next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
