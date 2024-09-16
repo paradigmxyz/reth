@@ -534,7 +534,7 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_primitives::{b256, Address, StorageKey, StorageValue};
-    use reth_chainspec::ChainSpecBuilder;
+    use reth_chainspec::{ChainSpecBuilder, MIN_TRANSACTION_GAS};
     use reth_primitives::{
         Account, Block, Signature, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
@@ -608,7 +608,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -619,7 +619,7 @@ mod tests {
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: 21_000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
             Signature::default(),
@@ -692,7 +692,7 @@ mod tests {
             Transaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 to: addr.into(),
                 ..Default::default()
             }),
@@ -703,7 +703,7 @@ mod tests {
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
                 to: addr.into(),
-                gas_limit: 21_000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 ..Default::default()
             }),
             Signature::optimism_deposit_tx_signature(),
