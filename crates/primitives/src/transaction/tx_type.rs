@@ -5,11 +5,20 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use reth_codecs::Compact;
 
+/// Identifier parameter for legacy transaction
+pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
+
+/// Identifier parameter for EIP-2930 transaction
+pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
+
+/// Identifier parameter for EIP-1559 transaction
+pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
+
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
-/// parameter. In the case of a 3, the full transaction type is read from the buffer as a
-/// single byte.
+/// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
+/// read from the buffer as a single byte.
 #[cfg(any(test, feature = "reth-codec"))]
-const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
+pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
 /// typed.
@@ -144,9 +153,9 @@ impl reth_codecs::Compact for TxType {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
-            Self::Legacy => 0,
-            Self::Eip2930 => 1,
-            Self::Eip1559 => 2,
+            Self::Legacy => COMPACT_IDENTIFIER_LEGACY,
+            Self::Eip2930 => COMPACT_IDENTIFIER_EIP2930,
+            Self::Eip1559 => COMPACT_IDENTIFIER_EIP1559,
             Self::Eip4844 => {
                 buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
@@ -164,15 +173,15 @@ impl reth_codecs::Compact for TxType {
     }
 
     // For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
-    // parameter. In the case of a 3, the full transaction type is read from the buffer as a
-    // single byte.
+    // parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type
+    // is read from the buffer as a single byte.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         use bytes::Buf;
         (
             match identifier {
-                0 => Self::Legacy,
-                1 => Self::Eip2930,
-                2 => Self::Eip1559,
+                COMPACT_IDENTIFIER_LEGACY => Self::Legacy,
+                COMPACT_IDENTIFIER_EIP2930 => Self::Eip2930,
+                COMPACT_IDENTIFIER_EIP1559 => Self::Eip1559,
                 COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
@@ -268,9 +277,9 @@ mod tests {
     #[test]
     fn test_txtype_to_compat() {
         let cases = vec![
-            (TxType::Legacy, 0, vec![]),
-            (TxType::Eip2930, 1, vec![]),
-            (TxType::Eip1559, 2, vec![]),
+            (TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![]),
+            (TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![]),
+            (TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![]),
             (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
             (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
@@ -291,9 +300,9 @@ mod tests {
     #[test]
     fn test_txtype_from_compact() {
         let cases = vec![
-            (TxType::Legacy, 0, vec![]),
-            (TxType::Eip2930, 1, vec![]),
-            (TxType::Eip1559, 2, vec![]),
+            (TxType::Legacy, COMPACT_IDENTIFIER_LEGACY, vec![]),
+            (TxType::Eip2930, COMPACT_IDENTIFIER_EIP2930, vec![]),
+            (TxType::Eip1559, COMPACT_IDENTIFIER_EIP1559, vec![]),
             (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
             (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
