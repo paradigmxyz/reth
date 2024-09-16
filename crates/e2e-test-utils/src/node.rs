@@ -1,6 +1,5 @@
 use std::{marker::PhantomData, pin::Pin};
 
-use alloy_network::Network;
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
@@ -10,14 +9,16 @@ use reth::{
     network::PeersHandleProvider,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
-        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
-        types::{engine::PayloadStatusEnum, AnyTransactionReceipt},
+        api::eth::{
+            helpers::{EthApiSpec, EthTransactions, TraceExt},
+            FullEthApiTypes,
+        },
+        types::engine::PayloadStatusEnum,
     },
 };
 use reth_chainspec::ChainSpec;
-use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypesWithEngine};
+use reth_node_builder::{NodeAddOns, NodeTypesWithEngine};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
-use reth_rpc_types::WithOtherFields;
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
 

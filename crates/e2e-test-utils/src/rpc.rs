@@ -1,19 +1,15 @@
 use alloy_consensus::TxEnvelope;
-use alloy_network::{eip2718::Decodable2718, Network};
+use alloy_network::eip2718::Decodable2718;
 use reth::{
     builder::{rpc::RpcRegistry, FullNodeComponents},
     rpc::api::{
-        eth::{
-            helpers::{EthApiSpec, EthTransactions, TraceExt},
-            RpcTransaction,
-        },
+        eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
         DebugApiServer,
     },
 };
 use reth_chainspec::ChainSpec;
 use reth_node_builder::{EthApiTypes, NodeTypes};
 use reth_primitives::{Bytes, B256};
-use reth_rpc_types::{AnyTransactionReceipt, WithOtherFields};
 
 #[allow(missing_debug_implementations)]
 pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {

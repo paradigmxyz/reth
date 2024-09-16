@@ -7,7 +7,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Header, Transaction, WithOtherFields,
+    Header,
 };
 
 /// Otterscan rpc interface.

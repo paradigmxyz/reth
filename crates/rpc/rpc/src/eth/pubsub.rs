@@ -20,7 +20,7 @@ use reth_rpc_types::{
     },
     FilteredParams, Header, Log, Transaction, WithOtherFields,
 };
-use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
+use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;

@@ -39,7 +39,7 @@ where
             let timestamp = block.timestamp;
             let block = block.unseal();
 
-            let receipts = block
+            return block
                 .body
                 .into_iter()
                 .zip(receipts.iter())
@@ -58,8 +58,8 @@ where
                     ReceiptBuilder::new(&tx, meta, receipt, &receipts)
                         .map(|builder| builder.build())
                 })
-                .collect::<Result<Vec<_>, Self::Error>>();
-            return receipts.map(Some)
+                .collect::<Result<Vec<_>, Self::Error>>()
+                .map(Some)
         }
 
         Ok(None)

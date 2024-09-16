@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use reth_evm::ConfigureEvm;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
-use reth_rpc_eth_api::{EthApiTypes, TransactionCompat};
+use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, EthApiBuilderCtx, EthConfig, EthStateCache,
 };

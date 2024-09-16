@@ -12,7 +12,7 @@ use reth_node_core::{
     node_config::NodeConfig,
     rpc::{
         api::EngineApiServer,
-        eth::{EthApiTypes, FullEthApiServer, RpcTransaction},
+        eth::{EthApiTypes, FullEthApiServer},
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;

@@ -6,13 +6,11 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_eth_api::{FullEthApiTypes, RpcTransaction};
-use reth_rpc_types::{
-    txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
-    Transaction, WithOtherFields,
+use reth_rpc_types::txpool::{
+    TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
-use revm_primitives::TransactTo;
 use tracing::trace;
 
 /// `txpool` API implementation.

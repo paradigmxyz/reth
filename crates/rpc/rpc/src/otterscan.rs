@@ -2,7 +2,7 @@ use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{BlockId, BlockNumberOrTag, Transaction};
+use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -240,7 +240,7 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(|tx| Eth::TransactionCompat::tx_type(tx)))
+            .zip(transactions.iter().map(Eth::TransactionCompat::tx_type))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),

@@ -5,7 +5,6 @@
 pub mod add_ons;
 mod states;
 
-use alloy_network::Network;
 pub use states::*;
 
 use std::sync::Arc;
@@ -30,10 +29,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    rpc::{
-        eth::{helpers::AddDevSigners, FullEthApiServer},
-        types::AnyTransactionReceipt,
-    },
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};

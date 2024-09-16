@@ -10,7 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_network::Network;
 use alloy_primitives::TxHash;
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
