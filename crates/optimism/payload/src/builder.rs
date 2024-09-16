@@ -25,7 +25,10 @@ use reth_transaction_pool::{
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ExecutionResult},
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ExecutionResult,
+        InvalidTransaction,
+    },
     State,
 };
 use std::sync::Arc;
@@ -678,14 +681,36 @@ where
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
 
-            let execution_result = evm_transact_commit(
+            let execution_result = match evm_transact_commit(
                 &tx,
                 self.initialized_cfg.clone(),
                 self.initialized_block_env.clone(),
                 self.evm_config.clone(),
                 db,
-            )
-            .map_err(PayloadBuilderError::EvmExecutionError)?;
+            ) {
+                Ok(res) => res,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
+                                // if the nonce is too low, we can skip this transaction
+                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                            } else {
+                                // if the transaction is invalid, we can skip it and all of its
+                                // descendants
+                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                                best_txs.mark_invalid(&pool_tx);
+                            }
+
+                            continue;
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                        }
+                    }
+                }
+            };
 
             let gas_used = execution_result.gas_used();
             self.cumulative_gas_used += gas_used;
