@@ -253,7 +253,6 @@ impl<Node: Unpin> Stream for ExExNotifications<Node> {
 /// committed or reverted after the given head.
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
-    #[allow(dead_code)]
     node_head: Head,
     components: Node,
     notifications: Receiver<ExExNotification>,
@@ -302,12 +301,12 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
     ///     backfill from the node database.
     /// - ExEx is ahead of the node head (`node_head.number > exex_head.number`). Wait until the
     ///   node head catches up to the ExEx head, and then repeat the synchronization process.
-    fn synchronize(&mut self, node_head: Head) -> eyre::Result<()> {
+    fn synchronize(&mut self) -> eyre::Result<()> {
         let backfill_job_factory = BackfillJobFactory::new(
             self.components.block_executor().clone(),
             self.components.provider().clone(),
         );
-        match self.exex_head.block.number.cmp(&node_head.number) {
+        match self.exex_head.block.number.cmp(&self.node_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head
 
@@ -322,7 +321,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
 
                     // ExEx is on the canonical chain, start backfill
                     let backfill = backfill_job_factory
-                        .backfill(self.exex_head.block.number + 1..=node_head.number)
+                        .backfill(self.exex_head.block.number + 1..=self.node_head.number)
                         .into_stream();
                     self.backfill_job = Some(backfill);
                 } else {
@@ -375,7 +374,7 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
         let this = self.get_mut();
 
         if this.pending_sync {
-            this.synchronize(this.node_head)?;
+            this.synchronize()?;
             this.pending_sync = false;
         }
 
@@ -431,13 +430,14 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                             .provider()
                             .sealed_header(tip)?
                             .ok_or_eyre("node head not found")?;
-                        this.synchronize(Head::new(
+                        this.node_head = Head::new(
                             tip.number,
                             tip.hash(),
                             tip.difficulty,
                             U256::MAX,
                             tip.timestamp,
-                        ))?;
+                        );
+                        this.synchronize()?;
                     }
                 }
             }
