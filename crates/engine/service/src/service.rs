@@ -185,6 +185,9 @@ mod tests {
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
+
+        let state_root_task_spawner = Box::<TokioTaskExecutor>::default();
+
         let _eth_service = EngineService::new(
             consensus,
             executor_factory,
@@ -193,6 +196,7 @@ mod tests {
             Box::pin(incoming_requests),
             pipeline,
             pipeline_task_spawner,
+            state_root_task_spawner,
             provider_factory,
             blockchain_db,
             pruner,

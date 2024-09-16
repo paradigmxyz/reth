@@ -2627,16 +2627,13 @@ mod tests {
     use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
-    use reth_tasks::TaskManager;
+    use reth_tasks::TokioTaskExecutor;
     use reth_trie::updates::TrieUpdates;
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
     };
-    use tokio::{
-        runtime::{Handle, Runtime},
-        sync::mpsc::unbounded_channel,
-    };
+    use tokio::sync::mpsc::unbounded_channel;
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
     ///
@@ -2742,12 +2739,7 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let handle = Handle::try_current().unwrap_or_else(|_| {
-                let runtime = Runtime::new().unwrap();
-                runtime.handle().clone()
-            });
-            let manager = TaskManager::new(handle.clone());
-            let state_root_task_spawner = Box::new(manager.executor());
+            let state_root_task_spawner = Box::<TokioTaskExecutor>::default();
 
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
