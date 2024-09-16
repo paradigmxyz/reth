@@ -103,7 +103,7 @@ impl StorageRootProvider for StateProviderTest {
 impl StateProofProvider for StateProviderTest {
     fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -112,7 +112,7 @@ impl StateProofProvider for StateProviderTest {
 
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         unimplemented!("witness generation is not supported")
