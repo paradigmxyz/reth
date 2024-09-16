@@ -82,7 +82,7 @@ pub struct NetworkConfig<C> {
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
-    pub nat: Option<NatResolver>
+    pub nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfig ===
@@ -191,7 +191,7 @@ pub struct NetworkConfigBuilder {
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
-    nat: Option<NatResolver>
+    nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -224,7 +224,7 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled: false,
             block_import: None,
             transactions_manager_config: Default::default(),
-            nat: None
+            nat: None,
         }
     }
 
@@ -409,9 +409,15 @@ impl NetworkConfigBuilder {
         self
     }
 
+    // Disable nat
+    pub fn disable_nat(mut self) -> Self {
+        self.nat = None;
+        self
+    }
+
     /// Disables all discovery.
     pub fn disable_discovery(self) -> Self {
-        self.disable_discv4_discovery().disable_dns_discovery()
+        self.disable_discv4_discovery().disable_dns_discovery().disable_nat()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -564,7 +570,7 @@ impl NetworkConfigBuilder {
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,
-            nat
+            nat,
         }
     }
 }
