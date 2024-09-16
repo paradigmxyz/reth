@@ -10,16 +10,17 @@ use reth_node_telos::{TelosArgs, TelosNode};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread::sleep;
-use telos_consensus_client::main_utils::{build_consensus_client, run_client};
-use telos_consensus_client::client::{ConsensusClient, Shutdown};
+use std::thread::{sleep};
+use std::time::Duration;
+use telos_consensus_client::main_utils::{build_consensus_client};
+use telos_consensus_client::client::{ConsensusClient};
 use telos_consensus_client::config::{AppConfig, CliArgs};
+use telos_consensus_client::data::Block;
 use telos_translator_rs::block::TelosEVMBlock;
+use telos_translator_rs::translator::Translator;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
-use tracing::{info};
 
 struct TelosRethNodeHandle {
     execution_port: u16,
@@ -36,11 +37,11 @@ async fn start_ship() -> ContainerAsync<GenericImage> {
         "ghcr.io/telosnetwork/testcontainer-nodeos-evm",
         "v0.1.9@sha256:6d4946f112e5c26712a938ea332b76e742035e64af93149227d97dd67e1a9012",
     )
-    .with_exposed_port(Tcp(8888))
-    .with_exposed_port(Tcp(18999))
-    .start()
-    .await
-    .unwrap();
+        .with_exposed_port(Tcp(8888))
+        .with_exposed_port(Tcp(18999))
+        .start()
+        .await
+        .unwrap();
 
     let port_8888 = container.get_host_port_ipv4(8888).await.unwrap();
 
@@ -92,12 +93,12 @@ fn init_reth() -> eyre::Result<(NodeConfig, String)> {
     Ok((node_config, jwt))
 }
 
-async fn start_consensus(
+async fn build_consensus_and_translator(
     reth_handle: TelosRethNodeHandle,
     ship_port: u16,
     chain_port: u16,
-) -> eyre::Result<Shutdown> {
-    let config = AppConfig {
+) -> (ConsensusClient, Translator, Option<Block>) {
+    let mut config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: 41,
         execution_endpoint: format!("http://localhost:{}", reth_handle.execution_port),
@@ -120,16 +121,21 @@ async fn start_consensus(
 
     let cli_args = CliArgs {
         config: "".to_string(),
-        clean: false,
+        clean: true,
     };
-    let client_shutdown = run_client(cli_args, config.clone()).await?;
-    Ok(client_shutdown)
+
+    let (c, lib) = build_consensus_client(&cli_args, &mut config).await.unwrap();
+    let translator = Translator::new((&config).into());
+
+    (c, translator, lib)
 }
+
 
 #[tokio::test]
 async fn testing_chain_sync() {
     tracing_subscriber::fmt::init();
 
+    println!("Starting test node");
     let container = start_ship().await;
     let chain_port = container.get_host_port_ipv4(8888).await.unwrap();
     let ship_port = container.get_host_port_ipv4(18999).await.unwrap();
@@ -159,11 +165,36 @@ async fn testing_chain_sync() {
     let execution_port = node_handle.node.auth_server_handle().local_addr().port();
     let rpc_port = node_handle.node.rpc_server_handles.rpc.http_local_addr().unwrap().port();
     let reth_handle = TelosRethNodeHandle { execution_port, jwt_secret };
-    let node_context = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
-    info!("Started Reth on RPC port {}!", rpc_port);
+    println!("Starting Reth on RPC port {}!", rpc_port);
+    let _ = NodeTestContext::new(node_handle.node.clone()).await.unwrap();
+    println!("Starting consensus on RPC port {}!", rpc_port);
 
-    let client_shutdown = start_consensus(reth_handle, ship_port, chain_port).await.unwrap();
+    let (client, translator, lib) = build_consensus_and_translator(reth_handle, ship_port, chain_port).await;
 
-    sleep(std::time::Duration::from_secs(10));
-    client_shutdown.shutdown().await.unwrap();
+    let consensus_shutdown = client.shutdown_handle();
+    let translator_shutdown = translator.shutdown_handle();
+
+    let (block_sender, block_receiver) = mpsc::channel::<TelosEVMBlock>(1000);
+
+    println!("Telos translator client is starting...");
+    let translator_handle = tokio::spawn(translator.launch(Some(block_sender)));
+
+    println!("Telos consensus client starting, awaiting result...");
+    let client_handle = tokio::spawn(client.run(block_receiver, lib));
+
+
+    let shutdown_handle = tokio::spawn(async move {
+        // todo wait time or anything else to wait for shutdown
+        println!("Waiting to send shutdown signal...");
+        sleep(Duration::from_secs(15));
+        _ = consensus_shutdown.shutdown().await.unwrap();
+        _ = translator_shutdown.shutdown().await.unwrap();
+    });
+
+
+    _ = client_handle.await.unwrap();
+    println!("Client shutdown done.");
+    _ = translator_handle.await.unwrap();
+    println!("Translator shutdown done.");
+    shutdown_handle.await.unwrap();
 }
