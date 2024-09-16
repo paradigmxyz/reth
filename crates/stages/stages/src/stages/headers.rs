@@ -7,6 +7,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     transaction::DbTxMut,
+    DbTxUnwindExt,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
@@ -315,13 +316,17 @@ where
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
         // unwind from the next block number since the unwind_to block is exclusive
-        provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            (input.unwind_to + 1)..,
-        )?;
-        provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+                (input.unwind_to + 1)..,
+            )?;
+        provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
+        provider
+            .tx_ref()
+            .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
         let unfinalized_headers_unwound =
-            provider.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+            provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block

@@ -8641,7 +8641,6 @@ dependencies = [
  "reth-errors",
  "reth-metrics",
  "reth-network-p2p",
- "reth-node-types",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",

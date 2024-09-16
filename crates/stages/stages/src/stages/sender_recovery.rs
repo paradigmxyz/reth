@@ -5,6 +5,7 @@ use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
     transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt,
 };
 use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
@@ -123,7 +124,7 @@ where
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .last_tx_num();
-        provider.unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
