@@ -230,13 +230,11 @@ impl<Node> ExExNotifications<Node> {
 }
 
 impl<Node: FullNodeComponents> ExExNotifications<Node> {
-    // TODO(alexey): make it public when backfill is implemented in [`ExExNotificationsWithHead`]
     /// Subscribe to notifications with the given head.
     ///
     /// Notifications will be sent starting from the head, not inclusive. For example, if
     /// `head.number == 10`, then the first notification will be with `block.number == 11`.
-    #[allow(dead_code)]
-    fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<Node> {
+    pub fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<Node> {
         ExExNotificationsWithHead::new(self.node_head, self.components, self.notifications, head)
     }
 }
@@ -302,6 +300,8 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
     /// - ExEx is ahead of the node head (`node_head.number > exex_head.number`). Wait until the
     ///   node head catches up to the ExEx head, and then repeat the synchronization process.
     fn synchronize(&mut self) -> eyre::Result<()> {
+        debug!(target: "exex::manager", "Synchronizing ExEx head");
+
         let backfill_job_factory = BackfillJobFactory::new(
             self.components.block_executor().clone(),
             self.components.provider().clone(),
@@ -314,6 +314,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                     self.components.provider().header(&self.exex_head.block.hash)?
                 {
                     // ExEx is on the canonical chain
+                    debug!(target: "exex::manager", "ExEx is behind the node head and on the canonical chain");
 
                     if exex_header.number != self.exex_head.block.number {
                         eyre::bail!("ExEx head number does not match the hash")
@@ -325,6 +326,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                         .into_stream();
                     self.backfill_job = Some(backfill);
                 } else {
+                    debug!(target: "exex::manager", "ExEx is behind the node head and not on the canonical chain");
                     // ExEx is not on the canonical chain, first unwind it and then backfill
 
                     // TODO(alexey): unwind and backfill
@@ -339,6 +341,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                     self.components.provider().header(&self.exex_head.block.hash)?
                 {
                     // ExEx is on the canonical chain
+                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head and on the canonical chain");
 
                     if exex_header.number != self.exex_head.block.number {
                         eyre::bail!("ExEx head number does not match the hash")
@@ -349,12 +352,15 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                     self.backfill_job = None;
                 } else {
                     // ExEx is not on the canonical chain, first unwind it and then backfill
+                    debug!(target: "exex::manager", "ExEx is at the same block height as the node head but not on the canonical chain");
 
                     // TODO(alexey): unwind and backfill
                     self.backfill_job = None;
                 }
             }
             std::cmp::Ordering::Greater => {
+                debug!(target: "exex::manager", "ExEx is ahead of the node head");
+
                 // ExEx is ahead of the node head
 
                 // TODO(alexey): wait until the node head is at the same height as the ExEx head
@@ -788,8 +794,11 @@ impl Clone for ExExManagerHandle {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use reth_primitives::{SealedBlockWithSenders, B256};
-    use reth_provider::Chain;
+    use reth_chainspec::MAINNET;
+    use reth_exex_test_utils::test_exex_context_components;
+    use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders, B256};
+    use reth_provider::{BlockReader, BlockWriter, Chain};
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
 
     #[tokio::test]
     async fn test_delivers_events() {
@@ -1189,5 +1198,106 @@ mod tests {
 
         // Ensure the notification ID was incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn exex_notifications_behind_head_canonical() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let (genesis_hash, provider_factory, _, components) =
+            test_exex_context_components(MAINNET.clone()).await?;
+
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let node_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), ..Default::default() },
+        );
+        let provider_rw = provider_factory.provider_rw()?;
+        provider_rw.insert_block(
+            node_head_block.clone().seal_with_senders().ok_or_eyre("failed to recover senders")?,
+        )?;
+        provider_rw.commit()?;
+
+        let node_head = Head {
+            number: node_head_block.number,
+            hash: node_head_block.hash(),
+            ..Default::default()
+        };
+        let exex_head =
+            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .seal_with_senders()
+                .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx.send(notification.clone()).await?;
+
+        let mut notifications =
+            ExExNotifications::new(node_head, components, notifications_rx).with_head(exex_head);
+        let new_notification = notifications.next().await.transpose()?;
+
+        assert_eq!(new_notification, Some(notification));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
+        let (genesis_hash, provider_factory, _, components) =
+            test_exex_context_components(MAINNET.clone()).await?;
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let node_head =
+            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
+        let exex_head =
+            ExExHead { block: BlockNumHash { number: node_head.number, hash: node_head.hash } };
+
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![Block {
+                    header: Header {
+                        parent_hash: node_head.hash,
+                        number: node_head.number + 1,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+                .seal_slow()
+                .seal_with_senders()
+                .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx.send(notification.clone()).await?;
+
+        let mut notifications =
+            ExExNotifications::new(node_head, components, notifications_rx).with_head(exex_head);
+        let new_notification = notifications.next().await.transpose()?;
+
+        assert_eq!(new_notification, Some(notification));
+
+        Ok(())
     }
 }
