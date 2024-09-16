@@ -168,7 +168,7 @@ impl<Node> Debug for ExExNotifications<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> ExExNotifications<Node> {
+impl<Node> ExExNotifications<Node> {
     /// Creates a new instance of [`ExExNotifications`].
     pub const fn new(
         node_head: Head,
@@ -227,14 +227,16 @@ impl<Node: FullNodeComponents> ExExNotifications<Node> {
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<ExExNotification>> {
         self.notifications.poll_recv(cx)
     }
+}
 
+impl<Node: FullNodeComponents> ExExNotifications<Node> {
     // TODO(alexey): make it public when backfill is implemented in [`ExExNotificationsWithHead`]
     /// Subscribe to notifications with the given head.
     ///
     /// Notifications will be sent starting from the head, not inclusive. For example, if
     /// `head.number == 10`, then the first notification will be with `block.number == 11`.
     #[allow(dead_code)]
-    fn with_head(self, head: ExExHead) -> eyre::Result<ExExNotificationsWithHead<Node>> {
+    fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<Node> {
         ExExNotificationsWithHead::new(self.node_head, self.components, self.notifications, head)
     }
 }
@@ -254,33 +256,33 @@ pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
     #[allow(dead_code)]
     components: Node,
     notifications: Receiver<ExExNotification>,
-    head: ExExHead,
+    node_head: Head,
+    exex_head: ExExHead,
+    pending_heal: bool,
     /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<Node::Executor, Node::Provider, Chain>>,
     /// Whether to wait for the node head to be at the same height as the ExEx head, and then
     /// call the [`Self::heal`].
-    wait_for_head: bool,
+    pending_node_head_catchup: bool,
 }
 
 impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
     /// Creates a new [`ExExNotificationsWithHead`].
-    pub fn new(
+    pub const fn new(
         node_head: Head,
         components: Node,
         notifications: Receiver<ExExNotification>,
         exex_head: ExExHead,
-    ) -> eyre::Result<Self> {
-        let mut notifications = Self {
+    ) -> Self {
+        Self {
             components,
             notifications,
-            head: exex_head,
+            node_head,
+            exex_head,
+            pending_heal: true,
             backfill_job: None,
-            wait_for_head: false,
-        };
-
-        notifications.heal(node_head)?;
-
-        Ok(notifications)
+            pending_node_head_catchup: false,
+        }
     }
 
     fn heal(&mut self, node_head: Head) -> eyre::Result<()> {
@@ -288,22 +290,22 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
             self.components.block_executor().clone(),
             self.components.provider().clone(),
         );
-        match self.head.block.number.cmp(&node_head.number) {
+        match self.exex_head.block.number.cmp(&node_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head
 
                 if let Some(exex_header) =
-                    self.components.provider().header(&self.head.block.hash)?
+                    self.components.provider().header(&self.exex_head.block.hash)?
                 {
                     // ExEx is on the canonical chain
 
-                    if exex_header.number != self.head.block.number {
+                    if exex_header.number != self.exex_head.block.number {
                         eyre::bail!("ExEx head number does not match the hash")
                     }
 
                     // ExEx is on the canonical chain, start backfill
                     let backfill = backfill_job_factory
-                        .backfill(self.head.block.number + 1..=node_head.number)
+                        .backfill(self.exex_head.block.number + 1..=node_head.number)
                         .into_stream();
                     self.backfill_job = Some(backfill);
                 } else {
@@ -318,11 +320,11 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
                 // ExEx is at the same block height as the node head
 
                 if let Some(exex_header) =
-                    self.components.provider().header(&self.head.block.hash)?
+                    self.components.provider().header(&self.exex_head.block.hash)?
                 {
                     // ExEx is on the canonical chain
 
-                    if exex_header.number != self.head.block.number {
+                    if exex_header.number != self.exex_head.block.number {
                         eyre::bail!("ExEx head number does not match the hash")
                     }
 
@@ -341,7 +343,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
 
                 // TODO(alexey): wait until the node head is at the same height as the ExEx head
                 // and then repeat the process above
-                self.wait_for_head = true;
+                self.pending_node_head_catchup = true;
             }
         };
 
@@ -354,6 +356,11 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
+        if this.pending_heal {
+            this.heal(this.node_head)?;
+            this.pending_heal = false;
+        }
 
         if let Some(backfill_job) = &mut this.backfill_job {
             if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)) {
@@ -380,17 +387,17 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                         .map(|chain| (chain.clone(), chain.first().number - 1))
                 });
 
-            if this.wait_for_head {
+            if this.pending_node_head_catchup {
                 // If we are waiting for the node head to be at the same height as the ExEx head,
                 // then we need to check if the ExEx is on the canonical chain. To do this, we need
                 // to get the block at the ExEx head's height from new chain, and compare its hash
                 // to the ExEx head's hash.
                 if let Some((block, tip)) = chain_and_tip.as_ref().and_then(|(chain, tip)| {
-                    chain.blocks().get(&this.head.block.number).zip(Some(tip))
+                    chain.blocks().get(&this.exex_head.block.number).zip(Some(tip))
                 }) {
-                    if block.hash() == this.head.block.hash {
+                    if block.hash() == this.exex_head.block.hash {
                         // ExEx is on the canonical chain, proceed with the notification
-                        this.wait_for_head = false;
+                        this.pending_node_head_catchup = false;
                     } else {
                         // ExEx is not on the canonical chain, heal
                         let tip = this
@@ -398,16 +405,11 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                             .provider()
                             .sealed_header(*tip)?
                             .ok_or_eyre("node head not found")?;
-                        let total_difficulty = this
-                            .components
-                            .provider()
-                            .header_td_by_number(tip.number)?
-                            .unwrap_or(U256::MAX);
                         this.heal(Head::new(
                             tip.number,
                             tip.hash(),
                             tip.difficulty,
-                            total_difficulty,
+                            U256::MAX,
                             tip.timestamp,
                         ))?;
                     }
@@ -417,7 +419,7 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
             if notification
                 .committed_chain()
                 .or_else(|| notification.reverted_chain())
-                .map_or(false, |chain| chain.first().number > this.head.block.number)
+                .map_or(false, |chain| chain.first().number > this.exex_head.block.number)
             {
                 return Poll::Ready(Some(Ok(notification)))
             }
