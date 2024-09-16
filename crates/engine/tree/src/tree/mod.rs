@@ -40,7 +40,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
@@ -2263,29 +2263,23 @@ where
         hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-        let mut trie_nodes = TrieUpdates::default();
-        let mut state = HashedPostState::default();
-        let mut prefix_sets = TriePrefixSetsMut::default();
+        let mut input = TrieInput::default();
 
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
             // Retrieve revert state for historical block.
             let revert_state = consistent_view.revert_state(historical)?;
-            prefix_sets.extend(revert_state.construct_prefix_sets());
-            state.extend(revert_state);
+            input.append(revert_state);
 
             // Extend with contents of parent in-memory blocks.
             for block in blocks.iter().rev() {
-                trie_nodes.extend_ref(block.trie.as_ref());
-                state.extend_ref(block.hashed_state.as_ref());
+                input.append_cached_ref(block.trie_updates(), block.hashed_state())
             }
         }
 
         // Extend with block we are validating root for.
-        prefix_sets.extend(hashed_state.construct_prefix_sets());
-        state.extend_ref(hashed_state);
+        input.append_ref(hashed_state);
 
-        Ok(ParallelStateRoot::new(consistent_view, trie_nodes, state, prefix_sets.freeze())
-            .incremental_root_with_updates()?)
+        Ok(ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()?)
     }
 
     /// Handles an error that occurred while inserting a block.
