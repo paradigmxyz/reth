@@ -1,13 +1,12 @@
 use crate::metrics::PersistenceMetrics;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::BlockNumHash;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, ProviderFactory,
     StaticFileProviderFactory,
 };
-use reth_prune::{Pruner, PrunerError, PrunerOutput};
+use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
@@ -25,13 +24,13 @@ use tracing::{debug, error};
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
 #[derive(Debug)]
-pub struct PersistenceService<N: NodeTypesWithDB> {
+pub struct PersistenceService<N: ProviderNodeTypes> {
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
     incoming: Receiver<PersistenceAction>,
     /// The pruner
-    pruner: Pruner<N::DB, ProviderFactory<N>>,
+    pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
     metrics: PersistenceMetrics,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
@@ -43,7 +42,7 @@ impl<N: ProviderNodeTypes> PersistenceService<N> {
     pub fn new(
         provider: ProviderFactory<N>,
         incoming: Receiver<PersistenceAction>,
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
         Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
@@ -187,7 +186,7 @@ impl PersistenceHandle {
     /// Create a new [`PersistenceHandle`], and spawn the persistence service.
     pub fn spawn_service<N: ProviderNodeTypes>(
         provider_factory: ProviderFactory<N>,
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
         // create the initial channels
@@ -268,7 +267,7 @@ mod tests {
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
-    use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
+    use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune::Pruner;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -278,14 +277,8 @@ mod tests {
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let pruner = Pruner::<_, ProviderFactory<_>>::new(
-            provider.clone(),
-            vec![],
-            5,
-            0,
-            None,
-            finished_exex_height_rx,
-        );
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx)

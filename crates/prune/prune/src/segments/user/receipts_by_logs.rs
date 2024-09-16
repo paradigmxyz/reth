@@ -1,10 +1,10 @@
 use crate::{
+    db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::tables;
-use reth_db_api::database::Database;
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
+use reth_db::{tables, transaction::DbTxMut};
+use reth_provider::{BlockReader, DBProvider, PruneCheckpointWriter, TransactionsProvider};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     SegmentOutput, MINIMUM_PRUNING_DISTANCE,
@@ -22,7 +22,10 @@ impl ReceiptsByLogs {
     }
 }
 
-impl<DB: Database> Segment<DB> for ReceiptsByLogs {
+impl<Provider> Segment<Provider> for ReceiptsByLogs
+where
+    Provider: DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + TransactionsProvider + BlockReader,
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::ContractLogs
     }
@@ -36,11 +39,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
@@ -143,7 +142,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
             let deleted;
-            (deleted, done) = provider.prune_table_with_range::<tables::Receipts>(
+            (deleted, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts>(
                 tx_range,
                 &mut limiter,
                 |(tx_num, receipt)| {
@@ -224,7 +223,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-    use reth_provider::{PruneCheckpointReader, TransactionsProvider};
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
@@ -286,7 +285,7 @@ mod tests {
         );
 
         let run_prune = || {
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
 
             let prune_before_block: usize = 20;
             let prune_mode = PruneMode::Before(prune_before_block as u64);
