@@ -136,27 +136,25 @@ impl StorageRootProvider for MemoryOverlayStateProvider {
 }
 
 impl StateProofProvider for MemoryOverlayStateProvider {
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn proof(
         &self,
-        state: HashedPostState,
+        mut input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let mut hashed_state = self.trie_state().state.clone();
-        hashed_state.extend(state);
-        self.historical.proof(hashed_state, address, slots)
+        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
+        input.prepend_cached(nodes, state);
+        self.historical.proof(input, address, slots)
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn witness(
         &self,
-        overlay: HashedPostState,
+        mut input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
-        let mut hashed_state = self.trie_state().state.clone();
-        hashed_state.extend(overlay);
-        self.historical.witness(hashed_state, target)
+        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
+        input.prepend_cached(nodes, state);
+        self.historical.witness(input, target)
     }
 }
 

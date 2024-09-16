@@ -51,7 +51,7 @@ pub trait StateProofProvider: Send + Sync {
     /// on top of the current state.
     fn proof(
         &self,
-        hashed_state: HashedPostState,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof>;
@@ -59,7 +59,7 @@ pub trait StateProofProvider: Send + Sync {
     /// Get trie witness for provided state.
     fn witness(
         &self,
-        overlay: HashedPostState,
+        input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>>;
 }

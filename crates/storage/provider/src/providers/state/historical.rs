@@ -335,25 +335,22 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
     fn proof(
         &self,
-        hashed_state: HashedPostState,
+        mut input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let mut revert_state = self.revert_state()?;
-        revert_state.extend(hashed_state);
-        Proof::overlay_account_proof(self.tx, revert_state, address, slots)
+        input.prepend(self.revert_state()?);
+        Proof::overlay_account_proof(self.tx, input, address, slots)
             .map_err(Into::<ProviderError>::into)
     }
 
     fn witness(
         &self,
-        overlay: HashedPostState,
+        mut input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
-        let mut revert_state = self.revert_state()?;
-        revert_state.extend(overlay);
-        TrieWitness::overlay_witness(self.tx, revert_state, target)
-            .map_err(Into::<ProviderError>::into)
+        input.prepend(self.revert_state()?);
+        TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
     }
 }
 
