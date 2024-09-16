@@ -27,7 +27,7 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    let mut spec = ChainSpec {
+    let mut spec = ChainSpec::<ChainHardforks> {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
@@ -55,7 +55,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    let mut spec = ChainSpec {
+    let mut spec = ChainSpec::<ChainHardforks> {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
@@ -80,7 +80,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Holesky spec
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    let mut spec = ChainSpec {
+    let mut spec = ChainSpec::<ChainHardforks> {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
@@ -154,8 +154,8 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl core::ops::Deref for ChainSpec {
-    type Target = ChainHardforks;
+impl<T> core::ops::Deref for ChainSpec<T> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.hardforks
@@ -170,7 +170,7 @@ impl core::ops::Deref for ChainSpec {
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChainSpec {
+pub struct ChainSpec<T = ChainHardforks> {
     /// The chain ID
     pub chain: Chain,
 
@@ -194,7 +194,7 @@ pub struct ChainSpec {
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
-    pub hardforks: ChainHardforks,
+    pub hardforks: T,
 
     /// The deposit contract deployed for `PoS`
     pub deposit_contract: Option<DepositContract>,
@@ -209,7 +209,10 @@ pub struct ChainSpec {
     pub prune_delete_limit: usize,
 }
 
-impl Default for ChainSpec {
+impl<T> Default for ChainSpec<T>
+where
+    T: Default,
+{
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -226,7 +229,7 @@ impl Default for ChainSpec {
     }
 }
 
-impl ChainSpec {
+impl<T> ChainSpec<T> {
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -252,14 +255,6 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Optimism configuration.
     #[inline]
-    #[cfg(feature = "optimism")]
-    pub fn is_optimism(&self) -> bool {
-        self.chain.is_optimism() ||
-            self.hardforks.get(reth_ethereum_forks::OptimismHardfork::Bedrock).is_some()
-    }
-
-    /// Returns `true` if this chain contains Optimism configuration.
-    #[inline]
     #[cfg(not(feature = "optimism"))]
     pub const fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
@@ -276,6 +271,59 @@ impl ChainSpec {
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
     pub const fn genesis(&self) -> &Genesis {
         &self.genesis
+    }
+
+    /// Get the timestamp of the genesis block.
+    pub const fn genesis_timestamp(&self) -> u64 {
+        self.genesis.timestamp
+    }
+
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    pub fn get_final_paris_total_difficulty(&self) -> Option<U256> {
+        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+
+    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
+    ///
+    /// Note: technically this would also be valid for the block before the paris upgrade, but this
+    /// edge case is omitted here.
+    #[inline]
+    pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
+            (block_number >= activated_at).then_some(final_difficulty)
+        })
+    }
+
+    /// Returns the known bootnode records for the given chain.
+    pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        use NamedChain as C;
+        let chain = self.chain;
+        match chain.try_into().ok()? {
+            C::Mainnet => Some(mainnet_nodes()),
+            C::Sepolia => Some(sepolia_nodes()),
+            C::Holesky => Some(holesky_nodes()),
+            C::Base => Some(base_nodes()),
+            C::Optimism => Some(op_nodes()),
+            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
+            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
+            _ => None,
+        }
+    }
+}
+
+impl<T> ChainSpec<T>
+where
+    T: EthereumHardforks,
+{
+    /// Returns `true` if this chain contains Optimism configuration.
+    #[inline]
+    #[cfg(feature = "optimism")]
+    pub fn is_optimism(&self) -> bool {
+        self.chain.is_optimism() ||
+            !matches!(
+                self.hardforks.fork(reth_ethereum_forks::OptimismHardfork::Bedrock),
+                ForkCondition::Never
+            )
     }
 
     /// Get the header for the genesis block.
@@ -391,27 +439,6 @@ impl ChainSpec {
         *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
     }
 
-    /// Get the timestamp of the genesis block.
-    pub const fn genesis_timestamp(&self) -> u64 {
-        self.genesis.timestamp
-    }
-
-    /// Returns the final total difficulty if the Paris hardfork is known.
-    pub fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
-    }
-
-    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
-    ///
-    /// Note: technically this would also be valid for the block before the paris upgrade, but this
-    /// edge case is omitted here.
-    #[inline]
-    pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
-            (block_number >= activated_at).then_some(final_difficulty)
-        })
-    }
-
     /// Get the fork filter for the given hardfork
     pub fn hardfork_fork_filter<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkFilter> {
         match self.hardforks.fork(fork.clone()) {
@@ -450,13 +477,6 @@ impl ChainSpec {
     #[inline]
     pub fn cancun_fork_id(&self) -> Option<ForkId> {
         self.hardfork_fork_id(EthereumHardfork::Cancun)
-    }
-
-    /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
-    /// hardforks.
-    #[inline]
-    pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -579,30 +599,23 @@ impl ChainSpec {
         }
         None
     }
+}
+
+impl ChainSpec<ChainHardforks> {
+    /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
+    /// hardforks.
+    #[inline]
+    pub fn latest_fork_id(&self) -> ForkId {
+        self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
+    }
 
     /// Build a chainspec using [`ChainSpecBuilder`]
     pub fn builder() -> ChainSpecBuilder {
         ChainSpecBuilder::default()
     }
-
-    /// Returns the known bootnode records for the given chain.
-    pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        use NamedChain as C;
-        let chain = self.chain;
-        match chain.try_into().ok()? {
-            C::Mainnet => Some(mainnet_nodes()),
-            C::Sepolia => Some(sepolia_nodes()),
-            C::Holesky => Some(holesky_nodes()),
-            C::Base => Some(base_nodes()),
-            C::Optimism => Some(op_nodes()),
-            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
-            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
-            _ => None,
-        }
-    }
 }
 
-impl From<Genesis> for ChainSpec {
+impl From<Genesis> for ChainSpec<ChainHardforks> {
     fn from(genesis: Genesis) -> Self {
         #[cfg(not(feature = "optimism"))]
         {
@@ -618,7 +631,7 @@ impl From<Genesis> for ChainSpec {
 
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]
-fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
+fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec<ChainHardforks> {
     // Block-based hardforks
     let hardfork_opts = [
         (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
@@ -707,7 +720,7 @@ fn into_ethereum_chain_spec(genesis: Genesis) -> ChainSpec {
 
 #[cfg(feature = "optimism")]
 /// Convert the given [`Genesis`] into an Optimism [`ChainSpec`].
-fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec {
+fn into_optimism_chain_spec(genesis: Genesis) -> ChainSpec<ChainHardforks> {
     use reth_ethereum_forks::OptimismHardfork;
     let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
     let genesis_info = optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
@@ -1047,8 +1060,8 @@ impl ChainSpecBuilder {
     }
 }
 
-impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
-    fn from(value: &Arc<ChainSpec>) -> Self {
+impl From<&Arc<ChainSpec<ChainHardforks>>> for ChainSpecBuilder {
+    fn from(value: &Arc<ChainSpec<ChainHardforks>>) -> Self {
         Self {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),

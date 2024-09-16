@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{Chain, ChainHardforks, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
 use reth_trie::{proof::Proof, Nibbles};
@@ -22,7 +22,7 @@ use std::{
     All expected testspec results were obtained from querying proof RPC on the running geth instance `geth init crates/trie/testdata/proof-genesis.json && geth --http`.
 */
 static TEST_SPEC: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
-    ChainSpec {
+    ChainSpec::<ChainHardforks> {
         chain: Chain::from_id(12345),
         genesis: serde_json::from_str(include_str!("../../trie/testdata/proof-genesis.json"))
             .expect("Can't deserialize test genesis json"),
