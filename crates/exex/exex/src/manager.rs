@@ -1346,4 +1346,75 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let (genesis_hash, provider_factory, _, components) =
+            test_exex_context_components(MAINNET.clone()).await?;
+
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let exex_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        );
+
+        let node_head =
+            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
+        let exex_head = ExExHead {
+            block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx
+            .send(ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(
+                    vec![exex_head_block
+                        .clone()
+                        .seal_with_senders()
+                        .ok_or_eyre("failed to recover senders")?],
+                    Default::default(),
+                    None,
+                )),
+            })
+            .await?;
+
+        let mut notifications = ExExNotifications::new(
+            node_head,
+            components.provider,
+            EthExecutorProvider::mainnet(),
+            notifications_rx,
+        )
+        .with_head(exex_head);
+
+        // First notification is skipped because the node is catching up with the ExEx
+        let new_notification = poll_fn(|cx| Poll::Ready(notifications.poll_next_unpin(cx))).await;
+        assert!(new_notification.is_pending());
+
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![random_block(
+                    &mut rng,
+                    exex_head_block.number + 1,
+                    BlockParams { parent: Some(exex_head_block.hash()), ..Default::default() },
+                )
+                .seal_with_senders()
+                .ok_or_eyre("failed to recover senders")?],
+                Default::default(),
+                None,
+            )),
+        };
+        notifications_tx.send(notification.clone()).await?;
+
+        // Second notification is received because the node caught up with the ExEx
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+
+        Ok(())
+    }
 }
