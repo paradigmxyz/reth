@@ -7,10 +7,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::{keccak256, Account, B256};
-use reth_provider::{
-    AccountExtReader, DBProvider, DatabaseProvider, HashingWriter, StaticFileProviderFactory,
-    StatsReader,
-};
+use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
@@ -66,7 +63,9 @@ impl AccountHashingStage {
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db_api::models::AccountBeforeTx;
         use reth_primitives::U256;
-        use reth_provider::providers::StaticFileWriter;
+        use reth_provider::{
+            providers::StaticFileWriter, DatabaseProvider, StaticFileProviderFactory,
+        };
         use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
