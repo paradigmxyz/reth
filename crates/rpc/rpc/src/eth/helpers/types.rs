@@ -74,4 +74,12 @@ where
             ..Default::default()
         }
     }
+
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
+        tx.inner.input = tx.inner.input.slice(..4);
+    }
+
+    fn tx_type(tx: &Self::Transaction) -> u8 {
+        tx.inner.transaction_type.unwrap_or(0)
+    }
 }

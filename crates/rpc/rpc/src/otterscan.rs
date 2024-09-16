@@ -1,12 +1,12 @@
-use alloy_network::ReceiptResponse;
+use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_primitives::{BlockId, BlockNumberOrTag, Transaction};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction,
+    FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -18,7 +18,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    BlockTransactions, Header, Transaction, TransactionReceipt, WithOtherFields,
+    BlockTransactions, Header, TransactionReceipt,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -62,18 +62,15 @@ where
 }
 
 #[async_trait]
-impl<Eth> OtterscanServer for OtterscanApi<Eth>
+impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>> for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
-        > + TraceExt
-        + EthTransactions<
-            NetworkTypes: alloy_network::Network<
-                TransactionResponse = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
-        > + 'static,
+        > + EthTransactions<TransactionCompat: TransactionCompat>
+        + TraceExt
+        + 'static,
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
@@ -200,7 +197,7 @@ where
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
+    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>>> {
         let block_id = block_number.into();
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_id, true);
@@ -233,9 +230,9 @@ where
 
         // The input field returns only the 4 bytes method selector instead of the entire
         // calldata byte blob.
-        for tx in transactions {
-            if tx.input.len() > 4 {
-                tx.input = tx.input.slice(..4);
+        for tx in transactions.iter_mut() {
+            if tx.input().len() > 4 {
+                Eth::TransactionCompat::otterscan_api_truncate_input(tx);
             }
         }
 
@@ -243,7 +240,7 @@ where
         let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(|tx| tx.inner.transaction_type.unwrap_or(0)))
+            .zip(transactions.iter().map(|tx| Eth::TransactionCompat::tx_type(tx)))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
@@ -313,7 +310,7 @@ where
             .get_transaction_by_sender_and_nonce(sender, nonce, false)
             .await
             .map_err(Into::into)?
-            .map(|tx| tx.hash))
+            .map(|tx| tx.tx_hash()))
     }
 
     /// Handler for `getContractCreator`

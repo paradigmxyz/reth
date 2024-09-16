@@ -67,6 +67,10 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
     fn fill(tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
+
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
+
+    fn tx_type(tx: &Self::Transaction) -> u8;
 }
 
 impl TransactionCompat for () {
@@ -76,6 +80,12 @@ impl TransactionCompat for () {
 
     fn fill(_tx: TransactionSignedEcRecovered, _tx_info: TransactionInfo) -> Self::Transaction {
         WithOtherFields::default()
+    }
+
+    fn otterscan_api_truncate_input(_tx: &mut Self::Transaction) {}
+
+    fn tx_type(tx: &Self::Transaction) -> u8 {
+        0
     }
 }
 
