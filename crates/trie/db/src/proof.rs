@@ -1,7 +1,7 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use alloy_primitives::{Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
-use reth_primitives::{Address, B256};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::Proof,
     trie_cursor::InMemoryTrieCursorFactory, MultiProof, TrieInput,
