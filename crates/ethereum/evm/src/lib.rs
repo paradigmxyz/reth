@@ -103,8 +103,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             // blob fields can be None for this tx
             blob_hashes: Vec::new(),
             max_fee_per_blob_gas: None,
-            // TODO remove this once this crate is no longer built with optimism
-            ..Default::default()
+            authorization_list: None,
         };
         env.tx = tx;
 
