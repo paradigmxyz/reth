@@ -561,7 +561,7 @@ where
         }
     }
 
-    /// Sets the bad block hook.
+    /// Sets the invalid block hook.
     fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
         self.invalid_block_hook = invalid_block_hook;
     }
