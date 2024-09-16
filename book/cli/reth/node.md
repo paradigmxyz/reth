@@ -541,11 +541,14 @@ Debug:
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
       --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
-          Determines which type of bad block hook to install
+          Determines which type of invalid block hook to install
 
           Example: `witness,prestate`
 
           [possible values: witness, pre-state, opcode]
+
+      --debug.healthy-node-rpc-url <URL>
+          The RPC URL of a healthy node to use for comparing invalid block hook results against.
 
 Database:
       --db.log-level <LOG_LEVEL>

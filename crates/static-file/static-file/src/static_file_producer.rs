@@ -159,8 +159,7 @@ where
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
-            let mut provider = self.provider.database_provider_ro()?;
-            provider.disable_long_read_transaction_safety();
+            let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
             segment.copy_to_static_files(provider, self.provider.static_file_provider(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics

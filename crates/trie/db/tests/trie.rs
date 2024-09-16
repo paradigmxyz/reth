@@ -1,3 +1,4 @@
+use alloy_primitives::{keccak256, Address, B256, U256};
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
@@ -5,7 +6,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::DbTxMut,
 };
-use reth_primitives::{hex_literal::hex, Account, StorageEntry, U256};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, hex_literal::hex, Account, StorageEntry};
 use reth_provider::{
     test_utils::create_test_provider_factory, DatabaseProviderRW, StorageTrieWriter, TrieWriter,
 };
@@ -25,7 +26,6 @@ use std::{
 
 use alloy_rlp::Encodable;
 use reth_db_api::transaction::DbTx;
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie::{
     prefix_set::TriePrefixSets, updates::StorageTrieUpdates, HashBuilder,
     IntermediateStateRootState, Nibbles, StateRootProgress, TrieAccount,
