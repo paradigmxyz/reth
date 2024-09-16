@@ -2203,10 +2203,7 @@ where
                     debug!(target: "engine", %error, "Async state root computation failed consistency check, falling back");
                     None
                 }
-                Err(error) => {
-                    error!(target: "engine", %error, "Async state root computation failed");
-                    return Err(InsertBlockErrorKindTwo::Other(Box::new(error)))
-                }
+                Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
             };
         }
 
