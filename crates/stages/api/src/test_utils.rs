@@ -44,7 +44,7 @@ impl TestStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for TestStage {
+impl<Provider> Stage<Provider> for TestStage {
     fn id(&self) -> StageId {
         self.id
     }

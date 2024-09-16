@@ -8,9 +8,7 @@ use reth_db_api::{
     table::Decode,
     transaction::DbTxMut,
 };
-use reth_provider::{
-    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
-};
+use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
@@ -47,7 +45,11 @@ impl Default for IndexStorageHistoryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
+impl<Provider> Stage<Provider> for IndexStorageHistoryStage
+where
+    Provider:
+        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::IndexStorageHistory
@@ -56,7 +58,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Execute the stage.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -133,7 +135,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =

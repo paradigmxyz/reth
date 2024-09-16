@@ -14,8 +14,9 @@ use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateWriter, StatsReader, TransactionVariant,
+    BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriter, StaticFileProviderFactory, StatsReader,
+    TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -149,9 +150,9 @@ impl<E> ExecutionStage<E> {
     /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
     /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
     /// been previously executed.
-    fn adjust_prune_modes<DB: Database>(
+    fn adjust_prune_modes(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &impl StatsReader,
         start_block: u64,
         max_block: u64,
     ) -> Result<PruneModes, StageError> {
@@ -169,10 +170,11 @@ impl<E> ExecutionStage<E> {
     }
 }
 
-impl<E, DB> Stage<DB> for ExecutionStage<E>
+impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    DB: Database,
     E: BlockExecutorProvider,
+    Provider: DBProvider + BlockReader + StaticFileProviderFactory + StatsReader,
+    for<'a> UnifiedStorageWriter<'a, Provider, StaticFileProviderRWRefMut<'a>>: StateWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -190,11 +192,7 @@ where
     }
 
     /// Execute the stage
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -209,7 +207,8 @@ where
             self.prune_modes.receipts_log_filter.is_empty()
         {
             debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
-            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            let mut producer =
+                prepare_static_file_producer(provider, &static_file_provider, start_block)?;
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
             producer.commit()?;
@@ -228,8 +227,12 @@ where
 
         // Progress tracking
         let mut stage_progress = start_block;
-        let mut stage_checkpoint =
-            execution_checkpoint(static_file_provider, start_block, max_block, input.checkpoint())?;
+        let mut stage_checkpoint = execution_checkpoint(
+            &static_file_provider,
+            start_block,
+            max_block,
+            input.checkpoint(),
+        )?;
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -390,7 +393,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) =
@@ -432,7 +435,11 @@ where
             // prepare_static_file_producer does a consistency check that will unwind static files
             // if the expected highest receipt in the files is higher than the database.
             // Which is essentially what happens here when we unwind this stage.
-            let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
+            let _static_file_producer = prepare_static_file_producer(
+                provider,
+                &provider.static_file_provider(),
+                *range.start(),
+            )?;
         } else {
             // If there is any kind of receipt pruning/filtering we use the database, since static
             // files do not support filters.
@@ -572,11 +579,13 @@ fn calculate_gas_used_from_headers(
 /// the height in the static file is higher**, it rolls back (unwinds) the static file.
 /// **Conversely, if the height in the database is lower**, it triggers a rollback in the database
 /// (by returning [`StageError`]) until the heights in both the database and static file match.
-fn prepare_static_file_producer<'a, 'b, DB: Database>(
-    provider: &'b DatabaseProviderRW<DB>,
+fn prepare_static_file_producer<'a, 'b, Provider>(
+    provider: &'b Provider,
+    static_file_provider: &'a StaticFileProvider,
     start_block: u64,
 ) -> Result<StaticFileProviderRWRefMut<'a>, StageError>
 where
+    Provider: DBProvider + BlockReader + HeaderProvider,
     'b: 'a,
 {
     // Get next expected receipt number
@@ -588,7 +597,6 @@ where
         .unwrap_or(0);
 
     // Get next expected receipt number in static files
-    let static_file_provider = provider.static_file_provider();
     let next_static_file_receipt_num = static_file_provider
         .get_highest_static_file_tx(StaticFileSegment::Receipts)
         .map(|num| num + 1)

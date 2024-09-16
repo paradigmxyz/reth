@@ -7,8 +7,8 @@ use reth_db_api::{
 };
 use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
-    DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
-    StageCheckpointWriter, StatsReader, TrieWriter,
+    DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
+    StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
@@ -98,9 +98,9 @@ impl MerkleStage {
     }
 
     /// Gets the hashing progress
-    pub fn get_execution_checkpoint<DB: Database>(
+    pub fn get_execution_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &impl StageCheckpointReader,
     ) -> Result<Option<MerkleCheckpoint>, StageError> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
@@ -114,9 +114,9 @@ impl MerkleStage {
     }
 
     /// Saves the hashing progress
-    pub fn save_execution_checkpoint<DB: Database>(
+    pub fn save_execution_checkpoint(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &impl StageCheckpointWriter,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
         let mut buf = vec![];
@@ -132,7 +132,15 @@ impl MerkleStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for MerkleStage {
+impl<Provider> Stage<Provider> for MerkleStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + TrieWriter
+        + StatsReader
+        + HeaderProvider
+        + StageCheckpointReader
+        + StageCheckpointWriter,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         match self {
@@ -144,11 +152,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     }
 
     /// Execute the stage.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let threshold = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -286,7 +290,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();

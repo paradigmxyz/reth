@@ -9,8 +9,8 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives::{TxHash, TxNumber};
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
-    TransactionsProvider, TransactionsProviderExt,
+    BlockReader, DBProvider, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
+    StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -54,7 +54,16 @@ impl TransactionLookupStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for TransactionLookupStage {
+impl<Provider> Stage<Provider> for TransactionLookupStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + BlockReader
+        + PruneCheckpointReader
+        + StatsReader
+        + StaticFileProviderFactory
+        + TransactionsProviderExt,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::TransactionLookup
@@ -63,7 +72,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Write transaction hash -> id entries
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -178,7 +187,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
@@ -212,9 +221,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     }
 }
 
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, StageError> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
+where
+    Provider: PruneCheckpointReader + StaticFileProviderFactory + StatsReader,
+{
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?
         .and_then(|checkpoint| checkpoint.tx_number)

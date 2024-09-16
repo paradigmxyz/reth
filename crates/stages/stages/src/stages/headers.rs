@@ -13,7 +13,8 @@ use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDown
 use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    StaticFileProviderFactory,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -88,9 +89,9 @@ where
     ///
     /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
     /// database table.
-    fn write_headers<DB: Database>(
+    fn write_headers(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &impl DBProvider<Tx: DbTxMut>,
         static_file_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
@@ -183,11 +184,11 @@ where
     }
 }
 
-impl<DB, Provider, D> Stage<DB> for HeaderStage<Provider, D>
+impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
 where
-    DB: Database,
-    Provider: HeaderSyncGapProvider,
+    P: HeaderSyncGapProvider,
     D: HeaderDownloader,
+    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -259,11 +260,7 @@ where
 
     /// Download the headers in reverse order (falling block numbers)
     /// starting from the tip of the chain
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let current_checkpoint = input.checkpoint();
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
@@ -310,7 +307,7 @@ where
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.sync_gap.take();

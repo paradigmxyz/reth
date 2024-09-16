@@ -8,8 +8,8 @@ use reth_db_api::{
 };
 use reth_primitives::{Address, GotExpected, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
-    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
-    StatsReader,
+    BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
@@ -51,7 +51,14 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for SenderRecoveryStage {
+impl<Provider> Stage<Provider> for SenderRecoveryStage
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + BlockReader
+        + StaticFileProviderFactory
+        + StatsReader
+        + PruneCheckpointReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::SenderRecovery
@@ -61,11 +68,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -110,7 +113,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
@@ -129,13 +132,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-fn recover_range<DB, CURSOR>(
+fn recover_range<Provider, CURSOR>(
     tx_range: Range<u64>,
-    provider: &DatabaseProviderRW<DB>,
+    provider: &Provider,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    DB: Database,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
@@ -287,9 +290,10 @@ fn recover_sender(
     Ok((tx_id, sender))
 }
 
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<EntitiesCheckpoint, StageError> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
+where
+    Provider: StatsReader + StaticFileProviderFactory + PruneCheckpointReader,
+{
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::SenderRecovery)?
         .and_then(|checkpoint| checkpoint.tx_number)
