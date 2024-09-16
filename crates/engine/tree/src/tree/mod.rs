@@ -2279,7 +2279,9 @@ where
         ) {
             Ok((state_root_from_proofs, _)) => {
                 let computed_in = root_from_proofs_started_at.elapsed();
-                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
+                let total_from_proofs = computed_in + spent_waiting_for_multiproof;
+                let diff_secs = root_elapsed.as_secs_f64() - total_from_proofs.as_secs_f64();
+                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?total_from_proofs, diff_secs, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
                 Some(computed_in.as_secs_f64())
             }
             Err(error) => {
