@@ -7,9 +7,6 @@ pub trait DBProvider: Send + Sync + Sized + 'static {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
 
-    /// Returns the underlying transaction.
-    fn into_tx(self) -> Self::Tx;
-
     /// Returns a reference to the underlying transaction.
     fn tx_ref(&self) -> &Self::Tx;
 
