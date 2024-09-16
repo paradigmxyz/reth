@@ -5,6 +5,7 @@ use crate::{
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::{Either, Itertools};
+use rayon::slice::ParallelSliceMut;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
 use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
@@ -255,8 +256,8 @@ pub fn next_root_from_proofs(
     retain_updates: bool,
     mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
 ) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError> {
-    let trie_nodes =
-        Vec::from_iter(trie_nodes.into_iter().sorted_by_key(|(nibbles, _)| nibbles.clone()));
+    let mut trie_nodes = Vec::from_iter(trie_nodes.into_iter());
+    trie_nodes.par_sort_by_key(|(n, _)| n.clone());
 
     // Ignore branch child hashes in the path of leaves or lower child hashes.
     let mut keys = trie_nodes.iter().peekable();
