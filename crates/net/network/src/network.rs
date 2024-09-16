@@ -81,7 +81,7 @@ impl NetworkHandle {
             discv4,
             discv5,
             event_sender,
-            nat
+            nat,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -220,11 +220,9 @@ impl PeersInfo for NetworkHandle {
             let id = *self.peer_id();
             let mut socket_addr = *self.inner.listener_address.lock();
 
-            let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| {
-                match nat {
-                    NatResolver::ExternalIp(ip) => Some(ip),
-                    _ => None,
-                }
+            let external_ip: Option<IpAddr> = self.inner.nat.and_then(|nat| match nat {
+                NatResolver::ExternalIp(ip) => Some(ip),
+                _ => None,
             });
 
             // if able to resolve external ip, use it instead

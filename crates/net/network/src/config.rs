@@ -410,7 +410,7 @@ impl NetworkConfigBuilder {
     }
 
     // Disable nat
-    pub fn disable_nat(mut self) -> Self {
+    pub const fn disable_nat(mut self) -> Self {
         self.nat = None;
         self
     }

@@ -270,7 +270,7 @@ impl NetworkManager {
             discv4,
             discv5,
             event_sender.clone(),
-            nat
+            nat,
         );
 
         Ok(Self {
