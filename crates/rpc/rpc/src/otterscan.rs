@@ -1,8 +1,8 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::Network;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -44,14 +44,17 @@ impl<Eth> OtterscanApi<Eth> {
 impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+        NetworkTypes: Network<
+            TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            ReceiptResponse = AnyTransactionReceipt,
+        >,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
         block: RpcBlock<Eth::NetworkTypes>,
-        receipts: Vec<AnyTransactionReceipt>,
+        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
     ) -> RpcResult<BlockDetails> {
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
@@ -73,6 +76,7 @@ where
         > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + TraceExt
         + EthTransactions
@@ -113,7 +117,9 @@ where
                         value: op.value,
                         r#type: match op.kind {
                             TransferKind::Call => OperationType::OpTransfer,
-                            TransferKind::Create => OperationType::OpCreate,
+                            TransferKind::Create | TransferKind::EofCreate => {
+                                OperationType::OpCreate
+                            }
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
                         },

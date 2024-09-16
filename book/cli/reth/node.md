@@ -58,7 +58,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
 Networking:
@@ -219,6 +219,11 @@ Networking:
           Max capacity of cache of hashes for transactions pending fetch.
 
           [default: 25600]
+
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
 RPC:
       --http
@@ -536,11 +541,14 @@ Debug:
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
 
       --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
-          Determines which type of bad block hook to install
+          Determines which type of invalid block hook to install
 
           Example: `witness,prestate`
 
           [possible values: witness, pre-state, opcode]
+
+      --debug.healthy-node-rpc-url <URL>
+          The RPC URL of a healthy node to use for comparing invalid block hook results against.
 
 Database:
       --db.log-level <LOG_LEVEL>

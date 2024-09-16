@@ -6,7 +6,6 @@ use reth_primitives::{BlockHashOrNumber, GotExpected, StaticFileSegment, TxHashO
 #[cfg(feature = "std")]
 use std::path::PathBuf;
 
-#[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
 
 /// Provider result type.

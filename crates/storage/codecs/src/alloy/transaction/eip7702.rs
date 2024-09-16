@@ -1,12 +1,10 @@
 use crate::Compact;
+use alloc::vec::Vec;
 use alloy_consensus::transaction::TxEip7702 as AlloyTxEip7702;
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use alloy_primitives::{Bytes, ChainId, TxKind, U256};
+use alloy_primitives::{Address, Bytes, ChainId, U256};
 use reth_codecs_derive::add_arbitrary_tests;
 use serde::{Deserialize, Serialize};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
@@ -25,7 +23,7 @@ pub(crate) struct TxEip7702 {
     gas_limit: u64,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
-    to: TxKind,
+    to: Address,
     value: U256,
     access_list: AccessList,
     authorization_list: Vec<SignedAuthorization>,

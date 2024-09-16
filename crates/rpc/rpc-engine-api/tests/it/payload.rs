@@ -1,8 +1,9 @@
 //! Some payload tests
 
+use alloy_primitives::{Bytes, U256};
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_primitives::{proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, U256};
+use reth_primitives::{proofs, Block, SealedBlock, TransactionSigned, Withdrawals};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };

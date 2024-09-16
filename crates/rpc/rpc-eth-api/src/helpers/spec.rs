@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::{Address, U256, U64};
 use futures::Future;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, U256, U64};
 use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
 use reth_rpc_types::{Stage, SyncInfo, SyncStatus};
 

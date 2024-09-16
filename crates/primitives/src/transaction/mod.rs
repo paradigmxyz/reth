@@ -58,7 +58,6 @@ pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(test)]
 use reth_codecs::Compact;
 
-#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
@@ -218,9 +217,10 @@ impl Transaction {
         match self {
             Self::Legacy(TxLegacy { to, .. }) |
             Self::Eip2930(TxEip2930 { to, .. }) |
-            Self::Eip1559(TxEip1559 { to, .. }) |
-            Self::Eip7702(TxEip7702 { to, .. }) => *to,
-            Self::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
+            Self::Eip1559(TxEip1559 { to, .. }) => *to,
+            Self::Eip4844(TxEip4844 { to, .. }) | Self::Eip7702(TxEip7702 { to, .. }) => {
+                TxKind::Call(*to)
+            }
             #[cfg(feature = "optimism")]
             Self::Deposit(TxDeposit { to, .. }) => *to,
         }

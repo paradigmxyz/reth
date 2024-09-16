@@ -1,4 +1,4 @@
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 
 /// The struct that keeps track of the received forkchoice state and their status.

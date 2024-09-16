@@ -1,3 +1,4 @@
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -6,9 +7,7 @@ use reth_evm::{
     system_calls::{pre_block_beacon_root_contract_call, pre_block_blockhashes_contract_call},
     ConfigureEvmEnv,
 };
-use reth_primitives::{
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
-};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
     StateProviderFactory, TransactionVariant,
@@ -310,7 +309,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(inspector).into())
+                        return Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -356,7 +355,7 @@ where
                                 let frame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
                                     .into_geth_builder()
-                                    .geth_prestate_traces(&res, prestate_config, db)
+                                    .geth_prestate_traces(&res, &prestate_config, db)
                                     .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame)
                             })
@@ -671,9 +670,8 @@ where
                 // Generate an execution witness for the aggregated state of accessed accounts.
                 // Destruct the cache database to retrieve the state provider.
                 let state_provider = db.database.into_inner();
-                let witness = state_provider
-                    .witness(HashedPostState::default(), hashed_state)
-                    .map_err(Into::into)?;
+                let witness =
+                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
 
                 Ok(ExecutionWitness {
                     witness,
@@ -706,7 +704,7 @@ where
                     GethDebugBuiltInTracerType::FourByteTracer => {
                         let mut inspector = FourByteInspector::default();
                         let (res, _) = self.eth_api().inspect(db, env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(inspector).into(), res.state))
+                        return Ok((FourByteFrame::from(&inspector).into(), res.state))
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -739,7 +737,7 @@ where
                         let frame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_geth_builder()
-                            .geth_prestate_traces(&res, prestate_config, db)
+                            .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         return Ok((frame.into(), res.state))

@@ -13,15 +13,15 @@ use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
-pub mod client_version;
 pub mod integer_list;
 pub mod sharded_key;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
-pub use client_version::ClientVersion;
-pub use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
+pub use reth_db_models::{
+    AccountBeforeTx, ClientVersion, StoredBlockBodyIndices, StoredBlockWithdrawals,
+};
 pub use sharded_key::ShardedKey;
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.

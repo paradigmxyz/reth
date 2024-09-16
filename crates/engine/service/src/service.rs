@@ -19,8 +19,8 @@ use reth_node_types::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
-use reth_prune::Pruner;
-use reth_stages_api::Pipeline;
+use reth_prune::PrunerWithFactory;
+use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -73,14 +73,16 @@ where
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
-        pruner: Pruner<N::DB, ProviderFactory<N>>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
+        sync_metrics_tx: MetricEventsSender,
     ) -> Self {
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle = PersistenceHandle::spawn_service(provider, pruner);
+        let persistence_handle =
+            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
         let payload_validator = ExecutionPayloadValidator::new(chain_spec);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
@@ -145,6 +147,7 @@ mod tests {
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
@@ -176,9 +179,9 @@ mod tests {
                 .unwrap();
 
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
+        let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
 
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
         let _eth_service = EngineService::new(
             consensus,
@@ -194,6 +197,7 @@ mod tests {
             PayloadBuilderHandle::new(tx),
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            sync_metrics_tx,
         );
     }
 }
