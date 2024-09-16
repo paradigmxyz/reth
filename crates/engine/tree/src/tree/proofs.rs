@@ -101,7 +101,7 @@ where
             while let Poll::Ready(next) = this.state_stream.poll_recv(cx) {
                 match next {
                     Some(key) => {
-                        info!(target: "engine", %key, "New entry");
+                        info!(target: "engine", ?key, "New entry");
                         match key {
                             StateAccess::Account(address) => {
                                 targets.entry(keccak256(address)).or_default();
