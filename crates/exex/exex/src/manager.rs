@@ -378,23 +378,32 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                 return Poll::Ready(None)
             };
 
-            let chain_and_tip = notification
+            // 1. Either committed or reverted chain from the notification.
+            // 2. Block number of the tip of the canonical chain:
+            //   - For committed chain, it's the tip block number.
+            //   - For reverted chain, it's the block number preceding the first block in the chain.
+            let (chain, tip) = notification
                 .committed_chain()
                 .map(|chain| (chain.clone(), chain.tip().number))
                 .or_else(|| {
                     notification
                         .reverted_chain()
                         .map(|chain| (chain.clone(), chain.first().number - 1))
-                });
+                })
+                .unzip();
 
             if this.node_head_catchup_in_progress {
-                // If we are waiting for the node head to be at the same height as the ExEx head,
-                // then we need to check if the ExEx is on the canonical chain. To do this, we need
-                // to get the block at the ExEx head's height from new chain, and compare its hash
-                // to the ExEx head's hash.
-                if let Some((block, tip)) = chain_and_tip.as_ref().and_then(|(chain, tip)| {
-                    chain.blocks().get(&this.exex_head.block.number).zip(Some(tip))
-                }) {
+                // If we are waiting for the node head to catch up to the same height as the ExEx
+                // head, then we need to check if the ExEx is on the canonical chain.
+
+                // Query the chain from the new notification for the ExEx head block number.
+                let exex_head_block = chain
+                    .as_ref()
+                    .and_then(|chain| chain.blocks().get(&this.exex_head.block.number));
+
+                // Compare the hash of the block from the new notification to the ExEx head
+                // hash.
+                if let Some((block, tip)) = exex_head_block.zip(tip) {
                     if block.hash() == this.exex_head.block.hash {
                         // ExEx is on the canonical chain, proceed with the notification
                         this.node_head_catchup_in_progress = false;
@@ -403,7 +412,7 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                         let tip = this
                             .components
                             .provider()
-                            .sealed_header(*tip)?
+                            .sealed_header(tip)?
                             .ok_or_eyre("node head not found")?;
                         this.heal(Head::new(
                             tip.number,
