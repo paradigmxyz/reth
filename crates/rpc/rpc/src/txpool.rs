@@ -5,12 +5,14 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_rpc_api::TxPoolApiServer;
+use reth_rpc_eth_api::{FullEthApiTypes, RpcTransaction};
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus},
     Transaction, WithOtherFields,
 };
 use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
 use reth_transaction_pool::{AllPoolTransactions, PoolTransaction, TransactionPool};
+use revm_primitives::TransactTo;
 use tracing::trace;
 
 /// `txpool` API implementation.
@@ -34,35 +36,31 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
     // todo: make alloy_rpc_types_txpool::TxpoolContent generic over transaction
-    Eth: TransactionCompat<
-        Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-    >,
+    Eth: FullEthApiTypes,
 {
-    fn content(&self) -> TxpoolContent<Eth::Transaction> {
+    fn content(&self) -> TxpoolContent<RpcTransaction<Eth::NetworkTypes>> {
         #[inline]
-        fn insert<Tx, Eth>(
+        fn insert<Tx, RpcTxB>(
             tx: &Tx,
-            content: &mut BTreeMap<Address, BTreeMap<String, Eth::Transaction>>,
+            content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
         ) where
             Tx: PoolTransaction<Consensus = TransactionSignedEcRecovered>,
-            Eth: TransactionCompat<
-                Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-            >,
+            RpcTxB: TransactionCompat,
         {
-            content
-                .entry(tx.sender())
-                .or_default()
-                .insert(tx.nonce().to_string(), from_recovered::<Eth>(tx.clone().into_consensus()));
+            content.entry(tx.sender()).or_default().insert(
+                tx.nonce().to_string(),
+                from_recovered::<RpcTxB>(tx.clone().into_consensus()),
+            );
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent::<WithOtherFields<_>>::default();
+        let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
         for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending);
+            insert::<_, Eth::TransactionCompat>(&pending.transaction, &mut content.pending);
         }
         for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued);
+            insert::<_, Eth::TransactionCompat>(&queued.transaction, &mut content.queued);
         }
 
         content
@@ -70,10 +68,10 @@ where
 }
 
 #[async_trait]
-impl<Pool, Eth> TxPoolApiServer for TxPoolApi<Pool, Eth>
+impl<Pool, Eth> TxPoolApiServer<RpcTransaction<Eth::NetworkTypes>> for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool + 'static,
-    Eth: TransactionCompat<Transaction = WithOtherFields<reth_rpc_types::Transaction>> + 'static,
+    Eth: FullEthApiTypes + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -135,7 +133,7 @@ where
     async fn txpool_content_from(
         &self,
         from: Address,
-    ) -> Result<TxpoolContentFrom<Eth::Transaction>> {
+    ) -> Result<TxpoolContentFrom<RpcTransaction<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().remove_from(&from))
     }
@@ -145,7 +143,7 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> Result<TxpoolContent<WithOtherFields<Transaction>>> {
+    async fn txpool_content(&self) -> Result<TxpoolContent<RpcTransaction<Eth::NetworkTypes>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }
