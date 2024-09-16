@@ -1,10 +1,14 @@
 use reth_db_api::{database::Database, transaction::DbTx};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Database provider.
 pub trait DBProvider: Send + Sync {
     /// Underlying database transaction held by the provider.
     type Tx: DbTx;
+
+    /// Returns the underlying transaction.
+    fn into_tx(self) -> Self::Tx;
 
     /// Returns a reference to the underlying transaction.
     fn tx_ref(&self) -> &Self::Tx;
@@ -21,6 +25,9 @@ pub trait DBProvider: Send + Sync {
     fn disable_long_read_transaction_safety(&mut self) {
         self.tx_mut().disable_long_read_transaction_safety();
     }
+
+    /// Returns a reference to prune modes.
+    fn prune_modes_ref(&self) -> &PruneModes;
 }
 
 /// Database provider factory.

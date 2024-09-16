@@ -92,6 +92,12 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     }
 }
 
+impl<DB: Database> AsRef<DatabaseProvider<<DB as Database>::TXMut>> for DatabaseProviderRW<DB> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut> {
+        &self.0
+    }
+}
+
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
@@ -101,6 +107,12 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
+    }
+}
+
+impl<DB: Database> From<DatabaseProviderRW<DB>> for DatabaseProvider<<DB as Database>::TXMut> {
+    fn from(provider: DatabaseProviderRW<DB>) -> Self {
+        provider.0
     }
 }
 
@@ -139,6 +151,12 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
+    }
+}
+
+impl<TX> AsRef<Self> for DatabaseProvider<TX> {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
@@ -3693,12 +3711,20 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
 impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
     type Tx = TX;
 
+    fn into_tx(self) -> Self::Tx {
+        self.into_tx()
+    }
+
     fn tx_ref(&self) -> &Self::Tx {
         &self.tx
     }
 
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        self.prune_modes_ref()
     }
 }
 
