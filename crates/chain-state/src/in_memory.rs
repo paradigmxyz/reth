@@ -839,7 +839,8 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{AccountProof, HashedStorage, TrieInput};
+    use reth_trie::{AccountProof, HashedStorage, MultiProof, TrieInput};
+    use std::collections::HashSet;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -950,6 +951,14 @@ mod tests {
             _slots: &[B256],
         ) -> ProviderResult<AccountProof> {
             Ok(AccountProof::new(Address::random()))
+        }
+
+        fn multiproof(
+            &self,
+            _input: TrieInput,
+            _targets: HashMap<B256, HashSet<B256>>,
+        ) -> ProviderResult<MultiProof> {
+            Ok(MultiProof::default())
         }
 
         fn witness(

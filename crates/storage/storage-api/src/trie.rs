@@ -1,7 +1,9 @@
 use alloy_primitives::{Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
-use std::collections::HashMap;
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
+use std::collections::{HashMap, HashSet};
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -55,6 +57,14 @@ pub trait StateProofProvider: Send + Sync {
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof>;
+
+    /// Generate [`MultiProof`] for target hashed account and corresponding
+    /// hashed storage slot keys.
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
     fn witness(

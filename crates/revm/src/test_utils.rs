@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::precompile::HashMap;
 use alloc::vec::Vec;
 use reth_primitives::{
@@ -8,7 +10,9 @@ use reth_storage_api::{
     StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -107,6 +111,14 @@ impl StateProofProvider for StateProviderTest {
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
+        unimplemented!("proof generation is not supported")
+    }
+
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
         unimplemented!("proof generation is not supported")
     }
 

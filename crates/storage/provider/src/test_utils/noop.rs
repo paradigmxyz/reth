@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
@@ -22,7 +22,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
 
@@ -360,6 +362,14 @@ impl StateProofProvider for NoopProvider {
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
+    }
+
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Ok(MultiProof::default())
     }
 
     fn witness(

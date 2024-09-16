@@ -24,10 +24,12 @@ use reth_storage_api::{
     DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
@@ -622,6 +624,14 @@ impl StateProofProvider for MockEthProvider {
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
+    }
+
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Ok(MultiProof::default())
     }
 
     fn witness(
