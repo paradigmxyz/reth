@@ -9,9 +9,7 @@ use crate::{
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
-};
+use reth_trie_common::{AccountProof, MultiProof, ProofRetainer, StorageMultiProof, TrieAccount};
 use std::collections::{HashMap, HashSet};
 
 /// A struct for generating merkle proofs.

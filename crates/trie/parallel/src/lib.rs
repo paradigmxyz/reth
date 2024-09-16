@@ -17,6 +17,10 @@ pub mod stats;
 #[cfg(feature = "async")]
 pub mod async_root;
 
+/// Implementation of async state proof generation.
+#[cfg(feature = "async")]
+pub mod async_proof;
+
 /// Implementation of parallel state root computation.
 #[cfg(feature = "parallel")]
 pub mod parallel_root;

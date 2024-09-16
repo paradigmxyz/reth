@@ -30,4 +30,6 @@ pub use proofs::*;
 
 pub mod root;
 
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof::*, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH,
+};

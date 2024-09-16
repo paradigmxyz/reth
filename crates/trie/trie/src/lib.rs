@@ -38,7 +38,7 @@ pub use state::*;
 
 /// Input for trie computation.
 mod input;
-pub use input::TrieInput;
+pub use input::*;
 
 /// Merkle proof generation.
 pub mod proof;

@@ -44,9 +44,8 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_tasks::TaskSpawner;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut,
     updates::TrieUpdates,
-    witness::{next_root_from_proofs, target_nodes, TrieWitness},
+    witness::{next_root_from_proofs, target_nodes},
     HashedPostState, MultiProof, Nibbles, TrieAccount, TrieInput, EMPTY_ROOT_HASH,
 };
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
@@ -61,7 +60,6 @@ use std::{
     },
     time::Instant,
 };
-use streaming_database::{StateAccess, StreamingDatabase};
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
@@ -79,6 +77,10 @@ mod metrics;
 use metrics::EngineApiMetrics;
 
 mod streaming_database;
+use streaming_database::{StateAccess, StreamingDatabase};
+
+mod proofs;
+use proofs::*;
 
 /// Keeps track of the state of the tree.
 ///
@@ -2157,39 +2159,43 @@ where
             return Err(e.into())
         }
 
-        let (database, mut rx) = StreamingDatabase::new_with_rx(&state_provider);
+        let (database, mut state_rx) = StreamingDatabase::new_with_rx(&state_provider);
         let executor = self.executor_provider.executor(StateProviderDatabase::new(database));
 
         // Spawn proof gathering task
         let (multiproof_tx, multiproof_rx) = oneshot::channel();
-        self.task_spawner.spawn(Box::pin(async move {
-            let started_at = Instant::now();
-            let mut multiproof = MultiProof::default();
-            while let Some(next) = rx.recv().await {
-                let mut targets = HashMap::from([match next {
-                    StateAccess::Account(address) => (keccak256(address), HashSet::default()),
-                    StateAccess::StorageSlot(address, slot) => {
-                        (keccak256(address), HashSet::from([keccak256(slot)]))
-                    }
-                }]);
 
-                while let Ok(next) = rx.try_recv() {
-                    match next {
-                        StateAccess::Account(address) => {
-                            targets.entry(keccak256(address)).or_default();
-                        }
-                        StateAccess::StorageSlot(address, slot) => {
-                            targets.entry(keccak256(address)).or_default().insert(keccak256(slot));
-                        }
-                    }
+        if self.persistence_state.in_progress() {
+            self.task_spawner.spawn(Box::pin(async move {
+                gather_proofs(proof_provider, state_rx, multiproof_tx).await
+            }));
+        } else {
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let mut input = TrieInput::default();
+            if let Some((historical, blocks)) =
+                self.state.tree_state.blocks_by_hash(block.parent_hash)
+            {
+                // Retrieve revert state for historical block.
+                let revert_state = consistent_view.revert_state(historical)?;
+                input.append(revert_state);
+
+                // Extend with contents of parent in-memory blocks.
+                for block in blocks.iter().rev() {
+                    input.append_cached_ref(block.trie_updates(), block.hashed_state())
                 }
-
-                info!(target: "engine", accounts_len = targets.len(), "Computing multiproof");
-                multiproof.extend(proof_provider.multiproof(Default::default(), targets).unwrap());
             }
-
-            let _ = multiproof_tx.send((proof_provider, multiproof, started_at.elapsed()));
-        }));
+            let input = Arc::new(input.into_sorted());
+            self.task_spawner.spawn(Box::pin(async move {
+                gather_proofs_parallel(
+                    consistent_view,
+                    proof_provider,
+                    input,
+                    state_rx,
+                    multiproof_tx,
+                )
+                .await
+            }));
+        }
 
         let block_number = block.number;
         let block_hash = block.hash();

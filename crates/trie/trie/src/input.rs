@@ -1,4 +1,16 @@
-use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
+use crate::{
+    prefix_set::TriePrefixSetsMut,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
+
+// TODO: move
+#[derive(Debug)]
+pub struct TrieInputSorted {
+    pub nodes: TrieUpdatesSorted,
+    pub state: HashedPostStateSorted,
+    pub prefix_sets: TriePrefixSetsMut,
+}
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug)]
@@ -71,5 +83,13 @@ impl TrieInput {
     pub fn append_cached_ref(&mut self, nodes: &TrieUpdates, state: &HashedPostState) {
         self.nodes.extend_ref(nodes);
         self.state.extend_ref(state);
+    }
+
+    pub fn into_sorted(self) -> TrieInputSorted {
+        TrieInputSorted {
+            nodes: self.nodes.into_sorted(),
+            state: self.state.into_sorted(),
+            prefix_sets: self.prefix_sets,
+        }
     }
 }
