@@ -6,21 +6,17 @@ use serde::{Deserialize, Serialize};
 use reth_codecs::Compact;
 
 /// Identifier parameter for legacy transaction
-#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_LEGACY: usize = 0;
 
 /// Identifier parameter for EIP-2930 transaction
-#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_EIP2930: usize = 1;
 
 /// Identifier parameter for EIP-1559 transaction
-#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_IDENTIFIER_EIP1559: usize = 2;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
 /// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
 /// read from the buffer as a single byte.
-#[cfg(any(test, feature = "reth-codec"))]
 pub(crate) const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
@@ -255,26 +251,26 @@ mod tests {
     #[test]
     fn test_u64_to_tx_type() {
         // Test for Legacy transaction
-        assert_eq!(TxType::try_from(U64::from(0)).unwrap(), TxType::Legacy);
+        assert_eq!(TxType::try_from(U64::from(LEGACY_TX_TYPE_ID)).unwrap(), TxType::Legacy);
 
         // Test for EIP2930 transaction
-        assert_eq!(TxType::try_from(U64::from(1)).unwrap(), TxType::Eip2930);
+        assert_eq!(TxType::try_from(U64::from(EIP2930_TX_TYPE_ID)).unwrap(), TxType::Eip2930);
 
         // Test for EIP1559 transaction
-        assert_eq!(TxType::try_from(U64::from(2)).unwrap(), TxType::Eip1559);
+        assert_eq!(TxType::try_from(U64::from(EIP1559_TX_TYPE_ID)).unwrap(), TxType::Eip1559);
 
         // Test for EIP4844 transaction
-        assert_eq!(TxType::try_from(U64::from(3)).unwrap(), TxType::Eip4844);
+        assert_eq!(TxType::try_from(U64::from(EIP4844_TX_TYPE_ID)).unwrap(), TxType::Eip4844);
 
         // Test for EIP7702 transaction
-        assert_eq!(TxType::try_from(U64::from(4)).unwrap(), TxType::Eip7702);
+        assert_eq!(TxType::try_from(U64::from(EIP7702_TX_TYPE_ID)).unwrap(), TxType::Eip7702);
 
         // Test for Deposit transaction
         #[cfg(feature = "optimism")]
-        assert_eq!(TxType::try_from(U64::from(126)).unwrap(), TxType::Deposit);
+        assert_eq!(TxType::try_from(U64::from(DEPOSIT_TX_TYPE_ID)).unwrap(), TxType::Deposit);
 
         // For transactions with unsupported values
-        assert!(TxType::try_from(U64::from(5)).is_err());
+        assert!(TxType::try_from(U64::from(EIP7702_TX_TYPE_ID + 1)).is_err());
     }
 
     #[test]
@@ -329,29 +325,29 @@ mod tests {
         assert_eq!(tx_type, TxType::Legacy);
 
         // Test for EIP2930 transaction
-        let tx_type = TxType::decode(&mut &[1u8][..]).unwrap();
+        let tx_type = TxType::decode(&mut &[EIP2930_TX_TYPE_ID][..]).unwrap();
         assert_eq!(tx_type, TxType::Eip2930);
 
         // Test for EIP1559 transaction
-        let tx_type = TxType::decode(&mut &[2u8][..]).unwrap();
+        let tx_type = TxType::decode(&mut &[EIP1559_TX_TYPE_ID][..]).unwrap();
         assert_eq!(tx_type, TxType::Eip1559);
 
         // Test for EIP4844 transaction
-        let tx_type = TxType::decode(&mut &[3u8][..]).unwrap();
+        let tx_type = TxType::decode(&mut &[EIP4844_TX_TYPE_ID][..]).unwrap();
         assert_eq!(tx_type, TxType::Eip4844);
 
         // Test for EIP7702 transaction
-        let tx_type = TxType::decode(&mut &[4u8][..]).unwrap();
+        let tx_type = TxType::decode(&mut &[EIP7702_TX_TYPE_ID][..]).unwrap();
         assert_eq!(tx_type, TxType::Eip7702);
 
         // Test random byte not in range
-        let buf = [rand::thread_rng().gen_range(5..=u8::MAX)];
+        let buf = [rand::thread_rng().gen_range(EIP7702_TX_TYPE_ID + 1..=u8::MAX)];
         assert!(TxType::decode(&mut &buf[..]).is_err());
 
         // Test for Deposit transaction
         #[cfg(feature = "optimism")]
         {
-            let buf = [126u8];
+            let buf = [DEPOSIT_TX_TYPE_ID];
             let tx_type = TxType::decode(&mut &buf[..]).unwrap();
             assert_eq!(tx_type, TxType::Deposit);
         }
