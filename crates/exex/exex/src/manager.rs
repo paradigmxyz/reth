@@ -254,16 +254,16 @@ impl<Node: Unpin> Stream for ExExNotifications<Node> {
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
     #[allow(dead_code)]
+    node_head: Head,
     components: Node,
     notifications: Receiver<ExExNotification>,
-    node_head: Head,
     exex_head: ExExHead,
     pending_heal: bool,
     /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<Node::Executor, Node::Provider, Chain>>,
-    /// Whether to wait for the node head to be at the same height as the ExEx head, and then
-    /// call the [`Self::heal`].
-    pending_node_head_catchup: bool,
+    /// Whether we're currently waiting for the node head to catch up to the same height as the
+    /// ExEx head.
+    node_head_catchup_in_progress: bool,
 }
 
 impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
@@ -275,13 +275,13 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
         exex_head: ExExHead,
     ) -> Self {
         Self {
+            node_head,
             components,
             notifications,
-            node_head,
             exex_head,
             pending_heal: true,
             backfill_job: None,
-            pending_node_head_catchup: false,
+            node_head_catchup_in_progress: false,
         }
     }
 
@@ -343,7 +343,7 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
 
                 // TODO(alexey): wait until the node head is at the same height as the ExEx head
                 // and then repeat the process above
-                self.pending_node_head_catchup = true;
+                self.node_head_catchup_in_progress = true;
             }
         };
 
@@ -387,7 +387,7 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                         .map(|chain| (chain.clone(), chain.first().number - 1))
                 });
 
-            if this.pending_node_head_catchup {
+            if this.node_head_catchup_in_progress {
                 // If we are waiting for the node head to be at the same height as the ExEx head,
                 // then we need to check if the ExEx is on the canonical chain. To do this, we need
                 // to get the block at the ExEx head's height from new chain, and compare its hash
@@ -397,7 +397,7 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                 }) {
                     if block.hash() == this.exex_head.block.hash {
                         // ExEx is on the canonical chain, proceed with the notification
-                        this.pending_node_head_catchup = false;
+                        this.node_head_catchup_in_progress = false;
                     } else {
                         // ExEx is not on the canonical chain, heal
                         let tip = this
