@@ -92,6 +92,12 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     }
 }
 
+impl<DB: Database> AsRef<DatabaseProvider<<DB as Database>::TXMut>> for DatabaseProviderRW<DB> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut> {
+        &self.0
+    }
+}
+
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
@@ -101,6 +107,12 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
+    }
+}
+
+impl<DB: Database> From<DatabaseProviderRW<DB>> for DatabaseProvider<<DB as Database>::TXMut> {
+    fn from(provider: DatabaseProviderRW<DB>) -> Self {
+        provider.0
     }
 }
 
@@ -139,6 +151,12 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
+    }
+}
+
+impl<TX> AsRef<Self> for DatabaseProvider<TX> {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
@@ -3120,7 +3138,7 @@ impl<TX: DbTx> StateReader for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
+impl<TX: DbTxMut + DbTx + 'static> BlockExecutionWriter for DatabaseProvider<TX> {
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3298,7 +3316,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
+impl<TX: DbTxMut + DbTx + 'static> BlockWriter for DatabaseProvider<TX> {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3590,6 +3608,10 @@ impl<TX: DbTx + 'static> DBProvider for DatabaseProvider<TX> {
 
     fn into_tx(self) -> Self::Tx {
         self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        self.prune_modes_ref()
     }
 }
 
