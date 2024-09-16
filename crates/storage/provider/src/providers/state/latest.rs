@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, StateProvider, StateRootProvider,
@@ -16,10 +14,11 @@ use reth_primitives::{
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, proof::Proof, updates::TrieUpdates, witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, StateRoot, StorageRoot,
+    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
+    HashedStorage, StateRoot, StorageRoot, TrieInput,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieWitness};
+use std::collections::HashMap;
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -86,13 +85,8 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_from_nodes(
-        &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
-        StateRoot::overlay_root_from_nodes(self.tx, nodes, hashed_state, prefix_sets)
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        StateRoot::overlay_root_from_nodes(self.tx, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -106,11 +100,9 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx, nodes, hashed_state, prefix_sets)
+        StateRoot::overlay_root_from_nodes_with_updates(self.tx, input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
