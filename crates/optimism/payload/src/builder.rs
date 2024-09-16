@@ -625,7 +625,7 @@ where
 
             self.receipts.push(Some(receipt));
             self.executed_senders.push(sequencer_tx.signer());
-            self.executed_txs.push(sequencer_tx.to_owned().into_signed());
+            self.executed_txs.push(sequencer_tx.clone().into_signed());
         }
 
         Ok(())
@@ -732,7 +732,7 @@ where
 
             self.receipts.push(Some(receipt));
             self.executed_senders.push(tx.signer());
-            self.executed_txs.push(tx.to_owned().into_signed());
+            self.executed_txs.push(tx.clone().into_signed());
         }
 
         Ok(())
