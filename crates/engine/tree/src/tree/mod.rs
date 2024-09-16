@@ -2163,6 +2163,7 @@ where
         // Spawn proof gathering task
         let (multiproof_tx, multiproof_rx) = oneshot::channel();
         self.task_spawner.spawn(Box::pin(async move {
+            let started_at = Instant::now();
             let mut multiproof = MultiProof::default();
             while let Some(next) = rx.recv().await {
                 let mut targets = HashMap::from([match next {
@@ -2186,7 +2187,7 @@ where
                 multiproof.extend(proof_provider.multiproof(Default::default(), targets).unwrap());
             }
 
-            let _ = multiproof_tx.send((proof_provider, multiproof));
+            let _ = multiproof_tx.send((proof_provider, multiproof, started_at.elapsed()));
         }));
 
         let block_number = block.number;
@@ -2194,6 +2195,7 @@ where
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
 
+        info!(target: "engine", "Executing block");
         let exec_time = Instant::now();
         let output = self
             .metrics
@@ -2201,6 +2203,7 @@ where
             .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
         debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
+        info!(target: "engine", "Validating block post execution");
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),
@@ -2218,7 +2221,9 @@ where
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
         let waiting_for_multiproof_started_at = Instant::now();
-        let (proof_provider, multiproof) = multiproof_rx.blocking_recv().unwrap();
+        info!(target: "engine", "Waiting for multiproof result");
+        let (proof_provider, multiproof, multiproof_gathered_in) =
+            multiproof_rx.blocking_recv().unwrap();
         let spent_waiting_for_multiproof = waiting_for_multiproof_started_at.elapsed();
 
         let root_time = Instant::now();
@@ -2256,7 +2261,7 @@ where
         let root_from_proofs_started_at = Instant::now();
         match self.compute_state_root_from_proofs(proof_provider, &hashed_state, multiproof) {
             Ok((state_root_from_proofs, _)) => {
-                info!(target: "engine", %state_root, %state_root_from_proofs, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, "Computed root from proofs");
+                info!(target: "engine", %state_root, %state_root_from_proofs, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
             }
             Err(error) => {
                 error!(target: "engine", %error, "Error computing root from proofs");
