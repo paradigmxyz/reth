@@ -75,6 +75,11 @@ impl MultiProof {
         Ok(AccountProof { address, info, proof, storage_root, storage_proofs })
     }
 
+    /// Extend the multiproof with contents of another multiproof.
+    ///
+    /// # Panics
+    ///
+    /// If the storage root for the overlapping storage trie does not match.
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend(other.account_subtree);
         for (key, storage) in other.storages {

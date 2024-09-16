@@ -4,7 +4,7 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
 };
-use alloy_rlp::BufMut;
+use alloy_rlp::{BufMut, Encodable};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -25,8 +25,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, B256, U256,
+    keccak256, Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
@@ -44,8 +44,10 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_tasks::TaskSpawner;
 use reth_trie::{
-    updates::TrieUpdates, witness::TrieWitness, HashedPostState, MultiProof, Nibbles, TrieAccount,
-    TrieInput, EMPTY_ROOT_HASH,
+    prefix_set::TriePrefixSetsMut,
+    updates::TrieUpdates,
+    witness::{next_root_from_proofs, target_nodes, TrieWitness},
+    HashedPostState, MultiProof, Nibbles, TrieAccount, TrieInput, EMPTY_ROOT_HASH,
 };
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
@@ -61,7 +63,7 @@ use std::{
 };
 use streaming_database::{StateAccess, StreamingDatabase};
 use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
@@ -2164,17 +2166,19 @@ where
             let mut multiproof = MultiProof::default();
             while let Some(next) = rx.recv().await {
                 let mut targets = HashMap::from([match next {
-                    StateAccess::Account(address) => (address, HashSet::default()),
-                    StateAccess::StorageSlot(address, slot) => (address, HashSet::from(slot)),
+                    StateAccess::Account(address) => (keccak256(address), HashSet::default()),
+                    StateAccess::StorageSlot(address, slot) => {
+                        (keccak256(address), HashSet::from([keccak256(slot)]))
+                    }
                 }]);
 
                 while let Ok(next) = rx.try_recv() {
                     match next {
                         StateAccess::Account(address) => {
-                            targets.entry(address).or_default();
+                            targets.entry(keccak256(address)).or_default();
                         }
                         StateAccess::StorageSlot(address, slot) => {
-                            targets.entry(address).or_default().insert(slot);
+                            targets.entry(keccak256(address)).or_default().insert(keccak256(slot));
                         }
                     }
                 }
@@ -2213,35 +2217,49 @@ where
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
+        let waiting_for_multiproof_started_at = Instant::now();
         let (proof_provider, multiproof) = multiproof_rx.blocking_recv().unwrap();
+        let spent_waiting_for_multiproof = waiting_for_multiproof_started_at.elapsed();
 
         let root_time = Instant::now();
         let mut state_root_result = None;
 
+        // TODO:
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
         // finish parallel computation. It is important that nothing is being persisted as
         // we are computing in parallel, because we initialize a different database transaction
         // per thread and it might end up with a different view of the database.
-        let persistence_in_progress = self.persistence_state.in_progress();
-        if !persistence_in_progress {
-            state_root_result = match self
-                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
-            {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(ProviderError::ConsistentView(error)) => {
-                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                    None
-                }
-                Err(error) => return Err(error.into()),
-            };
-        }
+        // let persistence_in_progress = self.persistence_state.in_progress();
+        // if !persistence_in_progress {
+        //     state_root_result = match self
+        //         .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
+        //     {
+        //         Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+        //         Err(ProviderError::ConsistentView(error)) => {
+        //             debug!(target: "engine", %error, "Parallel state root computation failed
+        // consistency check, falling back");             None
+        //         }
+        //         Err(error) => return Err(error.into()),
+        //     };
+        // }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
             debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_with_updates(hashed_state.clone())?
+        };
+
+        // Test state root from proofs
+        let root_from_proofs_started_at = Instant::now();
+        match self.compute_state_root_from_proofs(proof_provider, &hashed_state, multiproof) {
+            Ok((state_root_from_proofs, _)) => {
+                info!(target: "engine", %state_root, %state_root_from_proofs, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, "Computed root from proofs");
+            }
+            Err(error) => {
+                error!(target: "engine", %error, "Error computing root from proofs");
+            }
         };
 
         if state_root != block.state_root {
@@ -2299,9 +2317,17 @@ where
         &self,
         state_provider: Box<dyn StateProvider>,
         state: &HashedPostState,
-        multiproof: MultiProof,
+        mut multiproof: MultiProof,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut input = TrieInput::from_state(state);
+        let proof_targets: HashMap<B256, HashSet<B256>> = HashMap::from_iter(
+            state
+                .accounts
+                .keys()
+                .map(|hashed_address| (*hashed_address, HashSet::default()))
+                .chain(state.storages.iter().map(|(hashed_address, storage)| {
+                    (*hashed_address, storage.storage.keys().copied().collect())
+                })),
+        );
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_trie_nodes = BTreeMap::default();
@@ -2324,7 +2350,7 @@ where
             };
             let key = Nibbles::unpack(hashed_address);
             let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
-            account_trie_nodes.extend(self.target_nodes(key.clone(), value, proof)?);
+            account_trie_nodes.extend(target_nodes(key.clone(), value, proof, None)?);
 
             // Gather and record storage trie nodes for this account.
             let mut storage_trie_nodes = BTreeMap::default();
@@ -2336,32 +2362,29 @@ where
                     .filter(|v| !v.is_zero())
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
                 let proof = storage_multiproof.subtree.iter().filter(|e| slot_key.starts_with(e.0));
-                storage_trie_nodes.extend(self.target_nodes(
-                    slot_key.clone(),
-                    slot_value,
-                    proof,
-                )?);
+                storage_trie_nodes.extend(target_nodes(slot_key.clone(), slot_value, proof, None)?);
             }
 
             let (storage_root, storage_trie_updates) =
-                TrieWitness::next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
+                next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
                     // Right pad the target with 0s.
                     let mut padded_key = key.pack();
                     padded_key.resize(32, 0);
-                    let proof = state_provider.multiproof(
-                        input,
-                        HashMap::from([(
-                            hashed_address,
-                            Vec::from([B256::from_slice(&padded_key)]),
-                        )]),
-                    )?;
+                    let mut proof = state_provider
+                        .multiproof(
+                            Default::default(),
+                            HashMap::from([(
+                                hashed_address,
+                                HashSet::from([B256::from_slice(&padded_key)]),
+                            )]),
+                        )
+                        .unwrap();
 
                     // The subtree only contains the proof for a single target.
                     let node = proof
                         .storages
-                        .get(&hashed_address)
-                        .and_then(|storage_multiproof| storage_multiproof.subtree.get(&key))
-                        .cloned()
+                        .get_mut(&hashed_address)
+                        .and_then(|storage_multiproof| storage_multiproof.subtree.remove(&key))
                         .ok_or(TrieWitnessError::MissingTargetNode(key))?;
                     Ok(node)
                 })?;
@@ -2369,14 +2392,16 @@ where
         }
 
         let (state_root, trie_updates) =
-            TrieWitness::next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
+            next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
-                let mut proof = state_provider.multiproof(
-                    input,
-                    HashMap::from([(B256::from_slice(&padded_key), Default::default())]),
-                )?;
+                let mut proof = state_provider
+                    .multiproof(
+                        Default::default(),
+                        HashMap::from([(B256::from_slice(&padded_key), Default::default())]),
+                    )
+                    .unwrap();
 
                 // The subtree only contains the proof for a single target.
                 let node = proof
@@ -2386,7 +2411,7 @@ where
                 Ok(node)
             })?;
 
-        todo!()
+        Ok((state_root, Default::default()))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -2724,6 +2749,7 @@ mod tests {
     use reth_primitives::Bytes;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
+    use reth_tasks::TokioTaskExecutor;
     use reth_trie::updates::TrieUpdates;
     use std::{
         str::FromStr,
@@ -2815,12 +2841,10 @@ mod tests {
             action_rx: Receiver<PersistenceAction>,
         ) -> Self {
             let persistence_handle = PersistenceHandle::new(action_tx);
-
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-
+            let task_spawner = Box::<TokioTaskExecutor>::default();
             let provider = MockEthProvider::default();
             let executor_provider = MockExecutorProvider::default();
-
             let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
@@ -2836,6 +2860,7 @@ mod tests {
                 provider.clone(),
                 executor_provider.clone(),
                 consensus,
+                task_spawner,
                 payload_validator,
                 from_tree_tx,
                 engine_api_tree_state,

@@ -4,22 +4,22 @@ use reth_revm::database::EvmStateProvider;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Copy, Debug)]
-pub enum StateAccess {
+pub(crate) enum StateAccess {
     Account(Address),
     StorageSlot(Address, B256),
 }
 
-pub struct StreamingDatabase<DB> {
+pub(crate) struct StreamingDatabase<DB> {
     inner: DB,
     sender: mpsc::UnboundedSender<StateAccess>,
 }
 
 impl<DB> StreamingDatabase<DB> {
-    pub fn new(inner: DB, sender: mpsc::UnboundedSender<StateAccess>) -> Self {
+    pub(crate) fn new(inner: DB, sender: mpsc::UnboundedSender<StateAccess>) -> Self {
         Self { inner, sender }
     }
 
-    pub fn new_with_rx(inner: DB) -> (Self, mpsc::UnboundedReceiver<StateAccess>) {
+    pub(crate) fn new_with_rx(inner: DB) -> (Self, mpsc::UnboundedReceiver<StateAccess>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Self::new(inner, tx), rx)
     }

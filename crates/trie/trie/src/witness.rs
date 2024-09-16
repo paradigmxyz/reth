@@ -142,7 +142,7 @@ where
             }
 
             let (storage_root, _) =
-                Self::next_root_from_proofs(storage_trie_nodes, false, |key: Nibbles| {
+                next_root_from_proofs(storage_trie_nodes, false, |key: Nibbles| {
                     // Right pad the target with 0s.
                     let mut padded_key = key.pack();
                     padded_key.resize(32, 0);
@@ -166,7 +166,7 @@ where
             debug_assert_eq!(storage_multiproof.root, storage_root);
         }
 
-        Self::next_root_from_proofs(account_trie_nodes, false, |key: Nibbles| {
+        next_root_from_proofs(account_trie_nodes, false, |key: Nibbles| {
             // Right pad the target with 0s.
             let mut padded_key = key.pack();
             padded_key.resize(32, 0);
@@ -186,70 +186,6 @@ where
         })?;
 
         Ok(self.witness)
-    }
-
-    pub fn next_root_from_proofs(
-        trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
-        retain_updates: bool,
-        mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
-    ) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError>
-    {
-        // Ignore branch child hashes in the path of leaves or lower child hashes.
-        let mut keys = trie_nodes.keys().peekable();
-        let mut ignored = HashSet::<Nibbles>::default();
-        while let Some(key) = keys.next() {
-            if keys.peek().map_or(false, |next| next.starts_with(key)) {
-                ignored.insert(key.clone());
-            }
-        }
-
-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-        let mut trie_nodes = trie_nodes.into_iter().filter(|e| !ignored.contains(&e.0)).peekable();
-        while let Some((path, value)) = trie_nodes.next() {
-            match value {
-                Either::Left(branch_hash) => {
-                    let parent_branch_path = path.slice(..path.len() - 1);
-                    if hash_builder.key.starts_with(&parent_branch_path) ||
-                        trie_nodes
-                            .peek()
-                            .map_or(false, |next| next.0.starts_with(&parent_branch_path))
-                    {
-                        hash_builder.add_branch(path, branch_hash, false);
-                    } else {
-                        // Parent is a branch node that needs to be turned into an extension node.
-                        let mut path = path.clone();
-                        loop {
-                            let node = trie_node_provider(path.clone())?;
-                            match TrieNode::decode(&mut &node[..])? {
-                                TrieNode::Branch(branch) => {
-                                    let children = branch_node_children(path, &branch);
-                                    for (child_path, branch_hash) in children {
-                                        hash_builder.add_branch(child_path, branch_hash, false);
-                                    }
-                                    break
-                                }
-                                TrieNode::Leaf(leaf) => {
-                                    let mut child_path = path;
-                                    child_path.extend_from_slice(&leaf.key);
-                                    hash_builder.add_leaf(child_path, &leaf.value);
-                                    break
-                                }
-                                TrieNode::Extension(ext) => {
-                                    path.extend_from_slice(&ext.key);
-                                }
-                            }
-                        }
-                    }
-                }
-                Either::Right(leaf_value) => {
-                    hash_builder.add_leaf(path, &leaf_value);
-                }
-            }
-        }
-
-        let root = hash_builder.root();
-        let (_, updates) = hash_builder.split();
-        Ok((root, updates))
     }
 }
 
@@ -311,4 +247,68 @@ pub fn target_nodes<'b>(
     }
 
     Ok(trie_nodes)
+}
+
+/// TODO:
+pub fn next_root_from_proofs(
+    trie_nodes: BTreeMap<Nibbles, Either<B256, Vec<u8>>>,
+    retain_updates: bool,
+    mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
+) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError> {
+    // Ignore branch child hashes in the path of leaves or lower child hashes.
+    let mut keys = trie_nodes.keys().peekable();
+    let mut ignored = HashSet::<Nibbles>::default();
+    while let Some(key) = keys.next() {
+        if keys.peek().map_or(false, |next| next.starts_with(key)) {
+            ignored.insert(key.clone());
+        }
+    }
+
+    let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
+    let mut trie_nodes = trie_nodes.into_iter().filter(|e| !ignored.contains(&e.0)).peekable();
+    while let Some((path, value)) = trie_nodes.next() {
+        match value {
+            Either::Left(branch_hash) => {
+                let parent_branch_path = path.slice(..path.len() - 1);
+                if hash_builder.key.starts_with(&parent_branch_path) ||
+                    trie_nodes
+                        .peek()
+                        .map_or(false, |next| next.0.starts_with(&parent_branch_path))
+                {
+                    hash_builder.add_branch(path, branch_hash, false);
+                } else {
+                    // Parent is a branch node that needs to be turned into an extension node.
+                    let mut path = path.clone();
+                    loop {
+                        let node = trie_node_provider(path.clone())?;
+                        match TrieNode::decode(&mut &node[..])? {
+                            TrieNode::Branch(branch) => {
+                                let children = branch_node_children(path, &branch);
+                                for (child_path, branch_hash) in children {
+                                    hash_builder.add_branch(child_path, branch_hash, false);
+                                }
+                                break
+                            }
+                            TrieNode::Leaf(leaf) => {
+                                let mut child_path = path;
+                                child_path.extend_from_slice(&leaf.key);
+                                hash_builder.add_leaf(child_path, &leaf.value);
+                                break
+                            }
+                            TrieNode::Extension(ext) => {
+                                path.extend_from_slice(&ext.key);
+                            }
+                        }
+                    }
+                }
+            }
+            Either::Right(leaf_value) => {
+                hash_builder.add_leaf(path, &leaf_value);
+            }
+        }
+    }
+
+    let root = hash_builder.root();
+    let (_, updates) = hash_builder.split();
+    Ok((root, updates))
 }
