@@ -2261,12 +2261,19 @@ where
 
         // Test state root from proofs
         let root_from_proofs_started_at = Instant::now();
-        match self.compute_state_root_from_proofs(proof_provider, &hashed_state, multiproof) {
+        let elapsed_from_proofs = match self.compute_state_root_from_proofs(
+            proof_provider,
+            &hashed_state,
+            multiproof,
+        ) {
             Ok((state_root_from_proofs, _)) => {
-                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, computed_in = ?root_from_proofs_started_at.elapsed(), ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
+                let computed_in = root_from_proofs_started_at.elapsed();
+                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?multiproof_gathered_in, "Computed root from proofs");
+                Some(computed_in.as_secs_f64())
             }
             Err(error) => {
                 error!(target: "engine", %error, "Error computing root from proofs");
+                None
             }
         };
 
@@ -2284,7 +2291,10 @@ where
             .into())
         }
 
-        self.metrics.block_validation.record_state_root(root_elapsed.as_secs_f64());
+        self.metrics.block_validation.record_state_root(
+            root_elapsed.as_secs_f64(),
+            elapsed_from_proofs.unwrap_or_default() + spent_waiting_for_multiproof.as_secs_f64(),
+        );
         debug!(target: "engine::tree", ?root_elapsed, ?block_number, "Calculated state root");
 
         let executed = ExecutedBlock {

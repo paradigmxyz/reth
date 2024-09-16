@@ -40,12 +40,15 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
+    /// Histogram of state root duration
+    pub(crate) state_root_from_proofs_histogram: Histogram,
 }
 
 impl BlockValidationMetrics {
     /// Records a new state root time, updating both the histogram and state root gauge
-    pub(crate) fn record_state_root(&self, elapsed_as_secs: f64) {
+    pub(crate) fn record_state_root(&self, elapsed_as_secs: f64, elapsed_from_proofs_as_secs: f64) {
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
+        self.state_root_from_proofs_histogram.record(elapsed_from_proofs_as_secs);
     }
 }
