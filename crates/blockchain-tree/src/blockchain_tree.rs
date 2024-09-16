@@ -1378,7 +1378,7 @@ mod tests {
     use alloy_primitives::{keccak256, Address, B256};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET, MIN_TRANSACTION_GAS};
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::tables;
     use reth_db_api::transaction::DbTxMut;
@@ -1558,13 +1558,13 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * 21_000);
+        let single_tx_cost = U256::from(EIP1559_INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
         let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
             TransactionSigned::from_transaction_and_signature(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
                     nonce,
-                    gas_limit: 21_000,
+                    gas_limit: MIN_TRANSACTION_GAS as u128,
                     to: Address::ZERO.into(),
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
@@ -1587,7 +1587,7 @@ mod tests {
                     Receipt {
                         tx_type: tx.tx_type(),
                         success: true,
-                        cumulative_gas_used: (idx as u64 + 1) * 21_000,
+                        cumulative_gas_used: (idx as u64 + 1) * MIN_TRANSACTION_GAS,
                         ..Default::default()
                     }
                     .with_bloom()
@@ -1602,7 +1602,7 @@ mod tests {
                     header: Header {
                         number,
                         parent_hash: parent.unwrap_or_default(),
-                        gas_used: body.len() as u64 * 21_000,
+                        gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
                         gas_limit: chain_spec.max_gas_limit,
                         mix_hash: B256::random(),
                         base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),

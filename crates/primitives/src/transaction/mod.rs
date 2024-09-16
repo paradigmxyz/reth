@@ -1706,6 +1706,7 @@ mod tests {
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
     use std::str::FromStr;
 
@@ -1860,7 +1861,7 @@ mod tests {
             nonce: 26,
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
-            gas_limit: 21000,
+            gas_limit: MIN_TRANSACTION_GAS as u128,
             to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),

@@ -44,6 +44,7 @@ reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
+reth-rpc-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -82,6 +83,7 @@ secp256k1 = { workspace = true, features = [
 aquamarine.workspace = true
 eyre.workspace = true
 fdlimit.workspace = true
+jsonrpsee.workspace = true
 rayon.workspace = true
 
 # tracing

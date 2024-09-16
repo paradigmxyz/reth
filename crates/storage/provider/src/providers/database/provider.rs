@@ -23,13 +23,13 @@ use reth_db::{
 };
 use reth_db_api::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::{Table, TableRow},
+    table::Table,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -43,7 +43,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, Withdrawals, B256, U256,
 };
-use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -92,6 +92,12 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     }
 }
 
+impl<DB: Database> AsRef<DatabaseProvider<<DB as Database>::TXMut>> for DatabaseProviderRW<DB> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut> {
+        &self.0
+    }
+}
+
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
@@ -101,6 +107,12 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
+    }
+}
+
+impl<DB: Database> From<DatabaseProviderRW<DB>> for DatabaseProvider<<DB as Database>::TXMut> {
+    fn from(provider: DatabaseProviderRW<DB>) -> Self {
+        provider.0
     }
 }
 
@@ -139,6 +151,12 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
         prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
+    }
+}
+
+impl<TX> AsRef<Self> for DatabaseProvider<TX> {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
@@ -1517,119 +1535,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             self.tx.delete::<T2>(value, None)?;
         }
         Ok(())
-    }
-
-    /// Prune the table for the specified pre-sorted key iterator.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator<T: Table>(
-        &self,
-        keys: impl IntoIterator<Item = T::Key>,
-        limiter: &mut PruneLimiter,
-        mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut keys = keys.into_iter();
-
-        let mut deleted_entries = 0;
-
-        for key in &mut keys {
-            if limiter.is_limit_reached() {
-                debug!(
-                    target: "providers::db",
-                    ?limiter,
-                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
-                    time_limit = %limiter.is_time_limit_reached(),
-                    table = %T::NAME,
-                    "Pruning limit reached"
-                );
-                break
-            }
-
-            let row = cursor.seek_exact(key)?;
-            if let Some(row) = row {
-                cursor.delete_current()?;
-                limiter.increment_deleted_entries_count();
-                deleted_entries += 1;
-                delete_callback(row);
-            }
-        }
-
-        let done = keys.next().is_none();
-        Ok((deleted_entries, done))
-    }
-
-    /// Prune the table for the specified key range.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_range<T: Table>(
-        &self,
-        keys: impl RangeBounds<T::Key> + Clone + Debug,
-        limiter: &mut PruneLimiter,
-        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
-        mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys)?;
-
-        let mut deleted_entries = 0;
-
-        let done = loop {
-            // check for time out must be done in this scope since it's not done in
-            // `prune_table_with_range_step`
-            if limiter.is_limit_reached() {
-                debug!(
-                    target: "providers::db",
-                    ?limiter,
-                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
-                    time_limit = %limiter.is_time_limit_reached(),
-                    table = %T::NAME,
-                    "Pruning limit reached"
-                );
-                break false
-            }
-
-            let done = self.prune_table_with_range_step(
-                &mut walker,
-                limiter,
-                &mut skip_filter,
-                &mut delete_callback,
-            )?;
-
-            if done {
-                break true
-            }
-            deleted_entries += 1;
-        };
-
-        Ok((deleted_entries, done))
-    }
-
-    /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
-    ///
-    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
-    /// pruning different tables concurrently, by letting them step to the same height before
-    /// timing out.
-    pub fn prune_table_with_range_step<T: Table>(
-        &self,
-        walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
-        limiter: &mut PruneLimiter,
-        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
-        delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
-
-        let row = res?;
-
-        if !skip_filter(&row) {
-            walker.delete_current()?;
-            limiter.increment_deleted_entries_count();
-            delete_callback(row);
-        }
-
-        Ok(false)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -3233,7 +3138,7 @@ impl<TX: DbTx> StateReader for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
+impl<TX: DbTxMut + DbTx + 'static> BlockExecutionWriter for DatabaseProvider<TX> {
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3411,7 +3316,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
+impl<TX: DbTxMut + DbTx + 'static> BlockWriter for DatabaseProvider<TX> {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3690,7 +3595,7 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
+impl<TX: DbTx + 'static> DBProvider for DatabaseProvider<TX> {
     type Tx = TX;
 
     fn tx_ref(&self) -> &Self::Tx {
@@ -3699,6 +3604,14 @@ impl<TX: DbTx> DBProvider for DatabaseProvider<TX> {
 
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
+    }
+
+    fn into_tx(self) -> Self::Tx {
+        self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        self.prune_modes_ref()
     }
 }
 
