@@ -115,13 +115,10 @@ impl TransactionCompat for OpTxBuilder {
         }
     }
 
-    /// Truncates the input of a transaction to only the first 4 bytes.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
         tx.inner.input = tx.inner.input.slice(..4);
     }
 
-    /// Returns the transaction type.
-    // todo: remove when alloy TransactionResponse trait it updated.
     fn tx_type(tx: &Self::Transaction) -> u8 {
         tx.inner.transaction_type.unwrap_or_default()
     }

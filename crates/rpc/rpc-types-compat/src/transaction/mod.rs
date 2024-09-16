@@ -68,8 +68,11 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + fmt::Debug {
     /// environment related fields to `None`.
     fn fill(tx: TransactionSignedEcRecovered, tx_inf: TransactionInfo) -> Self::Transaction;
 
+    /// Truncates the input of a transaction to only the first 4 bytes.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 
+    /// Returns the transaction type.
+    // todo: remove when alloy TransactionResponse trait it updated.
     fn tx_type(tx: &Self::Transaction) -> u8;
 }
 
@@ -84,7 +87,7 @@ impl TransactionCompat for () {
 
     fn otterscan_api_truncate_input(_tx: &mut Self::Transaction) {}
 
-    fn tx_type(tx: &Self::Transaction) -> u8 {
+    fn tx_type(_tx: &Self::Transaction) -> u8 {
         0
     }
 }
