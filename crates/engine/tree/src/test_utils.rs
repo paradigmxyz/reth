@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use reth_chainspec::ChainSpec;
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives::{BlockBody, SealedHeader, B256};

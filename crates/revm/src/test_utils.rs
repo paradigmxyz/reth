@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::precompile::HashMap;
 use alloc::vec::Vec;
 use reth_primitives::{

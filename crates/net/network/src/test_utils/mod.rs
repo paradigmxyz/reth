@@ -1,5 +1,5 @@
 //! Common helpers for network testing.
-
+#![allow(missing_docs)]
 mod init;
 mod testnet;
 

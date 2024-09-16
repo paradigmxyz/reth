@@ -1,5 +1,5 @@
 //! Utils for testing purposes.
-
+#![allow(missing_docs)]
 use crate::{
     error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,

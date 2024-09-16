@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 

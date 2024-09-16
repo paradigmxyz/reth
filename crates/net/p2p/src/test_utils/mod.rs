@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod bodies;
 mod full_block;
 mod headers;

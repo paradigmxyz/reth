@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::{
     engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,

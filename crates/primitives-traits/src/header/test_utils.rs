@@ -1,5 +1,5 @@
 //! Test utilities to generate random valid headers.
-
+#![allow(missing_docs)]
 use crate::Header;
 use alloy_primitives::B256;
 use proptest::{arbitrary::any, prop_compose};

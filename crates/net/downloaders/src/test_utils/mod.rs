@@ -1,5 +1,5 @@
 //! Test helper impls.
-
+#![allow(missing_docs)]
 #![allow(dead_code)]
 
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};

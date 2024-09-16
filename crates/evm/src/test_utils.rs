@@ -1,5 +1,5 @@
 //! Helpers for testing.
-
+#![allow(missing_docs)]
 use crate::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };

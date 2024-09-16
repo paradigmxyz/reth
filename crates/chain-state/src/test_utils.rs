@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,

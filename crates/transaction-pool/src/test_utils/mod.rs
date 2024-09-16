@@ -1,5 +1,5 @@
 //! Internal helpers for testing.
-
+#![allow(missing_docs)]
 use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolConfig};
 use std::ops::Deref;
 
