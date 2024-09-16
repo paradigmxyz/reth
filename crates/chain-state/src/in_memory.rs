@@ -839,7 +839,7 @@ mod tests {
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
     };
-    use reth_trie::{prefix_set::TriePrefixSetsMut, AccountProof, HashedStorage};
+    use reth_trie::{AccountProof, HashedStorage, TrieInput};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder,
@@ -913,12 +913,7 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_from_nodes(
-            &self,
-            _nodes: TrieUpdates,
-            _post_state: HashedPostState,
-            _prefix_sets: TriePrefixSetsMut,
-        ) -> ProviderResult<B256> {
+        fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
@@ -931,9 +926,7 @@ mod tests {
 
         fn state_root_from_nodes_with_updates(
             &self,
-            _nodes: TrieUpdates,
-            _post_state: HashedPostState,
-            _prefix_sets: TriePrefixSetsMut,
+            _input: TrieInput,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }

@@ -8,10 +8,7 @@ use reth_storage_api::{
     StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
-};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -74,12 +71,7 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
@@ -92,9 +84,7 @@ impl StateRootProvider for StateProviderTest {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }

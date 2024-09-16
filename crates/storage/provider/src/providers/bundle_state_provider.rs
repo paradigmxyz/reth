@@ -4,10 +4,7 @@ use crate::{
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, B256};
 use reth_storage_api::{StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
-};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, TrieInput};
 use std::collections::HashMap;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -75,12 +72,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         self.state_provider.state_root(state)
     }
 
-    fn state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!()
     }
 
@@ -96,16 +88,11 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 
     fn state_root_from_nodes_with_updates(
         &self,
-        nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSetsMut,
+        mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
-        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
-        let mut state_prefix_sets = state.construct_prefix_sets();
-        state.extend(hashed_state);
-        state_prefix_sets.extend(prefix_sets);
-        self.state_provider.state_root_from_nodes_with_updates(nodes, state, state_prefix_sets)
+        input.prepend(HashedPostState::from_bundle_state(&bundle_state.state));
+        self.state_provider.state_root_from_nodes_with_updates(input)
     }
 }
 
