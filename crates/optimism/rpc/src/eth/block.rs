@@ -1,24 +1,26 @@
 //! Loads and formats OP block RPC response.
 
-use reth_chainspec::ChainSpec;
+use op_alloy_network::Network;
+use op_alloy_rpc_types::OpTransactionReceipt;
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
-    helpers::{
-        EthApiSpec, EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, LoadTransaction,
-        SpawnBlocking,
-    },
-    FromEthApiError,
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
+    RpcReceipt,
 };
-use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyTransactionReceipt, BlockId};
+use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_types::BlockId;
 
-use crate::{OpEthApi, OpEthApiError};
+use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 
-impl<N, Eth> EthBlocks for OpEthApi<N, Eth>
+impl<N> EthBlocks for OpEthApi<N>
 where
-    Self: EthApiSpec + LoadBlock<Error = OpEthApiError> + LoadTransaction,
+    Self: LoadBlock<
+        Error = OpEthApiError,
+        NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
+    >,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
@@ -44,7 +46,7 @@ where
             let l1_block_info =
                 reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
-            let receipts = block
+            return block
                 .body
                 .into_iter()
                 .zip(receipts.iter())
@@ -61,7 +63,7 @@ where
                     };
 
                     Ok(OpReceiptBuilder::new(
-                        self.provider().chain_spec(),
+                        &self.inner.provider().chain_spec(),
                         tx,
                         meta,
                         receipt,
@@ -70,15 +72,15 @@ where
                     )?
                     .build())
                 })
-                .collect::<Result<Vec<_>, Self::Error>>();
-            return receipts.map(Some)
+                .collect::<Result<Vec<_>, Self::Error>>()
+                .map(Some)
         }
 
         Ok(None)
     }
 }
 
-impl<N, Eth> LoadBlock for OpEthApi<N, Eth>
+impl<N> LoadBlock for OpEthApi<N>
 where
     Self: LoadPendingBlock + SpawnBlocking,
     N: FullNodeComponents,

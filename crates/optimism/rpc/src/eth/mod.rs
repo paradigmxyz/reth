@@ -9,11 +9,11 @@ mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 
-use std::{fmt, marker::PhantomData, sync::Arc};
+use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use derive_more::Deref;
-use op_alloy_network::{Network, Optimism};
+use op_alloy_network::Optimism;
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -60,18 +60,16 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone, Deref)]
-pub struct OpEthApi<N: FullNodeComponents, Eth> {
+pub struct OpEthApi<N: FullNodeComponents> {
     /// Gateway to node's core components.
     #[deref]
     inner: Arc<EthApiNodeBackend<N>>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: OnceCell<SequencerClient>,
-    /// L1 RPC type builders.
-    _eth_ty_builders: PhantomData<Eth>,
 }
 
-impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
+impl<N: FullNodeComponents> OpEthApi<N> {
     /// Creates a new instance for given context.
     #[allow(clippy::type_complexity)]
     pub fn with_spawner(ctx: &EthApiBuilderCtx<N, Self>) -> Self {
@@ -93,26 +91,21 @@ impl<N: FullNodeComponents, Eth> OpEthApi<N, Eth> {
             ctx.config.proof_permits,
         );
 
-        Self {
-            inner: Arc::new(inner),
-            sequencer_client: OnceCell::new(),
-            _eth_ty_builders: PhantomData,
-        }
+        Self { inner: Arc::new(inner), sequencer_client: OnceCell::new() }
     }
 }
 
-impl<N, Eth> EthApiTypes for OpEthApi<N, Eth>
+impl<N> EthApiTypes for OpEthApi<N>
 where
     Self: Send + Sync,
     N: FullNodeComponents,
-    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Optimism;
-    type TransactionCompat = OpTxBuilder<Eth>;
+    type TransactionCompat = OpTxBuilder;
 }
 
-impl<N, Eth> EthApiSpec for OpEthApi<N, Eth>
+impl<N> EthApiSpec for OpEthApi<N>
 where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
@@ -141,11 +134,10 @@ where
     }
 }
 
-impl<N, Eth> SpawnBlocking for OpEthApi<N, Eth>
+impl<N> SpawnBlocking for OpEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
     N: FullNodeComponents,
-    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -163,7 +155,7 @@ where
     }
 }
 
-impl<N, Eth> LoadFee for OpEthApi<N, Eth>
+impl<N> LoadFee for OpEthApi<N>
 where
     Self: LoadBlock,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
@@ -191,11 +183,10 @@ where
     }
 }
 
-impl<N, Eth> LoadState for OpEthApi<N, Eth>
+impl<N> LoadState for OpEthApi<N>
 where
-    Self: Send + Sync,
+    Self: Send + Sync + Clone,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
-    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> {
@@ -213,7 +204,7 @@ where
     }
 }
 
-impl<N, Eth> EthState for OpEthApi<N, Eth>
+impl<N> EthState for OpEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
     N: FullNodeComponents,
@@ -224,14 +215,14 @@ where
     }
 }
 
-impl<N, Eth> EthFees for OpEthApi<N, Eth>
+impl<N> EthFees for OpEthApi<N>
 where
     Self: LoadFee,
     N: FullNodeComponents,
 {
 }
 
-impl<N, Eth> Trace for OpEthApi<N, Eth>
+impl<N> Trace for OpEthApi<N>
 where
     Self: LoadState,
     N: FullNodeComponents,
@@ -242,7 +233,7 @@ where
     }
 }
 
-impl<N, Eth> AddDevSigners for OpEthApi<N, Eth>
+impl<N> AddDevSigners for OpEthApi<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
@@ -251,11 +242,10 @@ where
     }
 }
 
-impl<N, Eth> BuilderProvider<N> for OpEthApi<N, Eth>
+impl<N> BuilderProvider<N> for OpEthApi<N>
 where
     Self: Send,
     N: FullNodeComponents,
-    Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse> + 'static,
 {
     type Ctx<'a> = &'a EthApiBuilderCtx<N, Self>;
 
@@ -264,7 +254,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents, Eth> fmt::Debug for OpEthApi<N, Eth> {
+impl<N: FullNodeComponents> fmt::Debug for OpEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }

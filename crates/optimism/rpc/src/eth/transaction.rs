@@ -1,26 +1,22 @@
 //! Loads and formats OP transaction RPC response.
 
-use std::marker::PhantomData;
-
 use alloy_primitives::{Bytes, B256};
-use op_alloy_network::{Network, Optimism};
-use op_alloy_rpc_types::OptimismTransactionFields;
-use reth_evm_optimism::RethL1BlockInfo;
+use op_alloy_rpc_types::Transaction;
 use reth_node_api::FullNodeComponents;
 use reth_primitives::TransactionSignedEcRecovered;
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_rpc::eth::EthTxBuilder;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, TransactionCompat,
+    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    FromEthApiError, FullEthApiTypes, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthStateCache};
 use reth_rpc_types::TransactionInfo;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
-use revm::L1BlockInfo;
 
 use crate::{OpEthApi, SequencerClient};
 
-impl<N, Eth> EthTransactions for OpEthApi<N, Eth>
+impl<N> EthTransactions for OpEthApi<N>
 where
     Self: LoadTransaction,
     N: FullNodeComponents,
@@ -60,9 +56,9 @@ where
     }
 }
 
-impl<N, Eth> LoadTransaction for OpEthApi<N, Eth>
+impl<N> LoadTransaction for OpEthApi<N>
 where
-    Self: SpawnBlocking,
+    Self: SpawnBlocking + FullEthApiTypes,
     N: FullNodeComponents,
 {
     type Pool = N::Pool;
@@ -80,7 +76,7 @@ where
     }
 }
 
-impl<N, Eth> OpEthApi<N, Eth>
+impl<N> OpEthApi<N>
 where
     N: FullNodeComponents,
 {
@@ -99,28 +95,34 @@ where
 }
 
 /// Builds OP transaction response type.
-#[derive(Debug, Clone, Copy)]
-pub struct OpTxBuilder<Eth> {
-    _l1_builders: PhantomData<Eth>,
-}
+#[derive(Clone, Debug, Copy)]
+pub struct OpTxBuilder;
 
-impl<Eth: TransactionCompat<Transaction = <Optimism as Network>::TransactionResponse>>
-    TransactionCompat for OpTxBuilder<Eth>
-{
-    type Transaction = <Optimism as Network>::TransactionResponse;
+impl TransactionCompat for OpTxBuilder {
+    type Transaction = Transaction;
 
     fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
         let signed_tx = tx.clone().into_signed();
 
-        let mut resp = Eth::fill(tx, tx_info);
+        let inner = EthTxBuilder::fill(tx, tx_info).inner;
 
-        resp.other = OptimismTransactionFields {
+        Transaction {
+            inner,
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint(),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
+            deposit_receipt_version: None, // todo: how to fill this field?
         }
-        .into();
+    }
 
-        resp
+    /// Truncates the input of a transaction to only the first 4 bytes.
+    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
+        tx.inner.input = tx.inner.input.slice(..4);
+    }
+
+    /// Returns the transaction type.
+    // todo: remove when alloy TransactionResponse trait it updated.
+    fn tx_type(tx: &Self::Transaction) -> u8 {
+        tx.inner.transaction_type.unwrap_or_default()
     }
 }

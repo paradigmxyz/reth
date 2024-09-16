@@ -12,14 +12,14 @@ use reth_rpc_types::TransactionRequest;
 
 use crate::{OpEthApi, OpEthApiError};
 
-impl<N, Eth> EthCall for OpEthApi<N, Eth>
+impl<N> EthCall for OpEthApi<N>
 where
     Self: Call,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
 }
 
-impl<N, Eth> Call for OpEthApi<N, Eth>
+impl<N> Call for OpEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
     Self::Error: From<OpEthApiError>,

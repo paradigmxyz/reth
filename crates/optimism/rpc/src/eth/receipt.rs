@@ -9,18 +9,15 @@ use reth_evm_optimism::RethL1BlockInfo;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::ChainSpecProvider;
-use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, LoadReceipt, LoadTransaction},
-    FromEthApiError,
-};
+use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
-use reth_rpc_types::{AnyReceiptEnvelope, AnyTransactionReceipt, Log, TransactionReceipt};
+use reth_rpc_types::{AnyReceiptEnvelope, Log, TransactionReceipt};
 
 use crate::{OpEthApi, OpEthApiError};
 
-impl<N, Eth> LoadReceipt for OpEthApi<N, Eth>
+impl<N> LoadReceipt for OpEthApi<N>
 where
-    Self: EthApiSpec + LoadTransaction<Error = OpEthApiError>,
+    Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
@@ -46,23 +43,19 @@ where
         let l1_block_info =
             reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
-        let op_receipt_meta = self
-            .build_op_receipt_meta(
-                self.provider().chain_spec(),
-                &tx,
-                l1_block_info,
-                &receipt,
-                l1_block_info,
-            )
-            .map_err(OpEthApiError::from)?;
-
-        let receipt_resp = OpReceiptBuilder::new(&tx, meta, &receipt, &receipts)?.build();
-
-        Ok(receipt_resp)
+        Ok(OpReceiptBuilder::new(
+            &self.inner.provider().chain_spec(),
+            &tx,
+            meta,
+            &receipt,
+            &receipts,
+            l1_block_info,
+        )?
+        .build())
     }
 }
 
-impl<N, Eth> OpEthApi<N, Eth>
+impl<N> OpEthApi<N>
 where
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {

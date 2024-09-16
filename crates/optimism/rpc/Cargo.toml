@@ -25,7 +25,6 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
