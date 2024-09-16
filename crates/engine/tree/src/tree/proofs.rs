@@ -109,11 +109,13 @@ where
                         }
                     },
                     None => {
+                        info!(target: "engine", "Channel closed.");
                         this.closed = true;
                     }
                 }
             }
             if !targets.is_empty() {
+                info!(target: "engine", account_len = targets.len(), "Spawning proof generation");
                 let (tx, rx) = oneshot::channel();
                 let view = this.view.clone();
                 let blocking_pool = this.blocking_task_pool.clone();
@@ -129,6 +131,7 @@ where
             }
 
             if let Poll::Ready(Some(result)) = this.pending.poll_next_unpin(cx) {
+                info!(target: "engine", "Received result");
                 this.multiproof.extend(result.expect("no error"));
                 continue
             }
