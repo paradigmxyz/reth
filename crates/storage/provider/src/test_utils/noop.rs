@@ -355,7 +355,7 @@ impl StorageRootProvider for NoopProvider {
 impl StateProofProvider for NoopProvider {
     fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -364,7 +364,7 @@ impl StateProofProvider for NoopProvider {
 
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())

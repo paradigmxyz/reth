@@ -617,7 +617,7 @@ impl StorageRootProvider for MockEthProvider {
 impl StateProofProvider for MockEthProvider {
     fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -626,7 +626,7 @@ impl StateProofProvider for MockEthProvider {
 
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())

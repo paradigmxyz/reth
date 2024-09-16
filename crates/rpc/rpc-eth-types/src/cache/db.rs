@@ -60,19 +60,19 @@ impl<'a> reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper<
 impl<'a> reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'a> {
     fn proof(
         &self,
-        hashed_state: reth_trie::HashedPostState,
+        input: reth_trie::TrieInput,
         address: revm_primitives::Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(hashed_state, address, slots)
+        self.0.proof(input, address, slots)
     }
 
     fn witness(
         &self,
-        overlay: reth_trie::HashedPostState,
+        input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<std::collections::HashMap<B256, alloy_primitives::Bytes>> {
-        self.0.witness(overlay, target)
+        self.0.witness(input, target)
     }
 }
 
