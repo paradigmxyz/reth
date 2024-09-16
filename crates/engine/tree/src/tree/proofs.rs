@@ -5,7 +5,7 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderBox,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
-use reth_trie::{MultiProof, TrieInput, TrieInputSorted};
+use reth_trie::{MultiProof, TrieInputSorted};
 use reth_trie_parallel::async_proof::AsyncProof;
 use std::{
     collections::{HashMap, HashSet},
@@ -142,6 +142,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub(crate) async fn gather_proofs_parallel<Factory>(
     view: ConsistentDbView<Factory>,
     provider: StateProviderBox,

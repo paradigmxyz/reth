@@ -25,12 +25,12 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    keccak256, Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, B256, U256,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256, U256,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    ProviderError, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
     StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -44,10 +44,14 @@ use reth_rpc_types::{
 use reth_stages_api::ControlFlow;
 use reth_tasks::TaskSpawner;
 use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory,
+    proof::Proof,
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::{next_root_from_proofs, target_nodes},
-    HashedPostState, MultiProof, Nibbles, TrieAccount, TrieInput, EMPTY_ROOT_HASH,
+    HashedPostState, MultiProof, Nibbles, TrieAccount, TrieInput, TrieInputSorted, EMPTY_ROOT_HASH,
 };
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
@@ -64,7 +68,6 @@ use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod config;
@@ -78,7 +81,7 @@ mod metrics;
 use metrics::EngineApiMetrics;
 
 mod streaming_database;
-use streaming_database::{StateAccess, StreamingDatabase};
+use streaming_database::StreamingDatabase;
 
 mod proofs;
 use proofs::*;
@@ -2166,11 +2169,26 @@ where
             return Err(e.into())
         }
 
-        let (database, mut state_rx) = StreamingDatabase::new_with_rx(&state_provider);
+        let (database, state_rx) = StreamingDatabase::new_with_rx(&state_provider);
         let executor = self.executor_provider.executor(StateProviderDatabase::new(database));
 
         // Spawn proof gathering task
         let (multiproof_tx, multiproof_rx) = oneshot::channel();
+
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let mut trie_input = TrieInput::default();
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(block.parent_hash)
+        {
+            // Retrieve revert state for historical block.
+            let revert_state = consistent_view.revert_state(historical)?;
+            trie_input.append(revert_state);
+
+            // Extend with contents of parent in-memory blocks.
+            for block in blocks.iter().rev() {
+                trie_input.append_cached_ref(block.trie_updates(), block.hashed_state())
+            }
+        }
+        let trie_input = Arc::new(trie_input.into_sorted());
 
         let persistence_in_progress = self.persistence_state.in_progress();
         if persistence_in_progress {
@@ -2178,26 +2196,13 @@ where
                 gather_proofs(proof_provider, state_rx, multiproof_tx).await
             }));
         } else {
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-            let mut input = TrieInput::default();
-            if let Some((historical, blocks)) =
-                self.state.tree_state.blocks_by_hash(block.parent_hash)
-            {
-                // Retrieve revert state for historical block.
-                let revert_state = consistent_view.revert_state(historical)?;
-                input.append(revert_state);
-
-                // Extend with contents of parent in-memory blocks.
-                for block in blocks.iter().rev() {
-                    input.append_cached_ref(block.trie_updates(), block.hashed_state())
-                }
-            }
-            let input = Arc::new(input.into_sorted());
+            let trie_input = trie_input.clone();
             let task_spawner = self.task_spawner.clone();
             self.task_spawner.spawn(Box::pin(async move {
                 let started_at = Instant::now();
                 let result =
-                    GatherProofsParallel::new(consistent_view, input, task_spawner, state_rx).await;
+                    GatherProofsParallel::new(consistent_view, trie_input, task_spawner, state_rx)
+                        .await;
                 let _ = multiproof_tx.send((proof_provider, result, started_at.elapsed()));
             }));
         }
@@ -2234,7 +2239,7 @@ where
 
         let waiting_for_multiproof_started_at = Instant::now();
         info!(target: "engine", "Waiting for multiproof result");
-        let (proof_provider, multiproof, multiproof_gathered_in) =
+        let (_proof_provider, multiproof, multiproof_gathered_in) =
             multiproof_rx.blocking_recv().unwrap();
         let spent_waiting_for_multiproof = waiting_for_multiproof_started_at.elapsed();
 
@@ -2247,19 +2252,18 @@ where
         // finish parallel computation. It is important that nothing is being persisted as
         // we are computing in parallel, because we initialize a different database transaction
         // per thread and it might end up with a different view of the database.
-        // let persistence_in_progress = self.persistence_state.in_progress();
-        // if !persistence_in_progress {
-        //     state_root_result = match self
-        //         .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
-        //     {
-        //         Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-        //         Err(ProviderError::ConsistentView(error)) => {
-        //             debug!(target: "engine", %error, "Parallel state root computation failed
-        // consistency check, falling back");             None
-        //         }
-        //         Err(error) => return Err(error.into()),
-        //     };
-        // }
+        if !persistence_in_progress {
+            state_root_result = match self
+                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
+            {
+                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                Err(ProviderError::ConsistentView(error)) => {
+                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            };
+        }
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
@@ -2272,22 +2276,22 @@ where
 
         // Test state root from proofs
         let root_from_proofs_started_at = Instant::now();
-        let elapsed_from_proofs = match self.compute_state_root_from_proofs(
-            proof_provider,
-            &hashed_state,
-            multiproof,
-        ) {
-            Ok((state_root_from_proofs, _)) => {
-                let computed_in = root_from_proofs_started_at.elapsed();
-                let total_from_proofs = computed_in + spent_waiting_for_multiproof;
-                let diff_secs = root_elapsed.as_secs_f64() - total_from_proofs.as_secs_f64();
-                info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?total_from_proofs, diff_secs, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
-                Some(computed_in.as_secs_f64())
+        let elapsed_from_proofs = if !persistence_in_progress {
+            match self.compute_state_root_from_proofs(&hashed_state, trie_input, multiproof) {
+                Ok((state_root_from_proofs, _)) => {
+                    let computed_in = root_from_proofs_started_at.elapsed();
+                    let total_from_proofs = computed_in + spent_waiting_for_multiproof;
+                    let diff_secs = root_elapsed.as_secs_f64() - total_from_proofs.as_secs_f64();
+                    info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?total_from_proofs, diff_secs, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
+                    Some(computed_in.as_secs_f64())
+                }
+                Err(error) => {
+                    error!(target: "engine", %error, "Error computing root from proofs");
+                    None
+                }
             }
-            Err(error) => {
-                error!(target: "engine", %error, "Error computing root from proofs");
-                None
-            }
+        } else {
+            None
         };
 
         if state_root != block.state_root {
@@ -2345,10 +2349,13 @@ where
 
     fn compute_state_root_from_proofs(
         &self,
-        state_provider: Box<dyn StateProvider>,
         state: &HashedPostState,
+        input: Arc<TrieInputSorted>,
         mut multiproof: MultiProof,
     ) -> ProviderResult<(B256, TrieUpdates)> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let provider_ro = consistent_view.provider_ro()?;
+
         let proof_targets: HashMap<B256, HashSet<B256>> = HashMap::from_iter(
             state
                 .accounts
@@ -2395,20 +2402,24 @@ where
                 storage_trie_nodes.extend(target_nodes(slot_key.clone(), slot_value, proof, None)?);
             }
 
-            let (storage_root, storage_trie_updates) =
+            let (storage_root, _storage_trie_updates) =
                 next_root_from_proofs(storage_trie_nodes, true, |key: Nibbles| {
                     // Right pad the target with 0s.
                     let mut padded_key = key.pack();
                     padded_key.resize(32, 0);
-                    let mut proof = state_provider
-                        .multiproof(
-                            Default::default(),
-                            HashMap::from([(
-                                hashed_address,
-                                HashSet::from([B256::from_slice(&padded_key)]),
-                            )]),
-                        )
-                        .unwrap();
+                    let mut proof = Proof::new(
+                        InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &input.nodes,
+                        ),
+                        HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                            &input.state,
+                        ),
+                    )
+                    .with_target((hashed_address, HashSet::from([B256::from_slice(&padded_key)])))
+                    .multiproof()
+                    .unwrap();
 
                     // The subtree only contains the proof for a single target.
                     let node = proof
@@ -2421,17 +2432,24 @@ where
             debug_assert_eq!(storage_multiproof.root, storage_root);
         }
 
-        let (state_root, trie_updates) =
+        let (state_root, _trie_updates) =
             next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
-                let mut proof = state_provider
-                    .multiproof(
-                        Default::default(),
-                        HashMap::from([(B256::from_slice(&padded_key), Default::default())]),
-                    )
-                    .unwrap();
+                let mut proof = Proof::new(
+                    InMemoryTrieCursorFactory::new(
+                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                        &input.nodes,
+                    ),
+                    HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                        &input.state,
+                    ),
+                )
+                .with_target((B256::from_slice(&padded_key), Default::default()))
+                .multiproof()
+                .unwrap();
 
                 // The subtree only contains the proof for a single target.
                 let node = proof
