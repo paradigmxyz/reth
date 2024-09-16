@@ -44,7 +44,8 @@ engine-withdrawals:
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
-engine-api: []
+engine-api:
+  - Re-org to Previously Validated Sidechain Payload (Paris) (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217

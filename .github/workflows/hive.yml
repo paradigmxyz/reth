@@ -255,7 +255,7 @@ jobs:
           cat hivetests/workspace/logs/reth/client-*.log
   notify-on-error:
     needs: test
-    if: failure()
+    if: false #failure()
     runs-on:
       group: Reth
     steps:

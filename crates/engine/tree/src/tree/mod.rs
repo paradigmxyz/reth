@@ -2198,7 +2198,16 @@ where
             state_provider.state_root_with_updates(hashed_state.clone())?
         };
 
-        if state_root != block.state_root {
+        let (seq_state_root, seq_trie_output) =
+            state_provider.state_root_with_updates(hashed_state.clone())?;
+
+        let state_root_eq = state_root == seq_state_root;
+        debug!(target: "engine", ?state_root_eq, ?state_root, ?seq_state_root, "state_root == seq_state_root");
+
+        let trie_output_eq = trie_output == seq_trie_output;
+        debug!(target: "engine", ?trie_output_eq, "trie_output == seq_trie_output");
+
+        if seq_state_root != block.state_root {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
                 &parent_block,
