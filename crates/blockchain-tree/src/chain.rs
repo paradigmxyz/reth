@@ -218,7 +218,7 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state = executor.execute((&block, U256::MAX).into(), #[cfg(feature = "telos")] None)?;
+        let state = executor.execute((&block, U256::MAX).into(), #[cfg(feature = "telos")] telos_extra_fields)?;
         externals.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&state.receipts, &state.requests),
