@@ -10,7 +10,7 @@ use jsonrpsee::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
+use reth_rpc_eth_api::{pubsub::EthPubSubApiServer, FullEthApiTypes, RpcTransaction};
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
@@ -71,17 +71,14 @@ impl<Provider, Pool, Events, Network, Eth> EthPubSub<Provider, Pool, Events, Net
 }
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<Eth::Transaction>
+impl<Provider, Pool, Events, Network, Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>>
     for EthPubSub<Provider, Pool, Events, Network, Eth>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
-    Eth: TransactionCompat<
-            Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-        > + Clone
-        + 'static,
+    Eth: FullEthApiTypes + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -113,9 +110,7 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
     // todo: make alloy_rpc_types_eth::SubscriptionResult generic over transaction
-    Eth: TransactionCompat<
-        Transaction = reth_rpc_types::WithOtherFields<reth_rpc_types::Transaction>,
-    >,
+    Eth: FullEthApiTypes,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -146,7 +141,9 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().map(|tx| {
-                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered::<Eth>(
+                            EthSubscriptionResult::FullTransaction(Box::new(from_recovered::<
+                                Eth::TransactionCompat,
+                            >(
                                 tx.transaction.to_recovered_transaction(),
                             )))
                         });
