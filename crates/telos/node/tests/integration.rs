@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::{sleep};
 use std::time::Duration;
+use alloy_provider::{Provider, ProviderBuilder};
 use telos_consensus_client::main_utils::{build_consensus_client};
 use telos_consensus_client::client::{ConsensusClient};
 use telos_consensus_client::config::{AppConfig, CliArgs};
@@ -181,20 +182,30 @@ async fn testing_chain_sync() {
 
     println!("Telos consensus client starting, awaiting result...");
     let client_handle = tokio::spawn(client.run(block_receiver, lib));
-
+    let rpc_url = format!("http://localhost:{}", rpc_port).parse().unwrap();
+    let provider = ProviderBuilder::new().on_http(rpc_url);
 
     let shutdown_handle = tokio::spawn(async move {
         // todo wait time or anything else to wait for shutdown
         println!("Waiting to send shutdown signal...");
-        sleep(Duration::from_secs(15));
-        _ = consensus_shutdown.shutdown().await.unwrap();
+
+        loop {
+            sleep(Duration::from_secs(1));
+            let latest_block = provider.get_block_number().await.unwrap();
+            println!("Latest block: {latest_block}");
+            if latest_block > 1 {
+                break;
+            }
+        }
+
         _ = translator_shutdown.shutdown().await.unwrap();
+        _ = translator_handle.await.unwrap();
+        println!("Translator shutdown done.");
+        _ = consensus_shutdown.shutdown().await.unwrap();
     });
 
 
     _ = client_handle.await.unwrap();
     println!("Client shutdown done.");
-    _ = translator_handle.await.unwrap();
-    println!("Translator shutdown done.");
     shutdown_handle.await.unwrap();
 }
