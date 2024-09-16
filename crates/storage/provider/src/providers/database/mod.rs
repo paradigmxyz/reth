@@ -186,9 +186,14 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
     type Provider = DatabaseProviderRO<N::DB>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.provider_rw().map(|provider| provider.0)
     }
 }
 
