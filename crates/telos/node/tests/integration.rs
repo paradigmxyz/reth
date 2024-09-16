@@ -12,7 +12,6 @@ use reth_telos_rpc::TelosClient;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
 use reqwest::Url;
 use telos_consensus_client::client::ConsensusClient;
@@ -24,6 +23,7 @@ use telos_translator_rs::translator::Translator;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 
 pub mod live_test_runner;
 
@@ -144,22 +144,16 @@ async fn testing_chain_sync() {
 
     let (node_config, jwt_secret) = init_reth().unwrap();
 
-    // let reth_runtime = tokio::runtime::Builder::new_multi_thread()
-    //     .worker_threads(4)
-    //     .enable_all()
-    //     .build()
-    //     .unwrap();
-    // let exec = TaskManager::new(reth_runtime.handle().clone());
     let exec = TaskManager::current();
     let exec = exec.executor();
 
     reth_tracing::init_test_tracing();
 
     let telos_args = TelosArgs {
-        telos_endpoint: None,
-        signer_account: None,
-        signer_permission: None,
-        signer_key: None,
+        telos_endpoint: Some(format!("http://localhost:{chain_port}")),
+        signer_account: Some("rpc.evm".to_string()),
+        signer_permission: Some("active".to_string()),
+        signer_key: Some("5Jr65kdYmn33C3UabzhmWDm2PuqbRfPuDStts3ZFNSBLM7TqaiL".to_string()),
         gas_cache_seconds: None,
     };
 
@@ -205,7 +199,7 @@ async fn testing_chain_sync() {
         println!("Waiting to send shutdown signal...");
 
         loop {
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_secs(1)).await;
             let latest_block = provider.get_block_number().await.unwrap();
             println!("Latest block: {latest_block}");
             if latest_block > CONTAINER_LAST_EVM_BLOCK {
@@ -213,7 +207,7 @@ async fn testing_chain_sync() {
             }
         }
 
-        // live_test_runner::run_tests(&rpc_url.clone().to_string(), "87ef69a835f8cd0c44ab99b7609a20b2ca7f1c8470af4f0e5b44db927d542084").await;
+        live_test_runner::run_tests(&rpc_url.clone().to_string(), "87ef69a835f8cd0c44ab99b7609a20b2ca7f1c8470af4f0e5b44db927d542084").await;
 
         _ = translator_shutdown.shutdown().await.unwrap();
         _ = translator_handle.await.unwrap();
