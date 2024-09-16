@@ -12,11 +12,10 @@ use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::TriePrefixSets,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -42,12 +41,8 @@ pub struct AsyncStateRoot<Factory> {
     view: ConsistentDbView<Factory>,
     /// Blocking task pool.
     blocking_pool: BlockingTaskPool,
-    /// Cached trie nodes.
-    trie_nodes: TrieUpdates,
-    /// Changed hashed state.
-    hashed_state: HashedPostState,
-    /// A set of prefix sets that have changed.
-    prefix_sets: TriePrefixSets,
+    /// Trie input.
+    input: TrieInput,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -58,16 +53,12 @@ impl<Factory> AsyncStateRoot<Factory> {
     pub fn new(
         view: ConsistentDbView<Factory>,
         blocking_pool: BlockingTaskPool,
-        trie_nodes: TrieUpdates,
-        hashed_state: HashedPostState,
-        prefix_sets: TriePrefixSets,
+        input: TrieInput,
     ) -> Self {
         Self {
             view,
             blocking_pool,
-            trie_nodes,
-            hashed_state,
-            prefix_sets,
+            input,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -95,14 +86,12 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), AsyncStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let trie_nodes_sorted = Arc::new(self.trie_nodes.into_sorted());
-        let hashed_state_sorted = Arc::new(self.hashed_state.into_sorted());
+        let trie_nodes_sorted = Arc::new(self.input.nodes.into_sorted());
+        let hashed_state_sorted = Arc::new(self.input.state.into_sorted());
+        let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
-            self.prefix_sets
-                .account_prefix_set
-                .iter()
-                .map(|nibbles| B256::from_slice(&nibbles.pack())),
-            self.prefix_sets.storage_prefix_sets,
+            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets.storage_prefix_sets,
         );
 
         // Pre-calculate storage roots async for accounts which were changed.
@@ -156,7 +145,7 @@ where
 
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            self.prefix_sets.account_prefix_set,
+            prefix_sets.account_prefix_set,
         )
         .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::new(
@@ -208,7 +197,7 @@ where
         trie_updates.finalize(
             account_node_iter.walker,
             hash_builder,
-            self.prefix_sets.destroyed_accounts,
+            prefix_sets.destroyed_accounts,
         );
 
         let stats = tracker.finish();
@@ -255,7 +244,7 @@ mod tests {
     use rayon::ThreadPoolBuilder;
     use reth_primitives::{keccak256, Account, Address, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::{test_utils, HashedStorage};
+    use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
     #[tokio::test]
     async fn random_async_root() {
@@ -309,8 +298,6 @@ mod tests {
                 consistent_view.clone(),
                 blocking_pool.clone(),
                 Default::default(),
-                HashedPostState::default(),
-                Default::default(),
             )
             .incremental_root()
             .await
@@ -343,14 +330,11 @@ mod tests {
             }
         }
 
-        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         assert_eq!(
             AsyncStateRoot::new(
                 consistent_view.clone(),
                 blocking_pool.clone(),
-                Default::default(),
-                hashed_state,
-                prefix_sets
+                TrieInput::from_state(hashed_state)
             )
             .incremental_root()
             .await
