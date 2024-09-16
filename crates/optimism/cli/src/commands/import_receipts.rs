@@ -232,13 +232,13 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        let mut storage_writer = UnifiedStorageWriter::from(&provider.0, static_file_producer);
+        let mut storage_writer = UnifiedStorageWriter::from(&provider, static_file_producer);
         storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
     // as static files works in file ranges, internally it will be committing when creating the
     // next file range already, so we only need to call explicitly at the end.
-    UnifiedStorageWriter::commit(provider.0, static_file_provider)?;
+    UnifiedStorageWriter::commit(provider, static_file_provider)?;
 
     Ok(ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns })
 }

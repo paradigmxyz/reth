@@ -40,7 +40,7 @@ pub trait DbTxUnwindExt: DbTxMut {
         Ok(deleted)
     }
 
-    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table.
+    /// Unwind a table forward by a [`Walker`][crate::cursor::Walker] on another table.
     ///
     /// Note: Range is inclusive and first key in the range is removed.
     fn unwind_table_by_walker<T1, T2>(

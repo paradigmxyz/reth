@@ -188,7 +188,7 @@ pub struct UnwindOutput {
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
-/// Stages receive [`DatabaseProviderRW`].
+/// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
 pub trait Stage<Provider>: Send + Sync {
     /// Get the ID of the stage.

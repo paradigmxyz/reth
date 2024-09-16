@@ -58,14 +58,12 @@ impl AccountHashingStage {
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
     pub fn seed<Tx: DbTx + DbTxMut + 'static>(
-        provider: &DatabaseProvider<Tx>,
+        provider: &reth_provider::DatabaseProvider<Tx>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db_api::models::AccountBeforeTx;
         use reth_primitives::U256;
-        use reth_provider::{
-            providers::StaticFileWriter, DatabaseProvider, StaticFileProviderFactory,
-        };
+        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
