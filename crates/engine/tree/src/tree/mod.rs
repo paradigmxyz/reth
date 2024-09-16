@@ -2220,6 +2220,7 @@ where
             .executor
             .metered((&block, U256::MAX).into(), |input| executor.execute(input))?;
         debug!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+        let executed_in = exec_time.elapsed();
 
         info!(target: "engine", "Validating block post execution");
         if let Err(err) = self.consensus.validate_block_post_execution(
@@ -2283,7 +2284,7 @@ where
                     let computed_in = root_from_proofs_started_at.elapsed();
                     let total_from_proofs = computed_in + spent_waiting_for_multiproof;
                     let diff_secs = root_elapsed.as_secs_f64() - total_from_proofs.as_secs_f64();
-                    info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?total_from_proofs, diff_secs, ?multiproof_gathered_in, persistence_in_progress, "Computed root from proofs");
+                    info!(target: "engine", %state_root, %state_root_from_proofs, vanilla_computed_in = ?root_elapsed, ?computed_in, ?spent_waiting_for_multiproof, ?total_from_proofs, diff_secs, ?multiproof_gathered_in, exec_in = ?executed_in, persistence_in_progress, "Computed root from proofs");
                     Some(computed_in.as_secs_f64())
                 }
                 Err(error) => {
