@@ -441,7 +441,7 @@ where
 /// configuration parameters
 #[derive(Debug)]
 pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
-    /// Receipts corresponding to each transaction in the block
+    /// Receipts  to each transaction in the block
     pub receipts: Vec<Option<Receipt>>,
     /// Signed transactions executed in the block
     pub executed_txs: Vec<TransactionSigned>,
@@ -565,17 +565,64 @@ where
                     )
                 })?;
 
-            if let Err(err) = self.insert_sequencer_transaction(&sequencer_tx, db) {
-                match err {
-                    PayloadBuilderError::EvmExecutionError(EVMError::Transaction(err)) => {
-                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+            //
+            // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
+            // were not introduced in Bedrock. In addition, regular transactions don't have deposit
+            // nonces, so we don't need to touch the DB for those.
+            let depositor = (self.is_regolith && sequencer_tx.is_deposit())
+                .then(|| {
+                    db.load_cache_account(sequencer_tx.signer())
+                        .map(|acc| acc.account_info().unwrap_or_default())
+                })
+                .transpose()
+                .map_err(|_| {
+                    PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
+                        sequencer_tx.signer(),
+                    ))
+                })?;
+
+            let execution_result = match evm_transact_commit(
+                &sequencer_tx,
+                self.initialized_cfg.clone(),
+                self.initialized_block_env.clone(),
+                self.evm_config.clone(),
+                db,
+            ) {
+                Ok(result) => result,
+                Err(err) => match err {
+                    EVMError::Transaction(err) => {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error insequencer transaction, skipping.");
                         continue;
                     }
                     other => {
-                        return Err(other);
+                        return Err(PayloadBuilderError::EvmExecutionError(other));
                     }
-                }
-            }
+                },
+            };
+
+            self.cumulative_gas_used += execution_result.gas_used();
+
+            let receipt = Receipt {
+                tx_type: sequencer_tx.tx_type(),
+                success: execution_result.is_success(),
+                cumulative_gas_used: self.cumulative_gas_used,
+                logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
+                deposit_nonce: depositor.map(|account| account.nonce),
+                // The deposit receipt version was introduced in Canyon to indicate an update to how
+                // receipt hashes should be computed when set. The state transition process
+                // ensures this is only set for post-Canyon deposit transactions.
+                deposit_receipt_version: self
+                    .chain_spec
+                    .is_fork_active_at_timestamp(
+                        OptimismHardfork::Canyon,
+                        self.payload_attributes.payload_attributes.timestamp,
+                    )
+                    .then_some(1),
+            };
+
+            self.receipts.push(Some(receipt));
+            self.executed_senders.push(sequencer_tx.signer());
+            self.executed_txs.push(sequencer_tx.to_owned().into_signed());
         }
 
         Ok(())
@@ -630,7 +677,37 @@ where
 
             // convert tx to a signed transaction
             let tx = pool_tx.to_recovered_transaction();
-            self.insert_pooled_transaction(&tx, db)?;
+
+            let execution_result = evm_transact_commit(
+                &tx,
+                self.initialized_cfg.clone(),
+                self.initialized_block_env.clone(),
+                self.evm_config.clone(),
+                db,
+            )
+            .map_err(PayloadBuilderError::EvmExecutionError)?;
+
+            let gas_used = execution_result.gas_used();
+            self.cumulative_gas_used += gas_used;
+
+            let receipt = Receipt {
+                tx_type: tx.tx_type(),
+                success: execution_result.is_success(),
+                cumulative_gas_used: self.cumulative_gas_used,
+                logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
+                deposit_nonce: None,
+                deposit_receipt_version: None,
+            };
+
+            // update add to total fees
+            let miner_fee = tx
+                .effective_tip_per_gas(Some(self.base_fee))
+                .expect("fee is always valid; execution succeeded");
+            self.total_fees += U256::from(miner_fee) * U256::from(gas_used);
+
+            self.receipts.push(Some(receipt));
+            self.executed_senders.push(tx.signer());
+            self.executed_txs.push(tx.to_owned().into_signed());
         }
 
         Ok(())
@@ -693,54 +770,6 @@ where
                 )
                 .then_some(1),
         };
-
-        self.receipts.push(Some(receipt));
-        self.executed_senders.push(tx.signer());
-        self.executed_txs.push(tx.to_owned().into_signed());
-
-        Ok(())
-    }
-
-    /// Inserts a transaction from the transaction pool into the block, committing state to the db
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` on successful execution and insertion of the pooled transaction
-    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
-    pub fn insert_pooled_transaction<DB>(
-        &mut self,
-        tx: &TransactionSignedEcRecovered,
-        db: &mut revm::State<DB>,
-    ) -> Result<(), PayloadBuilderError>
-    where
-        DB: revm::Database<Error = ProviderError>,
-    {
-        let execution_result = evm_transact_commit(
-            tx,
-            self.initialized_cfg.clone(),
-            self.initialized_block_env.clone(),
-            self.evm_config.clone(),
-            db,
-        )
-        .map_err(PayloadBuilderError::EvmExecutionError)?;
-
-        let gas_used = execution_result.gas_used();
-        self.cumulative_gas_used += gas_used;
-
-        let receipt = Receipt {
-            tx_type: tx.tx_type(),
-            success: execution_result.is_success(),
-            cumulative_gas_used: self.cumulative_gas_used,
-            logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
-            deposit_nonce: None,
-            deposit_receipt_version: None,
-        };
-
-        // update add to total fees
-        let miner_fee = tx
-            .effective_tip_per_gas(Some(self.base_fee))
-            .expect("fee is always valid; execution succeeded");
-        self.total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         self.receipts.push(Some(receipt));
         self.executed_senders.push(tx.signer());
