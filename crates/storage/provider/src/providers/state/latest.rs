@@ -121,20 +121,20 @@ impl<'b, TX: DbTx> StorageRootProvider for LatestStateProviderRef<'b, TX> {
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     fn proof(
         &self,
-        hashed_state: HashedPostState,
+        input: TrieInput,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Proof::overlay_account_proof(self.tx, hashed_state, address, slots)
+        Proof::overlay_account_proof(self.tx, input, address, slots)
             .map_err(Into::<ProviderError>::into)
     }
 
     fn witness(
         &self,
-        overlay: HashedPostState,
+        input: TrieInput,
         target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
-        TrieWitness::overlay_witness(self.tx, overlay, target).map_err(Into::<ProviderError>::into)
+        TrieWitness::overlay_witness(self.tx, input, target).map_err(Into::<ProviderError>::into)
     }
 }
 
