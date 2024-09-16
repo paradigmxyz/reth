@@ -17,25 +17,33 @@ use reth_revm::{
     primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
     DatabaseCommit, StateBuilder,
 };
+use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage};
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
 pub struct InvalidBlockWitnessHook<P, EvmConfig> {
-    /// The directory to write the witness to. Additionally, diff files will be written to this
-    /// directory in case of failed sanity checks.
-    output_directory: PathBuf,
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
     /// The EVM configuration to use for the execution.
     evm_config: EvmConfig,
+    /// The directory to write the witness to. Additionally, diff files will be written to this
+    /// directory in case of failed sanity checks.
+    output_directory: PathBuf,
+    /// The healthy node client to compare the witness against.
+    healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
 }
 
 impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
     /// Creates a new witness hook.
-    pub const fn new(output_directory: PathBuf, provider: P, evm_config: EvmConfig) -> Self {
-        Self { output_directory, provider, evm_config }
+    pub const fn new(
+        provider: P,
+        evm_config: EvmConfig,
+        output_directory: PathBuf,
+        healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
+    ) -> Self {
+        Self { provider, evm_config, output_directory, healthy_node_client }
     }
 }
 
@@ -148,12 +156,13 @@ where
         let witness = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let mut file = File::options()
-            .write(true)
-            .create_new(true)
-            .open(self.output_directory.join(format!("{}_{}.json", block.number, block.hash())))?;
         let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
-        file.write_all(serde_json::to_string(&response)?.as_bytes())?;
+        File::create_new(self.output_directory.join(format!(
+            "{}_{}.json",
+            block.number,
+            block.hash()
+        )))?
+        .write_all(serde_json::to_string(&response)?.as_bytes())?;
 
         // The bundle state after re-execution should match the original one.
         if bundle_state != output.state {
@@ -179,6 +188,33 @@ where
             }
         }
 
+        if let Some(healthy_node_client) = &self.healthy_node_client {
+            // Compare the witness against the healthy node.
+            let healthy_node_witness = futures::executor::block_on(async move {
+                DebugApiClient::debug_execution_witness(
+                    healthy_node_client,
+                    block.number.into(),
+                    true,
+                )
+                .await
+            })?;
+
+            // Write the healthy node witness to the output directory.
+            File::create_new(self.output_directory.join(format!(
+                "{}_{}.healthy_witness.json",
+                block.number,
+                block.hash()
+            )))?
+            .write_all(serde_json::to_string(&healthy_node_witness)?.as_bytes())?;
+
+            // If the witnesses are different, write the diff to the output directory.
+            if response != healthy_node_witness {
+                let filename = format!("{}_{}.healthy_witness.diff", block.number, block.hash());
+                let path = self.save_diff(filename, &response, &healthy_node_witness)?;
+                warn!(target: "engine::invalid_block_hooks::witness", path = %path.display(), "Witness mismatch against healthy node");
+            }
+        }
+
         Ok(())
     }
 
@@ -191,11 +227,7 @@ where
     ) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
         let diff = Comparison::new(original, new);
-        File::options()
-            .write(true)
-            .create_new(true)
-            .open(&path)?
-            .write_all(diff.to_string().as_bytes())?;
+        File::create_new(&path)?.write_all(diff.to_string().as_bytes())?;
 
         Ok(path)
     }
