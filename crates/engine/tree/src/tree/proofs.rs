@@ -109,7 +109,7 @@ where
                         }
                     },
                     None => {
-                        info!(target: "engine", "Channel closed.");
+                        info!(target: "engine", pending = this.pending.len(), targets = targets.len(), "Channel closed.");
                         this.closed = true;
                     }
                 }
