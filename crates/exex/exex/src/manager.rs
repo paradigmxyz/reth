@@ -258,7 +258,7 @@ pub struct ExExNotificationsWithHead<Node: FullNodeComponents> {
     components: Node,
     notifications: Receiver<ExExNotification>,
     exex_head: ExExHead,
-    pending_heal: bool,
+    pending_sync: bool,
     /// The backfill job to run before consuming any notifications.
     backfill_job: Option<StreamBackfillJob<Node::Executor, Node::Provider, Chain>>,
     /// Whether we're currently waiting for the node head to catch up to the same height as the
@@ -279,13 +279,30 @@ impl<Node: FullNodeComponents> ExExNotificationsWithHead<Node> {
             components,
             notifications,
             exex_head,
-            pending_heal: true,
+            pending_sync: true,
             backfill_job: None,
             node_head_catchup_in_progress: false,
         }
     }
 
-    fn heal(&mut self, node_head: Head) -> eyre::Result<()> {
+    /// Compares the node head against the ExEx head, and synchronizes them in case of a mismatch.
+    ///
+    /// Possible situations are:
+    /// - ExEx is behind the node head (`node_head.number < exex_head.number`).
+    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database).
+    ///     Backfill from the node database.
+    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
+    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
+    ///     bacfkill from the node database.
+    /// - ExEx is at the same block number (`node_head.number == exex_head.number`).
+    ///   - ExEx is on the canonical chain (`exex_head.hash` is found in the node database). Nothing
+    ///     to do.
+    ///   - ExEx is not on the canonical chain (`exex_head.hash` is not found in the node database).
+    ///     Unwind the ExEx to the first block matching between the ExEx and the node, and then
+    ///     backfill from the node database.
+    /// - ExEx is ahead of the node head (`node_head.number > exex_head.number`). Wait until the
+    ///   node head catches up to the ExEx head, and then repeat the synchronization process.
+    fn synchronize(&mut self, node_head: Head) -> eyre::Result<()> {
         let backfill_job_factory = BackfillJobFactory::new(
             self.components.block_executor().clone(),
             self.components.provider().clone(),
@@ -357,9 +374,9 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if this.pending_heal {
-            this.heal(this.node_head)?;
-            this.pending_heal = false;
+        if this.pending_sync {
+            this.synchronize(this.node_head)?;
+            this.pending_sync = false;
         }
 
         if let Some(backfill_job) = &mut this.backfill_job {
@@ -408,13 +425,13 @@ impl<Node: FullNodeComponents + Unpin> Stream for ExExNotificationsWithHead<Node
                         // ExEx is on the canonical chain, proceed with the notification
                         this.node_head_catchup_in_progress = false;
                     } else {
-                        // ExEx is not on the canonical chain, heal
+                        // ExEx is not on the canonical chain, synchronize
                         let tip = this
                             .components
                             .provider()
                             .sealed_header(tip)?
                             .ok_or_eyre("node head not found")?;
-                        this.heal(Head::new(
+                        this.synchronize(Head::new(
                             tip.number,
                             tip.hash(),
                             tip.difficulty,
