@@ -376,7 +376,6 @@ where
     MerkleStage: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
-    MerkleStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()

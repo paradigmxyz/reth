@@ -549,6 +549,7 @@ mod tests {
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
+    use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -755,7 +756,7 @@ mod tests {
     #[test]
     fn write_to_db_storage() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address_a = Address::ZERO;
         let address_b = Address::repeat_byte(0xff);
@@ -950,7 +951,7 @@ mod tests {
     #[test]
     fn write_to_db_multiple_selfdestructs() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -1265,7 +1266,7 @@ mod tests {
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -1415,7 +1416,7 @@ mod tests {
             .collect();
 
         let provider_factory = create_test_provider_factory();
-        let provider_rw = provider_factory.provider_rw().unwrap();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
 
         // insert initial state to the database
         let tx = provider_rw.tx_ref();

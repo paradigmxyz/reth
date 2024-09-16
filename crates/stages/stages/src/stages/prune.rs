@@ -51,9 +51,9 @@ where
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
-            .build::<Provider>(provider.static_file_provider().clone());
+            .build::<Provider>(provider.static_file_provider());
 
-        let result = pruner.run_with_provider(&provider, input.target())?;
+        let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {

@@ -205,7 +205,7 @@ impl<TX: DbTx + 'static> TryIntoHistoricalStateProvider for DatabaseProvider<TX>
     }
 }
 
-impl<DB: Database> DatabaseProviderRW<DB> {
+impl<Tx: DbTx + DbTxMut + 'static> DatabaseProvider<Tx> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**

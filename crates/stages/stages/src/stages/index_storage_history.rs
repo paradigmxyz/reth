@@ -164,7 +164,7 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
-    use reth_provider::providers::StaticFileWriter;
+    use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,
         BlockRangeParams,
@@ -237,7 +237,7 @@ mod tests {
                 .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
         provider.commit().unwrap();
@@ -250,7 +250,7 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexStorageHistoryStage::default();
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         provider.commit().unwrap();
@@ -500,7 +500,7 @@ mod tests {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();

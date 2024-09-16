@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
-    ProviderFactory,
+    ProviderFactory, StaticFileProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
@@ -63,7 +63,7 @@ where
     let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
         .executor(StateProviderDatabase::new(LatestStateProviderRef::new(
             provider.tx_ref(),
-            provider.static_file_provider().clone(),
+            provider.static_file_provider(),
         )))
         .execute(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
     block_execution_output.state.reverts.sort();
@@ -187,7 +187,7 @@ where
 
     let executor =
         EthExecutorProvider::ethereum(chain_spec).batch_executor(StateProviderDatabase::new(
-            LatestStateProviderRef::new(provider.tx_ref(), provider.static_file_provider().clone()),
+            LatestStateProviderRef::new(provider.tx_ref(), provider.static_file_provider()),
         ));
 
     let mut execution_outcome = executor.execute_and_verify_batch(vec![

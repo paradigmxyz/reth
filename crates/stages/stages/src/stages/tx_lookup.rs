@@ -252,7 +252,9 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_primitives::{BlockNumber, SealedBlock, B256};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_provider::{
+        providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+    };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
@@ -406,7 +408,7 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {

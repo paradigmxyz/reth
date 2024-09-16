@@ -7,7 +7,10 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::{keccak256, Account, B256};
-use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
+use reth_provider::{
+    AccountExtReader, DBProvider, DatabaseProvider, HashingWriter, StaticFileProviderFactory,
+    StatsReader,
+};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
@@ -57,8 +60,8 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
-    pub fn seed<DB: Database>(
-        provider: &Provider,
+    pub fn seed<Tx: DbTx + DbTxMut + 'static>(
+        provider: &DatabaseProvider<Tx>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db_api::models::AccountBeforeTx;
@@ -346,6 +349,7 @@ mod tests {
         use super::*;
         use crate::test_utils::TestStageDB;
         use reth_primitives::Address;
+        use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) db: TestStageDB,
@@ -440,7 +444,7 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let provider = self.db.factory.provider_rw()?;
+                let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },

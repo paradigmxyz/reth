@@ -155,7 +155,7 @@ where
         })
         .unzip();
 
-    let static_file_provider = provider.static_file_provider().clone();
+    let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
     // there will be a timeout grace period in which Tokio does not allow spawning
@@ -339,8 +339,8 @@ mod tests {
     use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
     use reth_provider::{
-        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
-        TransactionsProvider,
+        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
+        StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
@@ -533,7 +533,7 @@ mod tests {
             .expect("save stage checkpoint");
         provider.commit().expect("commit");
 
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         assert_eq!(
             stage_checkpoint(&provider).expect("stage checkpoint"),
             EntitiesCheckpoint {
