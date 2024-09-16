@@ -97,7 +97,7 @@ where
         // Attempt to compute state root from proofs and gather additional
         // information for the witness.
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_trie_nodes = HashMap::default();
+        let mut account_trie_nodes = Vec::new();
         for (hashed_address, hashed_slots) in proof_targets {
             let storage_multiproof =
                 account_multiproof.storages.remove(&hashed_address).unwrap_or_default();
@@ -125,7 +125,7 @@ where
             )?);
 
             // Gather and record storage trie nodes for this account.
-            let mut storage_trie_nodes = HashMap::default();
+            let mut storage_trie_nodes = Vec::new();
             let storage = state.storages.get(&hashed_address);
             for hashed_slot in hashed_slots {
                 let slot_key = Nibbles::unpack(hashed_slot);
@@ -212,8 +212,8 @@ pub fn target_nodes<'b>(
     value: Option<Vec<u8>>,
     proof: impl IntoIterator<Item = (&'b Nibbles, &'b Bytes)>,
     mut witness: Option<&mut HashMap<B256, Bytes>>,
-) -> Result<HashMap<Nibbles, Either<B256, Vec<u8>>>, StateProofError> {
-    let mut trie_nodes = HashMap::default();
+) -> Result<Vec<(Nibbles, Either<B256, Vec<u8>>)>, StateProofError> {
+    let mut trie_nodes = Vec::new();
     for (path, encoded) in proof {
         // Record the node in witness.
         if let Some(witness) = &mut witness {
@@ -227,7 +227,7 @@ pub fn target_nodes<'b>(
                 let children = branch_node_children(path.clone(), &branch);
                 for (child_path, node_hash) in children {
                     if !key.starts_with(&child_path) {
-                        trie_nodes.insert(child_path, Either::Left(node_hash));
+                        trie_nodes.push((child_path, Either::Left(node_hash)));
                     }
                 }
             }
@@ -237,14 +237,14 @@ pub fn target_nodes<'b>(
             TrieNode::Leaf(leaf) => {
                 next_path.extend_from_slice(&leaf.key);
                 if next_path != key {
-                    trie_nodes.insert(next_path.clone(), Either::Right(leaf.value.clone()));
+                    trie_nodes.push((next_path.clone(), Either::Right(leaf.value.clone())));
                 }
             }
         };
     }
 
     if let Some(value) = value {
-        trie_nodes.insert(key, Either::Right(value));
+        trie_nodes.push((key, Either::Right(value)));
     }
 
     Ok(trie_nodes)
@@ -252,7 +252,7 @@ pub fn target_nodes<'b>(
 
 /// TODO:
 pub fn next_root_from_proofs(
-    trie_nodes: HashMap<Nibbles, Either<B256, Vec<u8>>>,
+    trie_nodes: impl IntoIterator<Item = (Nibbles, Either<B256, Vec<u8>>)>,
     retain_updates: bool,
     mut trie_node_provider: impl FnMut(Nibbles) -> Result<Bytes, TrieWitnessError>,
 ) -> Result<(B256, revm::primitives::HashMap<Nibbles, BranchNodeCompact>), TrieWitnessError> {

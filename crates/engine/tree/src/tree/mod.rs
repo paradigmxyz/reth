@@ -2372,7 +2372,7 @@ where
             .into_par_iter()
             .map(|(hashed_address, hashed_slots)| {
                 // Gather and record storage trie nodes for this account.
-                let mut storage_trie_nodes = HashMap::default();
+                let mut storage_trie_nodes = Vec::with_capacity(hashed_slots.len());
                 let storage = state.storages.get(&hashed_address);
                 for hashed_slot in hashed_slots {
                     let slot_key = Nibbles::unpack(hashed_slot);
@@ -2447,13 +2447,12 @@ where
                 let proof = multiproof.account_subtree.iter().filter(|e| key.starts_with(e.0));
                 Ok(target_nodes(key.clone(), value, proof, None)?)
             })
-            .collect::<ProviderResult<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<HashMap<_, _>>();
+            .collect::<ProviderResult<Vec<_>>>()?;
 
-        let (state_root, _trie_updates) =
-            next_root_from_proofs(account_trie_nodes, true, |key: Nibbles| {
+        let (state_root, _trie_updates) = next_root_from_proofs(
+            account_trie_nodes.into_iter().flatten(),
+            true,
+            |key: Nibbles| {
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
@@ -2477,7 +2476,8 @@ where
                     .remove(&key)
                     .ok_or(TrieWitnessError::MissingTargetNode(key))?;
                 Ok(node)
-            })?;
+            },
+        )?;
 
         Ok((state_root, Default::default()))
     }
