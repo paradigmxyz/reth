@@ -100,14 +100,20 @@ where
             let mut targets = HashMap::<B256, HashSet<B256>>::default();
             while let Poll::Ready(next) = this.state_stream.poll_recv(cx) {
                 match next {
-                    Some(key) => match key {
-                        StateAccess::Account(address) => {
-                            targets.entry(keccak256(address)).or_default();
+                    Some(key) => {
+                        info!(target: "engine", %key, "New entry");
+                        match key {
+                            StateAccess::Account(address) => {
+                                targets.entry(keccak256(address)).or_default();
+                            }
+                            StateAccess::StorageSlot(address, slot) => {
+                                targets
+                                    .entry(keccak256(address))
+                                    .or_default()
+                                    .insert(keccak256(slot));
+                            }
                         }
-                        StateAccess::StorageSlot(address, slot) => {
-                            targets.entry(keccak256(address)).or_default().insert(keccak256(slot));
-                        }
-                    },
+                    }
                     None => {
                         info!(target: "engine", pending = this.pending.len(), targets = targets.len(), "Channel closed.");
                         this.closed = true;
