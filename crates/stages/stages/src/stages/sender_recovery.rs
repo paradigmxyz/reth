@@ -3,7 +3,6 @@ use reth_consensus::ConsensusError;
 use reth_db::{static_file::TransactionMask, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
-    database::Database,
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };

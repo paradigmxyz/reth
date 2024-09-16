@@ -9,7 +9,6 @@ use tracing::*;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     transaction::DbTxMut,
 };
@@ -17,8 +16,7 @@ use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockRespon
 use reth_primitives::{StaticFileSegment, TxNumber};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DBProvider, DatabaseProviderRW, HeaderProvider, ProviderError,
-    StaticFileProviderFactory, StatsReader,
+    BlockReader, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,

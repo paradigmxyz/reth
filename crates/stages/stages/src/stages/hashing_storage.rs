@@ -9,7 +9,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::{keccak256, BufMut, StorageEntry, B256};
-use reth_provider::{DBProvider, DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
+use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     StorageHashingCheckpoint, UnwindInput, UnwindOutput,

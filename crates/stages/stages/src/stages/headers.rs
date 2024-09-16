@@ -5,7 +5,6 @@ use reth_consensus::Consensus;
 use reth_db::{tables, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     transaction::DbTxMut,
     DbTxUnwindExt,
 };

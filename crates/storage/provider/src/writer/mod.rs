@@ -47,11 +47,8 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub fn new<P>(database: &'a P, static_file: Option<ProviderSF>) -> Self
-    where
-        P: AsRef<ProviderDB>,
-    {
-        Self { database: database.as_ref(), static_file }
+    pub fn new(database: &'a ProviderDB, static_file: Option<ProviderSF>) -> Self {
+        Self { database, static_file }
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider and a static
@@ -60,7 +57,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     where
         P: AsRef<ProviderDB>,
     {
-        Self::new(database, Some(static_file))
+        Self::new(database.as_ref(), Some(static_file))
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider.
@@ -68,7 +65,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     where
         P: AsRef<ProviderDB>,
     {
-        Self::new(database, None)
+        Self::new(database.as_ref(), None)
     }
 
     /// Returns a reference to the database writer.

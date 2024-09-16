@@ -1,6 +1,5 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
 use alloy_primitives::{BlockNumber, B256};
-use reth_db_api::database::Database;
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
@@ -85,13 +84,13 @@ impl<Provider> PipelineBuilder<Provider> {
     }
 }
 
-impl<DB: Database> Default for PipelineBuilder<DB> {
+impl<Provider> Default for PipelineBuilder<Provider> {
     fn default() -> Self {
         Self { stages: Vec::new(), max_block: None, tip_tx: None, metrics_tx: None }
     }
 }
 
-impl<DB: Database> std::fmt::Debug for PipelineBuilder<DB> {
+impl<Provider> std::fmt::Debug for PipelineBuilder<Provider> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PipelineBuilder")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

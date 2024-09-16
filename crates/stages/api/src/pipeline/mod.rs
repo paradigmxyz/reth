@@ -82,7 +82,8 @@ pub struct Pipeline<N: ProviderNodeTypes> {
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<N::DB> {
+    pub fn builder() -> PipelineBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>
+    {
         PipelineBuilder::default()
     }
 

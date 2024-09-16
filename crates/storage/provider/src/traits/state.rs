@@ -6,6 +6,7 @@ use revm::db::{
     states::{PlainStateReverts, StateChangeset},
     OriginalValuesKnown,
 };
+use std::ops::RangeInclusive;
 
 /// A helper trait for [`ExecutionOutcome`] to write state and receipts to storage.
 pub trait StateWriter {
@@ -34,4 +35,10 @@ pub trait StateChangeWriter {
 
     /// Writes the hashed state changes to the database
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
+
+    /// Remove the block range of state.
+    fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()>;
+
+    /// Take the block range of state, recreating the [`ExecutionOutcome`].
+    fn take_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<ExecutionOutcome>;
 }

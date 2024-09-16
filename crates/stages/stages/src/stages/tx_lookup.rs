@@ -3,13 +3,12 @@ use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{tables, RawKey, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
 use reth_primitives::{TxHash, TxNumber};
 use reth_provider::{
-    BlockReader, DBProvider, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter,
+    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
