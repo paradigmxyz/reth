@@ -56,7 +56,7 @@ pub fn new(tx: &'a TX) -> Self {
 //     const DEFAULT_PATH: &'static str = S::DEFAULT_PATH;
 // }
 
-impl<'a, TX: DbTxMut + DbTx> Flush for VerkleDb<'a, TX> 
+impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> 
 {
     fn flush(&mut self) {
         let now = std::time::Instant::now();
@@ -95,9 +95,9 @@ impl<'a, TX: DbTxMut + DbTx> Flush for VerkleDb<'a, TX>
         }
 
         for (key, value) in trie_updates {
-            self.tx.put::<tables::VerkleTrie>(key, value).unwrap();
+            self.tx.0.put::<tables::VerkleTrie>(key, value).unwrap();
         }
-        self.tx.commit().unwrap();
+        self.tx.0.commit().unwrap();
 
         let num_items = self.batch.num_items();
         println!(
@@ -141,7 +141,14 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        self.storage.get_stem_meta(stem_key)
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
+        labelled_key.push(STEM_TABLE_MARKER);
+        labelled_key.extend_from_slice(&stem_key);
+        trie_cursor.seek_exact(labelled_key)
+            .ok()
+            .and_then(|result| result)
+            .map(|(_, value)| StemMeta::from_bytes(value).unwrap())
     }
 
     fn get_branch_meta(&self, key: &[u8]) -> Option<BranchMeta> {
@@ -154,7 +161,15 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        self.storage.get_branch_meta(key)
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut labelled_key = Vec::with_capacity(key.len() + 1);
+        labelled_key.push(BRANCH_TABLE_MARKER);
+        labelled_key.extend_from_slice(key);
+
+        trie_cursor.seek_exact(labelled_key)
+            .ok()
+            .and_then(|result| result)
+            .map(|(_, value)| BranchMeta::from_bytes(value).unwrap())
     }
 
     fn get_branch_child(&self, branch_id: &[u8], index: u8) -> Option<BranchChild> {
@@ -167,7 +182,16 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        self.storage.get_branch_child(branch_id, index)
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut labelled_key = Vec::with_capacity(branch_id.len() + 2);
+        labelled_key.push(BRANCH_TABLE_MARKER);
+        labelled_key.extend_from_slice(branch_id);
+        labelled_key.push(index);
+
+        trie_cursor.seek_exact(labelled_key)
+            .ok()
+            .and_then(|result| result)
+            .map(|(_, value)| BranchChild::from_bytes(value).unwrap())
     }
 
     fn get_branch_children(&self, branch_id: &[u8]) -> Vec<(u8, BranchChild)> {
@@ -177,9 +201,24 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return self.cache.get_branch_children(branch_id);
         }
         // First get the children from storage
-        let mut children: HashMap<_, _> = self
-            .storage
-            .get_branch_children(branch_id)
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok().unwrap();
+        let mut branch_children = Vec::with_capacity(256);
+
+        let mut labelled_key = Vec::with_capacity(branch_id.len() + 1);
+        labelled_key.push(BRANCH_TABLE_MARKER);
+        labelled_key.extend_from_slice(branch_id);
+
+        if let Ok(Some(_)) = trie_cursor.seek(labelled_key.clone()) {
+            while let Ok(Some((key, value))) = trie_cursor.next() {
+                if key.len() == labelled_key.len() + 1 && key.starts_with(&labelled_key) {
+                    let index = key[key.len() - 1];
+                    branch_children.push((index, BranchChild::from_bytes(value).unwrap()));
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut children: HashMap<_, _> = branch_children
             .into_iter()
             .collect();
         //
@@ -205,11 +244,23 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
 
         // It's possible that they are in disk storage and that batch storage has some recent updates
         // First get the children from storage
-        let mut children: HashMap<_, _> = self
-            .storage
-            .get_stem_children(stem_key)
-            .into_iter()
-            .collect();
+        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok().unwrap();
+        let mut stem_children = Vec::with_capacity(256);
+        let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
+        labelled_key.push(LEAF_TABLE_MARKER);
+        labelled_key.extend_from_slice(&stem_key);
+
+        if let Ok(Some(_)) = trie_cursor.seek(labelled_key.clone()) {
+            while let Ok(Some((key, value))) = trie_cursor.next() {
+                if key.len() == labelled_key.len() + 1 && key.starts_with(&labelled_key) {
+                    let index = key[key.len() - 1];
+                    stem_children.push((index, value.try_into().unwrap()));
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut children: HashMap<_, _> = stem_children.into_iter().collect();
         //
         // Then get the children from the batch
         let children_from_batch = self.batch.get_stem_children(stem_key);
@@ -224,7 +275,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
 }
 
 // Always save in the permanent storage and only save in the memorydb if the depth is <= cache depth
-impl<S> WriteOnlyHigherDb for VerkleDb<S> {
+impl<'a, TX: DbTx> WriteOnlyHigherDb for VerkleDb<'a, TX> {
     fn insert_leaf(&mut self, key: [u8; 32], value: [u8; 32], depth: u8) -> Option<Vec<u8>> {
         if depth <= CACHE_DEPTH {
             self.cache.insert_leaf(key, value, depth);
