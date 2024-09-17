@@ -74,6 +74,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// Given build arguments including an Ethereum client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
+    #[inline]
     fn build_payload<Pool, Client>(
         &self,
         evm_config: EvmConfig,
@@ -147,6 +148,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// * `Err(PayloadBuilderError::Internal(_))` if applying the beacon root contract call fails.
     /// * `Err(PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail))`
     ///   if ensuring the create2 deployer fails.
+    #[inline]
     pub fn init_pre_block_state<DB>(
         &self,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
@@ -212,6 +214,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// * `Err(PayloadBuilderError::TransactionEcRecoverFailed)` if EC recovery fails for a
     ///   transaction
     /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
+    #[inline]
     pub fn construct_block_attributes<Pool, DB>(
         &self,
         pool: Pool,
@@ -248,6 +251,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// # Returns
     ///
     /// An `OptimismBuiltPayload` representing the fully constructed block payload.
+    #[inline]
     pub fn construct_built_payload(
         &self,
         op_block_attributes: OptimismBlockAttributes<EvmConfig>,
@@ -357,6 +361,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// * `Ok((WithdrawalsOutcome, ExecutionOutcome))` containing the outcomes of withdrawals and
     ///   transaction executions.
     /// * `Err(ProviderError)` if processing withdrawals fails or state merging encounters an error.
+    #[inline]
     pub fn construct_outcome<DB>(
         &self,
         op_block_attributes: &OptimismBlockAttributes<EvmConfig>,
@@ -534,6 +539,7 @@ where
     ///   transaction
     /// * `Err(PayloadBuilderError::EvmExecutionError(EVMError::Transaction(_)))` if an EVM
     ///   execution error occurs
+    #[inline]
     pub fn add_sequencer_transactions<DB>(
         &mut self,
         transactions: &[WithEncoded<TransactionSigned>],
@@ -638,6 +644,7 @@ where
     /// * `Ok(())` on successful addition of all valid pooled transactions
     /// * `Err(PayloadBuilderError::BuildOutcomeCancelled)` if the operation was cancelled
     /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
+    #[inline]
     pub fn add_pooled_transactions<DB, Pool>(
         &mut self,
         pool: &Pool,
@@ -737,71 +744,6 @@ where
 
         Ok(())
     }
-
-    /// Insert a transaction derived from payload attributes into the block,
-    /// committing state to the db
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` on successful execution and insertion of the sequencer transaction
-    /// * `Err(PayloadBuilderError::AccountLoadFailed(_))` if loading the depositor account fails
-    /// * `Err(PayloadBuilderError::EvmExecutionError(_))` if an EVM execution error occurs
-    pub fn insert_sequencer_transaction<DB>(
-        &mut self,
-        tx: &TransactionSignedEcRecovered,
-        db: &mut revm::State<DB>,
-    ) -> Result<(), PayloadBuilderError>
-    where
-        DB: revm::Database<Error = ProviderError>,
-    {
-        // Cache the depositor account prior to the state transition for the deposit nonce.
-        //
-        // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
-        // were not introduced in Bedrock. In addition, regular transactions don't have deposit
-        // nonces, so we don't need to touch the DB for those.
-        let depositor = (self.is_regolith && tx.is_deposit())
-            .then(|| {
-                db.load_cache_account(tx.signer()).map(|acc| acc.account_info().unwrap_or_default())
-            })
-            .transpose()
-            .map_err(|_| {
-                PayloadBuilderError::other(OptimismPayloadBuilderError::AccountLoadFailed(
-                    tx.signer(),
-                ))
-            })?;
-
-        let execution_result = evm_transact_commit(
-            tx,
-            self.initialized_cfg.clone(),
-            self.initialized_block_env.clone(),
-            self.evm_config.clone(),
-            db,
-        )
-        .map_err(PayloadBuilderError::EvmExecutionError)?;
-
-        self.cumulative_gas_used += execution_result.gas_used();
-
-        let receipt = Receipt {
-            tx_type: tx.tx_type(),
-            success: execution_result.is_success(),
-            cumulative_gas_used: self.cumulative_gas_used,
-            logs: execution_result.into_logs().into_iter().map(Into::into).collect(),
-            deposit_nonce: depositor.map(|account| account.nonce),
-            deposit_receipt_version: self
-                .chain_spec
-                .is_fork_active_at_timestamp(
-                    OptimismHardfork::Canyon,
-                    self.payload_attributes.payload_attributes.timestamp,
-                )
-                .then_some(1),
-        };
-
-        self.receipts.push(Some(receipt));
-        self.executed_senders.push(tx.signer());
-        self.executed_txs.push(tx.to_owned().into_signed());
-
-        Ok(())
-    }
 }
 
 /// Executes a transaction within the EVM and commits the state changes to the db
@@ -810,6 +752,7 @@ where
 ///
 /// * `Ok(ExecutionResult)` with the result of the transaction execution on success
 /// * `Err(EVMError<ProviderError>)` if the transaction execution fails due to EVM-related errors
+#[inline]
 pub fn evm_transact_commit<EvmConfig, DB>(
     transaction: &TransactionSignedEcRecovered,
     initialized_cfg: CfgEnvWithHandlerCfg,
