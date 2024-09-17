@@ -636,7 +636,7 @@ where
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
                 // referenced accounts + storage slots.
-                let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+                let mut hashed_state = HashedPostState::default();
                 for (address, account) in db.cache.accounts {
                     let hashed_address = keccak256(address);
                     hashed_state.accounts.insert(
