@@ -8,7 +8,7 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> Trace for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn evm_config(&self) -> &impl ConfigureEvm {

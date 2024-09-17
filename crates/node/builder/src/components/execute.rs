@@ -24,7 +24,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, EVM, Executor> ExecutorBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<(EVM, Executor)>> + Send,

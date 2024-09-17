@@ -7,6 +7,7 @@ use crate::ConfigureEvm;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_primitives::Header;
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
 
@@ -28,7 +29,7 @@ pub fn pre_block_blockhashes_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // Apply the pre-block EIP-2935 contract call
     let mut evm_pre_block = Evm::builder()
@@ -74,7 +75,7 @@ pub fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
         return Ok(None)
@@ -133,7 +134,7 @@ pub fn apply_blockhashes_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     if let Some(res) = transact_blockhashes_contract_call(
         evm_config,

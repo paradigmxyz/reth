@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
-use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
+use revm_primitives::{AnalysisKind, BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 use std::sync::Arc;
 
 mod config;
@@ -53,7 +53,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         let spec_id = config::revm_spec(
@@ -71,6 +71,27 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    /// Fill [`BlockEnv`] field according to the chain spec and given header
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+        block_env.number = U256::from(header.number);
+        block_env.coinbase = header.beneficiary;
+        block_env.timestamp = U256::from(header.timestamp);
+        if after_merge {
+            block_env.prevrandao = Some(header.mix_hash);
+            block_env.difficulty = U256::ZERO;
+        } else {
+            block_env.difficulty = header.difficulty;
+            block_env.prevrandao = None;
+        }
+        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
+        block_env.gas_limit = U256::from(header.gas_limit);
+
+        // EIP-4844 excess blob gas of this block, introduced in Cancun
+        if let Some(excess_blob_gas) = header.excess_blob_gas {
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+        }
     }
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {

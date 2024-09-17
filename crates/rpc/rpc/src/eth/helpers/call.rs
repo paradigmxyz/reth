@@ -13,7 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Netw
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {

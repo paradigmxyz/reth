@@ -217,7 +217,7 @@ impl EthereumPayloadBuilder {
     where
         Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
         Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm,
+        Evm: ConfigureEvm<Header = Header>,
         Pool: TransactionPool + Unpin + 'static,
         Types::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,

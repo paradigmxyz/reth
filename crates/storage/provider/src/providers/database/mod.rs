@@ -550,7 +550,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -563,7 +563,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -575,7 +575,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -587,7 +587,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }

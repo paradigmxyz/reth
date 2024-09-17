@@ -254,7 +254,7 @@ impl OptimismPayloadBuilder {
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
         >,
         Pool: TransactionPool + Unpin + 'static,
-        Evm: ConfigureEvm,
+        Evm: ConfigureEvm<Header = Header>,
     {
         let payload_builder =
             reth_optimism_payload_builder::OptimismPayloadBuilder::new(evm_config)
