@@ -146,9 +146,8 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         if let Some(excess_blob_gas) = header.excess_blob_gas {
             block_env.set_blob_excess_gas_and_price(excess_blob_gas);
         }
+    }
 
-  }
-      
     fn next_cfg_and_block_env(
         &self,
         parent: &Header,
