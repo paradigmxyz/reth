@@ -7,16 +7,20 @@ use crate::{
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
-use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
+use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_evm::{
+    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
+    NextBlockEnvAttributes,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, transaction::WithEncoded,
-    Address, Block, Bytes, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
-    TransactionSigned, TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
+    constants::BEACON_NONCE,
+    eip4844::calculate_excess_blob_gas,
+    proofs,
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ProviderError, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -32,11 +36,8 @@ use revm::{
     },
     State,
 };
-use std::sync::Arc;
-use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
@@ -407,64 +408,18 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         Ok((withdrawals_outcome, execution_outcome))
     }
 
-    /// Configures the EVM environment and block environment based on the provided payload
-    /// configuration.
-    pub fn cfg_and_block_env(
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    fn cfg_and_block_env(
         &self,
         config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // configure evm env based on parent block
-        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
-        let parent = &config.parent_block;
-
-        // ensure we're not missing any timestamp based hardforks
-        let spec_id =
-            revm_spec_by_timestamp_after_bedrock(&config.chain_spec, config.attributes.timestamp());
-
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id.is_enabled_in(SpecId::CANCUN) {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: config.attributes.suggested_fee_recipient(),
-            timestamp: U256::from(config.attributes.timestamp()),
-            difficulty: U256::ZERO,
-            prevrandao: Some(config.attributes.prev_randao()),
-            gas_limit: U256::from(parent.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(
-                parent
-                    .next_block_base_fee(
-                        config
-                            .chain_spec
-                            .base_fee_params_at_timestamp(config.attributes.timestamp()),
-                    )
-                    .unwrap_or_default(),
-            ),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: config.attributes.timestamp(),
+            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
+            prev_randao: config.attributes.prev_randao(),
         };
-
-        let cfg_with_handler_cfg;
-        {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
-                cfg_env: cfg,
-                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
-            };
-        }
-
-        (cfg_with_handler_cfg, block_env)
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
 }
 

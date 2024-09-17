@@ -14,7 +14,9 @@ extern crate alloc;
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
+use reth_primitives::{
+    Address, Header, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
@@ -177,4 +179,29 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         self.fill_block_env(block_env, header, after_merge);
     }
+
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for `parent + 1` block.
+    ///
+    /// This is intended for usage in block building after the merge and requires additional
+    /// attributes that can't be derived from the parent block: attributes that are determined by
+    /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
+    fn next_cfg_and_block_env(
+        &self,
+        parent: &Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
+}
+
+/// Represents additional attributes required to configure the next block.
+/// This is used to configure the next block's environment
+/// [`ConfigureEvmEnv::next_cfg_and_block_env`] and contains fields that can't be derived from the
+/// parent header alone (attributes that are determined by the CL.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextBlockEnvAttributes {
+    /// The timestamp of the next block.
+    pub timestamp: u64,
+    /// The suggested fee recipient for the next block.
+    pub suggested_fee_recipient: Address,
+    /// The randomness value for the next block.
+    pub prev_randao: B256,
 }
