@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use reth::api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
-use reth_payload_builder::{Events, PayloadBuilderHandle, PayloadId};
+use reth_payload_builder::{Events, PayloadBuilder, PayloadBuilderHandle, PayloadId};
 use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for payload operations

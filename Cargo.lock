@@ -8108,6 +8108,7 @@ name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
  "futures-util",
  "metrics",
  "pin-project",

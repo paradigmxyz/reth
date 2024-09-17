@@ -1,9 +1,58 @@
 //! Trait abstractions used by the payload crate.
 
-use crate::error::PayloadBuilderError;
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use crate::{error::PayloadBuilderError, PayloadEvents, PayloadId};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
 use reth_provider::CanonStateNotification;
-use std::future::Future;
+use std::{future::Future, pin::Pin};
+use tokio::sync::oneshot;
+
+pub(crate) type PayloadFuture<P> =
+    Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
+/// A type that can request, subscribe to and resolve payloads.
+#[async_trait::async_trait]
+pub trait PayloadBuilder {
+    /// The Payload type for the builder.
+    type PayloadType: PayloadTypes + 'static;
+    /// The error type returned by the builder.
+    type Error;
+
+    /// Sends a message to the service to start building a new payload for the given payload
+    /// attributes and returns a future that resolves to the payload.
+    async fn send_and_resolve_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadFuture<<Self::PayloadType as PayloadTypes>::BuiltPayload>, Self::Error>;
+
+    /// Returns the best payload for the given identifier.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
+
+    /// Sends a message to the service to start building a new payload for the given payload.
+    ///
+    /// This is the same as [`PayloadBuilder::new_payload`] but does not wait for the result
+    /// and returns the receiver instead
+    fn send_new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> oneshot::Receiver<Result<PayloadId, Self::Error>>;
+
+    /// Starts building a new payload for the given payload attributes.
+    ///
+    /// Returns the identifier of the payload.
+    ///
+    /// Note: if there's already payload in progress with same identifier, it will be returned.
+    async fn new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadId, Self::Error>;
+
+    /// Sends a message to the service to subscribe to payload events.
+    /// Returns a receiver that will receive them.
+    async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
+}
 
 /// A type that can build a payload.
 ///

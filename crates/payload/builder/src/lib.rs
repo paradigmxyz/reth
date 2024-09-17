@@ -118,7 +118,7 @@ pub use reth_rpc_types::engine::PayloadId;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
-pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+pub use traits::{KeepPayloadJobAlive, PayloadBuilder, PayloadJob, PayloadJobGenerator};
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]

@@ -20,7 +20,7 @@ use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{PayloadBuilder, PayloadBuilderHandle};
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{

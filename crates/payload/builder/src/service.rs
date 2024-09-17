@@ -7,8 +7,8 @@ use crate::{
     error::PayloadBuilderError,
     events::{Events, PayloadEvents},
     metrics::PayloadBuilderServiceMetrics,
-    traits::PayloadJobGenerator,
-    KeepPayloadJobAlive, PayloadJob,
+    traits::{PayloadFuture, PayloadJobGenerator},
+    KeepPayloadJobAlive, PayloadBuilder, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
@@ -22,12 +22,10 @@ use std::{
 };
 use tokio::sync::{
     broadcast, mpsc,
-    oneshot::{self, error::RecvError},
+    oneshot::{self, Receiver},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
-
-type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 #[derive(Debug)]
@@ -102,6 +100,60 @@ pub struct PayloadBuilderHandle<T: PayloadTypes> {
 
 // === impl PayloadBuilderHandle ===
 
+#[async_trait::async_trait]
+impl<T> PayloadBuilder for PayloadBuilderHandle<T>
+where
+    T: PayloadTypes + 'static,
+{
+    type PayloadType = T;
+    type Error = PayloadBuilderError;
+
+    async fn send_and_resolve_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadFuture<<Self::PayloadType as PayloadTypes>::BuiltPayload>, Self::Error> {
+        let rx = self.send_new_payload(attr);
+        let id = rx.await??;
+
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::Resolve(id, tx));
+        rx.await?.ok_or(PayloadBuilderError::MissingPayload)
+    }
+
+    /// Note: this does not resolve the job if it's still in progress.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>> {
+        let (tx, rx) = oneshot::channel();
+        self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
+        rx.await.ok()?
+    }
+
+    fn send_new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Receiver<Result<PayloadId, Self::Error>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
+        rx
+    }
+
+    /// Note: if there's already payload in progress with same identifier, it will be returned.
+    async fn new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadId, Self::Error> {
+        self.send_new_payload(attr).await?
+    }
+
+    async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
+        Ok(PayloadEvents { receiver: rx.await? })
+    }
+}
+
 impl<T> PayloadBuilderHandle<T>
 where
     T: PayloadTypes + 'static,
@@ -127,32 +179,6 @@ where
         }
     }
 
-    /// Sends a message to the service to start building a new payload for the given payload
-    /// attributes and returns a future that resolves to the payload.
-    pub async fn send_and_resolve_payload(
-        &self,
-        attr: T::PayloadBuilderAttributes,
-    ) -> Result<PayloadFuture<T::BuiltPayload>, PayloadBuilderError> {
-        let rx = self.send_new_payload(attr);
-        let id = rx.await??;
-
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::Resolve(id, tx));
-        rx.await?.ok_or(PayloadBuilderError::MissingPayload)
-    }
-
-    /// Returns the best payload for the given identifier.
-    ///
-    /// Note: this does not resolve the job if it's still in progress.
-    pub async fn best_payload(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::BestPayload(id, tx)).ok()?;
-        rx.await.ok()?
-    }
-
     /// Returns the payload attributes associated with the given identifier.
     ///
     /// Note: this returns the attributes of the payload and does not resolve the job.
@@ -163,39 +189,6 @@ where
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
-    }
-
-    /// Sends a message to the service to start building a new payload for the given payload.
-    ///
-    /// This is the same as [`PayloadBuilderHandle::new_payload`] but does not wait for the result
-    /// and returns the receiver instead
-    pub fn send_new_payload(
-        &self,
-        attr: T::PayloadBuilderAttributes,
-    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
-        rx
-    }
-
-    /// Starts building a new payload for the given payload attributes.
-    ///
-    /// Returns the identifier of the payload.
-    ///
-    /// Note: if there's already payload in progress with same identifier, it will be returned.
-    pub async fn new_payload(
-        &self,
-        attr: T::PayloadBuilderAttributes,
-    ) -> Result<PayloadId, PayloadBuilderError> {
-        self.send_new_payload(attr).await?
-    }
-
-    /// Sends a message to the service to subscribe to payload events.
-    /// Returns a receiver that will receive them.
-    pub async fn subscribe(&self) -> Result<PayloadEvents<T>, RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::Subscribe(tx));
-        Ok(PayloadEvents { receiver: rx.await? })
     }
 }
 

@@ -26,6 +26,7 @@ reth-chain-state = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 
 # async
+async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
