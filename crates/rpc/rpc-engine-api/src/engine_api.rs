@@ -1,6 +1,7 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
+use alloy_eips::BlobAndProofV1;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
@@ -22,7 +23,6 @@ use reth_rpc_types::{
         ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
         TransitionConfiguration,
     },
-    BlobAndProofV1,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
