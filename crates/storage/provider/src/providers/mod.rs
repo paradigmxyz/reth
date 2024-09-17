@@ -15,7 +15,7 @@ use reth_blockchain_tree_api::{
     InsertPayloadOk,
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
@@ -62,7 +62,7 @@ mod blockchain_provider;
 pub use blockchain_provider::BlockchainProvider2;
 
 /// Helper trait keeping common requirements of providers for [`NodeTypesWithDB`].
-pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec = ChainSpec> {}
+pub trait ProviderNodeTypes: NodeTypesWithDB<ChainSpec: EthereumHardforks> {}
 
 impl<T> ProviderNodeTypes for T where T: NodeTypesWithDB<ChainSpec = ChainSpec> {}
 
@@ -176,11 +176,11 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        self.database.provider()
+        self.database.database_provider_ro()
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        self.database.provider_rw().map(|p| p.0)
+        self.database.database_provider_rw()
     }
 }
 

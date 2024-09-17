@@ -70,36 +70,36 @@ use tokio::sync::watch;
 use tracing::{debug, error, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
-pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
+pub type DatabaseProviderRO<DB, Spec> = DatabaseProvider<<DB as Database>::TX, Spec>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
-pub struct DatabaseProviderRW<DB: Database>(pub DatabaseProvider<<DB as Database>::TXMut>);
+pub struct DatabaseProviderRW<DB: Database, Spec>(pub DatabaseProvider<<DB as Database>::TXMut, Spec>);
 
-impl<DB: Database> Deref for DatabaseProviderRW<DB> {
-    type Target = DatabaseProvider<<DB as Database>::TXMut>;
+impl<DB: Database, Spec> Deref for DatabaseProviderRW<DB, Spec> {
+    type Target = DatabaseProvider<<DB as Database>::TXMut, Spec>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
+impl<DB: Database, Spec> DerefMut for DatabaseProviderRW<DB, Spec> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<DB: Database> AsRef<DatabaseProvider<<DB as Database>::TXMut>> for DatabaseProviderRW<DB> {
-    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut> {
+impl<DB: Database, Spec> AsRef<DatabaseProvider<<DB as Database>::TXMut, Spec>> for DatabaseProviderRW<DB, Spec> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut, Spec> {
         &self.0
     }
 }
 
-impl<DB: Database> DatabaseProviderRW<DB> {
+impl<DB: Database, Spec: Send + Sync + 'static> DatabaseProviderRW<DB, Spec> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
         self.0.commit()
@@ -111,8 +111,8 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     }
 }
 
-impl<DB: Database> From<DatabaseProviderRW<DB>> for DatabaseProvider<<DB as Database>::TXMut> {
-    fn from(provider: DatabaseProviderRW<DB>) -> Self {
+impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>> for DatabaseProvider<<DB as Database>::TXMut, Spec> {
+    fn from(provider: DatabaseProviderRW<DB, Spec>) -> Self {
         provider.0
     }
 }
