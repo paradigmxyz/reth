@@ -2314,7 +2314,7 @@ where
             }),
         );
 
-        rx.try_recv()?
+        rx.blocking_recv()?
     }
 
     /// Handles an error that occurred while inserting a block.
