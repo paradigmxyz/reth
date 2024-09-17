@@ -289,6 +289,8 @@ impl AppendableChain {
         canonical_fork: ForkBlock,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<(), InsertBlockErrorKind>
     where
         DB: Database + Clone,
@@ -310,7 +312,8 @@ impl AppendableChain {
             externals,
             block_attachment,
             block_validation_kind,
-            #[cfg(feature = "telos")] None,
+            #[cfg(feature = "telos")]
+            telos_extra_fields,
         )?;
         // extend the state.
         self.chain.append_block(block, block_state);

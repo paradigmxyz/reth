@@ -342,7 +342,7 @@ where
         // check if block parent can be found in any side chain.
         if let Some(chain_id) = self.block_indices().get_side_chain_id(&parent.hash) {
             // found parent in side tree, try to insert there
-            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind)
+            return self.try_insert_block_into_side_chain(block, chain_id, block_validation_kind, #[cfg(feature = "telos")] telos_extra_fields)
         }
 
         // if not found, check if the parent can be found inside canonical chain.
@@ -469,6 +469,8 @@ where
         block: SealedBlockWithSenders,
         chain_id: SidechainId,
         block_validation_kind: BlockValidationKind,
+        #[cfg(feature = "telos")]
+        telos_extra_fields: Option<TelosEngineAPIExtraFields>,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         let block_num_hash = block.num_hash();
         debug!(target: "blockchain_tree", ?block_num_hash, ?chain_id, "Inserting block into side chain");
@@ -509,6 +511,8 @@ where
                 canonical_fork,
                 block_attachment,
                 block_validation_kind,
+                #[cfg(feature = "telos")]
+                telos_extra_fields,
             )?;
 
             self.state.block_indices.insert_non_fork_block(block_number, block_hash, chain_id);
