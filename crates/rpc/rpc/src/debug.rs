@@ -32,7 +32,7 @@ use reth_rpc_types::{
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::{states::bundle_state::BundleRetention, CacheDB},
+    db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
@@ -581,10 +581,8 @@ where
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
                 let evm_config = Call::evm_config(this.eth_api()).clone();
-                let mut db = StateBuilder::new()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bundle_update()
-                    .build();
+                let mut db =
+                    StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
 
                 pre_block_beacon_root_contract_call(
                     &mut db,
@@ -623,11 +621,8 @@ where
                     db.commit(res.state);
                 }
 
-                // Merge all state transitions
-                db.merge_transitions(BundleRetention::Reverts);
-
-                // Take the bundle state
-                let bundle_state = db.take_bundle();
+                // No need to merge transitions and create the bundle state, we will use Revm's
+                // cache directly.
 
                 // Initialize a map of preimages.
                 let mut state_preimages = HashMap::new();
@@ -635,8 +630,9 @@ where
                 // Grab all account proofs for the data accessed during block execution.
                 //
                 // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
-                // referenced accounts + storage slots.
-                let mut hashed_state = HashedPostState::from_bundle_state(&bundle_state.state);
+                // referenced accounts + storage slots. Cache is a superset of `BundleState`, so we
+                // can just query it to get the latest state of all accounts and storage slots.
+                let mut hashed_state = HashedPostState::default();
                 for (address, account) in db.cache.accounts {
                     let hashed_address = keccak256(address);
                     hashed_state.accounts.insert(
