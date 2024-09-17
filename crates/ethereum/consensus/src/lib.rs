@@ -46,7 +46,7 @@ impl EthBeaconConsensus {
     /// Checks the gas limit for consistency between parent and self headers.
     ///
     /// The maximum allowable difference between self and parent gas limits is determined by the
-    /// parent's gas limit divided by the ['GAS_LIMIT_BOUND_DIVISOR'].
+    /// parent's gas limit divided by the [`GAS_LIMIT_BOUND_DIVISOR`].
     fn validate_against_parent_gas_limit(
         &self,
         header: &SealedHeader,
