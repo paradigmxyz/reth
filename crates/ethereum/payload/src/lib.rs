@@ -14,7 +14,6 @@ use reth_basic_payload_builder::{
     PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::EthereumHardfork;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
@@ -22,21 +21,19 @@ use reth_evm::{
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
         pre_block_blockhashes_contract_call,
     },
-    ConfigureEvm,
+    ConfigureEvm, NextBlockEnvAttributes,
 };
-use reth_evm_ethereum::{
-    eip6110::parse_deposits_from_receipts, revm_spec_by_timestamp_after_merge, EthEvmConfig,
-};
+use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EIP1559_INITIAL_BASE_FEE},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
-    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
@@ -48,9 +45,7 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{
-        BlobExcessGasAndPrice, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState,
-    },
+    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
 use std::sync::Arc;
@@ -76,75 +71,17 @@ where
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
     fn cfg_and_block_env(
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        // configure evm env based on parent block
-        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
-
-        // ensure we're not missing any timestamp based hardforks
-        let spec_id =
-            revm_spec_by_timestamp_after_merge(&config.chain_spec, config.attributes.timestamp());
-
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id == SpecId::CANCUN {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
-
-        let mut basefee = parent.next_block_base_fee(
-            config.chain_spec.base_fee_params_at_timestamp(config.attributes.timestamp()),
-        );
-
-        let mut gas_limit = U256::from(parent.gas_limit);
-
-        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
-        // elasticity multiplier to get the new gas limit.
-        if config.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
-        {
-            let elasticity_multiplier = config
-                .chain_spec
-                .base_fee_params_at_timestamp(config.attributes.timestamp())
-                .elasticity_multiplier;
-
-            // multiply the gas limit by the elasticity multiplier
-            gas_limit *= U256::from(elasticity_multiplier);
-
-            // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(EIP1559_INITIAL_BASE_FEE)
-        }
-
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
-            coinbase: config.attributes.suggested_fee_recipient(),
-            timestamp: U256::from(config.attributes.timestamp()),
-            difficulty: U256::ZERO,
-            prevrandao: Some(config.attributes.prev_randao()),
-            gas_limit,
-            // calculate basefee based on parent block's gas usage
-            basefee: basefee.map(U256::from).unwrap_or_default(),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: config.attributes.timestamp(),
+            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
+            prev_randao: config.attributes.prev_randao(),
         };
-
-        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
 }
 

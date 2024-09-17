@@ -5,9 +5,10 @@
 use alloy_genesis::Genesis;
 use parking_lot::RwLock;
 use reth::{
+    api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
+        revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
         Address, Bytes, U256,
     },
     revm::{
@@ -150,6 +151,16 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env(tx_env, transaction, sender)
     }
 
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
+    }
+
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
@@ -159,35 +170,12 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
     }
 
-    /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
-        block_env.number = U256::from(header.number);
-        block_env.coinbase = header.beneficiary;
-        block_env.timestamp = U256::from(header.timestamp);
-        if after_merge {
-            block_env.prevrandao = Some(header.mix_hash);
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty;
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit);
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
-    }
-
-    fn fill_tx_env_system_contract_call(
+    fn next_cfg_and_block_env(
         &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
+        parent: &Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
