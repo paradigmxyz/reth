@@ -126,10 +126,7 @@ where
         // check if we have a better block
         if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
             // can skip building the block
-            return Ok(BuildOutcome::Aborted {
-                fees: op_block_attributes.total_fees,
-                cached_reads,
-            });
+            return Ok(BuildOutcome::Aborted { fees: op_block_attributes.total_fees, cached_reads });
         }
 
         let (withdrawals_outcome, execution_outcome) =
