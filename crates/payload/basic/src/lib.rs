@@ -692,7 +692,7 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub fn new(
+    pub const fn new(
         parent_block: Arc<SealedBlock>,
         extra_data: Bytes,
         attributes: Attributes,
