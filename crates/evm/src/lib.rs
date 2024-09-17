@@ -162,7 +162,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
     ///
-    /// Note: Implementors should ensure that all fields are required fields are filled.
+    /// Note: Implementers should ensure that all fields are required fields are filled.
     fn fill_cfg_and_block_env(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
