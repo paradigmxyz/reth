@@ -21,6 +21,7 @@ use reth_node_builder::{
     BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::Header;
 use reth_provider::CanonStateSubscriptions;
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};

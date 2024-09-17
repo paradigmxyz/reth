@@ -70,7 +70,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 }
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvmEnv<Header = Header>,
 {
     /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
     /// (that has the `parent` as its parent).

@@ -4,6 +4,7 @@ use std::{future::Future, marker::PhantomData};
 
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{

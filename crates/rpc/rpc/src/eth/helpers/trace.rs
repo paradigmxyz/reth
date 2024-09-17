@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to tracing.
 
 use reth_evm::ConfigureEvm;
+use reth_primitives::Header;
 use reth_rpc_eth_api::helpers::{LoadState, Trace};
 
 use crate::EthApi;
@@ -11,7 +12,7 @@ where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 }
