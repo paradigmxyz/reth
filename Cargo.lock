@@ -6392,6 +6392,7 @@ dependencies = [
 name = "reth-blockchain-tree-api"
 version = "1.0.6"
 dependencies = [
+ "alloy-primitives",
  "reth-consensus",
  "reth-execution-errors",
  "reth-primitives",
