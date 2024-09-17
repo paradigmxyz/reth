@@ -106,7 +106,7 @@ async fn build_consensus_and_translator(
         jwt_secret: reth_handle.jwt_secret,
         ship_endpoint: format!("ws://localhost:{ship_port}"),
         chain_endpoint: format!("http://localhost:{chain_port}"),
-        batch_size: 1,
+        batch_size: 10,
         prev_hash: "b25034033c9ca7a40e879ddcc29cf69071a22df06688b5fe8cc2d68b4e0528f9".to_string(),
         validate_hash: None,
         evm_start_block: 1,
