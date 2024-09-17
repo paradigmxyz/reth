@@ -4,6 +4,8 @@ Dumps genesis block JSON configuration to stdout
 
 ```bash
 $ reth dump-genesis --help
+```
+```txt
 Usage: reth dump-genesis [OPTIONS]
 
 Options:

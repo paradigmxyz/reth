@@ -19,6 +19,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByRangeV1",
     "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV2",
+    "engine_getBlobsV1",
 ];
 
 // The list of all supported Engine capabilities available over the engine endpoint.
@@ -32,7 +33,7 @@ pub struct EngineCapabilities {
 impl EngineCapabilities {
     /// Returns the list of all supported Engine capabilities for Prague spec.
     fn prague() -> Self {
-        Self { inner: CAPABILITIES.iter().cloned().map(str::to_owned).collect() }
+        Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
     }
 
     /// Returns the list of all supported Engine capabilities.

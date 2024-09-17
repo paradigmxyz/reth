@@ -29,6 +29,7 @@ reth-transaction-pool.workspace = true
 reth-trie.workspace = true
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 revm.workspace = true
 revm-inspectors.workspace = true
@@ -59,5 +60,4 @@ serde_json.workspace = true
 
 
 [features]
-default = ["js-tracer"]
 js-tracer = ["revm-inspectors/js-tracer"]

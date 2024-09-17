@@ -14,14 +14,16 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-execution-types.workspace = true
+reth-db-models.workspace = true
 reth-db-api.workspace = true
+reth-execution-types.workspace = true
 reth-primitives.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
 
-revm.workspace = true
+# alloy
+alloy-primitives.workspace = true
 
 auto_impl.workspace = true

@@ -2,9 +2,10 @@
 //!
 //! Log parsing for building filter.
 
+use alloy_primitives::TxHash;
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_primitives::{BlockNumHash, Receipt, TxHash};
+use reth_primitives::{BlockNumHash, Receipt};
 use reth_rpc_server_types::result::rpc_error_with_code;
 use reth_rpc_types::{FilterId, FilteredParams, Log};
 use reth_storage_api::BlockReader;
@@ -45,9 +46,9 @@ impl From<EthFilterError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee_types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
-            err @ EthFilterError::InvalidBlockRangeParams |
-            err @ EthFilterError::QueryExceedsMaxBlocks(_) |
-            err @ EthFilterError::QueryExceedsMaxResults(_) => {
+            err @ (EthFilterError::InvalidBlockRangeParams |
+            EthFilterError::QueryExceedsMaxBlocks(_) |
+            EthFilterError::QueryExceedsMaxResults(_)) => {
                 rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
@@ -167,7 +168,7 @@ pub fn append_matching_block_logs(
 /// Returns true if the log matches the filter and should be included
 pub fn log_matches_filter(
     block: BlockNumHash,
-    log: &reth_primitives::Log,
+    log: &alloy_primitives::Log,
     params: &FilteredParams,
 ) -> bool {
     if params.filter.is_some() &&

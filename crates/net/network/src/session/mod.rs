@@ -41,7 +41,7 @@ use secp256k1::SecretKey;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
@@ -346,7 +346,18 @@ impl SessionManager {
     /// Sends a message to the peer's session
     pub fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage) {
         if let Some(session) = self.active_sessions.get_mut(peer_id) {
-            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg));
+            let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
+                |e| {
+                    if let TrySendError::Full(_) = e {
+                        debug!(
+                            target: "net::session",
+                            ?peer_id,
+                            "session command buffer full, dropping message"
+                        );
+                        self.metrics.total_outgoing_peer_messages_dropped.increment(1);
+                    }
+                },
+            );
         }
     }
 

@@ -1,11 +1,9 @@
 //! [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895) Withdrawal types.
 
+use alloc::vec::Vec;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
-use reth_codecs::{reth_codec, Compact};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use reth_codecs::{add_arbitrary_tests, Compact};
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
@@ -13,7 +11,6 @@ pub use alloy_eips::eip4895::Withdrawal;
 use serde::{Deserialize, Serialize};
 
 /// Represents a collection of Withdrawals.
-#[reth_codec]
 #[derive(
     Debug,
     Clone,
@@ -30,7 +27,10 @@ use serde::{Deserialize, Serialize};
     RlpDecodableWrapper,
     Serialize,
     Deserialize,
+    Compact,
 )]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 #[as_ref(forward)]
 pub struct Withdrawals(Vec<Withdrawal>);
 
@@ -95,7 +95,6 @@ mod tests {
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// Withdrawal type natively
-    #[reth_codec]
     #[derive(
         Debug,
         Clone,
@@ -107,7 +106,10 @@ mod tests {
         RlpDecodable,
         Serialize,
         Deserialize,
+        Compact,
     )]
+    #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+    #[add_arbitrary_tests(compact)]
     struct RethWithdrawal {
         /// Monotonically increasing identifier issued by consensus layer.
         index: u64,

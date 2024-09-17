@@ -13,35 +13,47 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
+use reth_chain_state::ExecutedBlock;
+use reth_chainspec::EthereumHardfork;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
+        post_block_consolidation_requests_contract_call,
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+        pre_block_blockhashes_contract_call,
     },
     ConfigureEvm,
 };
-use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
+use reth_evm_ethereum::{
+    eip6110::parse_deposits_from_receipts, revm_spec_by_timestamp_after_merge, EthEvmConfig,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-    },
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EIP1559_INITIAL_BASE_FEE},
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_revm::database::StateProviderDatabase;
+use reth_transaction_pool::{
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+};
+use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        BlobExcessGasAndPrice, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState,
+    },
     DatabaseCommit, State,
 };
+use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
@@ -58,9 +70,81 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     }
 }
 
-impl Default for EthereumPayloadBuilder {
-    fn default() -> Self {
-        Self::new(EthEvmConfig::default())
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    ///
+    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
+    /// based on its timestamp.
+    ///
+    /// Block related settings are derived from the `parent` block and the configured attributes.
+    ///
+    /// NOTE: This is only intended for beacon consensus (after merge).
+    fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<EthPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id =
+            revm_spec_by_timestamp_after_merge(&config.chain_spec, config.attributes.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let mut basefee = parent.next_block_base_fee(
+            config.chain_spec.base_fee_params_at_timestamp(config.attributes.timestamp()),
+        );
+
+        let mut gas_limit = U256::from(parent.gas_limit);
+
+        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
+        // elasticity multiplier to get the new gas limit.
+        if config.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
+        {
+            let elasticity_multiplier = config
+                .chain_spec
+                .base_fee_params_at_timestamp(config.attributes.timestamp())
+                .elasticity_multiplier;
+
+            // multiply the gas limit by the elasticity multiplier
+            gas_limit *= U256::from(elasticity_multiplier);
+
+            // set the base fee to the initial base fee from the EIP-1559 spec
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+        }
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: config.attributes.suggested_fee_recipient(),
+            timestamp: U256::from(config.attributes.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(config.attributes.prev_randao()),
+            gas_limit,
+            // calculate basefee based on parent block's gas usage
+            basefee: basefee.map(U256::from).unwrap_or_default(),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
     }
 }
 
@@ -78,7 +162,8 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload_builder(self.evm_config.clone(), args)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
     }
 
     fn build_empty_payload(
@@ -86,163 +171,19 @@ where
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let extra_data = config.extra_data();
-        let PayloadConfig {
-            initialized_block_env,
-            parent_block,
-            attributes,
-            chain_spec,
-            initialized_cfg,
-            ..
-        } = config;
-
-        debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
-
-        let state = client.state_by_block_hash(parent_block.hash()).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to get state for empty payload"
-            );
-            err
-        })?;
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state))
-            .with_bundle_update()
-            .build();
-
-        let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
-        let block_gas_limit =
-            initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
-
-        // apply eip-4788 pre block contract call
-        pre_block_beacon_root_contract_call(
-            &mut db,
-            &self.evm_config,
-            &chain_spec,
-            &initialized_cfg,
-            &initialized_block_env,
-            block_number,
-            attributes.timestamp,
-            attributes.parent_beacon_block_root,
-        )
-        .map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to apply beacon root contract call for empty payload"
-            );
-            PayloadBuilderError::Internal(err.into())
-        })?;
-
-        // apply eip-2935 blockhashes update
-        apply_blockhashes_update(
-            &mut db,
-            &chain_spec,
-            initialized_block_env.timestamp.to::<u64>(),
-            block_number,
-            parent_block.hash(),
-        ).map_err(|err| {
-            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
-            PayloadBuilderError::Internal(err.into())
-        })?;
-
-        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-            &mut db,
-            &chain_spec,
-            attributes.timestamp,
-            attributes.withdrawals.clone(),
-        )
-        .map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to commit withdrawals for empty payload"
-            );
-            err
-        })?;
-
-        // merge all transitions into bundle state, this would apply the withdrawal balance
-        // changes and 4788 contract call
-        db.merge_transitions(BundleRetention::PlainState);
-
-        // calculate the state root
-        let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for empty payload"
-            );
-            err
-        })?;
-
-        let mut excess_blob_gas = None;
-        let mut blob_gas_used = None;
-
-        if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
-            excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-                let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-                let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
-            } else {
-                // for the first post-fork block, both parent.blob_gas_used and
-                // parent.excess_blob_gas are evaluated as 0
-                Some(calculate_excess_blob_gas(0, 0))
-            };
-
-            blob_gas_used = Some(0);
-        }
-
-        // Calculate the requests and the requests root.
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                // We do not calculate the EIP-6110 deposit requests because there are no
-                // transactions in an empty payload.
-                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-                    &self.evm_config,
-                    &mut db,
-                    &initialized_cfg,
-                    &initialized_block_env,
-                )
-                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-
-                let requests = withdrawal_requests;
-                let requests_root = calculate_requests_root(&requests);
-                (Some(requests.into()), Some(requests_root))
-            } else {
-                (None, None)
-            };
-
-        let header = Header {
-            parent_hash: parent_block.hash(),
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: initialized_block_env.coinbase,
-            state_root,
-            transactions_root: EMPTY_TRANSACTIONS,
-            withdrawals_root,
-            receipts_root: EMPTY_RECEIPTS,
-            logs_bloom: Default::default(),
-            timestamp: attributes.timestamp,
-            mix_hash: attributes.prev_randao,
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
-            number: parent_block.number + 1,
-            gas_limit: block_gas_limit,
-            difficulty: U256::ZERO,
-            gas_used: 0,
-            extra_data,
-            blob_gas_used,
-            excess_blob_gas,
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            requests_root,
+        let args = BuildArguments {
+            client,
+            config,
+            // we use defaults here because for the empty payload we don't need to execute anything
+            pool: NoopTransactionPool::default(),
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
         };
-
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
-        let sealed_block = block.seal_slow();
-
-        Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -252,9 +193,11 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
+pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm,
@@ -267,15 +210,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -285,6 +220,7 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
+    let mut executed_senders = Vec::new();
 
     let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
@@ -302,8 +238,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -316,14 +250,18 @@ where
     })?;
 
     // apply eip-2935 blockhashes update
-    apply_blockhashes_update(
+    pre_block_blockhashes_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
+        &initialized_cfg,
+        &initialized_block_env,
         parent_block.hash(),
     )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    .map_err(|err| {
+        warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -429,7 +367,8 @@ where
             .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append transaction to the list of executed transactions
+        // append sender and transaction to the respective lists
+        executed_senders.push(tx.signer());
         executed_txs.push(tx.into_signed());
     }
 
@@ -452,8 +391,15 @@ where
             &initialized_block_env,
         )
         .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let consolidation_requests = post_block_consolidation_requests_contract_call(
+            &evm_config,
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests = [deposit_requests, withdrawal_requests, consolidation_requests].concat();
         let requests_root = calculate_requests_root(&requests);
         (Some(requests.into()), Some(requests_root))
     } else {
@@ -465,11 +411,11 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
-    db.merge_transitions(BundleRetention::PlainState);
+    db.merge_transitions(BundleRetention::Reverts);
 
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts.clone()].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -478,9 +424,16 @@ where
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
-    let state_root = {
+    let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
+    let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(execution_outcome.state())?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header
@@ -541,7 +494,16 @@ where
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees);
+    // create the executed block data
+    let executed = ExecutedBlock {
+        block: Arc::new(sealed_block.clone()),
+        senders: Arc::new(executed_senders),
+        execution_output: Arc::new(execution_outcome),
+        hashed_state: Arc::new(hashed_state),
+        trie: Arc::new(trie_output),
+    };
+
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed));
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars);

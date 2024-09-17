@@ -4,6 +4,8 @@ Reth
 
 ```bash
 $ reth --help
+```
+```txt
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:

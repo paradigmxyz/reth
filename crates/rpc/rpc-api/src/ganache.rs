@@ -1,5 +1,5 @@
+use alloy_primitives::U256;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::U256;
 use reth_rpc_types::anvil::MineOptions;
 
 /// Ganache rpc interface.

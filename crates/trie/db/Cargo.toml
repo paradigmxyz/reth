@@ -26,6 +26,7 @@ revm.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
+alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -55,6 +56,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-node-types.workspace = true
 
 # trie
 triehash = "0.8"
@@ -70,7 +72,6 @@ tokio = { workspace = true, default-features = false, features = [
 tokio-stream.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
-criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]

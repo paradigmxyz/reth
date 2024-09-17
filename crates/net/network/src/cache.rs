@@ -5,7 +5,6 @@ use std::{fmt, hash::Hash};
 
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-// use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 
 /// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.

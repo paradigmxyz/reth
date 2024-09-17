@@ -1,14 +1,12 @@
 use crate::{
+    db_ext::DbTxPruneExt,
     segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::tables;
-use reth_db_api::{
-    database::Database,
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
-};
-use reth_provider::DatabaseProviderRW;
+use reth_db::{tables, transaction::DbTxMut};
+use reth_db_api::models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress};
+use reth_provider::DBProvider;
 use reth_prune_types::{
     PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
     SegmentOutputCheckpoint,
@@ -33,7 +31,10 @@ impl StorageHistory {
     }
 }
 
-impl<DB: Database> Segment<DB> for StorageHistory {
+impl<Provider> Segment<Provider> for StorageHistory
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+{
     fn segment(&self) -> PruneSegment {
         PruneSegment::StorageHistory
     }
@@ -47,11 +48,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -83,8 +80,8 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         // size should be up to 0.5MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_storages = FxHashMap::default();
-        let (pruned_changesets, done) = provider
-            .prune_table_with_range::<tables::StorageChangeSets>(
+        let (pruned_changesets, done) =
+            provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,
@@ -114,7 +111,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
                     block_number.min(last_changeset_pruned_block),
                 )
             });
-        let outcomes = prune_history_indices::<DB, tables::StoragesHistory, _>(
+        let outcomes = prune_history_indices::<Provider, tables::StoragesHistory, _>(
             provider,
             highest_sharded_keys,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
@@ -143,12 +140,11 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -157,7 +153,11 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, 0..=5000, B256::ZERO, 0..1);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=5000,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
@@ -207,7 +207,7 @@ mod tests {
             };
             let segment = StorageHistory::new(prune_mode);
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 

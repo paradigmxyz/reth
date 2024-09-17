@@ -1,9 +1,14 @@
+//! Integration tests for the trace API.
+
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
+use jsonrpsee_http_client::HttpClient;
+use reth_primitives::Receipt;
 use reth_rpc_api_testing_util::{debug::DebugApiExt, trace::TraceApiExt, utils::parse_env_url};
 use reth_rpc_eth_api::EthApiClient;
-use reth_rpc_types::trace::{
-    filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
+use reth_rpc_types::{
+    trace::{filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest},
+    Block, Transaction,
 };
 use std::{collections::HashSet, time::Instant};
 
@@ -106,7 +111,12 @@ async fn debug_trace_block_entire_chain() {
     let url = url.unwrap();
 
     let client = HttpClientBuilder::default().build(url).unwrap();
-    let current_block: u64 = client.block_number().await.unwrap().try_into().unwrap();
+    let current_block: u64 =
+        <HttpClient as EthApiClient<Transaction, Block, Receipt>>::block_number(&client)
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
     let range = 0..=current_block;
     let mut stream = client.debug_trace_block_buffered_unordered(range, None, 20);
     let now = Instant::now();

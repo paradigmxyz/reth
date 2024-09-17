@@ -3,7 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use reth_primitives::B256;
+use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;
@@ -199,7 +199,7 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
         if self.storage_trie_cleared ||
             (exact && in_memory.as_ref().map_or(false, |entry| entry.0 == key))
         {
-            return Ok(in_memory)
+            return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key))
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
@@ -221,6 +221,9 @@ impl<'a, C: TrieCursor> InMemoryStorageTrieCursor<'a, C> {
         last: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.first_after(&last));
+        if self.storage_trie_cleared {
+            return Ok(in_memory)
+        }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(last.clone())?;

@@ -1,5 +1,5 @@
 use reth::rpc::types::{
-    engine::{ExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV3},
+    engine::ExecutionPayloadEnvelopeV3, optimism::OptimismExecutionPayloadEnvelopeV3,
     ExecutionPayloadV3,
 };
 

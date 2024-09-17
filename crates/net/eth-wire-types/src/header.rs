@@ -2,7 +2,7 @@
 
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
 /// > The response must contain a number of block headers, of rising number when reverse is 0,
@@ -14,9 +14,10 @@ use reth_codecs_derive::derive_arbitrary;
 /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getblockheaders-0x03>
-#[derive_arbitrary(rlp)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub enum HeadersDirection {
     /// Falling block number.
     Falling,

@@ -6,10 +6,15 @@ use std::{
 };
 
 use futures::TryFutureExt;
-use reth_node_api::{BuilderProvider, FullNodeComponents};
+use reth_chainspec::ChainSpec;
+use reth_node_api::{BuilderProvider, FullNodeComponents, NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::{
     node_config::NodeConfig,
-    rpc::{api::EngineApiServer, eth::FullEthApiServer},
+    rpc::{
+        api::EngineApiServer,
+        eth::{EthApiTypes, FullEthApiServer},
+        types::AnyTransactionReceipt,
+    },
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc_builder::{
@@ -18,6 +23,7 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
+use reth_rpc_types::WithOtherFields;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 
@@ -42,13 +48,21 @@ pub struct RpcHooks<Node: FullNodeComponents, EthApi> {
     pub extend_rpc_modules: Box<dyn ExtendRpcModules<Node, EthApi>>,
 }
 
-impl<Node: FullNodeComponents, EthApi> Default for RpcHooks<Node, EthApi> {
+impl<Node, EthApi> Default for RpcHooks<Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     fn default() -> Self {
         Self { on_rpc_started: Box::<()>::default(), extend_rpc_modules: Box::<()>::default() }
     }
 }
 
-impl<Node: FullNodeComponents, EthApi> RpcHooks<Node, EthApi> {
+impl<Node, EthApi> RpcHooks<Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     /// Sets the hook that is run once the rpc server is started.
     pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
     where
@@ -88,7 +102,11 @@ impl<Node: FullNodeComponents, EthApi> RpcHooks<Node, EthApi> {
     }
 }
 
-impl<Node: FullNodeComponents, EthApi> fmt::Debug for RpcHooks<Node, EthApi> {
+impl<Node, EthApi> fmt::Debug for RpcHooks<Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcHooks")
             .field("on_rpc_started", &"...")
@@ -98,7 +116,7 @@ impl<Node: FullNodeComponents, EthApi> fmt::Debug for RpcHooks<Node, EthApi> {
 }
 
 /// Event hook that is called once the rpc server is started.
-pub trait OnRpcStarted<Node: FullNodeComponents, EthApi>: Send {
+pub trait OnRpcStarted<Node: FullNodeComponents, EthApi: EthApiTypes>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
         self: Box<Self>,
@@ -111,6 +129,7 @@ impl<Node, EthApi, F> OnRpcStarted<Node, EthApi> for F
 where
     F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
+    EthApi: EthApiTypes,
 {
     fn on_rpc_started(
         self: Box<Self>,
@@ -121,7 +140,11 @@ where
     }
 }
 
-impl<Node: FullNodeComponents, EthApi> OnRpcStarted<Node, EthApi> for () {
+impl<Node, EthApi> OnRpcStarted<Node, EthApi> for ()
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     fn on_rpc_started(
         self: Box<Self>,
         _: RpcContext<'_, Node, EthApi>,
@@ -132,7 +155,7 @@ impl<Node: FullNodeComponents, EthApi> OnRpcStarted<Node, EthApi> for () {
 }
 
 /// Event hook that is called when the rpc server is started.
-pub trait ExtendRpcModules<Node: FullNodeComponents, EthApi>: Send {
+pub trait ExtendRpcModules<Node: FullNodeComponents, EthApi: EthApiTypes>: Send {
     /// The hook that is called once the rpc server is started.
     fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node, EthApi>) -> eyre::Result<()>;
 }
@@ -141,13 +164,18 @@ impl<Node, EthApi, F> ExtendRpcModules<Node, EthApi> for F
 where
     F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
+    EthApi: EthApiTypes,
 {
     fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node, EthApi>) -> eyre::Result<()> {
         (*self)(ctx)
     }
 }
 
-impl<Node: FullNodeComponents, EthApi> ExtendRpcModules<Node, EthApi> for () {
+impl<Node, EthApi> ExtendRpcModules<Node, EthApi> for ()
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     fn extend_rpc_modules(self: Box<Self>, _: RpcContext<'_, Node, EthApi>) -> eyre::Result<()> {
         Ok(())
     }
@@ -156,7 +184,7 @@ impl<Node: FullNodeComponents, EthApi> ExtendRpcModules<Node, EthApi> for () {
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
 #[derive(Debug, Clone)]
 #[allow(clippy::type_complexity)]
-pub struct RpcRegistry<Node: FullNodeComponents, EthApi> {
+pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) registry: RpcRegistryInner<
         Node::Provider,
         Node::Pool,
@@ -167,7 +195,11 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi> {
     >,
 }
 
-impl<Node: FullNodeComponents, EthApi> Deref for RpcRegistry<Node, EthApi> {
+impl<Node, EthApi> Deref for RpcRegistry<Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     type Target = RpcRegistryInner<
         Node::Provider,
         Node::Pool,
@@ -182,7 +214,11 @@ impl<Node: FullNodeComponents, EthApi> Deref for RpcRegistry<Node, EthApi> {
     }
 }
 
-impl<Node: FullNodeComponents, EthApi> DerefMut for RpcRegistry<Node, EthApi> {
+impl<Node, EthApi> DerefMut for RpcRegistry<Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.registry
     }
@@ -196,7 +232,7 @@ impl<Node: FullNodeComponents, EthApi> DerefMut for RpcRegistry<Node, EthApi> {
 /// transport modules [`TransportRpcModules`] as well as configured authenticated methods
 /// [`AuthRpcModule`].
 #[allow(missing_debug_implementations)]
-pub struct RpcContext<'a, Node: FullNodeComponents, EthApi> {
+pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// The node components.
     pub(crate) node: Node,
 
@@ -218,7 +254,11 @@ pub struct RpcContext<'a, Node: FullNodeComponents, EthApi> {
     pub auth_module: &'a mut AuthRpcModule,
 }
 
-impl<'a, Node: FullNodeComponents, EthApi> RpcContext<'a, Node, EthApi> {
+impl<'a, Node, EthApi> RpcContext<'a, Node, EthApi>
+where
+    Node: FullNodeComponents,
+    EthApi: EthApiTypes,
+{
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig {
         self.config
@@ -245,7 +285,9 @@ impl<'a, Node: FullNodeComponents, EthApi> RpcContext<'a, Node, EthApi> {
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+    pub fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
         self.node.payload_builder()
     }
 }
@@ -259,9 +301,15 @@ pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
-    Node: FullNodeComponents + Clone,
-    Engine: EngineApiServer<Node::Engine>,
+    Node: FullNodeComponents<Types: NodeTypesWithDB<ChainSpec = ChainSpec>> + Clone,
+    Engine: EngineApiServer<<Node::Types as NodeTypesWithEngine>::Engine>,
+    EthApi: EthApiBuilderProvider<Node>
+        + FullEthApiServer<
+            NetworkTypes: alloy_network::Network<
+                TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
+            >,
+        >,
 {
     let auth_config = config.rpc.auth_server_config(jwt_secret)?;
     let module_config = config.rpc.transport_rpc_module_config();
@@ -333,7 +381,7 @@ where
 }
 
 /// Provides builder for the core `eth` API type.
-pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> {
+pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> + EthApiTypes {
     /// Returns the eth api builder.
     #[allow(clippy::type_complexity)]
     fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
@@ -342,7 +390,7 @@ pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> {
 impl<N, F> EthApiBuilderProvider<N> for F
 where
     N: FullNodeComponents,
-    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>>,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>> + EthApiTypes,
 {
     fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
         F::builder()

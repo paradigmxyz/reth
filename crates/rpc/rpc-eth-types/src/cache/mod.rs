@@ -1,5 +1,6 @@
 //! Async caching support for eth RPC
 
+use alloy_primitives::B256;
 use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
@@ -7,7 +8,7 @@ use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionSigned, TransactionSignedEcRecovered, B256,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -32,7 +33,7 @@ pub mod db;
 pub mod metrics;
 pub mod multi_consumer;
 
-/// The type that can send the response to a requested [Block]
+/// The type that can send the response to a requested [`Block`]
 type BlockTransactionsResponseSender =
     oneshot::Sender<ProviderResult<Option<Vec<TransactionSigned>>>>;
 
@@ -140,7 +141,7 @@ impl EthStateCache {
         this
     }
 
-    /// Requests the [Block] for the block hash
+    /// Requests the [`Block`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_block(&self, block_hash: B256) -> ProviderResult<Option<Block>> {
@@ -156,14 +157,14 @@ impl EthStateCache {
         }
     }
 
-    /// Requests the [Block] for the block hash, sealed with the given block hash.
+    /// Requests the [`Block`] for the block hash, sealed with the given block hash.
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_sealed_block(&self, block_hash: B256) -> ProviderResult<Option<SealedBlock>> {
         Ok(self.get_block(block_hash).await?.map(|block| block.seal(block_hash)))
     }
 
-    /// Requests the transactions of the [Block]
+    /// Requests the transactions of the [`Block`]
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_block_transactions(
@@ -175,7 +176,7 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-    /// Requests the ecrecovered transactions of the [Block]
+    /// Requests the ecrecovered transactions of the [`Block`]
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_block_transactions_ecrecovered(

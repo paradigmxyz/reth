@@ -9,13 +9,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
@@ -25,6 +23,8 @@ use revm_primitives::{
 pub mod builder;
 pub mod either;
 pub mod execute;
+#[cfg(feature = "std")]
+pub mod metrics;
 pub mod noop;
 pub mod provider;
 pub mod system_calls;
@@ -44,7 +44,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB>;
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        RethEvmBuilder::new(db, self.default_external_context()).build()
+    }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
@@ -106,6 +108,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+    /// The header type used by the EVM.
+    type Header;
+
     /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
     fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
         let mut tx_env = TxEnv::default();
@@ -125,11 +130,13 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         data: Bytes,
     );
 
-    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
+    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
+    ///
+    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
+    /// difficulty
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     );
@@ -157,15 +164,16 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
+    ///
+    /// Note: Implementers should ensure that all fields are required fields are filled.
     fn fill_cfg_and_block_env(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        self.fill_cfg_env(cfg, chain_spec, header, total_difficulty);
+        self.fill_cfg_env(cfg, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         self.fill_block_env(block_env, header, after_merge);
     }

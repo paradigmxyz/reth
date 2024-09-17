@@ -1,8 +1,7 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter as SfWriter},
     writer::static_file::StaticFileWriter,
-    BlockExecutionWriter, BlockWriter, DatabaseProvider, DatabaseProviderRW, HistoryWriter,
-    StateChangeWriter, StateWriter, TrieWriter,
+    BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
@@ -10,7 +9,6 @@ use reth_db::{
     models::CompactU256,
     tables,
     transaction::{DbTx, DbTxMut},
-    Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
@@ -19,7 +17,7 @@ use reth_primitives::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockNumReader, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
+    DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
 };
 use reth_storage_errors::writer::UnifiedStorageWriterError;
 use revm::db::OriginalValuesKnown;
@@ -38,29 +36,38 @@ enum StorageType<C = (), S = ()> {
 /// [`UnifiedStorageWriter`] is responsible for managing the writing to storage with both database
 /// and static file providers.
 #[derive(Debug)]
-pub struct UnifiedStorageWriter<'a, TX, SF> {
-    database: &'a DatabaseProvider<TX>,
-    static_file: Option<SF>,
+pub struct UnifiedStorageWriter<'a, ProviderDB, ProviderSF> {
+    database: &'a ProviderDB,
+    static_file: Option<ProviderSF>,
 }
 
-impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
+impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF> {
     /// Creates a new instance of [`UnifiedStorageWriter`].
     ///
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub const fn new(database: &'a DatabaseProvider<TX>, static_file: Option<SF>) -> Self {
-        Self { database, static_file }
+    pub fn new<P>(database: &'a P, static_file: Option<ProviderSF>) -> Self
+    where
+        P: AsRef<ProviderDB>,
+    {
+        Self { database: database.as_ref(), static_file }
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider and a static
     /// file instance.
-    pub const fn from(database: &'a DatabaseProvider<TX>, static_file: SF) -> Self {
+    pub fn from<P>(database: &'a P, static_file: ProviderSF) -> Self
+    where
+        P: AsRef<ProviderDB>,
+    {
         Self::new(database, Some(static_file))
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider.
-    pub const fn from_database(database: &'a DatabaseProvider<TX>) -> Self {
+    pub fn from_database<P>(database: &'a P) -> Self
+    where
+        P: AsRef<ProviderDB>,
+    {
         Self::new(database, None)
     }
 
@@ -68,7 +75,7 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the database provider is not set.
-    const fn database(&self) -> &DatabaseProvider<TX> {
+    const fn database(&self) -> &ProviderDB {
         self.database
     }
 
@@ -76,7 +83,7 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file(&self) -> &SF {
+    fn static_file(&self) -> &ProviderSF {
         self.static_file.as_ref().expect("should exist")
     }
 
@@ -84,7 +91,7 @@ impl<'a, TX, SF> UnifiedStorageWriter<'a, TX, SF> {
     ///
     /// # Panics
     /// If the static file instance is not set.
-    fn static_file_mut(&mut self) -> &mut SF {
+    fn static_file_mut(&mut self) -> &mut ProviderSF {
         self.static_file.as_mut().expect("should exist")
     }
 
@@ -111,12 +118,15 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// start-up.
     ///
     /// NOTE: If unwinding data from storage, use `commit_unwind` instead!
-    pub fn commit<DB: Database>(
-        database: DatabaseProviderRW<DB>,
+    pub fn commit<P>(
+        database: impl Into<P> + AsRef<P>,
         static_file: StaticFileProvider,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<()>
+    where
+        P: DBProvider<Tx: DbTxMut>,
+    {
         static_file.commit()?;
-        database.commit()?;
+        database.into().into_tx().commit()?;
         Ok(())
     }
 
@@ -128,19 +138,30 @@ impl UnifiedStorageWriter<'_, (), ()> {
     /// checkpoints on the next start-up.
     ///
     /// NOTE: Should only be used after unwinding data from storage!
-    pub fn commit_unwind<DB: Database>(
-        database: DatabaseProviderRW<DB>,
+    pub fn commit_unwind<P>(
+        database: impl Into<P> + AsRef<P>,
         static_file: StaticFileProvider,
-    ) -> ProviderResult<()> {
-        database.commit()?;
+    ) -> ProviderResult<()>
+    where
+        P: DBProvider<Tx: DbTxMut>,
+    {
+        database.into().into_tx().commit()?;
         static_file.commit()?;
         Ok(())
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, &'b StaticFileProvider>
+impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, &'b StaticFileProvider>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTx + DbTxMut>
+        + BlockWriter
+        + TransactionsProviderExt
+        + StateChangeWriter
+        + TrieWriter
+        + HistoryWriter
+        + StageCheckpointWriter
+        + BlockExecutionWriter
+        + AsRef<ProviderDB>,
 {
     /// Writes executed blocks and receipts to storage.
     pub fn save_blocks(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
@@ -260,16 +281,23 @@ where
 
         // Get the total txs for the block range, so we have the correct number of columns for
         // receipts and transactions
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         let tx_range = self
             .database()
-            .transaction_range_by_block_range(block_number..=highest_static_file_block)?;
+            .transaction_range_by_block_range(block_number + 1..=highest_static_file_block)?;
         let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
+        // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
         self.database().remove_block_and_execution_range(
-            block_number..=self.database().last_block_number()?,
+            block_number + 1..=self.database().last_block_number()?,
         )?;
 
+        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
+        // we remove only what is ABOVE the block.
+        //
+        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+        // will have three blocks to remove, which will be block 8, 7, and 6.
         debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
         self.static_file()
             .get_writer(block_number, StaticFileSegment::Headers)?
@@ -289,9 +317,9 @@ where
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
 where
-    TX: DbTx,
+    ProviderDB: DBProvider<Tx: DbTx> + HeaderProvider,
 {
     /// Ensures that the static file writer is set and of the right [`StaticFileSegment`] variant.
     ///
@@ -304,13 +332,13 @@ where
     ) -> Result<(), UnifiedStorageWriterError> {
         match &self.static_file {
             Some(writer) => {
-                if writer.user_header().segment() != segment {
+                if writer.user_header().segment() == segment {
+                    Ok(())
+                } else {
                     Err(UnifiedStorageWriterError::IncorrectStaticFileWriter(
                         writer.user_header().segment(),
                         segment,
                     ))
-                } else {
-                    Ok(())
                 }
             }
             None => Err(UnifiedStorageWriterError::MissingStaticFileWriter),
@@ -400,9 +428,9 @@ where
     }
 }
 
-impl<'a, 'b, TX> UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, ProviderDB> UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + HeaderProvider,
 {
     /// Appends receipts block by block.
     ///
@@ -481,9 +509,10 @@ where
     }
 }
 
-impl<'a, 'b, TX> StateWriter for UnifiedStorageWriter<'a, TX, StaticFileProviderRWRefMut<'b>>
+impl<'a, 'b, ProviderDB> StateWriter
+    for UnifiedStorageWriter<'a, ProviderDB, StaticFileProviderRWRefMut<'b>>
 where
-    TX: DbTxMut + DbTx,
+    ProviderDB: DBProvider<Tx: DbTxMut + DbTx> + StateChangeWriter + HeaderProvider,
 {
     /// Write the data and receipts to the database or static files if `static_file_producer` is
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
@@ -511,7 +540,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, AccountReader, TrieWriter};
+    use crate::{
+        test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
+    };
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -521,8 +552,11 @@ mod tests {
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
-    use reth_trie::{test_utils::state_root, HashedPostState, HashedStorage, StateRoot};
-    use reth_trie_db::DatabaseStateRoot;
+    use reth_trie::{
+        test_utils::{state_root, storage_root_prehashed},
+        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+    };
+    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm::{
         db::{
             states::{
@@ -535,7 +569,10 @@ mod tests {
         },
         DatabaseCommit, State,
     };
-    use std::collections::{BTreeMap, HashMap};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        str::FromStr,
+    };
 
     #[test]
     fn wiped_entries_are_removed() {
@@ -1413,7 +1450,6 @@ mod tests {
                         Vec::new()
                     )
                     .hash_state_slow(),
-                    Default::default()
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
@@ -1576,5 +1612,56 @@ mod tests {
         assert_eq!(end_state.state.get(&address1).unwrap().info, Some(account1_changed));
         // account2 got inserted
         assert_eq!(end_state.state.get(&address2).unwrap().info, Some(account2));
+    }
+
+    #[test]
+    fn hashed_state_storage_root() {
+        let address = Address::random();
+        let hashed_address = keccak256(address);
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.provider_rw().unwrap();
+        let tx = provider_rw.tx_ref();
+
+        // insert initial account storage
+        let init_storage = HashedStorage::from_iter(
+            false,
+            [
+                "50000000000000000000000000000004253371b55351a08cb3267d4d265530b6",
+                "512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e",
+                "51e6784c736ef8548f856909870b38e49ef7a4e3e77e5e945e0d5e6fcaa3037f",
+            ]
+            .into_iter()
+            .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
+        );
+        let mut state = HashedPostState::default();
+        state.storages.insert(hashed_address, init_storage.clone());
+        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+
+        // calculate database storage root and write intermediate storage nodes.
+        let (storage_root, _, storage_updates) =
+            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
+        assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
+        assert!(!storage_updates.is_empty());
+        provider_rw
+            .write_individual_storage_trie_updates(hashed_address, &storage_updates)
+            .unwrap();
+
+        // destroy the storage and re-create with new slots
+        let updated_storage = HashedStorage::from_iter(
+            true,
+            [
+                "00deb8486ad8edccfdedfc07109b3667b38a03a8009271aac250cce062d90917",
+                "88d233b7380bb1bcdc866f6871c94685848f54cf0ee033b1480310b4ddb75fc9",
+            ]
+            .into_iter()
+            .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
+        );
+        let mut state = HashedPostState::default();
+        state.storages.insert(hashed_address, updated_storage.clone());
+        provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
+
+        // re-calculate database storage root
+        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
+        assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

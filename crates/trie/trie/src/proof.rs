@@ -6,13 +6,13 @@ use crate::{
     walker::TrieWalker,
     HashBuilder, Nibbles,
 };
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives::{keccak256, Address, B256};
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A struct for generating merkle proofs.
 ///
@@ -28,7 +28,7 @@ pub struct Proof<T, H> {
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
     /// Proof targets.
-    targets: HashMap<B256, Vec<B256>>,
+    targets: HashMap<B256, HashSet<B256>>,
 }
 
 impl<T, H> Proof<T, H> {
@@ -39,6 +39,16 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
             targets: HashMap::default(),
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H> {
+        Proof {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+            targets: self.targets,
         }
     }
 
@@ -58,8 +68,13 @@ impl<T, H> Proof<T, H> {
         self
     }
 
+    /// Set the target account and slots.
+    pub fn with_target(self, target: (B256, HashSet<B256>)) -> Self {
+        self.with_targets(HashMap::from([target]))
+    }
+
     /// Set the target accounts and slots.
-    pub fn with_targets(mut self, targets: HashMap<B256, Vec<B256>>) -> Self {
+    pub fn with_targets(mut self, targets: HashMap<B256, HashSet<B256>>) -> Self {
         self.targets = targets;
         self
     }
@@ -77,10 +92,7 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .with_targets(HashMap::from([(
-                keccak256(address),
-                slots.iter().map(keccak256).collect(),
-            )]))
+            .with_target((keccak256(address), slots.iter().map(keccak256).collect()))
             .multiproof()?
             .account_proof(address, slots)?)
     }

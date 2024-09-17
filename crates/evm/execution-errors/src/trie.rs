@@ -1,19 +1,28 @@
 //! Errors when computing the state root.
 
+use alloc::string::ToString;
 use alloy_primitives::B256;
+use derive_more::{Display, From};
 use nybbles::Nibbles;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use thiserror_no_std::Error;
 
 /// State root errors.
-#[derive(Error, Debug, PartialEq, Eq, Clone)]
+#[derive(Display, Debug, From, PartialEq, Eq, Clone)]
 pub enum StateRootError {
     /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Database(DatabaseError),
     /// Storage root error.
-    #[error(transparent)]
-    StorageRootError(#[from] StorageRootError),
+    StorageRootError(StorageRootError),
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for StateRootError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(source) => std::error::Error::source(source),
+            Self::StorageRootError(source) => std::error::Error::source(source),
+        }
+    }
 }
 
 impl From<StateRootError> for DatabaseError {
@@ -26,11 +35,10 @@ impl From<StateRootError> for DatabaseError {
 }
 
 /// Storage root error.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Display, From, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Database(DatabaseError),
 }
 
 impl From<StorageRootError> for DatabaseError {
@@ -41,15 +49,22 @@ impl From<StorageRootError> for DatabaseError {
     }
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for StorageRootError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(source) => std::error::Error::source(source),
+        }
+    }
+}
+
 /// State proof errors.
-#[derive(Error, Debug, PartialEq, Eq, Clone)]
+#[derive(Display, From, Debug, PartialEq, Eq, Clone)]
 pub enum StateProofError {
     /// Internal database error.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Database(DatabaseError),
     /// RLP decoding error.
-    #[error(transparent)]
-    Rlp(#[from] alloy_rlp::Error),
+    Rlp(alloy_rlp::Error),
 }
 
 impl From<StateProofError> for ProviderError {
@@ -61,28 +76,46 @@ impl From<StateProofError> for ProviderError {
     }
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for StateProofError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(source) => std::error::Error::source(source),
+            Self::Rlp(source) => std::error::Error::source(source),
+        }
+    }
+}
+
 /// Trie witness errors.
-#[derive(Error, Debug, PartialEq, Eq, Clone)]
+#[derive(Display, From, Debug, PartialEq, Eq, Clone)]
 pub enum TrieWitnessError {
     /// Error gather proofs.
-    #[error(transparent)]
-    Proof(#[from] StateProofError),
+    #[from]
+    Proof(StateProofError),
     /// RLP decoding error.
-    #[error(transparent)]
-    Rlp(#[from] alloy_rlp::Error),
-    /// Missing storage multiproof.
-    #[error("missing storage multiproof for {0}")]
-    MissingStorageMultiProof(B256),
+    #[from]
+    Rlp(alloy_rlp::Error),
     /// Missing account.
-    #[error("missing account {0}")]
+    #[display("missing account {_0}")]
     MissingAccount(B256),
     /// Missing target node.
-    #[error("target node missing from proof {0:?}")]
+    #[display("target node missing from proof {_0:?}")]
     MissingTargetNode(Nibbles),
 }
 
 impl From<TrieWitnessError> for ProviderError {
-    fn from(value: TrieWitnessError) -> Self {
-        Self::TrieWitnessError(value.to_string())
+    fn from(error: TrieWitnessError) -> Self {
+        Self::TrieWitnessError(error.to_string())
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for TrieWitnessError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Proof(source) => std::error::Error::source(source),
+            Self::Rlp(source) => std::error::Error::source(source),
+            _ => Option::None,
+        }
     }
 }

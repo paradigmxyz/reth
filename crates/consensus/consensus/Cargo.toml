@@ -14,11 +14,14 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # misc
 auto_impl.workspace = true
-thiserror-no-std = {workspace = true, default-features = false }
+derive_more.workspace = true
 
 [features]
 default = ["std"]
-std = ["thiserror-no-std/std"]
+std = []
 test-utils = []

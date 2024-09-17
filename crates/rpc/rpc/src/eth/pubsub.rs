@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::TxHash;
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
 use reth_rpc_eth_types::logs_utils;
@@ -17,7 +18,7 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    FilteredParams, Header, Log,
+    FilteredParams, Header, Log, Transaction, WithOtherFields,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
@@ -68,7 +69,7 @@ impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network>
 }
 
 #[async_trait::async_trait]
-impl<Provider, Pool, Events, Network> EthPubSubApiServer
+impl<Provider, Pool, Events, Network> EthPubSubApiServer<reth_rpc_types::Transaction>
     for EthPubSub<Provider, Pool, Events, Network>
 where
     Provider: BlockReader + EvmEnvProvider + Clone + 'static,
@@ -108,9 +109,11 @@ where
 {
     match kind {
         SubscriptionKind::NewHeads => {
-            let stream = pubsub
-                .new_headers_stream()
-                .map(|block| EthSubscriptionResult::Header(Box::new(block.into())));
+            let stream = pubsub.new_headers_stream().map(|header| {
+                EthSubscriptionResult::<WithOtherFields<Transaction>>::Header(Box::new(
+                    header.into(),
+                ))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Logs => {
@@ -122,8 +125,9 @@ where
                 }
                 _ => FilteredParams::default(),
             };
-            let stream =
-                pubsub.log_stream(filter).map(|log| EthSubscriptionResult::Log(Box::new(log)));
+            let stream = pubsub.log_stream(filter).map(|log| {
+                EthSubscriptionResult::<WithOtherFields<Transaction>>::Log(Box::new(log))
+            });
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::NewPendingTransactions => {
@@ -153,7 +157,7 @@ where
 
             let stream = pubsub
                 .pending_transaction_hashes_stream()
-                .map(EthSubscriptionResult::TransactionHash);
+                .map(EthSubscriptionResult::<WithOtherFields<Transaction>>::TransactionHash);
             pipe_from_stream(accepted_sink, stream).await
         }
         SubscriptionKind::Syncing => {

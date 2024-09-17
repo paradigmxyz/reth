@@ -1,6 +1,7 @@
 use crate::BlockHashReader;
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, B256};
+use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
@@ -62,14 +63,12 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.number))
             }
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::FinalizedBlockNotFound),
-            },
-            BlockNumberOrTag::Safe => match self.safe_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::SafeBlockNotFound),
-            },
+            BlockNumberOrTag::Finalized => {
+                self.finalized_block_number()?.ok_or(ProviderError::FinalizedBlockNotFound)?
+            }
+            BlockNumberOrTag::Safe => {
+                self.safe_block_number()?.ok_or(ProviderError::SafeBlockNotFound)?
+            }
         };
         Ok(Some(num))
     }

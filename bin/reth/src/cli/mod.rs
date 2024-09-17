@@ -1,16 +1,13 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
-        LogArgs,
-    },
+    args::LogArgs,
     commands::debug_cmd,
-    macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, dump_genesis, import, init_cmd, init_state,
     node::{self, NoArgs},
@@ -19,6 +16,8 @@ use reth_cli_commands::{
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::args::utils::DefaultChainSpecParser;
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -35,10 +34,10 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub struct Cli<C: ChainSpecParser = DefaultChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Ext>,
+    command: Commands<C, Ext>,
 
     /// The chain this node is running.
     ///
@@ -46,12 +45,12 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(
         long,
         value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_value_parser,
+        long_help = C::help_message(),
+        default_value = C::SUPPORTED_CHAINS[0],
+        value_parser = C::parser(),
         global = true,
     )]
-    chain: Arc<ChainSpec>,
+    chain: Arc<C::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -89,7 +88,7 @@ impl Cli {
     }
 }
 
-impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -117,14 +116,14 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth::cli::Cli;
+    /// use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::parse()
+    /// Cli::<DefaultChainSpecParser, MyArgs>::parse()
     ///     .run(|builder, my_args: MyArgs| async move {
     ///         // launch the node
     ///
@@ -149,29 +148,33 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
-            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute(|chain_spec| block_executor!(chain_spec)),
-            ),
-            #[cfg(feature = "optimism")]
-            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            #[cfg(feature = "optimism")]
-            Commands::ImportReceiptsOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute())
+            Commands::Init(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
+            Commands::InitState(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
+                command.execute::<EthereumNode, _, _>(EthExecutorProvider::ethereum),
+            ),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
+                command.execute::<EthereumNode, _, _>(ctx, EthExecutorProvider::ethereum)
             }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Debug(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
+            }
+            Commands::Recover(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
+            }
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
         }
     }
 
@@ -187,38 +190,30 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
+pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::NodeCommand<Ext>),
+    Node(Box<node::NodeCommand<C, Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(init_cmd::InitCommand),
+    Init(init_cmd::InitCommand<C>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand),
+    InitState(init_state::InitStateCommand<C>),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
-    Import(import::ImportCommand),
-    /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
-    #[cfg(feature = "optimism")]
-    #[command(name = "import-op")]
-    ImportOp(reth_optimism_cli::ImportOpCommand),
-    /// This imports RLP encoded receipts from a file.
-    #[cfg(feature = "optimism")]
-    #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(reth_optimism_cli::ImportReceiptsOpCommand),
+    Import(import::ImportCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
-    DumpGenesis(dump_genesis::DumpGenesisCommand),
+    DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command),
+    Db(db::Command<C>),
     /// Manipulate individual stages.
     #[command(name = "stage")]
-    Stage(stage::Command),
+    Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command),
+    P2P(p2p::Command<C>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
@@ -228,13 +223,13 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     Config(config_cmd::Command),
     /// Various debug routines
     #[command(name = "debug")]
-    Debug(debug_cmd::Command),
+    Debug(debug_cmd::Command<C>),
     /// Scripts for node recovery
     #[command(name = "recover")]
-    Recover(recover::Command),
+    Recover(recover::Command<C>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
-    Prune(prune::PruneCommand),
+    Prune(prune::PruneCommand<C>),
 }
 
 #[cfg(test)]
@@ -242,6 +237,7 @@ mod tests {
     use super::*;
     use crate::args::ColorMode;
     use clap::CommandFactory;
+    use reth_node_core::args::utils::SUPPORTED_CHAINS;
 
     #[test]
     fn parse_color_mode() {
@@ -254,7 +250,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<NoArgs>::command();
+        let reth = Cli::<DefaultChainSpecParser, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()

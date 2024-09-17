@@ -21,11 +21,11 @@ pub(crate) mod utils;
 
 use reth_db_api::{
     models::{
-        accounts::{AccountBeforeTx, BlockNumberAddress},
+        accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
-        client_version::ClientVersion,
         storage_sharded_key::StorageShardedKey,
-        CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, ClientVersion, CompactU256, ShardedKey, StoredBlockBodyIndices,
+        StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table},
 };
@@ -370,14 +370,14 @@ tables! {
     table StorageChangeSets<Key = BlockNumberAddress, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state of an [`Account`] indexed with `keccak256Address`
-    /// This table is in preparation for merkelization and calculation of state root.
+    /// This table is in preparation for merklization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
-    /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
+    /// part of storage is changed. Benefit for merklization is that hashed addresses are sorted.
     table HashedAccounts<Key = B256, Value = Account>;
 
     /// Stores the current storage values indexed with `keccak256Address` and
     /// hash of storage key `keccak256key`.
-    /// This table is in preparation for merkelization and calculation of state root.
+    /// This table is in preparation for merklization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
     table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
 

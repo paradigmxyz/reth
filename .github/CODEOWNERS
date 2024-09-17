@@ -2,7 +2,7 @@
 bin/                        @onbjerg
 crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
 crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
-crates/chainspec/           @Rjected @joshieDo @mattsse
+crates/chainspec/           @Rjected @joshieDo @mattsse @emhane
 crates/chain-state/         @fgimenez @mattsse @rkrasiuk
 crates/cli/                 @onbjerg @mattsse
 crates/config/              @onbjerg
@@ -21,7 +21,7 @@ crates/metrics/             @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
 crates/node/                @mattsse @Rjected @onbjerg
-crates/optimism/            @mattsse @Rjected @fgimenez
+crates/optimism/            @mattsse @Rjected @fgimenez @emhane
 crates/payload/             @mattsse @Rjected
 crates/primitives/          @Rjected
 crates/primitives-traits/   @Rjected @joshieDo
@@ -44,4 +44,5 @@ crates/tokio-util/          @fgimenez @emhane
 crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie/                @rkrasiuk @Rjected
+etc/                        @Rjected @onbjerg @shekhirin
 .github/                    @onbjerg @gakonst @DaniPopes
