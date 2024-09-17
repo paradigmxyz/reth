@@ -7105,9 +7105,11 @@ name = "reth-ethereum-cli"
 version = "1.0.6"
 dependencies = [
  "alloy-genesis",
+ "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli",
+ "reth-cli-commands",
  "serde_json",
  "shellexpand",
 ]
