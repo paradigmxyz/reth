@@ -16,7 +16,7 @@ use crate::{
     PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
     TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use alloy_eips::BlobAndProofV1
+use alloy_eips::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::BlobTransactionSidecar;
