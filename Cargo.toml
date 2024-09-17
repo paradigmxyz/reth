@@ -381,6 +381,7 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-verkle-trie = { path = "crates/verkle/trie" }
+reth-verkle-db = { path = "crates/verkle/db" }
 # revm
 revm = { version = "12.1.0", features = [
     "std",

@@ -1,20 +1,12 @@
 use reth_db::{
-    cursor::{DbCursorRW, DbDupCursorRW},
-    tables, transaction::DbTxMut,
+    tables, transaction::DbTxMut
 };
 use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::DbCursorRO,
     transaction::DbTx,
 };
-use reth_verkle_trie::generic_db::{GenericBatchDB, GenericBatchWriter};
-use reth_verkle_trie::verkle_trie_cursor::VerkleTrieCursorFactory;
 use std::collections::HashMap;
-use verkle_db::{BareMetalDiskDb, BareMetalKVDb, BatchDB, BatchWriter};
 use verkle_trie::{from_to_bytes::{FromBytes, ToBytes}, database::{memory_db::MemoryDb, meta::{BranchChild, BranchMeta, StemMeta}, Flush, ReadOnlyHigherDb, WriteOnlyHigherDb}};
-use crate::verkle_trie_cursor::{DatabaseVerkleTrie, DatabaseVerkleTrieCursor};
-// A convenient structure that allows the end user to just implement BatchDb and BareMetalDiskDb
-// Then the methods needed for the Trie are auto implemented. In  particular, ReadOnlyHigherDb and WriteOnlyHigherDb
-// are implemented
 
 // All nodes at this level or above will be cached in memory
 const CACHE_DEPTH: u8 = 4;
@@ -22,16 +14,16 @@ pub(crate) const LEAF_TABLE_MARKER: u8 = 0;
 pub(crate) const STEM_TABLE_MARKER: u8 = 1;
 pub(crate) const BRANCH_TABLE_MARKER: u8 = 2;
 
-// A wrapper database for those that just want to implement the permanent storage
+/// Database for operations over verkle trie.
 #[derive(Debug)]
 pub struct VerkleDb<'a, TX> {
-    // The underlying key value database
+    /// The underlying key value database
     // We try to avoid fetching from this, and we only store at the end of a batch insert
-    pub tx: DatabaseVerkleTrie<'a, TX>,
-    // This stores the key-value pairs that we need to insert into the storage
+    pub tx: &'a TX,
+    /// This stores the key-value pairs that we need to insert into the storage
     // This is flushed after every batch insert
     pub batch: MemoryDb,
-    // This stores the top 3 layers of the trie, since these are the most accessed
+    /// This stores the top 3 layers of the trie, since these are the most accessed
     // in the trie on average
     pub cache: MemoryDb,
 }
@@ -39,22 +31,9 @@ pub struct VerkleDb<'a, TX> {
 impl<'a, TX> VerkleDb<'a, TX>{
 /// Create new [`VerkleDb`].
 pub fn new(tx: &'a TX) -> Self {
-    Self { tx: DatabaseVerkleTrie::new(tx), batch: MemoryDb::new(), cache: MemoryDb::new() }
+    Self { tx, batch: MemoryDb::new(), cache: MemoryDb::new() }
 }
 }
-
-// impl<S: BareMetalDiskDb> BareMetalDiskDb for VerkleDb<S> {
-//     fn from_path<P: AsRef<std::path::Path>>(path: P) -> Self {
-//         VerkleDb {
-//             storage: GenericBatchDB::from_path(path),
-
-//             batch: MemoryDb::new(),
-//             cache: MemoryDb::new(),
-//         }
-//     }
-
-//     const DEFAULT_PATH: &'static str = S::DEFAULT_PATH;
-// }
 
 impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> 
 {
@@ -95,9 +74,9 @@ impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX>
         }
 
         for (key, value) in trie_updates {
-            self.tx.0.put::<tables::VerkleTrie>(key, value).unwrap();
+            self.tx.put::<tables::VerkleTrie>(key, value).unwrap();
         }
-        self.tx.0.commit().unwrap();
+        self.tx.commit().unwrap();
 
         let num_items = self.batch.num_items();
         println!(
@@ -121,7 +100,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok()?;
         let mut labelled_key = Vec::with_capacity(key.len() + 1);
         labelled_key.push(LEAF_TABLE_MARKER);
         labelled_key.extend_from_slice(&key);
@@ -141,7 +120,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok()?;
         let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
         labelled_key.push(STEM_TABLE_MARKER);
         labelled_key.extend_from_slice(&stem_key);
@@ -161,7 +140,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok()?;
         let mut labelled_key = Vec::with_capacity(key.len() + 1);
         labelled_key.push(BRANCH_TABLE_MARKER);
         labelled_key.extend_from_slice(key);
@@ -182,7 +161,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return Some(val);
         }
         // Now try the disk
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok()?;
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok()?;
         let mut labelled_key = Vec::with_capacity(branch_id.len() + 2);
         labelled_key.push(BRANCH_TABLE_MARKER);
         labelled_key.extend_from_slice(branch_id);
@@ -201,7 +180,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             return self.cache.get_branch_children(branch_id);
         }
         // First get the children from storage
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok().unwrap();
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok().unwrap();
         let mut branch_children = Vec::with_capacity(256);
 
         let mut labelled_key = Vec::with_capacity(branch_id.len() + 1);
@@ -221,7 +200,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
         let mut children: HashMap<_, _> = branch_children
             .into_iter()
             .collect();
-        //
+        
         // Then get the children from the batch
         let children_from_batch = self.batch.get_branch_children(branch_id);
         //
@@ -244,7 +223,7 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
 
         // It's possible that they are in disk storage and that batch storage has some recent updates
         // First get the children from storage
-        let mut trie_cursor = self.tx.0.cursor_read::<tables::VerkleTrie>().ok().unwrap();
+        let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok().unwrap();
         let mut stem_children = Vec::with_capacity(256);
         let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
         labelled_key.push(LEAF_TABLE_MARKER);
@@ -261,10 +240,10 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             }
         }
         let mut children: HashMap<_, _> = stem_children.into_iter().collect();
-        //
+        
         // Then get the children from the batch
         let children_from_batch = self.batch.get_stem_children(stem_key);
-        //
+        
         // Now insert the children from batch into the storage children as they will be fresher
         // overwriting if they have the same indices
         for (index, val) in children_from_batch {
@@ -312,3 +291,30 @@ impl<'a, TX: DbTx> WriteOnlyHigherDb for VerkleDb<'a, TX> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_provider::test_utils::create_test_provider_factory;
+    #[test]
+    fn test_verkle_storage_cursor_abstraction() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let mut cursor = provider.tx_ref().cursor_write::<tables::VerkleTrie>().unwrap();
+        // key of a leaf node
+        let key: Vec<u8> = vec![
+            245, 110, 100, 66, 36, 244, 87, 100, 144, 207, 224, 222, 20, 36, 164, 83, 34, 18, 82,
+            155, 254, 55, 71, 19, 216, 78, 125, 126, 142, 146, 114, 3,
+        ];
+        let value: Vec<u8> = vec![
+            197, 210, 70, 1, 134, 247, 35, 60, 146, 126, 125, 178, 220, 199, 3, 192, 229, 0, 182,
+            83, 202, 130, 39, 59, 123, 250, 216, 4, 93, 133, 164, 112,
+        ];
+        let mut labelled_key = Vec::with_capacity(key.len() + 1);
+        labelled_key.push(LEAF_TABLE_MARKER);
+        labelled_key.extend_from_slice(&key);
+        cursor.upsert(labelled_key.clone(), value.clone()).unwrap();
+        let db = VerkleDb::new(provider.tx_ref());
+        assert_eq!(db.get_leaf(key.try_into().unwrap()).map(Vec::from), Some(value));
+    }
+}
