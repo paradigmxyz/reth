@@ -186,36 +186,40 @@ async fn testing_chain_sync() {
 
     let (block_sender, block_receiver) = mpsc::channel::<TelosEVMBlock>(1000);
 
+    println!("Telos consensus client starting, awaiting result...");
+    let client_handle = tokio::spawn(client.run(block_receiver, lib));
+
     println!("Telos translator client is starting...");
     let translator_handle = tokio::spawn(translator.launch(Some(block_sender)));
 
-    println!("Telos consensus client starting, awaiting result...");
-    let client_handle = tokio::spawn(client.run(block_receiver, lib));
     let rpc_url = Url::from(format!("http://localhost:{}", rpc_port).parse().unwrap());
     let provider = ProviderBuilder::new().on_http(rpc_url.clone());
 
-    let shutdown_handle = tokio::spawn(async move {
-        // todo wait time or anything else to wait for shutdown
-        println!("Waiting to send shutdown signal...");
+    // todo wait time or anything else to wait for shutdown
+    println!("Waiting to send shutdown signal...");
 
-        loop {
-            sleep(Duration::from_secs(1)).await;
-            let latest_block = provider.get_block_number().await.unwrap();
-            println!("Latest block: {latest_block}");
-            if latest_block > CONTAINER_LAST_EVM_BLOCK {
-                break;
-            }
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let latest_block = provider.get_block_number().await.unwrap();
+        println!("Latest block: {latest_block}");
+        if client_handle.is_finished() {
+            _ = translator_shutdown.shutdown().await.unwrap();
+            break;
         }
+        if latest_block > CONTAINER_LAST_EVM_BLOCK {
+            _ = translator_shutdown.shutdown().await.unwrap();
+            _ = consensus_shutdown.shutdown().await.unwrap();
+            break;
+        }
+    }
 
-        live_test_runner::run_tests(&rpc_url.clone().to_string(), "87ef69a835f8cd0c44ab99b7609a20b2ca7f1c8470af4f0e5b44db927d542084").await;
-
-        _ = translator_shutdown.shutdown().await.unwrap();
-        _ = translator_handle.await.unwrap();
-        println!("Translator shutdown done.");
-        _ = consensus_shutdown.shutdown().await.unwrap();
-    });
-
-    _ = client_handle.await.unwrap();
+    _ = tokio::join!(client_handle, translator_handle);
+    println!("Translator shutdown done.");
     println!("Client shutdown done.");
-    shutdown_handle.await.unwrap();
+
+    live_test_runner::run_tests(
+        &rpc_url.clone().to_string(),
+        "87ef69a835f8cd0c44ab99b7609a20b2ca7f1c8470af4f0e5b44db927d542084",
+    )
+    .await;
 }
