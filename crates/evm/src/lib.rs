@@ -14,9 +14,7 @@ extern crate alloc;
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_primitives::{
-    Address, Header, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
-};
+use reth_primitives::{Address, TransactionSigned, TransactionSignedEcRecovered, B256, U256};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
@@ -169,7 +167,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
     fn next_cfg_and_block_env(
         &self,
-        parent: &Header,
+        parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
