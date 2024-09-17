@@ -427,6 +427,7 @@ alloy-eips = { version = "0.3.5", default-features = false }
 alloy-genesis = { version = "0.3.5", default-features = false }
 alloy-json-rpc = { version = "0.3.5", default-features = false }
 alloy-network = { version = "0.3.5", default-features = false }
+alloy-network-primitives = { version = "0.3.5", default-features = false }
 alloy-node-bindings = { version = "0.3.5", default-features = false }
 alloy-provider = { version = "0.3.5", features = [
     "reqwest",
