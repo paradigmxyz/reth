@@ -238,13 +238,11 @@ where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
     E: BlockExecutorProvider + Clone + Unpin + 'static,
 {
-    // TODO(alexey): make it public when backfill is implemented in [`ExExNotificationsWithHead`]
     /// Subscribe to notifications with the given head.
     ///
     /// Notifications will be sent starting from the head, not inclusive. For example, if
     /// `head.number == 10`, then the first notification will be with `block.number == 11`.
-    #[allow(dead_code)]
-    fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
+    pub fn with_head(self, head: ExExHead) -> ExExNotificationsWithHead<P, E> {
         ExExNotificationsWithHead::new(
             self.node_head,
             self.provider,
