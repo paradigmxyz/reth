@@ -103,6 +103,7 @@ impl Default for DebugArgs {
             reorg_depth: None,
             engine_api_store: None,
             invalid_block_hook: Some(InvalidBlockSelection::default()),
+            healthy_node_rpc_url: None,
         }
     }
 }
@@ -122,7 +123,7 @@ pub struct InvalidBlockSelection(HashSet<InvalidBlockHookType>);
 
 impl Default for InvalidBlockSelection {
     fn default() -> Self {
-        Self([InvalidBlockHook::Witness].into())
+        Self([InvalidBlockHookType::Witness].into())
     }
 }
 
