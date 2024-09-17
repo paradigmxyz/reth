@@ -269,25 +269,33 @@ pub trait LoadState: EthApiTypes {
         Self: SpawnBlocking,
     {
         self.spawn_blocking_io(move |this| {
+            // first fetch the on chain nonce
+            let nonce = this
+                .state_at_block_id_or_latest(block_id)?
+                .account_nonce(address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
             if block_id == Some(BlockId::pending()) {
+                // for pending tag we need to find the highest nonce in the pool
                 let address_txs = this.pool().get_transactions_by_sender(address);
-                if let Some(highest_nonce) =
+                if let Some(highest_pool_nonce) =
                     address_txs.iter().map(|item| item.transaction.nonce()).max()
                 {
-                    let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
-                        EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
-                    ))?;
+                    // and the corresponding txcount is nonce + 1
+                    let next_nonce =
+                        nonce.max(highest_pool_nonce).checked_add(1).ok_or_else(|| {
+                            Self::Error::from(EthApiError::InvalidTransaction(
+                                RpcInvalidTransactionError::NonceMaxValue,
+                            ))
+                        })?;
+
+                    let tx_count = nonce.max(next_nonce);
                     return Ok(U256::from(tx_count))
                 }
             }
 
-            let state = this.state_at_block_id_or_latest(block_id)?;
-            Ok(U256::from(
-                state
-                    .account_nonce(address)
-                    .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default(),
-            ))
+            Ok(U256::from(nonce))
         })
     }
 
