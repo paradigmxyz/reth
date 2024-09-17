@@ -1301,6 +1301,12 @@ mod tests {
         Ok(())
     }
 
+    #[ignore]
+    #[tokio::test]
+    async fn exex_notifications_behind_head_non_canonical() -> eyre::Result<()> {
+        Ok(())
+    }
+
     #[tokio::test]
     async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
         let provider_factory = create_test_provider_factory();
@@ -1345,10 +1351,16 @@ mod tests {
             notifications_rx,
         )
         .with_head(exex_head);
-        let new_notification = notifications.next().await.transpose()?;
 
+        let new_notification = notifications.next().await.transpose()?;
         assert_eq!(new_notification, Some(notification));
 
+        Ok(())
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn exex_notifications_same_head_non_canonical() -> eyre::Result<()> {
         Ok(())
     }
 
@@ -1403,6 +1415,8 @@ mod tests {
         let new_notification = poll_fn(|cx| Poll::Ready(notifications.poll_next_unpin(cx))).await;
         assert!(new_notification.is_pending());
 
+        // Imitate the node catching up with the ExEx by sending a notification for the missing
+        // block
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![random_block(
