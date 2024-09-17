@@ -5088,7 +5088,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -9674,6 +9674,7 @@ name = "reth-telos-rpc-engine-api"
 version = "1.0.6"
 dependencies = [
  "reth-primitives 1.0.6",
+ "revm",
  "serde",
 ]
 
@@ -11089,7 +11090,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=7ce6b11fe671504f6ee5c0c5d9291cc12f7e5fbc#7ce6b11fe671504f6ee5c0c5d9291cc12f7e5fbc"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=9a2137c578584d571854db03b4f981cfa4ea997a#9a2137c578584d571854db03b4f981cfa4ea997a"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -11125,7 +11126,7 @@ dependencies = [
 [[package]]
 name = "telos-translator-rs"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=7ce6b11fe671504f6ee5c0c5d9291cc12f7e5fbc#7ce6b11fe671504f6ee5c0c5d9291cc12f7e5fbc"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=9a2137c578584d571854db03b4f981cfa4ea997a#9a2137c578584d571854db03b4f981cfa4ea997a"
 dependencies = [
  "alloy",
  "alloy-consensus",

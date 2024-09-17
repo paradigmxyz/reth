@@ -33,6 +33,12 @@ use revm_primitives::{
 };
 #[cfg(feature = "telos")]
 use reth_telos_rpc_engine_api::structs::TelosEngineAPIExtraFields;
+#[cfg(feature = "telos")]
+use reth_telos_rpc_engine_api::compare::compare_state_diffs;
+#[cfg(feature = "telos")]
+use revm_primitives::{Address, Account, AccountInfo, AccountStatus, Bytecode, HashMap, KECCAK_EMPTY};
+#[cfg(feature = "telos")]
+use reth_primitives::B256;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
@@ -149,8 +155,6 @@ where
         DB: Database,
         DB::Error: Into<ProviderError> + Display,
     {
-        #[cfg(feature = "telos")]
-        println!("Engine API: {:?}",telos_extra_fields);
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.evm_config,
@@ -169,10 +173,29 @@ where
             &mut evm,
         )?;
 
+        #[cfg(feature = "telos")]
+        let mut tx_index = 0;
+        #[cfg(feature = "telos")]
+        let unwrapped_telos_extra_fields = telos_extra_fields.unwrap_or_default();
+        #[cfg(feature = "telos")]
+        let mut new_addresses_using_create_iter = unwrapped_telos_extra_fields.new_addresses_using_create.as_ref().unwrap().into_iter().peekable();
+
         // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (sender, transaction) in block.transactions_with_sender() {
+            #[cfg(feature = "telos")]
+            while new_addresses_using_create_iter.peek().is_some() && new_addresses_using_create_iter.peek().unwrap().0 == tx_index {
+                let address = new_addresses_using_create_iter.peek().unwrap().1;
+                let mut state: HashMap<Address, Account> = HashMap::new();
+                evm.db_mut().insert_not_existing(Address::from_word(B256::from(address)));
+                state.insert(Address::from_word(B256::from(address)),Account{info: AccountInfo{balance: U256::ZERO, nonce: 1, code: Some(Bytecode::default()), code_hash: KECCAK_EMPTY}, storage: HashMap::new(), status: AccountStatus::Touched|AccountStatus::LoadedAsNotExisting});
+                evm.db_mut().commit(state);
+                new_addresses_using_create_iter.next();
+            }
+            #[cfg(feature = "telos")] {
+                tx_index += 1;
+            }
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
@@ -220,6 +243,22 @@ where
                     ..Default::default()
                 },
             );
+        }
+
+        #[cfg(feature = "telos")]
+        while new_addresses_using_create_iter.peek().is_some() {
+            let address = new_addresses_using_create_iter.peek().unwrap().1;
+            let mut state: HashMap<Address, Account> = HashMap::new();
+            evm.db_mut().insert_not_existing(Address::from_word(B256::from(address)));
+            state.insert(Address::from_word(B256::from(address)),Account{info: AccountInfo{balance: U256::ZERO, nonce: 1, code: Some(Bytecode::default()), code_hash: KECCAK_EMPTY}, storage: HashMap::new(), status: AccountStatus::Touched|AccountStatus::LoadedAsNotExisting});
+            evm.db_mut().commit(state);
+            new_addresses_using_create_iter.next();
+        }
+
+        #[cfg(feature = "telos")] {
+        // Perform state diff comparision
+        let revm_state_diffs = evm.db_mut().transition_state.clone().unwrap_or_default().transitions;
+        println!("Compare: {}",compare_state_diffs(revm_state_diffs,unwrapped_telos_extra_fields.statediffs_account.unwrap_or_default(),unwrapped_telos_extra_fields.statediffs_accountstate.unwrap_or_default(),unwrapped_telos_extra_fields.new_addresses_using_create.unwrap_or_default(),unwrapped_telos_extra_fields.new_addresses_using_openwallet.unwrap_or_default()));
         }
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {

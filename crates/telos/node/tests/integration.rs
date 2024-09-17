@@ -17,7 +17,7 @@ use telos_consensus_client::main_utils::{build_consensus_client};
 use telos_consensus_client::client::{ConsensusClient};
 use telos_consensus_client::config::{AppConfig, CliArgs};
 use telos_consensus_client::data::Block;
-use telos_translator_rs::block::TelosEVMBlock;
+use telos_translator_rs::{block::TelosEVMBlock, types::translator_types::ChainId};
 use telos_translator_rs::translator::Translator;
 use testcontainers::core::ContainerPort::Tcp;
 use testcontainers::{runners::AsyncRunner, ContainerAsync, GenericImage};
@@ -101,7 +101,7 @@ async fn build_consensus_and_translator(
 ) -> (ConsensusClient, Translator, Option<Block>) {
     let mut config = AppConfig {
         log_level: "debug".to_string(),
-        chain_id: 41,
+        chain_id: ChainId(41),
         execution_endpoint: format!("http://localhost:{}", reth_handle.execution_port),
         jwt_secret: reth_handle.jwt_secret,
         ship_endpoint: format!("ws://localhost:{ship_port}"),
@@ -193,7 +193,7 @@ async fn testing_chain_sync() {
             sleep(Duration::from_secs(1));
             let latest_block = provider.get_block_number().await.unwrap();
             println!("Latest block: {latest_block}");
-            if latest_block > 1 {
+            if latest_block > 50 {
                 break;
             }
         }

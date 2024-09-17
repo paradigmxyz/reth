@@ -34,6 +34,8 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
                 tx_env.authorization_list = None;
+                tx_env.revision_number = 1;
+                tx_env.fixed_gas_price = U256::from(113378400387_u64);
             }
             Transaction::Eip2930(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
