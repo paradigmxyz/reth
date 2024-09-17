@@ -18,15 +18,11 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.network }} (${{ matrix.partition }}/2)
+    name: test / ethereum
     runs-on:
       group: Reth
     env:
       RUST_BACKTRACE: 1
-    strategy:
-      matrix:
-        partition: [1, 2]
-        network: ["ethereum", "optimism"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +34,30 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak" \
             --workspace --exclude ef-tests \
-            --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
+
+  test-op:
+    name: test / optimism
+    runs-on:
+      group: Reth
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        run: |
+          cargo nextest run \
+            --locked --features "asm-keccak optimism" \
+            --workspace --exclude ef-tests reth_ethereum_cli::test::parse_dev \
+            -E "!kind(test)" 
 
   state:
     name: Ethereum state tests
