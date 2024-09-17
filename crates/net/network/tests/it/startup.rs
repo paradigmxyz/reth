@@ -105,7 +105,6 @@ async fn test_tcp_port_node_record_discovery() {
     assert_ne!(record.udp_port, 0);
 }
 
-// <https://github.com/paradigmxyz/reth/issues/8851>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -121,7 +120,6 @@ async fn test_node_record_address_with_nat() {
     assert_eq!(record.address, IpAddr::V4(Ipv4Addr::new(10, 1, 1, 1)));
 }
 
-// <https://github.com/paradigmxyz/reth/issues/8851>
 #[tokio::test(flavor = "multi_thread")]
 async fn test_node_record_address_with_nat_disable_discovery() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
