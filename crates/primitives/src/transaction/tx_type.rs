@@ -160,16 +160,16 @@ impl reth_codecs::Compact for TxType {
             Self::Eip2930 => COMPACT_IDENTIFIER_EIP2930,
             Self::Eip1559 => COMPACT_IDENTIFIER_EIP1559,
             Self::Eip4844 => {
-                buf.put_u8(*self as u8);
+                buf.put_u8(EIP4844_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             Self::Eip7702 => {
-                buf.put_u8(*self as u8);
+                buf.put_u8(EIP7702_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             #[cfg(feature = "optimism")]
             Self::Deposit => {
-                buf.put_u8(*self as u8);
+                buf.put_u8(DEPOSIT_TX_TYPE_ID);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }
