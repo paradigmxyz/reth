@@ -21,7 +21,6 @@ reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 reth-trie.workspace = true
-reth-verkle-trie.workspace = true
 revm.workspace = true
 
 # alloy

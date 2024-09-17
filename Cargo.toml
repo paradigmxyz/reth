@@ -119,7 +119,6 @@ members = [
     "crates/trie/db",
     "crates/trie/parallel/",
     "crates/trie/trie",
-    "crates/verkle/trie",
     "crates/verkle/db",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
@@ -380,7 +379,6 @@ reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common" }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
-reth-verkle-trie = { path = "crates/verkle/trie" }
 reth-verkle-db = { path = "crates/verkle/db" }
 # revm
 revm = { version = "12.1.0", features = [
