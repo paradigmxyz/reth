@@ -108,6 +108,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+    /// The header type used by the EVM.
+    type Header;
+
     /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
     fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
         let mut tx_env = TxEnv::default();
