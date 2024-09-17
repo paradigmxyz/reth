@@ -285,7 +285,7 @@ mod test {
             ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE).await.unwrap();
 
         let db = TestStageDB::default();
-        init_genesis(db.factory.clone()).unwrap();
+        init_genesis(&db.factory).unwrap();
 
         // todo: where does import command init receipts ? probably somewhere in pipeline
 

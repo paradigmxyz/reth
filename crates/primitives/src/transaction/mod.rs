@@ -58,7 +58,6 @@ pub use tx_type::DEPOSIT_TX_TYPE_ID;
 #[cfg(test)]
 use reth_codecs::Compact;
 
-#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
@@ -76,7 +75,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::From)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
@@ -688,36 +687,6 @@ impl Transaction {
             Self::Eip7702(tx) => Some(tx),
             _ => None,
         }
-    }
-}
-
-impl From<TxLegacy> for Transaction {
-    fn from(tx: TxLegacy) -> Self {
-        Self::Legacy(tx)
-    }
-}
-
-impl From<TxEip2930> for Transaction {
-    fn from(tx: TxEip2930) -> Self {
-        Self::Eip2930(tx)
-    }
-}
-
-impl From<TxEip1559> for Transaction {
-    fn from(tx: TxEip1559) -> Self {
-        Self::Eip1559(tx)
-    }
-}
-
-impl From<TxEip4844> for Transaction {
-    fn from(tx: TxEip4844) -> Self {
-        Self::Eip4844(tx)
-    }
-}
-
-impl From<TxEip7702> for Transaction {
-    fn from(tx: TxEip7702) -> Self {
-        Self::Eip7702(tx)
     }
 }
 
@@ -1707,6 +1676,7 @@ mod tests {
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_codecs::Compact;
     use std::str::FromStr;
 
@@ -1861,7 +1831,7 @@ mod tests {
             nonce: 26,
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
-            gas_limit: 21000,
+            gas_limit: MIN_TRANSACTION_GAS as u128,
             to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),
@@ -1966,13 +1936,13 @@ mod tests {
         // some random transactions pulled from hive tests
         let data = hex!("b86f02f86c0705843b9aca008506fc23ac00830124f89400000000000000000000000000000000000003160180c001a00293c713e2f1eab91c366621ff2f867e05ad7e99d4aa5d069aafeb9e1e8c9b6aa05ec6c0605ff20b57c90a6484ec3b0509e5923733d06f9b69bee9a2dabe4f1352");
         let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
-        let mut b = Vec::new();
+        let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
 
         let data = hex!("f865048506fc23ac00830124f8940000000000000000000000000000000000000316018032a06b8fdfdcb84790816b7af85b19305f493665fe8b4e7c51ffdd7cc144cd776a60a028a09ab55def7b8d6602ba1c97a0ebbafe64ffc9c8e89520cec97a8edfb2ebe9");
         let tx = TransactionSigned::decode(&mut data.as_slice()).unwrap();
-        let mut b = Vec::new();
+        let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
     }

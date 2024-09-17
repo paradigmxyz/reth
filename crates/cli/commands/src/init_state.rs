@@ -72,7 +72,7 @@ pub fn init_at_state<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let reader = BufReader::new(file);
 
     let provider_rw = factory.provider_rw()?;
-    let hash = init_from_state_dump(reader, &provider_rw, etl_config)?;
+    let hash = init_from_state_dump(reader, &provider_rw.0, etl_config)?;
     provider_rw.commit()?;
 
     Ok(hash)

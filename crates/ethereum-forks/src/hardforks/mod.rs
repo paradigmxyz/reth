@@ -13,7 +13,8 @@ use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, collections::btree_map::Entry, vec::Vec};
+use alloc::collections::btree_map::Entry;
+use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
 pub trait Hardforks: Default + Clone {

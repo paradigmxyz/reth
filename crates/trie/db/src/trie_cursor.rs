@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
     tables,
@@ -6,7 +7,6 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},

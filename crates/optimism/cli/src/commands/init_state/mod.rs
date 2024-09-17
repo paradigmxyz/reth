@@ -89,7 +89,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
         info!(target: "reth::cli", "Initiating state dump");
 
         let reader = BufReader::new(File::open(self.state)?);
-        let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
+        let hash = init_from_state_dump(reader, &provider_rw.0, config.stages.etl)?;
 
         provider_rw.commit()?;
 
