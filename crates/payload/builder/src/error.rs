@@ -29,6 +29,9 @@ pub enum PayloadBuilderError {
     /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
+    /// Thrown when no better payload could be built.
+    #[error("no better payload could be built")]
+    NoBetterPayload,
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
