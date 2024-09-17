@@ -31,7 +31,7 @@ pub enum Commands<
     Init(init_cmd::InitCommand<Spec>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand<Spec>),
+    InitState(init_state::InitStateCommandOp<Spec>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[command(name = "import-op")]
     ImportOp(ImportOpCommand<Spec>),

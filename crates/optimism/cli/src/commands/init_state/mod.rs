@@ -3,45 +3,23 @@
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{AccessRights, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_node_builder::NodeTypesWithEngine;
 use reth_optimism_primitives::bedrock::BEDROCK_HEADER;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, StaticFileProviderFactory, StaticFileWriter,
 };
-use std::{fs::File, io::BufReader, path::PathBuf};
+use std::{fs::File, io::BufReader};
 use tracing::info;
 
 mod bedrock;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
-pub struct InitStateCommand<C: ChainSpecParser> {
+pub struct InitStateCommandOp<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
-
-    /// JSONL file with state dump.
-    ///
-    /// Must contain accounts in following format, additional account fields are ignored
-    /// ```
-    /// {
-    ///     "balance": "\<balance\>",
-    ///     "nonce": \<nonce\>,
-    ///     "code": "\<bytecode\>",
-    ///     "storage": {
-    ///         "\<key\>": "\<value\>",
-    ///         ..
-    ///     },
-    ///     "address": "\<address\>",
-    /// }
-    /// ```
-    /// Must also contain `{ "root": \<state-root\> }` as first line.
-    ///
-    /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
-    /// and including the non-genesis block to init chain at. See 'import' command.
-    #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
-    state: PathBuf,
+    init_state: reth_cli_commands::init_state::InitStateCommand<C>,
 
     /// **Optimism Mainnet Only**
     ///
@@ -56,14 +34,15 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     without_ovm: bool,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommandOp<C> {
     /// Execute the `init` command
     pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
         self,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } =
+            self.init_state.env.init::<N>(AccessRights::RW)?;
 
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.provider_rw()?;
@@ -90,7 +69,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let reader = BufReader::new(File::open(self.state)?);
+        let reader = BufReader::new(File::open(self.init_state.state)?);
         let hash = init_from_state_dump(reader, &provider_rw.0, config.stages.etl)?;
 
         provider_rw.commit()?;

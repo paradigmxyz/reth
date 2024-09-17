@@ -17,7 +17,7 @@ use tracing::info;
 #[derive(Debug, Parser)]
 pub struct InitStateCommand<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs<C>,
+    pub env: EnvironmentArgs<C>,
 
     /// JSONL file with state dump.
     ///
@@ -37,7 +37,7 @@ pub struct InitStateCommand<C: ChainSpecParser> {
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
     /// and including the non-genesis block to init chain at. See 'import' command.
     #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
-    state: PathBuf,
+    pub state: PathBuf,
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> InitStateCommand<C> {
