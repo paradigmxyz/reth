@@ -9,7 +9,7 @@ use std::{collections::HashSet, ffi::OsStr, fmt, path::PathBuf, str::FromStr};
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 
 /// Parameters for debugging purposes
-#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Flag indicating whether the node should be terminated after the pipeline sync.
@@ -71,7 +71,12 @@ pub struct DebugArgs {
     /// Determines which type of invalid block hook to install
     ///
     /// Example: `witness,prestate`
-    #[arg(long = "debug.invalid-block-hook", help_heading = "Debug", value_parser = InvalidBlockSelectionValueParser::default())]
+    #[arg(
+        long = "debug.invalid-block-hook",
+        help_heading = "Debug",
+        value_parser = InvalidBlockSelectionValueParser::default(),
+        default_value = "witness"
+    )]
     pub invalid_block_hook: Option<InvalidBlockSelection>,
 
     /// The RPC URL of a healthy node to use for comparing invalid block hook results against.
@@ -82,6 +87,25 @@ pub struct DebugArgs {
         verbatim_doc_comment
     )]
     pub healthy_node_rpc_url: Option<String>,
+}
+
+impl Default for DebugArgs {
+    fn default() -> Self {
+        Self {
+            terminate: false,
+            tip: None,
+            max_block: None,
+            etherscan: None,
+            rpc_consensus_ws: None,
+            skip_fcu: None,
+            skip_new_payload: None,
+            reorg_frequency: None,
+            reorg_depth: None,
+            engine_api_store: None,
+            invalid_block_hook: Some(InvalidBlockSelection::default()),
+            healthy_node_rpc_url: None,
+        }
+    }
 }
 
 /// Describes the invalid block hooks that should be installed.
@@ -96,6 +120,12 @@ pub struct DebugArgs {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref)]
 pub struct InvalidBlockSelection(HashSet<InvalidBlockHookType>);
+
+impl Default for InvalidBlockSelection {
+    fn default() -> Self {
+        Self([InvalidBlockHookType::Witness].into())
+    }
+}
 
 impl InvalidBlockSelection {
     /// Creates a new _unique_ [`InvalidBlockSelection`] from the given items.

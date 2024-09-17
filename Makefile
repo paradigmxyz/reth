@@ -343,7 +343,8 @@ lint-op-reth:
 	--examples \
 	--tests \
 	--benches \
-	--features "optimism $(BIN_OTHER_FEATURES)"
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	-- -D warnings
 
 lint-other-targets:
 	cargo +nightly clippy \
