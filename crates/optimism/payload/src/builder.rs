@@ -9,11 +9,16 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::BEACON_NONCE, eip4844::calculate_excess_blob_gas, proofs, Block, Header,
-    IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    constants::BEACON_NONCE,
+    eip4844::calculate_excess_blob_gas,
+    proofs,
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -23,7 +28,10 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        BlobExcessGasAndPrice, EVMError, EnvWithHandlerCfg, HandlerCfg, InvalidTransaction,
+        ResultAndState,
+    },
     DatabaseCommit, State,
 };
 use std::sync::Arc;
@@ -60,6 +68,64 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
+
+    fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id =
+            revm_spec_by_timestamp_after_bedrock(&config.chain_spec, config.attributes.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id.is_enabled_in(SpecId::CANCUN) {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: config.attributes.suggested_fee_recipient(),
+            timestamp: U256::from(config.attributes.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(config.attributes.prev_randao()),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(
+                parent
+                    .next_block_base_fee(
+                        config
+                            .chain_spec
+                            .base_fee_params_at_timestamp(config.attributes.timestamp()),
+                    )
+                    .unwrap_or_default(),
+            ),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        let cfg_with_handler_cfg;
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
+            };
+        }
+
+        (cfg_with_handler_cfg, block_env)
+    }
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
@@ -76,7 +142,14 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        optimism_payload(self.evm_config.clone(), args, self.compute_pending_block)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(
+            self.evm_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            self.compute_pending_block,
+        )
     }
 
     fn on_missing_payload(
@@ -104,7 +177,8 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        optimism_payload(self.evm_config.clone(), args, false)?
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -122,6 +196,8 @@ where
 pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
@@ -135,15 +211,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, attributes, chain_spec, extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
