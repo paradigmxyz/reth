@@ -19,9 +19,13 @@ reth-ethereum-forks = { workspace = true, features = ["optimism"] }
 alloy-chains.workspace = true
 alloy-primitives.workspace = true
 
+# io
+serde = { workspace = true, optional = true }
+
 # misc
 once_cell.workspace = true
 
 [features]
 default = ["std"]
 std = []
+serde = ["dep:serde"]
