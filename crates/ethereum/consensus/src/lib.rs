@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_invalid_gas_limit_decrease_exceeding_limit() {
-        let parent = header_with_gas_limit(1024 * 10);
+        let parent = header_with_gas_limit(GAS_LIMIT_BOUND_DIVISOR * 10);
         let child = header_with_gas_limit(
             parent.gas_limit - parent.gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1,
         );
