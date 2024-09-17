@@ -32,7 +32,7 @@ use reth_rpc_types::{
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{
-    db::{states::bundle_state::BundleRetention, CacheDB},
+    db::CacheDB,
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
     StateBuilder,
 };
