@@ -36,9 +36,8 @@ use revm::{
 };
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
-
 /// Optimism's payload builder
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
