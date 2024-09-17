@@ -18,17 +18,15 @@ reth-node-optimism.workspace = true
 
 clap = { workspace = true, features = ["derive", "env"] }
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { workspace = true, optional = true }
-
 [lints]
 workspace = true
 
 [features]
 default = ["jemalloc"]
 
-jemalloc = ["dep:tikv-jemallocator"]
-jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+jemalloc = ["reth-cli-util/jemalloc"]
+jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-node-optimism/asm-keccak"]
 

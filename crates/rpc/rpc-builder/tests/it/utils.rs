@@ -130,5 +130,5 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
         .with_events(TestCanonStateSubscriptions::default())
-        .with_evm_config(EthEvmConfig::default())
+        .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
 }

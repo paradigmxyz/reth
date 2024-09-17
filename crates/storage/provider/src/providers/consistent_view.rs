@@ -1,7 +1,10 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
+use reth_errors::ProviderError;
 use reth_primitives::{GotExpected, B256};
-use reth_storage_api::BlockReader;
+use reth_storage_api::{BlockReader, DBProvider};
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::HashedPostState;
+use reth_trie_db::DatabaseHashedPostState;
 
 pub use reth_storage_errors::provider::ConsistentViewError;
 
@@ -41,6 +44,21 @@ where
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         Ok(Self::new(provider, tip))
+    }
+
+    /// Retrieve revert hashed state down to the given block hash.
+    pub fn revert_state(&self, block_hash: B256) -> ProviderResult<HashedPostState> {
+        let provider = self.provider_ro()?;
+        let block_number = provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        if block_number == provider.best_block_number()? &&
+            block_number == provider.last_block_number()?
+        {
+            Ok(HashedPostState::default())
+        } else {
+            Ok(HashedPostState::from_reverts(provider.tx_ref(), block_number + 1)?)
+        }
     }
 
     /// Creates new read-only provider and performs consistency checks on the current tip.

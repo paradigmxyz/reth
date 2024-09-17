@@ -1,11 +1,9 @@
-#[cfg(not(feature = "std"))]
+use crate::{hardforks::Hardforks, ForkCondition};
 use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
-
-use crate::{hardforks::Hardforks, ForkCondition};
 
 /// A container to pretty-print a hardfork.
 ///

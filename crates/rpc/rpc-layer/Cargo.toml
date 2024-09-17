@@ -11,7 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
+alloy-rpc-types-engine = { workspace = true, features = ["jwt", "serde"] }
 
 http.workspace = true
 jsonrpsee-http-client.workspace = true

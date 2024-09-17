@@ -94,7 +94,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> EnvironmentArgs<C> {
         let provider_factory = self.create_provider_factory(&config, db, sfp)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis(provider_factory.clone())?;
+            init_genesis(&provider_factory)?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })

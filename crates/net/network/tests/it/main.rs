@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 mod big_pooled_txs_req;
 mod connect;
 mod multiplex;

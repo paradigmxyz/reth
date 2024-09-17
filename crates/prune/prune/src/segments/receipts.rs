@@ -5,11 +5,10 @@
 //! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
 //!   node after static file producer has finished
 
-use crate::{segments::PruneInput, PrunerError};
-use reth_db::tables;
-use reth_db_api::database::Database;
+use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
+use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{
-    errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
+    errors::provider::ProviderResult, BlockReader, DBProvider, PruneCheckpointWriter,
     TransactionsProvider,
 };
 use reth_prune_types::{
@@ -17,10 +16,13 @@ use reth_prune_types::{
 };
 use tracing::trace;
 
-pub(crate) fn prune<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub(crate) fn prune<Provider>(
+    provider: &Provider,
     input: PruneInput,
-) -> Result<SegmentOutput, PrunerError> {
+) -> Result<SegmentOutput, PrunerError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+{
     let tx_range = match input.get_next_tx_num_range(provider)? {
         Some(range) => range,
         None => {
@@ -33,7 +35,7 @@ pub(crate) fn prune<DB: Database>(
     let mut limiter = input.limiter;
 
     let mut last_pruned_transaction = tx_range_end;
-    let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
+    let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts>(
         tx_range,
         &mut limiter,
         |_| false,
@@ -60,8 +62,8 @@ pub(crate) fn prune<DB: Database>(
     })
 }
 
-pub(crate) fn save_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub(crate) fn save_checkpoint(
+    provider: impl PruneCheckpointWriter,
     checkpoint: PruneCheckpoint,
 ) -> ProviderResult<()> {
     provider.save_prune_checkpoint(PruneSegment::Receipts, checkpoint)?;
@@ -83,7 +85,7 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
     };
@@ -158,7 +160,7 @@ mod tests {
                 )
                 .sub(1);
 
-            let provider = db.factory.provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
             let result = super::prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
