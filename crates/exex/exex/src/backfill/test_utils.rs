@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eyre::OptionExt;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
@@ -98,8 +98,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
-            gas_limit: 21000,
-            gas_used: 21000,
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -107,7 +107,7 @@ fn blocks(
             Transaction::Eip2930(TxEip2930 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: 21000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 gas_price: 1_500_000_000,
                 to: TxKind::Call(Address::ZERO),
                 value: U256::from(0.1 * ETH_TO_WEI as f64),
@@ -128,8 +128,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
-            gas_limit: 21000,
-            gas_used: 21000,
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -137,7 +137,7 @@ fn blocks(
             Transaction::Eip2930(TxEip2930 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 1,
-                gas_limit: 21000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 gas_price: 1_500_000_000,
                 to: TxKind::Call(Address::ZERO),
                 value: U256::from(0.1 * ETH_TO_WEI as f64),

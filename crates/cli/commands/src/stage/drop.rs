@@ -73,7 +73,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -86,7 +86,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -107,7 +107,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     Default::default(),
                 )?;
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw, alloc.iter())?;
+                insert_genesis_state(&provider_rw.0, alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -165,7 +165,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw, self.env.chain.genesis.alloc.iter())?;
+                insert_genesis_history(&provider_rw.0, self.env.chain.genesis.alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
@@ -173,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, &self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
         }
 

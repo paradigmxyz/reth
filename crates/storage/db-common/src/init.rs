@@ -6,18 +6,17 @@ use reth_chainspec::ChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::tables;
-use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
+use reth_db_api::{transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Account, Bytecode, GotExpected, Receipts, StaticFileSegment, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
     writer::UnifiedStorageWriter,
-    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DatabaseProviderRW,
-    ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter, OriginalValuesKnown,
-    ProviderError, ProviderFactory, RevertsInit, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, TrieWriter,
+    BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
+    DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointWriter, StateChangeWriter,
+    StateWriter, StaticFileProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -70,9 +69,19 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
-    factory: &ProviderFactory<N>,
-) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitDatabaseError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + BlockHashReader,
+    PF::ProviderRW: StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateChangeWriter
+        + AsRef<PF::ProviderRW>,
+{
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -100,7 +109,7 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let alloc = &genesis.alloc;
 
     // use transaction to insert genesis header
-    let provider_rw = factory.provider_rw()?;
+    let provider_rw = factory.database_provider_rw()?;
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
@@ -130,19 +139,25 @@ pub fn init_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 }
 
 /// Inserts the genesis state into the database.
-pub fn insert_genesis_state<'a, 'b, DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_genesis_state<'a, 'b, Provider>(
+    provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-) -> ProviderResult<()> {
-    insert_state::<DB>(provider, alloc, 0)
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + StateChangeWriter + HeaderProvider + AsRef<Provider>,
+{
+    insert_state(provider, alloc, 0)
 }
 
 /// Inserts state at given block into database.
-pub fn insert_state<'a, 'b, DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_state<'a, 'b, Provider>(
+    provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
-) -> ProviderResult<()> {
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + StateChangeWriter + HeaderProvider + AsRef<Provider>,
+{
     let capacity = alloc.size_hint().1.unwrap_or(0);
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
@@ -217,10 +232,13 @@ pub fn insert_state<'a, 'b, DB: Database>(
 }
 
 /// Inserts hashes for the genesis state.
-pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_genesis_hashes<'a, 'b, Provider>(
+    provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
-) -> ProviderResult<()> {
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
+{
     // insert and hash accounts to hashing table
     let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
@@ -241,19 +259,25 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
 }
 
 /// Inserts history indices for genesis accounts and storage.
-pub fn insert_genesis_history<'a, 'b, DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_genesis_history<'a, 'b, Provider>(
+    provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
-) -> ProviderResult<()> {
-    insert_history::<DB>(provider, alloc, 0)
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + HistoryWriter,
+{
+    insert_history(provider, alloc, 0)
 }
 
 /// Inserts history indices for genesis accounts and storage.
-pub fn insert_history<'a, 'b, DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_history<'a, 'b, Provider>(
+    provider: &Provider,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
     block: u64,
-) -> ProviderResult<()> {
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + HistoryWriter,
+{
     let account_transitions = alloc.clone().map(|(addr, _)| (*addr, [block]));
     provider.insert_account_history_index(account_transitions)?;
 
@@ -270,11 +294,14 @@ pub fn insert_history<'a, 'b, DB: Database>(
 }
 
 /// Inserts header for the genesis state.
-pub fn insert_genesis_header<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
+pub fn insert_genesis_header<Provider>(
+    provider: &Provider,
     static_file_provider: &StaticFileProvider,
     chain: &ChainSpec,
-) -> ProviderResult<()> {
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+{
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
 
     match static_file_provider.block_hash(0) {
@@ -299,11 +326,26 @@ pub fn insert_genesis_header<DB: Database>(
 /// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
 /// be set to the highest block present. One practical usecase is to import OP mainnet state at
 /// bedrock transition block.
-pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn init_from_state_dump<PF>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<N>,
+    factory: PF,
     etl_config: EtlConfig,
-) -> eyre::Result<B256> {
+) -> eyre::Result<B256>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + BlockHashReader
+        + BlockNumReader
+        + HeaderProvider,
+    PF::ProviderRW: StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateChangeWriter
+        + TrieWriter
+        + AsRef<PF::ProviderRW>,
+{
     let block = factory.last_block_number()?;
     let hash = factory.block_hash(block)?.unwrap();
     let expected_state_root = factory
@@ -336,7 +378,7 @@ pub fn init_from_state_dump<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    let provider_rw = factory.provider_rw()?;
+    let provider_rw = factory.database_provider_rw()?;
     dump_state(collector, &provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
@@ -413,11 +455,19 @@ fn parse_accounts(
 }
 
 /// Takes a [`Collector`] and processes all accounts.
-fn dump_state<DB: Database>(
+fn dump_state<Provider>(
     mut collector: Collector<Address, GenesisAccount>,
-    provider_rw: &DatabaseProviderRW<DB>,
+    provider_rw: &Provider,
     block: u64,
-) -> Result<(), eyre::Error> {
+) -> Result<(), eyre::Error>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + HeaderProvider
+        + HashingWriter
+        + HistoryWriter
+        + StateChangeWriter
+        + AsRef<Provider>,
+{
     let accounts_len = collector.len();
     let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
     let mut total_inserted_accounts = 0;
@@ -452,7 +502,7 @@ fn dump_state<DB: Database>(
             )?;
 
             // block is already written to static files
-            insert_state::<DB>(
+            insert_state(
                 provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
@@ -466,7 +516,10 @@ fn dump_state<DB: Database>(
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
-fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::Result<B256> {
+fn compute_state_root<Provider>(provider: &Provider) -> eyre::Result<B256>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
+{
     trace!(target: "reth::cli", "Computing state root");
 
     let tx = provider.tx_ref();
@@ -543,11 +596,13 @@ mod tests {
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
         transaction::DbTx,
+        Database,
     };
     use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
-    use reth_provider::test_utils::{
-        create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB,
+    use reth_provider::{
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        ProviderFactory,
     };
     use std::{collections::BTreeMap, sync::Arc};
 

@@ -709,6 +709,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let block_requests = self.get::<tables::BlockRequests>(range.clone())?;
 
         let block_tx = self.get_block_transaction_range(range)?;
+        let mut blocks = Vec::with_capacity(block_headers.len());
 
         // merge all into block
         let block_header_iter = block_headers.into_iter();
@@ -723,9 +724,8 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
         let mut block_requests = block_requests_iter.next();
 
-        let mut blocks = Vec::new();
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
             let header = header.seal(header_hash);
 
@@ -844,7 +844,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut receipt_iter =
             self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
@@ -1199,6 +1199,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_requests = self.take::<tables::BlockRequests>(range.clone())?;
         let block_tx = self.take_block_transaction_range(range.clone())?;
 
+        let mut blocks = Vec::with_capacity(block_headers.len());
+
         // rm HeaderTerminalDifficulties
         self.remove::<tables::HeaderTerminalDifficulties>(range)?;
 
@@ -1215,9 +1217,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
         let mut block_requests = block_requests_iter.next();
 
-        let mut blocks = Vec::new();
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
             let header = header.seal(header_hash);
 
@@ -2554,7 +2555,10 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn take_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<ExecutionOutcome> {
+    fn take_state(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<ExecutionOutcome> {
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
         }
@@ -2626,7 +2630,7 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
         let mut receipt_iter =
             self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);

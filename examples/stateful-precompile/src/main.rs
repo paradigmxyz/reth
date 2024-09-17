@@ -5,9 +5,10 @@
 use alloy_genesis::Genesis;
 use parking_lot::RwLock;
 use reth::{
+    api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
+        revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
         Address, Bytes, U256,
     },
     revm::{
@@ -144,8 +145,20 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
+    type Header = Header;
+
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender)
+    }
+
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 
     fn fill_cfg_env(
@@ -157,14 +170,12 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
     }
 
-    fn fill_tx_env_system_contract_call(
+    fn next_cfg_and_block_env(
         &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
+        parent: &Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
 
