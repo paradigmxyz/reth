@@ -7,10 +7,9 @@ use crate::{
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
-    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
-    NextBlockEnvAttributes,
+    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -20,7 +19,9 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    transaction::WithEncoded,
+    Address, Block, Bytes, Header, IntoRecoveredTransaction, Receipt, Receipts, SealedBlock,
+    TransactionSigned, TransactionSignedEcRecovered, TxType, B256, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::{ProviderError, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -30,14 +31,14 @@ use reth_transaction_pool::{
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{
-        BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-        ExecutionResult, HandlerCfg, InvalidTransaction, SpecId,
-    },
+    primitives::{EVMError, EnvWithHandlerCfg, ExecutionResult, InvalidTransaction},
     State,
 };
+use std::sync::Arc;
+use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
+#[derive(Clone)]
 pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
@@ -46,7 +47,10 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     evm_config: EvmConfig,
 }
 
-impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
+impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+{
     /// `OptimismPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, evm_config }
@@ -123,7 +127,10 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         // check if we have a better block
         if !is_better_payload(best_payload.as_ref(), op_block_attributes.total_fees) {
             // can skip building the block
-            return Ok(BuildOutcome::Aborted { fees: op_block_attributes.total_fees, cached_reads });
+            return Ok(BuildOutcome::Aborted {
+                fees: op_block_attributes.total_fees,
+                cached_reads,
+            });
         }
 
         let (withdrawals_outcome, execution_outcome) =
@@ -419,7 +426,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
             prev_randao: config.attributes.prev_randao(),
         };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+        self.evm_config.next_cfg_and_block_env(&config.parent_block, next_attributes)
     }
 }
 
