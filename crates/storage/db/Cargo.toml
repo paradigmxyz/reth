@@ -56,7 +56,7 @@ strum = { workspace = true, features = ["derive"], optional = true }
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 rand.workspace = true
 serde_json.workspace = true
-
+tempfile.workspace = true
 test-fuzz.workspace = true
 
 pprof = { workspace = true, features = [

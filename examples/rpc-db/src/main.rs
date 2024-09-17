@@ -15,6 +15,7 @@
 use std::{path::Path, sync::Arc};
 
 use reth::{
+    api::NodeTypesWithDBAdapter,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
@@ -23,8 +24,7 @@ use reth::{
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::mdbx::DatabaseArguments;
-use reth_db_api::models::ClientVersion;
+use reth_db::{mdbx::DatabaseArguments, ClientVersion, DatabaseEnv};
 
 // Bringing up the RPC
 use reth::rpc::builder::{
@@ -33,7 +33,7 @@ use reth::rpc::builder::{
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
-use reth_node_ethereum::EthEvmConfig;
+use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 
 // Custom rpc extension
@@ -49,10 +49,10 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::new(
+    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
         db.clone(),
         spec.clone(),
-        StaticFileProvider::read_only(db_path.join("static_files"))?,
+        StaticFileProvider::read_only(db_path.join("static_files"), true)?,
     );
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
@@ -66,7 +66,7 @@ async fn main() -> eyre::Result<()> {
         .with_noop_pool()
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
-        .with_evm_config(EthEvmConfig::default())
+        .with_evm_config(EthEvmConfig::new(spec))
         .with_events(TestCanonStateSubscriptions::default());
 
     // Pick which namespaces to expose.

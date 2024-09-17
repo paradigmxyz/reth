@@ -4,6 +4,8 @@ Drop a stage's tables from the database
 
 ```bash
 $ reth stage drop --help
+```
+```txt
 Usage: reth stage drop [OPTIONS] <STAGE>
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>

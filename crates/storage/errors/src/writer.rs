@@ -2,15 +2,24 @@ use crate::db::DatabaseError;
 use reth_primitives::StaticFileSegment;
 
 /// `UnifiedStorageWriter` related errors
-#[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
+/// `StorageWriter` related errors
+#[derive(Clone, Debug, derive_more::Display, PartialEq, Eq, derive_more::Error)]
 pub enum UnifiedStorageWriterError {
+    /// Database writer is missing
+    #[display("Database writer is missing")]
+    MissingDatabaseWriter,
     /// Static file writer is missing
-    #[error("Static file writer is missing")]
+    #[display("Static file writer is missing")]
     MissingStaticFileWriter,
     /// Static file writer is of wrong segment
-    #[error("Static file writer is of wrong segment: got {0}, expected {1}")]
+    #[display("Static file writer is of wrong segment: got {_0}, expected {_1}")]
     IncorrectStaticFileWriter(StaticFileSegment, StaticFileSegment),
     /// Database-related errors.
-    #[error(transparent)]
-    Database(#[from] DatabaseError),
+    Database(DatabaseError),
+}
+
+impl From<DatabaseError> for UnifiedStorageWriterError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
+    }
 }

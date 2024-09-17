@@ -3,17 +3,18 @@ use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
-use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
 use reth_primitives::B256;
-use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
+use reth_provider::{
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
+    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::collections::HashMap;
@@ -33,32 +34,31 @@ use tracing::*;
 ///
 /// If possible, use more optimized `AsyncStateRoot` instead.
 #[derive(Debug)]
-pub struct ParallelStateRoot<DB, Provider> {
+pub struct ParallelStateRoot<Factory> {
     /// Consistent view of the database.
-    view: ConsistentDbView<DB, Provider>,
-    /// Changed hashed state.
-    hashed_state: HashedPostState,
+    view: ConsistentDbView<Factory>,
+    /// Trie input.
+    input: TrieInput,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
 }
 
-impl<DB, Provider> ParallelStateRoot<DB, Provider> {
+impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<DB, Provider>, hashed_state: HashedPostState) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
         Self {
             view,
-            hashed_state,
+            input,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
     }
 }
 
-impl<DB, Provider> ParallelStateRoot<DB, Provider>
+impl<Factory> ParallelStateRoot<Factory>
 where
-    DB: Database,
-    Provider: DatabaseProviderFactory<DB> + Send + Sync,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
@@ -77,12 +77,13 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let prefix_sets = self.hashed_state.construct_prefix_sets().freeze();
+        let trie_nodes_sorted = self.input.nodes.into_sorted();
+        let hashed_state_sorted = self.input.state.into_sorted();
+        let prefix_sets = self.input.prefix_sets.freeze();
         let storage_root_targets = StorageRootTargets::new(
-            self.hashed_state.accounts.keys().copied(),
+            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets,
         );
-        let hashed_state_sorted = self.hashed_state.into_sorted();
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
@@ -91,7 +92,10 @@ where
             .into_par_iter()
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
-                let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_ro.tx_ref());
+                let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                    &trie_nodes_sorted,
+                );
                 let hashed_cursor_factory = HashedPostStateCursorFactory::new(
                     DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
                     &hashed_state_sorted,
@@ -113,11 +117,14 @@ where
         let mut trie_updates = TrieUpdates::default();
 
         let provider_ro = self.view.provider_ro()?;
+        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+            &trie_nodes_sorted,
+        );
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
             &hashed_state_sorted,
         );
-        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_ro.tx_ref());
 
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
@@ -219,10 +226,11 @@ impl From<ParallelStateRootError> for ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
-    use reth_primitives::{keccak256, Account, Address, StorageEntry, U256};
+    use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::{test_utils, HashedStorage};
+    use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
     #[tokio::test]
     async fn random_parallel_root() {
@@ -270,7 +278,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), HashedPostState::default())
+            ParallelStateRoot::new(consistent_view.clone(), Default::default())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -302,7 +310,9 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, hashed_state).incremental_root().unwrap(),
+            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
+                .incremental_root()
+                .unwrap(),
             test_utils::state_root(state)
         );
     }

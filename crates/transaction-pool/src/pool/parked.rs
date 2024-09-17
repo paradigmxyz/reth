@@ -168,7 +168,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     pub(crate) fn get_senders_by_submission_id(
         &self,
     ) -> impl Iterator<Item = SubmissionSenderId> + '_ {
-        self.last_sender_submission.iter().cloned()
+        self.last_sender_submission.iter().copied()
     }
 
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
@@ -520,7 +520,8 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
-    use reth_primitives::{address, TxType};
+    use alloy_primitives::address;
+    use reth_primitives::TxType;
     use std::collections::HashSet;
 
     #[test]

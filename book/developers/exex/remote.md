@@ -268,13 +268,15 @@ Don't forget to emit `ExExEvent::FinishedHeight`
 
 ```rust,norun,noplayground,ignore
 // ...
+
+use futures_util::StreamExt;
 use reth_exex::{ExExContext, ExExEvent};
 
 async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.recv().await {
+    while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
                 .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
@@ -332,6 +334,9 @@ fn main() -> eyre::Result<()> {
 <summary>Click to expand</summary>
   
 ```rust,norun,noplayground,ignore
+use std::sync::Arc;
+
+use futures_util::StreamExt;
 use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
@@ -340,7 +345,6 @@ use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
-use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
@@ -381,7 +385,7 @@ async fn remote_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.recv().await {
+    while let Some(notification) = ctx.notifications.next().await {
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events
                 .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
@@ -475,10 +479,10 @@ async fn main() -> eyre::Result<()> {
 ## Running
 
 In one terminal window, we will run our ExEx and gRPC server. It will start syncing Reth on the Holesky chain
-and use Etherscan in place of a real Consensus Client.
+and use Etherscan in place of a real Consensus Client. Make sure to have `ETHERSCAN_API_KEY` on your env.
 
 ```console
-cargo run --bin exex --release -- node --chain holesky --debug.etherscan
+export ETHERSCAN_API_KEY={YOUR_API_KEY} && cargo run --bin exex --release -- node --chain holesky --debug.etherscan
 ```
 
 And in the other, we will run our consumer:

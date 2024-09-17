@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eyre::OptionExt;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
@@ -10,7 +10,10 @@ use reth_primitives::{
     b256, constants::ETH_TO_WEI, Address, Block, BlockWithSenders, Genesis, GenesisAccount, Header,
     Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
 };
-use reth_provider::{BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
+    ProviderFactory,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
 use secp256k1::Keypair;
@@ -46,13 +49,13 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     )
 }
 
-pub(crate) fn execute_block_and_commit_to_database<DB>(
-    provider_factory: &ProviderFactory<DB>,
+pub(crate) fn execute_block_and_commit_to_database<N>(
+    provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     block: &BlockWithSenders,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let provider = provider_factory.provider()?;
 
@@ -95,8 +98,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
-            gas_limit: 21000,
-            gas_used: 21000,
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -104,7 +107,7 @@ fn blocks(
             Transaction::Eip2930(TxEip2930 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
-                gas_limit: 21000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 gas_price: 1_500_000_000,
                 to: TxKind::Call(Address::ZERO),
                 value: U256::from(0.1 * ETH_TO_WEI as f64),
@@ -125,8 +128,8 @@ fn blocks(
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
-            gas_limit: 21000,
-            gas_used: 21000,
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
         body: vec![sign_tx_with_key_pair(
@@ -134,7 +137,7 @@ fn blocks(
             Transaction::Eip2930(TxEip2930 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 1,
-                gas_limit: 21000,
+                gas_limit: MIN_TRANSACTION_GAS as u128,
                 gas_price: 1_500_000_000,
                 to: TxKind::Call(Address::ZERO),
                 value: U256::from(0.1 * ETH_TO_WEI as f64),
@@ -149,13 +152,13 @@ fn blocks(
     Ok((block1, block2))
 }
 
-pub(crate) fn blocks_and_execution_outputs<DB>(
-    provider_factory: ProviderFactory<DB>,
+pub(crate) fn blocks_and_execution_outputs<N>(
+    provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
 ) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
@@ -170,13 +173,13 @@ where
     Ok(vec![(block1, block_output1), (block2, block_output2)])
 }
 
-pub(crate) fn blocks_and_execution_outcome<DB>(
-    provider_factory: ProviderFactory<DB>,
+pub(crate) fn blocks_and_execution_outcome<N>(
+    provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
 ) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
 where
-    DB: reth_db_api::database::Database,
+    N: ProviderNodeTypes,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 

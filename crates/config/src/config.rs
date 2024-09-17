@@ -1,11 +1,13 @@
 //! Configuration files.
 
+use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -29,6 +31,31 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load a [`Config`] from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = Self::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
+    }
+
     /// Returns the [`PeersConfig`] for the node.
     ///
     /// If a peers file is provided, the basic nodes from the file are added to the configuration.
@@ -48,9 +75,14 @@ impl Config {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
-            ))
+            ));
         }
-        confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+
+        std::fs::write(
+            path,
+            toml::to_string(self)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        )
     }
 
     /// Sets the pruning configuration.
@@ -360,6 +392,34 @@ impl PruneConfig {
     pub fn has_receipts_pruning(&self) -> bool {
         self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
+
+    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
+    /// if the corresponding value in this config is not set.
+    pub fn merge(&mut self, other: Option<Self>) {
+        let Some(other) = other else { return };
+
+        // Merge block_interval
+        if self.block_interval == 0 {
+            self.block_interval = other.block_interval;
+        }
+
+        // Merge the various segment prune modes
+        self.segments.sender_recovery =
+            self.segments.sender_recovery.or(other.segments.sender_recovery);
+        self.segments.transaction_lookup =
+            self.segments.transaction_lookup.or(other.segments.transaction_lookup);
+        self.segments.receipts = self.segments.receipts.or(other.segments.receipts);
+        self.segments.account_history =
+            self.segments.account_history.or(other.segments.account_history);
+        self.segments.storage_history =
+            self.segments.storage_history.or(other.segments.storage_history);
+
+        if self.segments.receipts_log_filter.0.is_empty() &&
+            !other.segments.receipts_log_filter.0.is_empty()
+        {
+            self.segments.receipts_log_filter = other.segments.receipts_log_filter;
+        }
+    }
 }
 
 /// Helper type to support older versions of Duration deserialization.
@@ -383,8 +443,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Config, EXTENSION};
+    use crate::PruneConfig;
     use reth_network_peers::TrustedPeer;
-    use std::{str::FromStr, time::Duration};
+    use reth_primitives::Address;
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
+    use std::{collections::BTreeMap, path::Path, str::FromStr, time::Duration};
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -395,11 +458,91 @@ mod tests {
         temp_dir.close().unwrap()
     }
 
+    /// Run a test function with a temporary config path as fixture.
+    fn with_config_path(test_fn: fn(&Path)) {
+        // Create a temporary directory for the config file
+        let config_dir = tempfile::tempdir().expect("creating test fixture failed");
+        // Create the config file path
+        let config_path =
+            config_dir.path().join("example-app").join("example-config").with_extension("toml");
+        // Run the test function with the config path
+        test_fn(&config_path);
+        config_dir.close().expect("removing test fixture failed");
+    }
+
+    #[test]
+    fn test_load_path_works() {
+        with_config_path(|path| {
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+        })
+    }
+
+    #[test]
+    fn test_load_path_reads_existing_config() {
+        with_config_path(|path| {
+            let config = Config::default();
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write the config to the file
+            std::fs::write(path, toml::to_string(&config).unwrap())
+                .expect("Failed to write config");
+
+            // Load the config from the file and compare it
+            let loaded = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, loaded);
+        })
+    }
+
+    #[test]
+    fn test_load_path_fails_on_invalid_toml() {
+        with_config_path(|path| {
+            let invalid_toml = "invalid toml data";
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write invalid TOML data to the file
+            std::fs::write(path, invalid_toml).expect("Failed to write invalid TOML");
+
+            // Attempt to load the config should fail
+            let result = Config::from_path(path);
+            assert!(result.is_err());
+        })
+    }
+
+    #[test]
+    fn test_load_path_creates_directory_if_not_exists() {
+        with_config_path(|path| {
+            // Ensure the directory does not exist
+            let parent = path.parent().unwrap();
+            assert!(!parent.exists());
+
+            // Load the configuration, which should create the directory and a default config file
+            let config = Config::from_path(path).expect("load_path failed");
+            assert_eq!(config, Config::default());
+
+            // The directory and file should now exist
+            assert!(parent.exists());
+            assert!(path.exists());
+        });
+    }
+
     #[test]
     fn test_store_config() {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, config).expect("Failed to store config");
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
         })
     }
 
@@ -415,9 +558,18 @@ mod tests {
     fn test_load_config() {
         with_tempdir("config-load-test", |config_path| {
             let config = Config::default();
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -427,9 +579,18 @@ mod tests {
         with_tempdir("config-load-test", |config_path| {
             let mut config = Config::default();
             config.stages.execution.max_duration = Some(Duration::from_secs(10 * 60));
-            confy::store_path(config_path, &config).unwrap();
 
-            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            // Write the config to a file
+            std::fs::write(
+                config_path,
+                toml::to_string(&config).expect("Failed to serialize config"),
+            )
+            .expect("Failed to write config file");
+
+            // Load the config from the file
+            let loaded_config = Config::from_path(config_path).unwrap();
+
+            // Compare the loaded config with the original config
             assert_eq!(config, loaded_config);
         })
     }
@@ -734,6 +895,79 @@ secs = 120
 nanos = 0
 #";
         let _conf: Config = toml::from_str(alpha_0_0_19).unwrap();
+    }
+
+    // ensures prune config deserialization is backwards compatible
+    #[test]
+    fn test_backwards_compatibility_prune_full() {
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = { distance = 16384 }
+#";
+        let _conf: Config = toml::from_str(s).unwrap();
+
+        let s = r"#
+[prune]
+block_interval = 5
+
+[prune.segments]
+sender_recovery = { distance = 16384 }
+transaction_lookup = 'full'
+receipts = 'full'
+#";
+        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
+        assert!(err.contains("invalid value: string \"full\""), "{}", err);
+    }
+
+    #[test]
+    fn test_prune_config_merge() {
+        let mut config1 = PruneConfig {
+            block_interval: 5,
+            segments: PruneModes {
+                sender_recovery: Some(PruneMode::Full),
+                transaction_lookup: None,
+                receipts: Some(PruneMode::Distance(1000)),
+                account_history: None,
+                storage_history: Some(PruneMode::Before(5000)),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                    Address::random(),
+                    PruneMode::Full,
+                )])),
+            },
+        };
+
+        let config2 = PruneConfig {
+            block_interval: 10,
+            segments: PruneModes {
+                sender_recovery: Some(PruneMode::Distance(500)),
+                transaction_lookup: Some(PruneMode::Full),
+                receipts: Some(PruneMode::Full),
+                account_history: Some(PruneMode::Distance(2000)),
+                storage_history: Some(PruneMode::Distance(3000)),
+                receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
+                    (Address::random(), PruneMode::Distance(1000)),
+                    (Address::random(), PruneMode::Before(2000)),
+                ])),
+            },
+        };
+
+        let original_filter = config1.segments.receipts_log_filter.clone();
+        config1.merge(Some(config2));
+
+        // Check that the configuration has been merged. Any configuration present in config1
+        // should not be overwritten by config2
+        assert_eq!(config1.block_interval, 5);
+        assert_eq!(config1.segments.sender_recovery, Some(PruneMode::Full));
+        assert_eq!(config1.segments.transaction_lookup, Some(PruneMode::Full));
+        assert_eq!(config1.segments.receipts, Some(PruneMode::Distance(1000)));
+        assert_eq!(config1.segments.account_history, Some(PruneMode::Distance(2000)));
+        assert_eq!(config1.segments.storage_history, Some(PruneMode::Before(5000)));
+        assert_eq!(config1.segments.receipts_log_filter, original_filter);
     }
 
     #[test]

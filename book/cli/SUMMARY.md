@@ -44,4 +44,3 @@
   - [`reth recover`](./reth/recover.md)
     - [`reth recover storage-tries`](./reth/recover/storage-tries.md)
   - [`reth prune`](./reth/prune.md)
-

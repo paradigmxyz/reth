@@ -3,7 +3,7 @@
 
 use crate::HeadersDirection;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 
 /// A request for a peer to return block headers starting at the requested block.
@@ -15,9 +15,10 @@ use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 ///
 /// If the [`skip`](#structfield.skip) field is non-zero, the peer must skip that amount of headers
 /// in the direction specified by [`reverse`](#structfield.reverse).
-#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -71,9 +72,10 @@ impl From<Vec<Header>> for BlockHeaders {
 }
 
 /// A request for a peer to return block bodies for the given block hashes.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<B256>,
@@ -87,9 +89,10 @@ impl From<Vec<B256>> for GetBlockBodies {
 
 /// The response to [`GetBlockBodies`], containing the block bodies that the peer knows about if
 /// any were found.
-#[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp, 16)]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<BlockBody>,
@@ -361,7 +364,7 @@ mod tests {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
-                            gas_limit: 0x2e248u64,
+                            gas_limit: 0x2e248,
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x200u64),
                             input: Default::default(),
@@ -376,7 +379,7 @@ mod tests {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
-                            gas_limit: 0x33450u64,
+                            gas_limit: 0x33450,
                             to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
@@ -435,7 +438,7 @@ mod tests {
                                 chain_id: Some(1),
                                 nonce: 0x8u64,
                                 gas_price: 0x4a817c808,
-                                gas_limit: 0x2e248u64,
+                                gas_limit: 0x2e248,
                                 to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
@@ -451,7 +454,7 @@ mod tests {
                                 chain_id: Some(1),
                                 nonce: 0x9u64,
                                 gas_price: 0x4a817c809,
-                                gas_limit: 0x33450u64,
+                                gas_limit: 0x33450,
                                 to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x2d9u64),
                                 input: Default::default(),

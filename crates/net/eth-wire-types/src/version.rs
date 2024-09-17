@@ -5,7 +5,7 @@ use std::{fmt, str::FromStr};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::BufMut;
 use derive_more::Display;
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 
 /// Error thrown when failed to parse a valid [`EthVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -131,9 +131,10 @@ impl From<EthVersion> for &'static str {
 }
 
 /// RLPx `p2p` protocol version
-#[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,

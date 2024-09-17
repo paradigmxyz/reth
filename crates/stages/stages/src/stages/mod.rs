@@ -46,9 +46,7 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::{cursor::Cursor, RW},
-        tables,
-        test_utils::TempDatabase,
-        AccountsHistory, DatabaseEnv,
+        tables, AccountsHistory,
     };
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
@@ -62,15 +60,18 @@ mod tests {
         StaticFileSegment, B256, U256,
     };
     use reth_provider::{
-        providers::StaticFileWriter, AccountExtReader, BlockReader, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::MockNodeTypesWithDB,
+        AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
+        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
-    use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_receipt, BlockRangeParams,
+    };
     use std::{io::Write, sync::Arc};
 
     #[tokio::test]
@@ -94,7 +95,11 @@ mod tests {
         let mut head = block.hash();
         let mut rng = generators::rng();
         for block_number in 2..=tip {
-            let nblock = random_block(&mut rng, block_number, Some(head), Some(0), Some(0));
+            let nblock = random_block(
+                &mut rng,
+                block_number,
+                generators::BlockParams { parent: Some(head), ..Default::default() },
+            );
             head = nblock.hash();
             provider_rw.insert_historical_block(nblock.try_seal_with_senders().unwrap()).unwrap();
         }
@@ -134,7 +139,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let check_pruning = |factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+        let check_pruning = |factory: ProviderFactory<MockNodeTypesWithDB>,
                              prune_modes: PruneModes,
                              expect_num_receipts: usize,
                              expect_num_acc_changesets: usize,
@@ -253,7 +258,11 @@ mod tests {
         let genesis_hash = B256::ZERO;
         let tip = (num_blocks - 1) as u64;
 
-        let blocks = random_block_range(&mut rng, 0..=tip, genesis_hash, 2..3);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=tip,
+            BlockRangeParams { parent: Some(genesis_hash), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
         let mut receipts = Vec::new();
@@ -287,7 +296,10 @@ mod tests {
         is_full_node: bool,
         expected: Option<PipelineTarget>,
     ) {
-        let static_file_provider = db.factory.static_file_provider();
+        // We recreate the static file provider, since consistency heals are done on fetching the
+        // writer for the first time.
+        let static_file_provider =
+            StaticFileProvider::read_write(db.factory.static_file_provider().path()).unwrap();
 
         // Simulate corruption by removing `prune_count` rows from the data file without updating
         // its offset list and configuration.
@@ -302,8 +314,11 @@ mod tests {
             data_file.get_ref().sync_all().unwrap();
         }
 
+        // We recreate the static file provider, since consistency heals are done on fetching the
+        // writer for the first time.
         assert_eq!(
-            static_file_provider
+            StaticFileProvider::read_write(db.factory.static_file_provider().path())
+                .unwrap()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
             Ok(expected)
         );

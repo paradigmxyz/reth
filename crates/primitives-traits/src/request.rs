@@ -1,18 +1,15 @@
 //! EIP-7685 requests.
 
+use alloc::vec::Vec;
 pub use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
 use alloy_rlp::{Decodable, Encodable};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
-use reth_codecs::{reth_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, Compact};
 use revm_primitives::Bytes;
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-
 /// A list of EIP-7685 requests.
-#[reth_codec]
 #[derive(
     Debug,
     Clone,
@@ -26,7 +23,10 @@ use alloc::vec::Vec;
     IntoIterator,
     Serialize,
     Deserialize,
+    Compact,
 )]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(compact)]
 pub struct Requests(pub Vec<Request>);
 
 impl Encodable for Requests {

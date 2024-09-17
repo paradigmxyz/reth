@@ -295,7 +295,7 @@ impl<D> ChainPath<D> {
     pub fn static_files(&self) -> PathBuf {
         let datadir_args = &self.2;
         if let Some(static_files_path) = &datadir_args.static_files_path {
-            static_files_path.to_path_buf()
+            static_files_path.clone()
         } else {
             self.data_dir().join("static_files")
         }
@@ -342,6 +342,13 @@ impl<D> ChainPath<D> {
     /// `<DIR>/<CHAIN_ID>/jwt.hex`
     pub fn jwt(&self) -> PathBuf {
         self.data_dir().join("jwt.hex")
+    }
+
+    /// Returns the path to the invalid block hooks directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/invalid_block_hooks`
+    pub fn invalid_block_hooks(&self) -> PathBuf {
+        self.data_dir().join("invalid_block_hooks")
     }
 }
 

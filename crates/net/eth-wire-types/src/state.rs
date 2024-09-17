@@ -1,15 +1,16 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-use reth_codecs_derive::derive_arbitrary;
+use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives::{Bytes, B256};
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetNodeData(pub Vec<B256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
@@ -17,9 +18,10 @@ pub struct GetNodeData(pub Vec<B256>);
 ///
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]

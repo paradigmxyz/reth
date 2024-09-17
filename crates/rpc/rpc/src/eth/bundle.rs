@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::{keccak256, U256};
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
-    keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement, U256,
+    PooledTransactionsElement,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{FromEthApiError, FromEvmError};
@@ -87,7 +87,7 @@ where
             .iter()
             .filter_map(|(tx, _)| {
                 if let PooledTransactionsElement::BlobTransaction(tx) = tx {
-                    Some(tx.transaction.blob_gas())
+                    Some(tx.transaction.tx.blob_gas())
                 } else {
                     None
                 }
@@ -128,7 +128,7 @@ where
             let parent = LoadPendingBlock::provider(&self.inner.eth_api)
                 .header_by_number(parent_block)
                 .map_err(Eth::Error::from_eth_err)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
             if let Some(base_fee) = parent.next_block_base_fee(
                 LoadPendingBlock::provider(&self.inner.eth_api)
                     .chain_spec()

@@ -1,10 +1,10 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
+use alloy_primitives::{B256, U256};
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
-    proofs::{self},
-    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
+    proofs, Block, Header, Request, SealedBlock, TransactionSigned, Withdrawals,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -12,7 +12,7 @@ use reth_rpc_types::engine::{
     ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
 };
 
-/// Converts [`ExecutionPayloadV1`] to [Block]
+/// Converts [`ExecutionPayloadV1`] to [`Block`]
 pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
     if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
         return Err(PayloadError::ExtraData(payload.extra_data))
@@ -24,7 +24,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
 
     let transactions = payload
         .transactions
-        .into_iter()
+        .iter()
         .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
         .collect::<Result<Vec<_>, _>>()?;
     let transactions_root = proofs::calculate_transaction_root(&transactions);
@@ -49,7 +49,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas
-                .uint_try_to()
+                .try_into()
                 .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
         ),
         blob_gas_used: None,
@@ -72,7 +72,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     })
 }
 
-/// Converts [`ExecutionPayloadV2`] to [Block]
+/// Converts [`ExecutionPayloadV2`] to [`Block`]
 pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, PayloadError> {
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
@@ -83,7 +83,7 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     Ok(base_sealed_block)
 }
 
-/// Converts [`ExecutionPayloadV3`] to [Block]
+/// Converts [`ExecutionPayloadV3`] to [`Block`]
 pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, PayloadError> {
     // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
     // used and excess blob gas
@@ -95,7 +95,7 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     Ok(base_block)
 }
 
-/// Converts [`ExecutionPayloadV4`] to [Block]
+/// Converts [`ExecutionPayloadV4`] to [`Block`]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
     let ExecutionPayloadV4 {
         payload_inner,
@@ -324,8 +324,8 @@ pub fn try_into_block(
 /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
 /// comparing the value with `payload.block_hash`.
 ///
-/// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [Block] and seals the block
-/// with its hash.
+/// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [`Block`] and seals the
+/// block with its hash.
 ///
 /// Uses [`validate_block_hash`] to validate the payload block hash and ultimately return the
 /// [`SealedBlock`].
@@ -340,7 +340,7 @@ pub fn try_into_sealed_block(
     validate_block_hash(block_hash, base_payload)
 }
 
-/// Takes the expected block hash and [Block], validating the block and converting it into a
+/// Takes the expected block hash and [`Block`], validating the block and converting it into a
 /// [`SealedBlock`].
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
@@ -361,7 +361,7 @@ pub fn validate_block_hash(
     Ok(sealed_block)
 }
 
-/// Converts [Block] to [`ExecutionPayloadBodyV1`]
+/// Converts [`Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     let transactions = value.body.into_iter().map(|tx| {
         let mut out = Vec::new();
@@ -374,7 +374,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     }
 }
 
-/// Converts [Block] to [`ExecutionPayloadBodyV2`]
+/// Converts [`Block`] to [`ExecutionPayloadBodyV2`]
 pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
     let transactions = value.body.into_iter().map(|tx| {
         let mut out = Vec::new();
@@ -447,7 +447,7 @@ mod tests {
         block_to_payload_v3, try_into_block, try_payload_v3_to_block, try_payload_v4_to_block,
         validate_block_hash,
     };
-    use reth_primitives::{b256, hex, Bytes, U256};
+    use alloy_primitives::{b256, hex, Bytes, U256};
     use reth_rpc_types::{
         engine::{CancunPayloadFields, ExecutionPayloadV3, ExecutionPayloadV4},
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,

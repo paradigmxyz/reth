@@ -2,12 +2,15 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,
 };
+use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::args::StageEnum;
 use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
 use reth_stages::StageId;
@@ -15,17 +18,19 @@ use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     stage: StageEnum,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `db` command
-    pub async fn execute(self) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let static_file_provider = provider_factory.static_file_provider();
 
@@ -68,7 +73,7 @@ impl Command {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -81,7 +86,7 @@ impl Command {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -102,7 +107,7 @@ impl Command {
                     Default::default(),
                 )?;
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
+                insert_genesis_state(&provider_rw.0, alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
@@ -160,7 +165,7 @@ impl Command {
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw, self.env.chain.genesis.alloc.iter())?;
+                insert_genesis_history(&provider_rw.0, self.env.chain.genesis.alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
@@ -168,7 +173,7 @@ impl Command {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
             }
         }
 

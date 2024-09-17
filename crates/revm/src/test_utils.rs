@@ -1,15 +1,18 @@
+use std::collections::HashSet;
+
 use crate::precompile::HashMap;
+use alloc::vec::Vec;
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
 use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage};
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
 
 /// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -50,7 +53,7 @@ impl AccountReader for StateProviderTest {
 
 impl BlockHashReader for StateProviderTest {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        Ok(self.block_hash.get(&number).cloned())
+        Ok(self.block_hash.get(&number).copied())
     }
 
     fn canonical_hashes_range(
@@ -68,18 +71,31 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn hashed_state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
+        unimplemented!("state root computation is not supported")
+    }
+
+    fn state_root_with_updates(
         &self,
         _hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn hashed_storage_root(
+    fn state_root_from_nodes_with_updates(
+        &self,
+        _input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        unimplemented!("state root computation is not supported")
+    }
+}
+
+impl StorageRootProvider for StateProviderTest {
+    fn storage_root(
         &self,
         _address: Address,
         _hashed_storage: HashedStorage,
@@ -89,18 +105,26 @@ impl StateRootProvider for StateProviderTest {
 }
 
 impl StateProofProvider for StateProviderTest {
-    fn hashed_proof(
+    fn proof(
         &self,
-        _hashed_state: HashedPostState,
+        _input: TrieInput,
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
     }
 
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        unimplemented!("proof generation is not supported")
+    }
+
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         unimplemented!("witness generation is not supported")
@@ -113,7 +137,7 @@ impl StateProvider for StateProviderTest {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<reth_primitives::StorageValue>> {
-        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).cloned()))
+        Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
