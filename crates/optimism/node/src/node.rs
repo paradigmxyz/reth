@@ -20,6 +20,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::Header;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -254,7 +255,7 @@ impl OptimismPayloadBuilder {
             Types: NodeTypesWithEngine<Engine = OptimismEngineTypes, ChainSpec = ChainSpec>,
         >,
         Pool: TransactionPool + Unpin + 'static,
-        Evm: ConfigureEvm,
+        Evm: ConfigureEvm<Header = Header>,
     {
         let payload_builder =
             reth_optimism_payload_builder::OptimismPayloadBuilder::new(evm_config)
