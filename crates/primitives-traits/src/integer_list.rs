@@ -138,7 +138,7 @@ impl<'a> Arbitrary<'a> for IntegerList {
 }
 
 /// Primitives error type.
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, derive_more::Error)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
     #[display("the provided input is invalid")]
@@ -147,9 +147,6 @@ pub enum RoaringBitmapError {
     #[display("failed to deserialize data into type")]
     FailedToDeserialize,
 }
-
-#[cfg(feature = "std")]
-impl std::error::Error for RoaringBitmapError {}
 
 #[cfg(test)]
 mod tests {
