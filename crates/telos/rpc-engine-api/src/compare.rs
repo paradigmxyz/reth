@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use reth_primitives::{Address, U256};
+use reth_primitives::{Address, B256, U256};
 use reth_primitives::revm_primitives::HashMap;
 use revm::TransitionAccount;
 
@@ -18,9 +18,18 @@ pub fn compare_state_diffs(
     println!("TEVM State diffs account: {:?}",statediffs_account);
     println!("TEVM State diffs accountstate: {:?}",statediffs_accountstate);
 
+    let mut new_addresses_using_openwallet_hashsetset = HashSet::new();
+    for row in &new_addresses_using_openwallet {
+        new_addresses_using_openwallet_hashsetset.insert(Address::from_word(B256::from(row.1)));
+    }
+
     let mut modified_addresses = HashSet::new();
 
     for row in &statediffs_account {
+        // Skip if address is created using openwallet and is empty
+        if new_addresses_using_openwallet_hashsetset.contains(&row.address) && row.balance == U256::ZERO && row.nonce == 0 && row.code.len() == 0 {
+            continue;
+        }
         modified_addresses.insert(row.address);
     }
     for row in &statediffs_accountstate {
@@ -32,6 +41,10 @@ pub fn compare_state_diffs(
     }
 
     for row in statediffs_account {
+        // Skip if address is created using openwallet and is empty
+        if new_addresses_using_openwallet_hashsetset.contains(&row.address) && row.balance == U256::ZERO && row.nonce == 0 && row.code.len() == 0 {
+            continue;
+        }
         let revm_side_row = revm_state_diffs.get(&row.address);
         // Key doesn't exist on revm state diffs
         if revm_side_row.is_none() {
