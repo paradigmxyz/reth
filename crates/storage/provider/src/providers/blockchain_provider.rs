@@ -15,7 +15,6 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
-use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
@@ -265,8 +264,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
+    type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
+    type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.database.database_provider_ro()

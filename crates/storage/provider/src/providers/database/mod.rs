@@ -186,8 +186,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     type DB = N::DB;
-    type Provider = DatabaseProviderRO<N::DB>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX, N::ChainSpec>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut, N::ChainSpec>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.provider()
