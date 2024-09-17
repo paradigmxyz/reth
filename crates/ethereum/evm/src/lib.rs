@@ -122,7 +122,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
     }
 
-    /// Fill [`BlockEnv`] field according to the chain spec and given header
     fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
         block_env.number = U256::from(header.number);
         block_env.coinbase = header.beneficiary;
