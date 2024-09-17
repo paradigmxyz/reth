@@ -11,16 +11,16 @@ use crate::{
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_db_api::database::Database;
 use reth_network_p2p::headers::client::HeadersClient;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fs, path::Path};
 
-use reth_primitives::{
-    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
-};
-use reth_provider::{BlockHashReader, HeaderProvider, ProviderFactory, StageCheckpointReader};
+use alloy_primitives::{BlockNumber, B256};
+use reth_primitives::{BlockHashOrNumber, Head, SealedHeader};
 use reth_stages_types::StageId;
+use reth_storage_api::{
+    BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
@@ -229,7 +229,7 @@ impl NodeConfig {
     }
 
     /// Set the pruning args for the node
-    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }
@@ -261,16 +261,16 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Loads '`EnvKzgSettings::Default`'
-    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
-        Ok(EnvKzgSettings::Default)
-    }
-
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> ProviderResult<Head> {
-        let provider = factory.provider()?;
+    pub fn lookup_head<Factory>(&self, factory: &Factory) -> ProviderResult<Head>
+    where
+        Factory: DatabaseProviderFactory<
+            Provider: HeaderProvider + StageCheckpointReader + BlockHashReader,
+        >,
+    {
+        let provider = factory.database_provider_ro()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 

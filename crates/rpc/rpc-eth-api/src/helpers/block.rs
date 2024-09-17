@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
+use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_eth_types::{EthApiError, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, EthStateCache};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
@@ -40,15 +40,12 @@ pub trait EthBlocks: LoadBlock {
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let block = match self.block_with_senders(block_id).await? {
-                Some(block) => block,
-                None => return Ok(None),
-            };
+            let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
             let total_difficulty = EthBlocks::provider(self)
                 .header_td_by_number(block.number)
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
             let block = from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))
                 .map_err(Self::Error::from_eth_err)?;
             Ok(Some(block))
@@ -96,44 +93,7 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<Vec<AnyTransactionReceipt>>, Self::Error>> + Send
     where
-        Self: LoadReceipt,
-    {
-        async move {
-            if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-                let block_number = block.number;
-                let base_fee = block.base_fee_per_gas;
-                let block_hash = block.hash();
-                let excess_blob_gas = block.excess_blob_gas;
-                let timestamp = block.timestamp;
-                let block = block.unseal();
-
-                let receipts = block
-                    .body
-                    .into_iter()
-                    .zip(receipts.iter())
-                    .enumerate()
-                    .map(|(idx, (tx, receipt))| {
-                        let meta = TransactionMeta {
-                            tx_hash: tx.hash,
-                            index: idx as u64,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                            excess_blob_gas,
-                            timestamp,
-                        };
-
-                        ReceiptBuilder::new(&tx, meta, receipt, &receipts)
-                            .map(|builder| builder.build())
-                            .map_err(Self::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Self::Error>>();
-                return receipts.map(Some)
-            }
-
-            Ok(None)
-        }
-    }
+        Self: LoadReceipt;
 
     /// Helper method that loads a bock and all its receipts.
     fn load_block_and_receipts(
@@ -145,10 +105,19 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             if block_id.is_pending() {
-                return Ok(LoadBlock::provider(self)
+                // First, try to get the pending block from the provider, in case we already
+                // received the actual pending block from the CL.
+                if let Some((block, receipts)) = LoadBlock::provider(self)
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
+                {
+                    return Ok(Some((block, Arc::new(receipts))));
+                }
+
+                // If no pending block from provider, build the pending block locally.
+                if let Some((block, receipts)) = self.local_pending_block().await? {
+                    return Ok(Some((block.block, Arc::new(receipts))));
+                }
             }
 
             if let Some(block_hash) = LoadBlock::provider(self)
@@ -243,8 +212,12 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
                 return if maybe_pending.is_some() {
                     Ok(maybe_pending)
                 } else {
-                    self.local_pending_block().await
-                }
+                    // If no pending block from provider, try to get local pending block
+                    return match self.local_pending_block().await? {
+                        Some((block, _)) => Ok(Some(block)),
+                        None => Ok(None),
+                    };
+                };
             }
 
             let block_hash = match LoadPendingBlock::provider(self)

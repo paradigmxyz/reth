@@ -2,8 +2,8 @@ use crate::{
     identifier::TransactionId, pool::pending::PendingTransaction, PoolTransaction,
     TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_primitives::B256 as TxHash;
 use core::fmt;
-use reth_primitives::B256 as TxHash;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
@@ -57,9 +57,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
                     .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128)
             {
                 return Some(best);
-            } else {
-                crate::traits::BestTransactions::mark_invalid(self, &best);
             }
+            crate::traits::BestTransactions::mark_invalid(self, &best);
         }
     }
 }
@@ -227,9 +226,8 @@ where
             let best = self.best.next()?;
             if (self.predicate)(&best) {
                 return Some(best)
-            } else {
-                self.best.mark_invalid(&best);
             }
+            self.best.mark_invalid(&best);
         }
     }
 }
@@ -270,7 +268,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         Priority,
     };
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
 
     #[test]
     fn test_best_iter() {
@@ -595,5 +593,35 @@ mod tests {
         // Verify that the new transaction has not been added to the 'independent' set
         assert_eq!(best.independent.len(), 2);
         assert!(!best.independent.contains(&pending_tx2));
+    }
+
+    #[test]
+    fn test_best_transactions_filter_trait_object() {
+        // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a trait object of BestTransactions iterator from the pool
+        let best: Box<dyn crate::traits::BestTransactions<Item = _>> = Box::new(pool.best());
+
+        // Create a filter that only returns transactions with even nonces
+        let filter =
+            BestTransactionFilter::new(best, |tx: &Arc<ValidPoolTransaction<MockTransaction>>| {
+                tx.nonce() % 2 == 0
+            });
+
+        // Verify that the filter only returns transactions with even nonces
+        for tx in filter {
+            assert_eq!(tx.nonce() % 2, 0);
+        }
     }
 }

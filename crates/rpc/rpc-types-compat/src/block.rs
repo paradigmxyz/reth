@@ -1,12 +1,15 @@
 //! Compatibility functions for rpc `Block` type.
 
 use crate::transaction::from_recovered_with_block_context;
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types::Transaction;
+use alloy_rpc_types::{Transaction, TransactionInfo};
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals,
 };
-use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
+use reth_rpc_types::{
+    Block, BlockError, BlockTransactions, BlockTransactionsKind, Header, WithOtherFields,
+};
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
@@ -17,7 +20,7 @@ pub fn from_block(
     total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
-) -> Result<Block, BlockError> {
+) -> Result<Block<WithOtherFields<Transaction>>, BlockError> {
     match kind {
         BlockTransactionsKind::Hashes => {
             Ok(from_block_with_tx_hashes(block, total_difficulty, block_hash))
@@ -35,7 +38,7 @@ pub fn from_block_with_tx_hashes(
     block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Block {
+) -> Block<WithOtherFields<Transaction>> {
     let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
     let transactions = block.body.iter().map(|tx| tx.hash()).collect();
 
@@ -57,7 +60,7 @@ pub fn from_block_full(
     mut block: BlockWithSenders,
     total_difficulty: U256,
     block_hash: Option<B256>,
-) -> Result<Block, BlockError> {
+) -> Result<Block<WithOtherFields<Transaction>>, BlockError> {
     let block_hash = block_hash.unwrap_or_else(|| block.block.header.hash_slow());
     let block_number = block.block.number;
     let base_fee_per_gas = block.block.base_fee_per_gas;
@@ -70,15 +73,17 @@ pub fn from_block_full(
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {
+            let tx_hash = tx.hash();
             let signed_tx_ec_recovered = tx.with_signer(sender);
+            let tx_info = TransactionInfo {
+                hash: Some(tx_hash),
+                block_hash: Some(block_hash),
+                block_number: Some(block_number),
+                base_fee: base_fee_per_gas.map(u128::from),
+                index: Some(idx as u64),
+            };
 
-            from_recovered_with_block_context(
-                signed_tx_ec_recovered,
-                block_hash,
-                block_number,
-                base_fee_per_gas,
-                idx,
-            )
+            from_recovered_with_block_context(signed_tx_ec_recovered, tx_info)
         })
         .collect::<Vec<_>>();
 
@@ -123,7 +128,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
     } = header;
 
     Header {
-        hash: Some(hash),
+        hash,
         parent_hash,
         uncles_hash: ommers_hash,
         miner: beneficiary,
@@ -131,7 +136,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         transactions_root,
         receipts_root,
         withdrawals_root,
-        number: Some(number),
+        number,
         gas_used: gas_used as u128,
         gas_limit: gas_limit as u128,
         extra_data,
@@ -155,8 +160,8 @@ fn from_block_with_transactions(
     block_hash: B256,
     block: PrimitiveBlock,
     total_difficulty: U256,
-    transactions: BlockTransactions<Transaction>,
-) -> Block {
+    transactions: BlockTransactions<WithOtherFields<Transaction>>,
+) -> Block<WithOtherFields<Transaction>> {
     let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
     let mut header = from_primitive_with_hash(block.header.seal(block_hash));
     header.total_difficulty = Some(total_difficulty);
@@ -167,19 +172,12 @@ fn from_block_with_transactions(
         .then(|| block.withdrawals.map(Withdrawals::into_inner))
         .flatten();
 
-    Block {
-        header,
-        uncles,
-        transactions,
-        size: Some(U256::from(block_length)),
-        withdrawals,
-        other: Default::default(),
-    }
+    Block { header, uncles, transactions, size: Some(U256::from(block_length)), withdrawals }
 }
 
 /// Build an RPC block response representing
 /// an Uncle from its header.
-pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
+pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block<WithOtherFields<Transaction>> {
     let hash = header.hash_slow();
     let rpc_header = from_primitive_with_hash(header.clone().seal(hash));
     let uncle_block = PrimitiveBlock { header, ..Default::default() };
@@ -190,6 +188,5 @@ pub fn uncle_block_from_header(header: PrimitiveHeader) -> Block {
         transactions: BlockTransactions::Uncle,
         withdrawals: Some(vec![]),
         size,
-        other: Default::default(),
     }
 }

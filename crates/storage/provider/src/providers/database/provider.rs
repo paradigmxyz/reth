@@ -7,12 +7,12 @@ use crate::{
     },
     writer::UnifiedStorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, EvmEnvProvider, FinalizedBlockReader,
+    BlockReader, BlockWriter, BundleStateInit, DBProvider, EvmEnvProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
-    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateWriter, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
+    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -23,13 +23,13 @@ use reth_db::{
 };
 use reth_db_api::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
-    table::{Table, TableRow},
+    table::Table,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -43,8 +43,9 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
     Withdrawal, Withdrawals, B256, U256,
 };
-use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::TryIntoHistoricalStateProvider;
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -91,6 +92,12 @@ impl<DB: Database> DerefMut for DatabaseProviderRW<DB> {
     }
 }
 
+impl<DB: Database> AsRef<DatabaseProvider<<DB as Database>::TXMut>> for DatabaseProviderRW<DB> {
+    fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut> {
+        &self.0
+    }
+}
+
 impl<DB: Database> DatabaseProviderRW<DB> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<bool> {
@@ -100,6 +107,12 @@ impl<DB: Database> DatabaseProviderRW<DB> {
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
+    }
+}
+
+impl<DB: Database> From<DatabaseProviderRW<DB>> for DatabaseProvider<<DB as Database>::TXMut> {
+    fn from(provider: DatabaseProviderRW<DB>) -> Self {
+        provider.0
     }
 }
 
@@ -141,9 +154,14 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTx + 'static> DatabaseProvider<TX> {
-    /// Storage provider for state at that given block
-    pub fn state_provider_by_block_number(
+impl<TX> AsRef<Self> for DatabaseProvider<TX> {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+impl<TX: DbTx + 'static> TryIntoHistoricalStateProvider for DatabaseProvider<TX> {
+    fn try_into_history_at_block(
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
@@ -259,9 +277,8 @@ where
         } else if block_number <= sharded_key.as_ref().highest_block_number {
             // Filter out all elements greater than block number.
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
-        } else {
-            return Ok(list.iter().collect::<Vec<_>>())
         }
+        return Ok(list.iter().collect::<Vec<_>>())
     }
 
     Ok(Vec::new())
@@ -646,10 +663,10 @@ impl<TX: DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -690,6 +707,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let block_requests = self.get::<tables::BlockRequests>(range.clone())?;
 
         let block_tx = self.get_block_transaction_range(range)?;
+        let mut blocks = Vec::with_capacity(block_headers.len());
 
         // merge all into block
         let block_header_iter = block_headers.into_iter();
@@ -704,9 +722,8 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
         let mut block_requests = block_requests_iter.next();
 
-        let mut blocks = Vec::new();
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
             let header = header.seal(header_hash);
 
@@ -778,12 +795,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
+    ///
+    /// If the range is empty, or there are no blocks for the given range, then this returns `None`.
     pub fn get_state(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<ExecutionOutcome> {
+    ) -> ProviderResult<Option<ExecutionOutcome>> {
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(None)
         }
         let start_block_number = *range.start();
 
@@ -791,10 +810,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
 
         // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
-        let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+        let Some(from_transaction_num) = block_bodies.first().map(|bodies| bodies.1.first_tx_num())
+        else {
+            return Ok(None)
+        };
+        let Some(to_transaction_num) = block_bodies.last().map(|bodies| bodies.1.last_tx_num())
+        else {
+            return Ok(None)
+        };
 
         let storage_range = BlockNumberAddress::range(range.clone());
 
@@ -819,7 +842,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut receipt_iter =
             self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
@@ -831,14 +854,14 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(ExecutionOutcome::new_init(
+        Ok(Some(ExecutionOutcome::new_init(
             state,
             reverts,
             Vec::new(),
             receipts.into(),
             start_block_number,
             Vec::new(),
-        ))
+        )))
     }
 
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
@@ -1117,7 +1140,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut receipt_iter =
             self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
@@ -1292,10 +1315,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
                 let recovered = match (tx, sender) {
                     (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
-                        if tx_id != sender_tx_id {
-                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
-                        } else {
+                        if tx_id == sender_tx_id {
                             Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        } else {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
                         }
                     }
                     (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
@@ -1384,6 +1407,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let block_requests = self.take::<tables::BlockRequests>(range.clone())?;
         let block_tx = self.take_block_transaction_range(range.clone())?;
 
+        let mut blocks = Vec::with_capacity(block_headers.len());
+
         // rm HeaderTerminalDifficulties
         self.remove::<tables::HeaderTerminalDifficulties>(range)?;
 
@@ -1400,9 +1425,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut block_withdrawals = block_withdrawals_iter.next();
         let mut block_requests = block_requests_iter.next();
 
-        let mut blocks = Vec::new();
         for ((main_block_number, header), (_, header_hash), (_, tx)) in
-            izip!(block_header_iter.into_iter(), block_header_hashes_iter, block_tx_iter)
+            izip!(block_header_iter, block_header_hashes_iter, block_tx_iter)
         {
             let header = header.seal(header_hash);
 
@@ -1495,7 +1519,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(deleted)
     }
 
-    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
+    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table.
+    ///
+    /// Note: Range is inclusive and first key in the range is removed.
     pub fn unwind_table_by_walker<T1, T2>(
         &self,
         range: impl RangeBounds<T1::Key>,
@@ -1510,120 +1536,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             self.tx.delete::<T2>(value, None)?;
         }
         Ok(())
-    }
-
-    /// Prune the table for the specified pre-sorted key iterator.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_iterator<T: Table>(
-        &self,
-        keys: impl IntoIterator<Item = T::Key>,
-        limiter: &mut PruneLimiter,
-        mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut keys = keys.into_iter();
-
-        let mut deleted_entries = 0;
-
-        for key in &mut keys {
-            if limiter.is_limit_reached() {
-                debug!(
-                    target: "providers::db",
-                    ?limiter,
-                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
-                    time_limit = %limiter.is_time_limit_reached(),
-                    table = %T::NAME,
-                    "Pruning limit reached"
-                );
-                break
-            }
-
-            let row = cursor.seek_exact(key)?;
-            if let Some(row) = row {
-                cursor.delete_current()?;
-                limiter.increment_deleted_entries_count();
-                deleted_entries += 1;
-                delete_callback(row);
-            }
-        }
-
-        let done = keys.next().is_none();
-        Ok((deleted_entries, done))
-    }
-
-    /// Prune the table for the specified key range.
-    ///
-    /// Returns number of rows pruned.
-    pub fn prune_table_with_range<T: Table>(
-        &self,
-        keys: impl RangeBounds<T::Key> + Clone + Debug,
-        limiter: &mut PruneLimiter,
-        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
-        mut delete_callback: impl FnMut(TableRow<T>),
-    ) -> Result<(usize, bool), DatabaseError> {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut walker = cursor.walk_range(keys)?;
-
-        let mut deleted_entries = 0;
-
-        let done = loop {
-            // check for time out must be done in this scope since it's not done in
-            // `prune_table_with_range_step`
-            if limiter.is_limit_reached() {
-                debug!(
-                    target: "providers::db",
-                    ?limiter,
-                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
-                    time_limit = %limiter.is_time_limit_reached(),
-                    table = %T::NAME,
-                    "Pruning limit reached"
-                );
-                break false
-            }
-
-            let done = self.prune_table_with_range_step(
-                &mut walker,
-                limiter,
-                &mut skip_filter,
-                &mut delete_callback,
-            )?;
-
-            if done {
-                break true
-            } else {
-                deleted_entries += 1;
-            }
-        };
-
-        Ok((deleted_entries, done))
-    }
-
-    /// Steps once with the given walker and prunes the entry in the table.
-    ///
-    /// Returns `true` if the walker is finished, `false` if it may have more data to prune.
-    ///
-    /// CAUTION: Pruner limits are not checked. This allows for a clean exit of a prune run that's
-    /// pruning different tables concurrently, by letting them step to the same height before
-    /// timing out.
-    pub fn prune_table_with_range_step<T: Table>(
-        &self,
-        walker: &mut RangeWalker<'_, T, <TX as DbTxMut>::CursorMut<T>>,
-        limiter: &mut PruneLimiter,
-        skip_filter: &mut impl FnMut(&TableRow<T>) -> bool,
-        delete_callback: &mut impl FnMut(TableRow<T>),
-    ) -> Result<bool, DatabaseError> {
-        let Some(res) = walker.next() else { return Ok(true) };
-
-        let row = res?;
-
-        if !skip_filter(&row) {
-            walker.delete_current()?;
-            limiter.increment_deleted_entries_count();
-            delete_callback(row);
-        }
-
-        Ok(false)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -1652,7 +1564,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// This function is used by history indexing stages.
     fn append_history_index<P, T>(
         &self,
-        index_updates: BTreeMap<P, Vec<u64>>,
+        index_updates: impl IntoIterator<Item = (P, impl IntoIterator<Item = u64>)>,
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
     ) -> ProviderResult<()>
     where
@@ -1660,21 +1572,17 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         T: Table<Value = BlockNumberList>,
     {
         for (partial_key, indices) in index_updates {
-            let last_shard = self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
-            // chunk indices and insert them in shards of N size.
-            let indices = last_shard.iter().chain(indices.iter());
-            let chunks = indices
-                .chunks(sharded_key::NUM_OF_INDICES_IN_SHARD)
-                .into_iter()
-                .map(|chunks| chunks.copied().collect())
-                .collect::<Vec<Vec<_>>>();
-
-            let mut chunks = chunks.into_iter().peekable();
+            let mut last_shard =
+                self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
+            last_shard.extend(indices);
+            // Chunk indices and insert them in shards of N size.
+            let indices = last_shard;
+            let mut chunks = indices.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
             while let Some(list) = chunks.next() {
                 let highest_block_number = if chunks.peek().is_some() {
                     *list.last().expect("`chunks` does not return empty list")
                 } else {
-                    // Insert last list with u64::MAX
+                    // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
                 self.tx.put::<T>(
@@ -2474,13 +2382,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_and_block_env(
-            cfg,
-            block_env,
-            &self.chain_spec,
-            header,
-            total_difficulty,
-        );
+        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
         Ok(())
     }
 
@@ -2510,7 +2412,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        evm_config.fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, header, total_difficulty);
         Ok(())
     }
 }
@@ -3139,7 +3041,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
     fn insert_account_history_index(
         &self,
-        account_transitions: BTreeMap<Address, Vec<u64>>,
+        account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
@@ -3189,7 +3091,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
     fn insert_storage_history_index(
         &self,
-        storage_transitions: BTreeMap<(Address, B256), Vec<u64>>,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
         self.append_history_index::<_, tables::StoragesHistory>(
             storage_transitions,
@@ -3225,13 +3127,19 @@ impl<TX: DbTx> BlockExecutionReader for DatabaseProvider<TX> {
         let blocks = self.get_block_range(range.clone())?;
 
         // get execution res
-        let execution_state = self.get_state(range)?;
+        let execution_state = self.get_state(range)?.unwrap_or_default();
 
         Ok(Chain::new(blocks, execution_state, None))
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
+impl<TX: DbTx> StateReader for DatabaseProvider<TX> {
+    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        self.get_state(block..=block)
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static> BlockExecutionWriter for DatabaseProvider<TX> {
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3409,7 +3317,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
+impl<TX: DbTxMut + DbTx + 'static> BlockWriter for DatabaseProvider<TX> {
     /// Inserts the block into the database, always modifying the following tables:
     /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
     /// * [`Headers`](tables::Headers)
@@ -3685,6 +3593,26 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx + 'static> DBProvider for DatabaseProvider<TX> {
+    type Tx = TX;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
+    }
+
+    fn into_tx(self) -> Self::Tx {
+        self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        self.prune_modes_ref()
     }
 }
 

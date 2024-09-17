@@ -1,21 +1,22 @@
-use crate::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
-use alloy_chains::Chain;
-use alloy_primitives::U256;
+use alloc::{boxed::Box, format, string::String, vec};
 use core::{
     any::Any,
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
+
+use alloy_chains::Chain;
+use alloy_primitives::U256;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, format, string::String, vec};
+use crate::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 hardfork!(
     /// The name of an optimism hardfork.
     ///
-    /// When building a list of hardforks for a chain, it's still expected to mix with [`EthereumHardfork`].
+    /// When building a list of hardforks for a chain, it's still expected to mix with
+    /// [`EthereumHardfork`].
     OptimismHardfork {
         /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
         Bedrock,

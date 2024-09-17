@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeTypesWithEngine};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
-use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{ExExEvent, ExExNotification};
+use crate::{ExExEvent, ExExNotifications};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -24,19 +24,24 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: UnboundedSender<ExExEvent>,
-    /// Channel to receive [`ExExNotification`]s.
+    /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
     ///
     /// # Important
     ///
-    /// Once a an [`ExExNotification`] is sent over the channel, it is considered delivered by the
-    /// node.
-    pub notifications: Receiver<ExExNotification>,
+    /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
+    /// considered delivered by the node.
+    pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
 
     /// node components
     pub components: Node,
 }
 
-impl<Node: FullNodeComponents> Debug for ExExContext<Node> {
+impl<Node> Debug for ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExContext")
             .field("head", &self.head)
@@ -76,7 +81,10 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(&self) -> &reth_payload_builder::PayloadBuilderHandle<Node::Engine> {
+    pub fn payload_builder(
+        &self,
+    ) -> &reth_payload_builder::PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>
+    {
         self.components.payload_builder()
     }
 

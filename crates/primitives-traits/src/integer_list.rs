@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use bytes::BufMut;
 use core::fmt;
 use derive_more::Deref;
@@ -7,9 +8,6 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
@@ -140,7 +138,7 @@ impl<'a> Arbitrary<'a> for IntegerList {
 }
 
 /// Primitives error type.
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, derive_more::Error)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
     #[display("the provided input is invalid")]
@@ -149,9 +147,6 @@ pub enum RoaringBitmapError {
     #[display("failed to deserialize data into type")]
     FailedToDeserialize,
 }
-
-#[cfg(feature = "std")]
-impl std::error::Error for RoaringBitmapError {}
 
 #[cfg(test)]
 mod tests {

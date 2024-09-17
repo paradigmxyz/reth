@@ -9,10 +9,8 @@
 
 use self::error::CanonicalError;
 use crate::error::InsertBlockError;
-use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader,
-};
+use alloy_primitives::{BlockHash, BlockNumber};
+use reth_primitives::{BlockNumHash, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::BTreeMap;
 
@@ -196,6 +194,36 @@ impl CanonicalOutcome {
     pub const fn is_already_canonical(&self) -> bool {
         matches!(self, Self::AlreadyCanonical { .. })
     }
+}
+
+/// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
+/// variant.
+///
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// is valid or not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockStatus2 {
+    /// The block is valid and block extends canonical chain.
+    Valid,
+    /// The block may be valid and has an unknown missing ancestor.
+    Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
+        /// The lowest ancestor block that is not connected to the canonical chain.
+        missing_ancestor: BlockNumHash,
+    },
+}
+
+/// How a payload was inserted if it was valid.
+///
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk2::AlreadySeen(_)`] is
+/// returned, otherwise [`InsertPayloadOk2::Inserted(_)`] is returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InsertPayloadOk2 {
+    /// The payload was valid, but we have already seen it.
+    AlreadySeen(BlockStatus2),
+    /// The payload was valid and inserted into the tree.
+    Inserted(BlockStatus2),
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.

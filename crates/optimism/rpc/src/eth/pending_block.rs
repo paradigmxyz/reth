@@ -1,14 +1,15 @@
-//! Loads OP pending block for a RPC response.   
+//! Loads OP pending block for a RPC response.
 
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::{
-    revm_primitives::BlockEnv, BlockHashOrNumber, BlockNumber, SealedBlockWithSenders, B256,
+    revm_primitives::BlockEnv, BlockNumberOrTag, Receipt, SealedBlockWithSenders,
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
-    StateProviderFactory,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -22,7 +23,7 @@ use crate::OpEthApi;
 impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking,
-    N: FullNodeComponents,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(
@@ -50,17 +51,30 @@ where
     }
 
     /// Returns the locally built pending block
-    async fn local_pending_block(&self) -> Result<Option<SealedBlockWithSenders>, Self::Error> {
+    async fn local_pending_block(
+        &self,
+    ) -> Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error> {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let (_, block_hash) = latest.split();
-        self.provider()
-            .sealed_block_with_senders(BlockHashOrNumber::from(block_hash), Default::default())
-            .map_err(Self::Error::from_eth_err)
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        let block_id = latest.hash().into();
+        let block = self
+            .provider()
+            .block_with_senders(block_id, Default::default())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
+            .seal(latest.hash());
+
+        let receipts = self
+            .provider()
+            .receipts_by_block(block_id)
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
+
+        Ok(Some((block, receipts)))
     }
 
     fn receipts_root(

@@ -1,8 +1,9 @@
 //! Helpers for testing trace calls.
 
+use alloy_primitives::{Bytes, TxHash, B256};
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, Bytes, TxHash, B256};
+use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
     trace::{
@@ -545,7 +546,6 @@ mod tests {
         let mut stream = client.replay_transactions(transactions, trace_types);
         let mut successes = 0;
         let mut failures = 0;
-        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -554,12 +554,10 @@ mod tests {
                 Ok((trace_result, tx_hash)) => {
                     println!("Success for tx_hash {tx_hash:?}: {trace_result:?}");
                     successes += 1;
-                    all_results.push(Ok((trace_result, tx_hash)));
                 }
                 Err((error, tx_hash)) => {
                     println!("Error for tx_hash {tx_hash:?}: {error:?}");
                     failures += 1;
-                    all_results.push(Err((error, tx_hash)));
                 }
             }
         }
@@ -656,7 +654,6 @@ mod tests {
         let mut stream = client.trace_call_stream(trace_call_request);
         let mut successes = 0;
         let mut failures = 0;
-        let mut all_results = Vec::new();
 
         assert_is_stream(&stream);
 
@@ -665,12 +662,10 @@ mod tests {
                 Ok(trace_result) => {
                     println!("Success: {trace_result:?}");
                     successes += 1;
-                    all_results.push(Ok(trace_result));
                 }
                 Err((error, request)) => {
                     println!("Error for request {request:?}: {error:?}");
                     failures += 1;
-                    all_results.push(Err((error, request)));
                 }
             }
         }

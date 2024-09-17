@@ -101,10 +101,10 @@ where
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key
-                    if key_ptr != key_val.iov_base {
-                        Some(Key::decode_val::<K>(txn, key_val)?)
-                    } else {
+                    if key_ptr == key_val.iov_base {
                         None
+                    } else {
+                        Some(Key::decode_val::<K>(txn, key_val)?)
                     }
                 };
                 let data_out = Value::decode_val::<K>(txn, data_val)?;
@@ -486,7 +486,11 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) }).unwrap()
+        // To be able to close a cursor of a timed out transaction, we need to renew it first.
+        // Hence the usage of `txn_execute_renew_on_timeout` here.
+        let _ = self
+            .txn
+            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
     }
 }
 

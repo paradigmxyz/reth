@@ -13,7 +13,8 @@ use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry;
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, collections::btree_map::Entry, vec::Vec};
+use alloc::collections::btree_map::Entry;
+use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
 pub trait Hardforks: Default + Clone {
@@ -68,7 +69,7 @@ impl ChainHardforks {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     pub fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
-        self.get(fork).unwrap_or(ForkCondition::Never)
+        self.get(fork).unwrap_or_default()
     }
 
     /// Retrieves [`ForkCondition`] from `fork` if it exists, otherwise `None`.

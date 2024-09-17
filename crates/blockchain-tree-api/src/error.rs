@@ -1,10 +1,11 @@
 //! Error handling for the blockchain tree
 
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_consensus::ConsensusError;
 use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
+use reth_primitives::SealedBlock;
 pub use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.

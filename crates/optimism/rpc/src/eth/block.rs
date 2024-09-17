@@ -1,6 +1,7 @@
-//! Loads and formats OP block RPC response.   
+//! Loads and formats OP block RPC response.
 
-use reth_node_api::FullNodeComponents;
+use reth_chainspec::ChainSpec;
+use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -13,13 +14,12 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 
-use crate::{op_receipt_fields, OpEthApi, OpEthApiError};
+use crate::{OpEthApi, OpEthApiError};
 
 impl<N> EthBlocks for OpEthApi<N>
 where
-    Self: LoadBlock + EthApiSpec + LoadTransaction,
-    Self::Error: From<OpEthApiError>,
-    N: FullNodeComponents,
+    Self: EthApiSpec + LoadBlock<Error = OpEthApiError> + LoadTransaction,
+    N: FullNodeComponents<Types: NodeTypes<ChainSpec = ChainSpec>>,
 {
     #[inline]
     fn provider(&self) -> impl HeaderProvider {
@@ -41,14 +41,15 @@ where
             let timestamp = block.timestamp;
             let block = block.unseal();
 
-            let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
+            let l1_block_info =
+                reth_evm_optimism::extract_l1_info(&block).map_err(OpEthApiError::from)?;
 
             let receipts = block
                 .body
                 .into_iter()
                 .zip(receipts.iter())
                 .enumerate()
-                .map(|(idx, (ref tx, receipt))| {
+                .map(|(idx, (ref tx, receipt))| -> Result<_, _> {
                     let meta = TransactionMeta {
                         tx_hash: tx.hash,
                         index: idx as u64,
@@ -59,14 +60,13 @@ where
                         timestamp,
                     };
 
-                    let optimism_tx_meta =
-                        self.build_op_tx_meta(tx, l1_block_info.clone(), timestamp)?;
+                    let op_tx_meta =
+                        self.build_op_receipt_meta(tx, l1_block_info.clone(), receipt)?;
 
-                    ReceiptBuilder::new(tx, meta, receipt, &receipts)
-                        .map(|builder| {
-                            op_receipt_fields(builder, tx, receipt, optimism_tx_meta).build()
-                        })
-                        .map_err(Self::Error::from_eth_err)
+                    Ok(ReceiptBuilder::new(tx, meta, receipt, &receipts)
+                        .map_err(Self::Error::from_eth_err)?
+                        .add_other_fields(op_tx_meta.into())
+                        .build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>();
             return receipts.map(Some)

@@ -9,6 +9,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::DashMap;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -22,7 +23,7 @@ use reth_db_api::{
     table::Table,
     transaction::DbTx,
 };
-use reth_nippy_jar::NippyJar;
+use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
@@ -82,13 +83,104 @@ impl StaticFileProvider {
     }
 
     /// Creates a new [`StaticFileProvider`] with read-only access.
-    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        Self::new(path, StaticFileAccess::RO)
+    ///
+    /// Set `watch_directory` to `true` to track the most recent changes in static files. Otherwise,
+    /// new data won't be detected or queryable.
+    pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
+        let provider = Self::new(path, StaticFileAccess::RO)?;
+
+        if watch_directory {
+            provider.watch_directory();
+        }
+
+        Ok(provider)
     }
 
     /// Creates a new [`StaticFileProvider`] with read-write access.
     pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
         Self::new(path, StaticFileAccess::RW)
+    }
+
+    /// Watches the directory for changes and updates the in-memory index when modifications
+    /// are detected.
+    ///
+    /// This may be necessary, since a non-node process that owns a [`StaticFileProvider`] does not
+    /// receive `update_index` notifications from a node that appends/truncates data.
+    pub fn watch_directory(&self) {
+        let provider = self.clone();
+        std::thread::spawn(move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher = RecommendedWatcher::new(
+                move |res| tx.send(res).unwrap(),
+                notify::Config::default(),
+            )
+            .expect("failed to create watcher");
+
+            watcher
+                .watch(&provider.path, RecursiveMode::NonRecursive)
+                .expect("failed to watch path");
+
+            // Some backends send repeated modified events
+            let mut last_event_timestamp = None;
+
+            while let Ok(res) = rx.recv() {
+                match res {
+                    Ok(event) => {
+                        // We only care about modified data events
+                        if !matches!(
+                            event.kind,
+                            notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                        ) {
+                            continue
+                        }
+
+                        // We only trigger a re-initialization if a configuration file was
+                        // modified. This means that a
+                        // static_file_provider.commit() was called on the node after
+                        // appending/truncating rows
+                        for segment in event.paths {
+                            // Ensure it's a file with the .conf extension
+                            if !segment
+                                .extension()
+                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
+                            {
+                                continue
+                            }
+
+                            // Ensure it's well formatted static file name
+                            if StaticFileSegment::parse_filename(
+                                &segment.file_stem().expect("qed").to_string_lossy(),
+                            )
+                            .is_none()
+                            {
+                                continue
+                            }
+
+                            // If we can read the metadata and modified timestamp, ensure this is
+                            // not an old or repeated event.
+                            if let Ok(current_modified_timestamp) =
+                                std::fs::metadata(&segment).and_then(|m| m.modified())
+                            {
+                                if last_event_timestamp.is_some_and(|last_timestamp| {
+                                    last_timestamp >= current_modified_timestamp
+                                }) {
+                                    continue
+                                }
+                                last_event_timestamp = Some(current_modified_timestamp);
+                            }
+
+                            info!(target: "providers::static_file", updated_file = ?segment.file_stem(), "re-initializing static file provider index");
+                            if let Err(err) = provider.initialize_index() {
+                                warn!(target: "providers::static_file", "failed to re-initialize index: {err}");
+                            }
+                            break
+                        }
+                    }
+
+                    Err(err) => warn!(target: "providers::watcher", "watch error: {err:?}"),
+                }
+            }
+        });
     }
 }
 
@@ -112,9 +204,6 @@ pub struct StaticFileProviderInner {
     static_files_tx_index: RwLock<SegmentRanges>,
     /// Directory where `static_files` are located
     path: PathBuf,
-    /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
-    /// won't be able to be queried directly.
-    load_filters: bool,
     /// Maintains a writer set of [`StaticFileSegment`].
     writers: StaticFileWriters,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
@@ -139,7 +228,6 @@ impl StaticFileProviderInner {
             static_files_max_block: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
-            load_filters: false,
             metrics: None,
             access,
             _lock_file,
@@ -154,14 +242,6 @@ impl StaticFileProviderInner {
 }
 
 impl StaticFileProvider {
-    /// Loads filters into memory when creating a [`StaticFileJarProvider`].
-    pub fn with_filters(self) -> Self {
-        let mut provider =
-            Arc::try_unwrap(self.0).expect("should be called when initializing only");
-        provider.load_filters = true;
-        Self(Arc::new(provider))
-    }
-
     /// Enables metrics on the [`StaticFileProvider`].
     pub fn with_metrics(self) -> Self {
         let mut provider =
@@ -278,6 +358,8 @@ impl StaticFileProvider {
     }
 
     /// Given a segment and block range it removes the cached provider from the map.
+    ///
+    /// CAUTION: cached provider should be dropped before calling this or IT WILL deadlock.
     pub fn remove_cached_provider(
         &self,
         segment: StaticFileSegment,
@@ -298,14 +380,8 @@ impl StaticFileProvider {
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            let mut jar = NippyJar::<SegmentHeader>::load(
-                &self.path.join(segment.filename(&fixed_block_range)),
-            )
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-            jar
+            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?
         };
 
         jar.delete().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -337,12 +413,7 @@ impl StaticFileProvider {
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
-            let mut jar =
-                NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            if self.load_filters {
-                jar.load_filters().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            }
-
+            let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
@@ -477,6 +548,7 @@ impl StaticFileProvider {
         let mut max_block = self.static_files_max_block.write();
         let mut tx_index = self.static_files_tx_index.write();
 
+        max_block.clear();
         tx_index.clear();
 
         for (segment, ranges) in
@@ -503,6 +575,9 @@ impl StaticFileProvider {
                 }
             }
         }
+
+        // If this is a re-initialization, we need to clear this as well
+        self.map.clear();
 
         Ok(())
     }
@@ -573,7 +648,12 @@ impl StaticFileProvider {
             // * pruning data was interrupted before a config commit, then we have deleted data that
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
-            self.ensure_file_consistency(segment)?;
+            if self.access.is_read_only() {
+                self.check_segment_consistency(segment)?;
+            } else {
+                // Fetching the writer will attempt to heal any file level inconsistency.
+                self.latest_writer(segment)?;
+            }
 
             // Only applies to block-based static files. (Headers)
             //
@@ -653,6 +733,23 @@ impl StaticFileProvider {
         }
 
         Ok(unwind_target.map(PipelineTarget::Unwind))
+    }
+
+    /// Checks consistency of the latest static file segment and throws an error if at fault.
+    /// Read-only.
+    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        if let Some(latest_block) = self.get_highest_static_file_block(segment) {
+            let file_path =
+                self.directory().join(segment.filename(&find_fixed_range(latest_block)));
+
+            let jar = NippyJar::<SegmentHeader>::load(&file_path)
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+
+            NippyJarChecker::new(jar)
+                .check_consistency()
+                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Check invariants for each corresponding table and static file segment:
@@ -1040,9 +1137,6 @@ pub trait StaticFileWriter {
 
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
-
-    /// Checks consistency of the segment latest file and heals if possible.
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
 impl StaticFileWriter for StaticFileProvider {
@@ -1070,28 +1164,6 @@ impl StaticFileWriter for StaticFileProvider {
 
     fn commit(&self) -> ProviderResult<()> {
         self.writers.commit()
-    }
-
-    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        match self.access {
-            StaticFileAccess::RO => {
-                let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
-
-                let mut writer = StaticFileProviderRW::new(
-                    segment,
-                    latest_block,
-                    Arc::downgrade(&self.0),
-                    self.metrics.clone(),
-                )?;
-
-                writer.ensure_file_consistency(self.access.is_read_only())?;
-            }
-            StaticFileAccess::RW => {
-                self.latest_writer(segment)?.ensure_file_consistency(self.access.is_read_only())?;
-            }
-        }
-
-        Ok(())
     }
 }
 

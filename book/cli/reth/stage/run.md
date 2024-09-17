@@ -4,6 +4,8 @@ Run a single stage.
 
 ```bash
 $ reth stage run --help
+```
+```txt
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>
@@ -263,6 +265,16 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
 Logging:
       --log.stdout.format <FORMAT>

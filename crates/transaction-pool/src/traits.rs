@@ -7,14 +7,17 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
+use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList,
     BlobTransactionSidecar, BlobTransactionValidationError, PooledTransactionsElement,
     PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
 };
+use reth_rpc_types::BlobAndProofV1;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,7 +31,7 @@ use std::{
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
-pub type PeerId = reth_primitives::B512;
+pub type PeerId = alloy_primitives::B512;
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -41,7 +44,10 @@ pub type PeerId = reth_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>;
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -331,8 +337,8 @@ pub trait TransactionPool: Send + Sync + Clone {
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns a transaction sent by a given user with a given nonce
-    fn get_transactions_by_sender_and_nonce(
+    /// Returns a transaction sent by a given user and a nonce
+    fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
         nonce: u64,
@@ -409,6 +415,12 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -483,13 +495,13 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns an iterator over all pending [`TransactionSignedEcRecovered`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into())
+    pub fn pending_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 
     /// Returns an iterator over all queued [`TransactionSignedEcRecovered`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = TransactionSignedEcRecovered> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into())
+    pub fn queued_recovered(&self) -> impl Iterator<Item = T::Consensus> + '_ {
+        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
     }
 }
 
@@ -675,26 +687,6 @@ impl fmt::Display for CanonicalStateUpdate<'_> {
     }
 }
 
-/// Represents a changed account
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct ChangedAccount {
-    /// The address of the account.
-    pub address: Address,
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-}
-
-// === impl ChangedAccount ===
-
-impl ChangedAccount {
-    /// Creates a new `ChangedAccount` with the given address and 0 balance and nonce.
-    pub(crate) const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
-    }
-}
-
 /// An `Iterator` that only returns transactions that are ready to be executed.
 ///
 /// This makes no assumptions about the order of the transactions, but expects that _all_
@@ -732,7 +724,31 @@ pub trait BestTransactions: Iterator + Send {
     ///
     /// If set to true, no blob transactions will be returned.
     fn set_skip_blobs(&mut self, skip_blobs: bool);
+}
 
+impl<T> BestTransactions for Box<T>
+where
+    T: BestTransactions + ?Sized,
+{
+    fn mark_invalid(&mut self, transaction: &Self::Item) {
+        (**self).mark_invalid(transaction);
+    }
+
+    fn no_updates(&mut self) {
+        (**self).no_updates();
+    }
+
+    fn skip_blobs(&mut self) {
+        (**self).skip_blobs();
+    }
+
+    fn set_skip_blobs(&mut self, skip_blobs: bool) {
+        (**self).set_skip_blobs(skip_blobs);
+    }
+}
+
+/// A subtrait on the [`BestTransactions`] trait that allows to filter transactions.
+pub trait BestTransactionsFilter: BestTransactions {
     /// Creates an iterator which uses a closure to determine if a transaction should be yielded.
     ///
     /// Given an element the closure must return true or false. The returned iterator will yield
@@ -748,6 +764,8 @@ pub trait BestTransactions: Iterator + Send {
     }
 }
 
+impl<T> BestTransactionsFilter for T where T: BestTransactions {}
+
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
     fn mark_invalid(&mut self, _tx: &T) {}
@@ -759,7 +777,7 @@ impl<T> BestTransactions for std::iter::Empty<T> {
     fn set_skip_blobs(&mut self, _skip_blobs: bool) {}
 }
 
-/// A Helper type that bundles best transactions attributes together.
+/// A Helper type that bundles the best transactions attributes together.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BestTransactionsAttributes {
     /// The base fee attribute for best transactions.
@@ -789,19 +807,21 @@ impl BestTransactionsAttributes {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction:
-    fmt::Debug
-    + Send
-    + Sync
-    + Clone
-    + TryFrom<TransactionSignedEcRecovered>
-    + Into<TransactionSignedEcRecovered>
-{
+pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
+    /// Associated error type for the `try_from_consensus` method.
+    type TryFromConsensusError;
+
     /// Associated type representing the raw consensus variant of the transaction.
     type Consensus: From<Self> + TryInto<Self>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: Into<Self>;
+
+    /// Define a method to convert from the `Consensus` type to `Self`
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError>;
+
+    /// Define a method to convert from the `Self` type to `Consensus`
+    fn into_consensus(self) -> Self::Consensus;
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Self::Pooled) -> Self;
@@ -903,7 +923,10 @@ pub trait PoolTransaction:
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
 pub trait EthPoolTransaction:
-    PoolTransaction<Pooled = PooledTransactionsElementEcRecovered>
+    PoolTransaction<
+    Pooled = PooledTransactionsElementEcRecovered,
+    Consensus = TransactionSignedEcRecovered,
+>
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
@@ -1039,9 +1062,19 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type TryFromConsensusError = TryFromRecoveredTransactionError;
+
     type Consensus = TransactionSignedEcRecovered;
 
     type Pooled = PooledTransactionsElementEcRecovered;
+
+    fn try_from_consensus(tx: Self::Consensus) -> Result<Self, Self::TryFromConsensusError> {
+        tx.try_into()
+    }
+
+    fn into_consensus(self) -> Self::Consensus {
+        self.into()
+    }
 
     fn from_pooled(pooled: Self::Pooled) -> Self {
         pooled.into()
