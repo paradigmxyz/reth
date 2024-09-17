@@ -479,6 +479,12 @@ impl NetworkConfigBuilder {
         self.build(Default::default())
     }
 
+    /// Sets the NAT resolver for external IP.
+    pub const fn add_nat(mut self, nat: Option<NatResolver>) -> Self {
+        self.nat = nat;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
