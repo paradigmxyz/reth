@@ -7984,6 +7984,7 @@ dependencies = [
  "alloy-primitives",
  "once_cell",
  "reth-ethereum-forks",
+ "serde",
 ]
 
 [[package]]
