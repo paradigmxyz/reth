@@ -1,5 +1,6 @@
 //! utilities for working with revm
 
+use super::{EthApiError, EthResult, RpcInvalidTransactionError};
 use alloy_primitives::{Address, B256, U256};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -12,9 +13,6 @@ use revm::{
     Database,
 };
 use revm_primitives::BlockEnv;
-use std::cmp::min;
-
-use super::{EthApiError, EthResult, RpcInvalidTransactionError};
 
 /// Returns the addresses of the precompiles corresponding to the `SpecId`.
 #[inline]
@@ -136,12 +134,17 @@ impl CallFees {
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
-                    Ok(min(
-                        max_fee,
+
+                    let tip = max_fee.saturating_sub(block_base_fee);
+                    let effective_price = if tip > max_priority_fee_per_gas {
                         block_base_fee.checked_add(max_priority_fee_per_gas).ok_or_else(|| {
                             EthApiError::from(RpcInvalidTransactionError::TipVeryHigh)
-                        })?,
-                    ))
+                        })?
+                    } else {
+                        max_fee
+                    };
+
+                    Ok(effective_price)
                 }
                 None => Ok(block_base_fee
                     .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
@@ -417,13 +420,32 @@ mod tests {
 
         let call_fees = CallFees::ensure_fees(
             None,
+            // max_fee_per_gas
             Some(U256::MAX),
+            // max_priority_fee_per_gas
             Some(U256::MAX),
+            // base_fee_per_gas
             U256::from(5 * GWEI_TO_WEI),
             None,
             None,
             Some(U256::ZERO),
-        );
-        assert!(call_fees.is_err());
+        )
+        .unwrap();
+        assert_eq!(call_fees.gas_price, U256::MAX);
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            // max_fee_per_gas
+            Some(U256::MAX / U256::from(2)),
+            // max_priority_fee_per_gas
+            Some(U256::MAX / U256::from(2)),
+            // base_fee_per_gas
+            U256::from(U256::MAX / U256::from(2)),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(call_fees.gas_price, U256::MAX / U256::from(2));
     }
 }
