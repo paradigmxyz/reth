@@ -581,10 +581,8 @@ where
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
                 let evm_config = Call::evm_config(this.eth_api()).clone();
-                let mut db = StateBuilder::new()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bundle_update()
-                    .build();
+                let mut db =
+                    StateBuilder::new().with_database(StateProviderDatabase::new(state)).build();
 
                 pre_block_beacon_root_contract_call(
                     &mut db,
