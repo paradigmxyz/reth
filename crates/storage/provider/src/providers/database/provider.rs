@@ -208,7 +208,9 @@ impl<TX: DbTx + 'static, Spec: Send + Sync> TryIntoHistoricalStateProvider
     }
 }
 
-impl<Tx: DbTx + DbTxMut + 'static, Spec: Send + Sync + 'static> DatabaseProvider<Tx, Spec> {
+impl<Tx: DbTx + DbTxMut + 'static, Spec: Send + Sync + EthereumHardforks + 'static>
+    DatabaseProvider<Tx, Spec>
+{
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -414,6 +416,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         construct_block: BF,
     ) -> ProviderResult<Option<B>>
     where
+        Spec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
         BF: FnOnce(
@@ -482,6 +485,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         mut assemble_block: F,
     ) -> ProviderResult<Vec<R>>
     where
+        Spec: EthereumHardforks,
         H: AsRef<Header>,
         HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         F: FnMut(
@@ -573,6 +577,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         assemble_block: BF,
     ) -> ProviderResult<Vec<B>>
     where
+        Spec: EthereumHardforks,
         H: AsRef<Header>,
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(
@@ -691,7 +696,10 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     pub fn get_block_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>>
+    where
+        Spec: EthereumHardforks,
+    {
         // For blocks we need:
         //
         // - Headers
@@ -1178,7 +1186,10 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
     pub fn take_block_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>>
+    where
+        Spec: EthereumHardforks,
+    {
         // For blocks we need:
         //
         // - Headers
@@ -1450,7 +1461,9 @@ impl<TX: DbTx, Spec: Send + Sync> HeaderSyncGapProvider for DatabaseProvider<TX,
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> HeaderProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> HeaderProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.header_by_number(num)?)
@@ -1606,7 +1619,7 @@ impl<TX: DbTx, Spec: Send + Sync> BlockNumReader for DatabaseProvider<TX, Spec> 
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> BlockReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockReader for DatabaseProvider<TX, Spec> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_canonical() {
             self.block(hash.into())
@@ -1779,7 +1792,9 @@ impl<TX: DbTx, Spec: Send + Sync> BlockReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> TransactionsProviderExt for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProviderExt
+    for DatabaseProvider<TX, Spec>
+{
     /// Recovers transaction hashes by walking through `Transactions` table and
     /// calculating them in a parallel manner. Returned unsorted.
     fn transaction_hashes_by_range(
@@ -1847,7 +1862,9 @@ impl<TX: DbTx, Spec: Send + Sync> TransactionsProviderExt for DatabaseProvider<T
 }
 
 // Calculates the hash of the given transaction
-impl<TX: DbTx, Spec: Send + Sync> TransactionsProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> TransactionsProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
     }
@@ -2005,7 +2022,9 @@ impl<TX: DbTx, Spec: Send + Sync> TransactionsProvider for DatabaseProvider<TX, 
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> ReceiptProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> ReceiptProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Receipts,
@@ -2051,7 +2070,9 @@ impl<TX: DbTx, Spec: Send + Sync> ReceiptProvider for DatabaseProvider<TX, Spec>
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> WithdrawalsProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> WithdrawalsProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn withdrawals_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -2079,7 +2100,9 @@ impl<TX: DbTx, Spec: Send + Sync> WithdrawalsProvider for DatabaseProvider<TX, S
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> RequestsProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> RequestsProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn requests_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -2097,7 +2120,9 @@ impl<TX: DbTx, Spec: Send + Sync> RequestsProvider for DatabaseProvider<TX, Spec
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> EvmEnvProvider for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> EvmEnvProvider
+    for DatabaseProvider<TX, Spec>
+{
     fn fill_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
@@ -3069,7 +3094,9 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> HistoryWriter for DatabaseProvider<T
     }
 }
 
-impl<TX: DbTx, Spec: Send + Sync> BlockExecutionReader for DatabaseProvider<TX, Spec> {
+impl<TX: DbTx, Spec: Send + Sync + EthereumHardforks> BlockExecutionReader
+    for DatabaseProvider<TX, Spec>
+{
     fn get_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3090,8 +3117,8 @@ impl<TX: DbTx, Spec: Send + Sync> StateReader for DatabaseProvider<TX, Spec> {
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + 'static> BlockExecutionWriter
-    for DatabaseProvider<TX, Spec>
+impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'static>
+    BlockExecutionWriter for DatabaseProvider<TX, Spec>
 {
     fn take_block_and_execution_range(
         &self,
@@ -3270,7 +3297,7 @@ impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + 'static> BlockExecutionWr
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + 'static> BlockWriter
+impl<TX: DbTxMut + DbTx + 'static, Spec: Send + Sync + EthereumHardforks + 'static> BlockWriter
     for DatabaseProvider<TX, Spec>
 {
     /// Inserts the block into the database, always modifying the following tables:

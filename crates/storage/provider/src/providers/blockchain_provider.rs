@@ -35,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::{DatabaseProvider, ProviderNodeTypes};
+use super::ProviderNodeTypes;
 
 /// The main type for interacting with the blockchain.
 ///
