@@ -2,7 +2,9 @@
 //! methods.
 
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
+use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{
@@ -10,7 +12,7 @@ use reth_primitives::{
         ResultAndState, TransactTo, TxEnv,
     },
     transaction::AccessListResult,
-    Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
+    TransactionSignedEcRecovered,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
@@ -23,9 +25,7 @@ use reth_rpc_eth_types::{
     },
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_server_types::constants::gas_oracle::{
-    CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
-};
+use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_rpc_types::{
     simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -108,7 +108,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                 self.block_with_senders(target_block)
             )?;
 
-            let Some(block) = block else { return Err(EthApiError::UnknownBlockNumber.into()) };
+            let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
             let gas_limit = self.call_gas_limit();
 
             // we're essentially replaying the transactions in the block here, hence we need the

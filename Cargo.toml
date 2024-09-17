@@ -33,7 +33,6 @@ members = [
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
-    "crates/ethereum-forks/",
     "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
@@ -168,6 +167,7 @@ rustdoc.all = "warn"
 # suggestions which we fixed. The others didn't have any findings, so we can
 # assume they don't have that many false positives. Let's enable them to
 # prevent future problems.
+borrow_as_ptr = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
 cloned_instead_of_copied = "warn"
@@ -210,6 +210,7 @@ redundant_clone = "warn"
 redundant_else = "warn"
 single_char_pattern = "warn"
 string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
 suboptimal_flops = "warn"
 suspicious_operation_groupings = "warn"
 trailing_empty_array = "warn"
@@ -219,12 +220,14 @@ trivial_regex = "warn"
 tuple_array_conversions = "warn"
 type_repetition_in_bounds = "warn"
 uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
 unnecessary_struct_initialization = "warn"
 unnested_or_patterns = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
+while_float = "warn"
 zero_sized_map_values = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
@@ -238,9 +241,9 @@ future_not_send = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
-too_long_first_doc_paragraph = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
 
 # Speed up tests.
 [profile.dev.package]
@@ -252,22 +255,22 @@ unarray.opt-level = 3
 # Meant for testing - all optimizations, but with debug assertions and overflow checks.
 [profile.hivetests]
 inherits = "test"
-opt-level = 3
 lto = "thin"
+opt-level = 3
 
 [profile.release]
-opt-level = 3
-lto = "thin"
-debug = "line-tables-only"
-strip = true
-panic = "unwind"
 codegen-units = 16
+debug = "line-tables-only"
+lto = "thin"
+opt-level = 3
+panic = "unwind"
+strip = true
 
 # Use the `--profile profiling` flag to show symbols in release mode.
 # e.g. `cargo build --profile profiling`
 [profile.profiling]
-inherits = "release"
 debug = 2
+inherits = "release"
 strip = false
 
 # Make sure debug symbols are in the bench profile
@@ -275,12 +278,13 @@ strip = false
 inherits = "profiling"
 
 [profile.maxperf]
+codegen-units = 1
 inherits = "release"
 lto = "fat"
-codegen-units = 1
 
 [workspace.dependencies]
 # reth
+op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
@@ -354,7 +358,6 @@ reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
-op-reth = { path = "crates/optimism/bin" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
@@ -406,7 +409,7 @@ revm = { version = "14.0.0", features = [
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.6"
+revm-inspectors = "0.7.1"
 revm-primitives = { version = "9.0.0", features = [
     "std",
 ], default-features = false }
@@ -419,44 +422,44 @@ alloy-rlp = "0.3.4"
 alloy-sol-types = "0.8.0"
 alloy-trie = { version = "0.5", default-features = false }
 
-alloy-consensus = { version = "0.3.1", default-features = false }
-alloy-eips = { version = "0.3.1", default-features = false }
-alloy-genesis = { version = "0.3.1", default-features = false }
-alloy-json-rpc = { version = "0.3.1", default-features = false }
-alloy-network = { version = "0.3.1", default-features = false }
-alloy-node-bindings = { version = "0.3.1", default-features = false }
-alloy-provider = { version = "0.3.1", features = [
+alloy-consensus = { version = "0.3.5", default-features = false }
+alloy-eips = { version = "0.3.5", default-features = false }
+alloy-genesis = { version = "0.3.5", default-features = false }
+alloy-json-rpc = { version = "0.3.5", default-features = false }
+alloy-network = { version = "0.3.5", default-features = false }
+alloy-node-bindings = { version = "0.3.5", default-features = false }
+alloy-provider = { version = "0.3.5", features = [
     "reqwest",
 ], default-features = false }
-alloy-pubsub = { version = "0.3.1", default-features = false }
-alloy-rpc-client = { version = "0.3.1", default-features = false }
-alloy-rpc-types = { version = "0.3.1", features = [
+alloy-pubsub = { version = "0.3.5", default-features = false }
+alloy-rpc-client = { version = "0.3.5", default-features = false }
+alloy-rpc-types = { version = "0.3.5", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-admin = { version = "0.3.1", default-features = false }
-alloy-rpc-types-anvil = { version = "0.3.1", default-features = false }
-alloy-rpc-types-beacon = { version = "0.3.1", default-features = false }
-alloy-rpc-types-debug = { version = "0.3.1", default-features = false }
-alloy-rpc-types-engine = { version = "0.3.1", default-features = false }
-alloy-rpc-types-eth = { version = "0.3.1", default-features = false }
-alloy-rpc-types-mev = { version = "0.3.1", default-features = false }
-alloy-rpc-types-trace = { version = "0.3.1", default-features = false }
-alloy-rpc-types-txpool = { version = "0.3.1", default-features = false }
-alloy-serde = { version = "0.3.1", default-features = false }
-alloy-signer = { version = "0.3.1", default-features = false }
-alloy-signer-local = { version = "0.3.1", default-features = false }
-alloy-transport = { version = "0.3.1" }
-alloy-transport-http = { version = "0.3.1", features = [
+alloy-rpc-types-admin = { version = "0.3.5", default-features = false }
+alloy-rpc-types-anvil = { version = "0.3.5", default-features = false }
+alloy-rpc-types-beacon = { version = "0.3.5", default-features = false }
+alloy-rpc-types-debug = { version = "0.3.5", default-features = false }
+alloy-rpc-types-engine = { version = "0.3.5", default-features = false }
+alloy-rpc-types-eth = { version = "0.3.5", default-features = false }
+alloy-rpc-types-mev = { version = "0.3.5", default-features = false }
+alloy-rpc-types-trace = { version = "0.3.5", default-features = false }
+alloy-rpc-types-txpool = { version = "0.3.5", default-features = false }
+alloy-serde = { version = "0.3.5", default-features = false }
+alloy-signer = { version = "0.3.5", default-features = false }
+alloy-signer-local = { version = "0.3.5", default-features = false }
+alloy-transport = { version = "0.3.5" }
+alloy-transport-http = { version = "0.3.5", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ipc = { version = "0.3.1", default-features = false }
-alloy-transport-ws = { version = "0.3.1", default-features = false }
+alloy-transport-ipc = { version = "0.3.5", default-features = false }
+alloy-transport-ws = { version = "0.3.5", default-features = false }
 
 # op
-op-alloy-rpc-types = "0.2.8"
-op-alloy-rpc-types-engine = "0.2.8"
-op-alloy-network = "0.2.8"
-op-alloy-consensus = "0.2.8"
+op-alloy-rpc-types = "0.2.10"
+op-alloy-rpc-types-engine = "0.2.10"
+op-alloy-network = "0.2.10"
+op-alloy-consensus = "0.2.10"
 
 # misc
 aquamarine = "0.5"
@@ -466,6 +469,7 @@ bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
 bytes = "1.5"
 clap = "4"
+cfg-if = "1.0"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "6.0"
 derive_more = { version = "1", features = ["full"] }
@@ -478,7 +482,9 @@ humantime-serde = "1.1"
 itertools = "0.13"
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
-notify = { version = "6.1.1", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "6.1.1", default-features = false, features = [
+    "macos_fsevent",
+] }
 nybbles = "0.2.1"
 once_cell = "1.19"
 parking_lot = "0.12"
@@ -532,6 +538,7 @@ tower-http = "0.5"
 
 # p2p
 discv5 = "0.7.0"
+if-addrs = "0.13"
 
 # rpc
 jsonrpsee = "0.24"
@@ -571,4 +578,7 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
-tikv-jemallocator = { version = "0.5.0" }
+
+tikv-jemalloc-ctl = "0.6"
+tikv-jemallocator = "0.6"
+tracy-client = "0.17.3"

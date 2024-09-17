@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-admin.workspace = true
@@ -24,7 +25,7 @@ alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-serde.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"], optional = true }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "serde", "jsonrpsee-types"], optional = true }
 
 # optimism
 op-alloy-rpc-types.workspace = true
@@ -32,6 +33,7 @@ op-alloy-rpc-types-engine.workspace = true
 
 # misc
 jsonrpsee-types = { workspace = true, optional = true }
+serde.workspace = true
 
 [dev-dependencies]
 # misc

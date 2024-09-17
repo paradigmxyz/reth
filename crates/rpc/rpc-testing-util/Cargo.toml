@@ -17,6 +17,9 @@ reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 futures.workspace = true
 

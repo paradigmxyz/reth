@@ -27,8 +27,9 @@ use reth_primitives::{
     SealedHeader, B256, U256,
 };
 use reth_provider::{
-    BlockReader, ExecutionOutcome, ProviderError, StateProviderBox, StateProviderFactory,
-    StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
+    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -39,7 +40,8 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet, VecDeque},
@@ -518,7 +520,8 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTr
 
 impl<P, E, T> EngineApiTreeHandler<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+    <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
 {
@@ -558,7 +561,7 @@ where
         }
     }
 
-    /// Sets the bad block hook.
+    /// Sets the invalid block hook.
     fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook>) {
         self.invalid_block_hook = invalid_block_hook;
     }
@@ -1107,7 +1110,7 @@ where
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
-    fn advance_persistence(&mut self) -> Result<(), TryRecvError> {
+    fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
                 debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block_number, "Removing blocks using persistence task");
@@ -1153,9 +1156,9 @@ where
                     trace!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, "Finished persisting, calling finish");
                     self.persistence_state
                         .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block();
+                    self.on_new_persisted_block()?;
                 }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed),
+                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
         }
@@ -1460,15 +1463,14 @@ where
     /// height.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) {
+    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        debug!(target: "engine::tree", last_persisted_hash=?self.persistence_state.last_persisted_block_hash, last_persisted_number=?self.persistence_state.last_persisted_block_number, ?finalized, "New persisted block, clearing in memory blocks");
-        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)
-            .expect("todo: error handling");
+        self.remove_before(self.persistence_state.last_persisted_block_number, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
             number: self.persistence_state.last_persisted_block_number,
             hash: self.persistence_state.last_persisted_block_hash,
         });
+        Ok(())
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
@@ -2168,8 +2170,34 @@ where
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
         let root_time = Instant::now();
-        let (state_root, trie_output) =
-            state_provider.state_root_with_updates(hashed_state.clone())?;
+        let mut state_root_result = None;
+
+        // We attempt to compute state root in parallel if we are currently not persisting anything
+        // to database. This is safe, because the database state cannot change until we
+        // finish parallel computation. It is important that nothing is being persisted as
+        // we are computing in parallel, because we initialize a different database transaction
+        // per thread and it might end up with a different view of the database.
+        let persistence_in_progress = self.persistence_state.in_progress();
+        if !persistence_in_progress {
+            state_root_result = match self
+                .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
+            {
+                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+                Err(ProviderError::ConsistentView(error)) => {
+                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            };
+        }
+
+        let (state_root, trie_output) = if let Some(result) = state_root_result {
+            result
+        } else {
+            debug!(target: "engine", persistence_in_progress, "Failed to compute state root in parallel");
+            state_provider.state_root_with_updates(hashed_state.clone())?
+        };
+
         if state_root != block.state_root {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
@@ -2219,6 +2247,39 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+    }
+
+    /// Compute state root for the given hashed post state in parallel.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(_)` if computed successfully.
+    /// Returns `Err(_)` if error was encountered during computation.
+    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+    /// should be used instead.
+    fn compute_state_root_in_parallel(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let mut input = TrieInput::default();
+
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+            // Retrieve revert state for historical block.
+            let revert_state = consistent_view.revert_state(historical)?;
+            input.append(revert_state);
+
+            // Extend with contents of parent in-memory blocks.
+            for block in blocks.iter().rev() {
+                input.append_cached_ref(block.trie_updates(), block.hashed_state())
+            }
+        }
+
+        // Extend with block we are validating root for.
+        input.append_ref(hashed_state);
+
+        Ok(ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()?)
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2451,6 +2512,18 @@ where
     }
 }
 
+/// This is an error that can come from advancing persistence. Either this can be a
+/// [`TryRecvError`], or this can be a [`ProviderError`]
+#[derive(Debug, thiserror::Error)]
+pub enum AdvancePersistenceError {
+    /// An error that can be from failing to receive a value from persistence
+    #[error(transparent)]
+    RecvError(#[from] TryRecvError),
+    /// A provider error
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 pub struct PersistenceState {
@@ -2518,6 +2591,61 @@ mod tests {
     };
     use tokio::sync::mpsc::unbounded_channel;
 
+    /// This is a test channel that allows you to `release` any value that is in the channel.
+    ///
+    /// If nothing has been sent, then the next value will be immediately sent.
+    #[allow(dead_code)]
+    struct TestChannel<T> {
+        /// If an item is sent to this channel, an item will be released in the wrapped channel
+        release: Receiver<()>,
+        /// The sender channel
+        tx: Sender<T>,
+        /// The receiver channel
+        rx: Receiver<T>,
+    }
+
+    impl<T: Send + 'static> TestChannel<T> {
+        /// Creates a new test channel
+        #[allow(dead_code)]
+        fn spawn_channel() -> (Sender<T>, Receiver<T>, TestChannelHandle) {
+            let (original_tx, original_rx) = channel();
+            let (wrapped_tx, wrapped_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            let handle = TestChannelHandle::new(release_tx);
+            let test_channel = Self { release: release_rx, tx: wrapped_tx, rx: original_rx };
+            // spawn the task that listens and releases stuff
+            std::thread::spawn(move || test_channel.intercept_loop());
+            (original_tx, wrapped_rx, handle)
+        }
+
+        /// Runs the intercept loop, waiting for the handle to release a value
+        fn intercept_loop(&self) {
+            while self.release.recv() == Ok(()) {
+                let Ok(value) = self.rx.recv() else { return };
+
+                let _ = self.tx.send(value);
+            }
+        }
+    }
+
+    struct TestChannelHandle {
+        /// The sender to use for releasing values
+        release: Sender<()>,
+    }
+
+    impl TestChannelHandle {
+        /// Returns a [`TestChannelHandle`]
+        const fn new(release: Sender<()>) -> Self {
+            Self { release }
+        }
+
+        /// Signals to the channel task that a value should be released
+        #[allow(dead_code)]
+        fn release(&self) {
+            let _ = self.release.send(());
+        }
+    }
+
     struct TestHarness {
         tree: EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
@@ -2532,6 +2660,20 @@ mod tests {
     impl TestHarness {
         fn new(chain_spec: Arc<ChainSpec>) -> Self {
             let (action_tx, action_rx) = channel();
+            Self::with_persistence_channel(chain_spec, action_tx, action_rx)
+        }
+
+        #[allow(dead_code)]
+        fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
+            let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
+            (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)
+        }
+
+        fn with_persistence_channel(
+            chain_spec: Arc<ChainSpec>,
+            action_tx: Sender<PersistenceAction>,
+            action_rx: Receiver<PersistenceAction>,
+        ) -> Self {
             let persistence_handle = PersistenceHandle::new(action_tx);
 
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -2543,7 +2685,7 @@ mod tests {
 
             let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
-            let header = chain_spec.genesis_header().seal_slow();
+            let header = chain_spec.genesis_header().clone().seal_slow();
             let engine_api_tree_state = EngineApiTreeState::new(10, 10, header.num_hash());
             let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None);
 

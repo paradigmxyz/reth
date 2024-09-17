@@ -2,10 +2,11 @@ use crate::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof,
     trie_cursor::TrieCursorFactory, HashedPostState,
 };
+use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use itertools::Either;
 use reth_execution_errors::{StateProofError, TrieWitnessError};
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Bytes, B256};
+use reth_primitives::constants::EMPTY_ROOT_HASH;
 use reth_trie_common::{
     BranchNode, HashBuilder, Nibbles, TrieAccount, TrieNode, CHILD_INDEX_RANGE,
 };
@@ -32,6 +33,16 @@ impl<T, H> TrieWitness<T, H> {
             hashed_cursor_factory,
             prefix_sets: TriePrefixSetsMut::default(),
             witness: HashMap::default(),
+        }
+    }
+
+    /// Set the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
+        TrieWitness {
+            trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            prefix_sets: self.prefix_sets,
+            witness: self.witness,
         }
     }
 
@@ -68,11 +79,13 @@ where
         state: HashedPostState,
     ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
         let proof_targets = HashMap::from_iter(
-            state.accounts.keys().map(|hashed_address| (*hashed_address, Vec::new())).chain(
-                state.storages.iter().map(|(hashed_address, storage)| {
+            state
+                .accounts
+                .keys()
+                .map(|hashed_address| (*hashed_address, HashSet::default()))
+                .chain(state.storages.iter().map(|(hashed_address, storage)| {
                     (*hashed_address, storage.storage.keys().copied().collect())
-                }),
-            ),
+                })),
         );
         let mut account_multiproof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
@@ -126,13 +139,13 @@ where
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
-                let target = (hashed_address, Vec::from([B256::from_slice(&padded_key)]));
+                let target_key = B256::from_slice(&padded_key);
                 let mut proof = Proof::new(
                     self.trie_cursor_factory.clone(),
                     self.hashed_cursor_factory.clone(),
                 )
                 .with_prefix_sets_mut(self.prefix_sets.clone())
-                .with_targets(HashMap::from([target]))
+                .with_target((hashed_address, HashSet::from([target_key])))
                 .storage_multiproof(hashed_address)?;
 
                 // The subtree only contains the proof for a single target.
@@ -151,7 +164,7 @@ where
             let mut proof =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                     .with_prefix_sets_mut(self.prefix_sets.clone())
-                    .with_targets(HashMap::from([(B256::from_slice(&padded_key), Vec::new())]))
+                    .with_target((B256::from_slice(&padded_key), HashSet::default()))
                     .multiproof()?;
 
             // The subtree only contains the proof for a single target.

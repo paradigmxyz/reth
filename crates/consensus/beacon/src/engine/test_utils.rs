@@ -3,6 +3,7 @@ use crate::{
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
     BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
+use alloy_primitives::{BlockNumber, B256};
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -20,11 +21,10 @@ use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, BlockClient};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    ExecutionOutcome, ProviderFactory,
+    ExecutionOutcome,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -389,19 +389,15 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(
-                externals,
-                BlockchainTreeConfig::new(1, 2, 3, 2),
-                PruneModes::default(),
-            )
-            .expect("failed to create tree"),
+            BlockchainTree::new(externals, BlockchainTreeConfig::new(1, 2, 3, 2))
+                .expect("failed to create tree"),
         ));
-        let genesis_block = self.base_config.chain_spec.genesis_header().seal_slow();
+        let genesis_block = self.base_config.chain_spec.genesis_header().clone().seal_slow();
 
         let blockchain_provider =
             BlockchainProvider::with_blocks(provider_factory.clone(), tree, genesis_block, None);
 
-        let pruner = Pruner::<_, ProviderFactory<_>>::new(
+        let pruner = Pruner::new_with_factory(
             provider_factory.clone(),
             vec![],
             5,

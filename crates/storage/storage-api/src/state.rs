@@ -2,11 +2,11 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
+use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, StorageKey,
-    StorageValue, B256, KECCAK_EMPTY, U256,
+    BlockId, BlockNumHash, BlockNumberOrTag, Bytecode, StorageKey, StorageValue, KECCAK_EMPTY,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
@@ -80,6 +80,15 @@ pub trait StateProvider:
             None => Ok(None),
         }
     }
+}
+
+/// Trait implemented for database providers that can be converted into a historical state provider.
+pub trait TryIntoHistoricalStateProvider {
+    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
+    fn try_into_history_at_block(
+        self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

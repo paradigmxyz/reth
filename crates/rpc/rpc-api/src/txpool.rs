@@ -1,5 +1,5 @@
+use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::Address;
 use reth_rpc_types::{
     txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolStatus},
     Transaction, WithOtherFields,

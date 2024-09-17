@@ -1,8 +1,8 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::Network;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -44,18 +44,18 @@ impl<Eth> OtterscanApi<Eth> {
 impl<Eth> OtterscanApi<Eth>
 where
     Eth: EthApiTypes<
-        NetworkTypes: Network<TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>>,
+        NetworkTypes: Network<
+            TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+            ReceiptResponse = AnyTransactionReceipt,
+        >,
     >,
 {
     /// Constructs a `BlockDetails` from a block and its receipts.
     fn block_details(
         &self,
-        block: Option<RpcBlock<Eth::NetworkTypes>>,
-        receipts: Option<Vec<AnyTransactionReceipt>>,
+        block: RpcBlock<Eth::NetworkTypes>,
+        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
     ) -> RpcResult<BlockDetails> {
-        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
@@ -76,6 +76,7 @@ where
         > + EthApiTypes<
             NetworkTypes: Network<
                 TransactionResponse = WithOtherFields<reth_rpc_types::Transaction>,
+                ReceiptResponse = AnyTransactionReceipt,
             >,
         > + TraceExt
         + EthTransactions
@@ -87,10 +88,8 @@ where
     }
 
     /// Handler for `ots_hasCode`
-    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
-        EthApiServer::get_code(&self.eth, address, block_number.map(Into::into))
-            .await
-            .map(|code| !code.is_empty())
+    async fn has_code(&self, address: Address, block_id: Option<BlockId>) -> RpcResult<bool> {
+        EthApiServer::get_code(&self.eth, address, block_id).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -118,7 +117,9 @@ where
                         value: op.value,
                         r#type: match op.kind {
                             TransferKind::Call => OperationType::OpTransfer,
-                            TransferKind::Create => OperationType::OpCreate,
+                            TransferKind::Create | TransferKind::EofCreate => {
+                                OperationType::OpCreate
+                            }
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
                         },
@@ -177,18 +178,27 @@ where
 
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block_id = block_number.into();
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_hash(block_hash, true);
-        let receipts = self.eth.block_receipts(block_hash.into());
+        let block_id = block_hash.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(block, receipts)
+        self.block_details(
+            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
+            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
+        )
     }
 
     /// Handler for `getBlockTransactions`
@@ -198,13 +208,15 @@ where
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions<WithOtherFields<Transaction>>> {
+        let block_id = block_number.into();
         // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_number.into(), true);
-        let receipts = self.eth.block_receipts(block_number.into());
+        let block = self.eth.block_by_number(block_id, true);
+        let block_id = block_id.into();
+        let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let mut receipts = receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?;
 
         // check if the number of transactions matches the number of receipts
         let tx_len = block.transactions.len();
@@ -292,7 +304,7 @@ where
             .eth
             .get_transaction_by_sender_and_nonce(sender, nonce, false)
             .await
-            .map_err(|e| e.into())?
+            .map_err(Into::into)?
             .map(|tx| tx.hash))
     }
 
@@ -342,7 +354,7 @@ where
                             ) if contract == address => Some(ContractCreator {
                                 hash: tx_trace
                                     .transaction_hash
-                                    .ok_or_else(|| EthApiError::TransactionNotFound)?,
+                                    .ok_or(EthApiError::TransactionNotFound)?,
                                 creator,
                             }),
                             _ => None,

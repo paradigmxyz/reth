@@ -1,7 +1,8 @@
 //! Blockchain tree state.
 
 use crate::{AppendableChain, BlockBuffer, BlockIndices};
-use reth_primitives::{BlockHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders};
+use alloy_primitives::{BlockHash, BlockNumber};
+use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders};
 use std::collections::{BTreeMap, HashMap};
 
 /// Container to hold the state of the blockchain tree.

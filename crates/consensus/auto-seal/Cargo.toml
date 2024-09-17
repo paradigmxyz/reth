@@ -31,6 +31,9 @@ reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
 reth-trie.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 # async
 futures-util.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }

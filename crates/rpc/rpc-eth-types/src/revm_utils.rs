@@ -1,6 +1,6 @@
 //! utilities for working with revm
 
-use reth_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
@@ -47,16 +47,19 @@ where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
-    Ok(db
-        // Get the caller account.
-        .basic(env.caller)?
-        // Get the caller balance.
-        .map(|acc| acc.balance)
-        .unwrap_or_default()
-        // Subtract transferred value from the caller balance.
+    // Get the caller account.
+    let caller = db.basic(env.caller)?;
+    // Get the caller balance.
+    let balance = caller.map(|acc| acc.balance).unwrap_or_default();
+    // Get transaction value.
+    let value = env.value;
+    // Subtract transferred value from the caller balance. Return error if the caller has
+    // insufficient funds.
+    let balance = balance
         .checked_sub(env.value)
-        // Return error if the caller has insufficient funds.
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
+
+    Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.
         .checked_div(env.gas_price)
         // This will be 0 if gas price is 0. It is fine, because we check it before.
@@ -142,7 +145,7 @@ impl CallFees {
                 }
                 None => Ok(block_base_fee
                     .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
-                    .ok_or_else(|| EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
+                    .ok_or(EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
             }
         }
 

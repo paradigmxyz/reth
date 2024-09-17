@@ -9,13 +9,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
@@ -132,11 +130,13 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         data: Bytes,
     );
 
-    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
+    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
+    ///
+    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
+    /// difficulty
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     );
@@ -164,15 +164,16 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
+    ///
+    /// Note: Implementers should ensure that all fields are required fields are filled.
     fn fill_cfg_and_block_env(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        self.fill_cfg_env(cfg, chain_spec, header, total_difficulty);
+        self.fill_cfg_env(cfg, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         self.fill_block_env(block_env, header, after_merge);
     }
