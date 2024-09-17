@@ -7,10 +7,11 @@ use crate::{
 use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_execution_types::ExecutionOutcome;
+use reth_optimism_forks::OptimismHardfork;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{

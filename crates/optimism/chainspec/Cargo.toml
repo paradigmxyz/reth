@@ -17,6 +17,9 @@ reth-chainspec = { workspace = true, features = ["optimism"] }
 reth-ethereum-forks = { workspace = true, features = ["optimism"] }
 reth-primitives-traits.workspace = true
 
+# op-reth
+reth-optimism-forks.workspace = true
+
 # ethereum
 alloy-chains.workspace = true
 alloy-primitives.workspace = true

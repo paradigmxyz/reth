@@ -6441,6 +6441,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth-ethereum-forks",
  "reth-network-peers",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-trie-common",
  "serde",
@@ -7242,6 +7243,7 @@ dependencies = [
  "reth-execution-types",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-prune-types",
  "reth-revm",
@@ -7869,6 +7871,7 @@ dependencies = [
  "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
+ "reth-optimism-forks",
  "reth-optimism-payload-builder",
  "reth-optimism-rpc",
  "reth-payload-builder",
@@ -7910,6 +7913,7 @@ dependencies = [
  "op-alloy-rpc-types",
  "reth-chainspec",
  "reth-ethereum-forks",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
 ]
@@ -7966,9 +7970,20 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-trie-common",
  "tracing",
+]
+
+[[package]]
+name = "reth-optimism-forks"
+version = "1.0.6"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives",
+ "once_cell",
+ "reth-ethereum-forks",
 ]
 
 [[package]]
@@ -7983,6 +7998,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-optimism",
  "reth-execution-types",
+ "reth-optimism-forks",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives",
@@ -8020,6 +8036,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -8114,6 +8131,7 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-optimism-chainspec",
+ "reth-optimism-forks",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",

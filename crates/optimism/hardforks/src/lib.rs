@@ -1,4 +1,13 @@
-use crate::{ChainHardforks, EthereumHardforks, OptimismHardfork};
+extern crate alloc;
+
+pub mod hardfork;
+
+mod dev;
+
+pub use dev::DEV_HARDFORKS;
+pub use hardfork::OptimismHardfork;
+
+use reth_ethereum_forks::{ChainHardforks, EthereumHardforks};
 
 /// Extends [`crate::EthereumHardforks`] with optimism helper methods.
 pub trait OptimismHardforks: EthereumHardforks {
