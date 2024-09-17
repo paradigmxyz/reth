@@ -14,6 +14,7 @@ use reth_basic_payload_builder::{
     PayloadConfig, WithdrawalsOutcome,
 };
 use reth_chain_state::ExecutedBlock;
+use reth_chainspec::EthereumHardfork;
 use reth_errors::RethError;
 use reth_evm::{
     system_calls::{
@@ -23,15 +24,19 @@ use reth_evm::{
     },
     ConfigureEvm,
 };
-use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
+use reth_evm_ethereum::{
+    eip6110::parse_deposits_from_receipts, revm_spec_by_timestamp_after_merge, EthEvmConfig,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EIP1559_INITIAL_BASE_FEE},
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
@@ -43,7 +48,9 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
-    primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
+    primitives::{
+        BlobExcessGasAndPrice, EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState,
+    },
     DatabaseCommit, State,
 };
 use std::sync::Arc;
@@ -63,6 +70,84 @@ impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     }
 }
 
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvm,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    ///
+    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
+    /// based on its timestamp.
+    ///
+    /// Block related settings are derived from the `parent` block and the configured attributes.
+    ///
+    /// NOTE: This is only intended for beacon consensus (after merge).
+    fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<EthPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id =
+            revm_spec_by_timestamp_after_merge(&config.chain_spec, config.attributes.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id == SpecId::CANCUN {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let mut basefee = parent.next_block_base_fee(
+            config.chain_spec.base_fee_params_at_timestamp(config.attributes.timestamp()),
+        );
+
+        let mut gas_limit = U256::from(parent.gas_limit);
+
+        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
+        // elasticity multiplier to get the new gas limit.
+        if config.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
+        {
+            let elasticity_multiplier = config
+                .chain_spec
+                .base_fee_params_at_timestamp(config.attributes.timestamp())
+                .elasticity_multiplier;
+
+            // multiply the gas limit by the elasticity multiplier
+            gas_limit *= U256::from(elasticity_multiplier);
+
+            // set the base fee to the initial base fee from the EIP-1559 spec
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+        }
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: config.attributes.suggested_fee_recipient(),
+            timestamp: U256::from(config.attributes.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(config.attributes.prev_randao()),
+            gas_limit,
+            // calculate basefee based on parent block's gas usage
+            basefee: basefee.map(U256::from).unwrap_or_default(),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        (CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env)
+    }
+}
+
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
@@ -77,7 +162,8 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload(self.evm_config.clone(), args)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)
     }
 
     fn build_empty_payload(
@@ -94,7 +180,8 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        default_ethereum_payload(self.evm_config.clone(), args)?
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env)?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -109,6 +196,8 @@ where
 pub fn default_ethereum_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm,
@@ -121,15 +210,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;

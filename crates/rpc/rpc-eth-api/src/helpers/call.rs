@@ -4,6 +4,7 @@
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
+use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{
@@ -24,9 +25,7 @@ use reth_rpc_eth_types::{
     },
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_server_types::constants::gas_oracle::{
-    CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
-};
+use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_rpc_types::{
     simulate::{SimBlock, SimulatedBlock},
     state::{EvmOverrides, StateOverride},

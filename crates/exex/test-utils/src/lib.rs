@@ -296,7 +296,12 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let (notifications_tx, notifications_rx) = tokio::sync::mpsc::channel(1);
-    let notifications = ExExNotifications::new(components.clone(), notifications_rx);
+    let notifications = ExExNotifications::new(
+        head,
+        components.provider.clone(),
+        components.components.executor.clone(),
+        notifications_rx,
+    );
 
     let ctx = ExExContext {
         head,

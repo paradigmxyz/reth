@@ -87,6 +87,8 @@ impl MyEvmConfig {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
+    type Header = Header;
+
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,

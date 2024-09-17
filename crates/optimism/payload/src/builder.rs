@@ -9,6 +9,7 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
@@ -26,8 +27,8 @@ use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::{
     db::states::bundle_state::BundleRetention,
     primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ExecutionResult,
-        InvalidTransaction,
+        BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
+        ExecutionResult, HandlerCfg, InvalidTransaction, SpecId,
     },
     State,
 };
@@ -95,11 +96,24 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
             .with_bundle_update()
             .build();
 
-        self.init_pre_block_state(&config, evm_config, &mut db)?;
+        let (initialized_cfg, initialized_block_env) = self.cfg_and_block_env(&config);
 
-        let op_block_attributes = match self
-            .construct_block_attributes(pool, &config, &mut db, &cancel)
-        {
+        self.init_pre_block_state(
+            &config,
+            evm_config,
+            &initialized_cfg,
+            &initialized_block_env,
+            &mut db,
+        )?;
+
+        let op_block_attributes = match self.construct_block_attributes(
+            pool,
+            &config,
+            initialized_cfg,
+            initialized_block_env,
+            &mut db,
+            &cancel,
+        ) {
             Ok(outcome) => Ok(outcome),
             Err(PayloadBuilderError::BuildOutcomeCancelled) => return Ok(BuildOutcome::Cancelled),
             Err(err) => Err(err),
@@ -153,20 +167,15 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         &self,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
         evm_config: EvmConfig,
+        initialized_cfg: &CfgEnvWithHandlerCfg,
+        initialized_block_env: &BlockEnv,
         db: &mut revm::State<DB>,
     ) -> Result<(), PayloadBuilderError>
     where
         DB: revm::Database<Error = ProviderError>,
         EvmConfig: ConfigureEvm,
     {
-        let PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            attributes,
-            chain_spec,
-            ..
-        } = payload_config;
+        let PayloadConfig { parent_block, attributes, chain_spec, .. } = payload_config;
 
         debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
@@ -219,6 +228,8 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         &self,
         pool: Pool,
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        initialized_cfg: CfgEnvWithHandlerCfg,
+        initialized_block_env: BlockEnv,
         db: &mut revm::State<DB>,
         cancel: &Cancelled,
     ) -> Result<OptimismBlockAttributes<EvmConfig>, PayloadBuilderError>
@@ -227,8 +238,12 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         DB: revm::Database<Error = ProviderError>,
         EvmConfig: ConfigureEvm,
     {
-        let mut op_block_attributes =
-            OptimismBlockAttributes::new(payload_config, self.evm_config.clone());
+        let mut op_block_attributes = OptimismBlockAttributes::new(
+            payload_config,
+            initialized_cfg,
+            initialized_block_env,
+            self.evm_config.clone(),
+        );
 
         // add sequencer transactions to block
         op_block_attributes.add_sequencer_transactions(
@@ -391,6 +406,66 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
 
         Ok((withdrawals_outcome, execution_outcome))
     }
+
+    /// Configures the EVM environment and block environment based on the provided payload
+    /// configuration.
+    pub fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
+        let parent = &config.parent_block;
+
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id =
+            revm_spec_by_timestamp_after_bedrock(&config.chain_spec, config.attributes.timestamp());
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value
+        let blob_excess_gas_and_price = parent
+            .next_block_excess_blob_gas()
+            .or_else(|| {
+                if spec_id.is_enabled_in(SpecId::CANCUN) {
+                    // default excess blob gas is zero
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .map(BlobExcessGasAndPrice::new);
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: config.attributes.suggested_fee_recipient(),
+            timestamp: U256::from(config.attributes.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(config.attributes.prev_randao()),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(
+                parent
+                    .next_block_base_fee(
+                        config
+                            .chain_spec
+                            .base_fee_params_at_timestamp(config.attributes.timestamp()),
+                    )
+                    .unwrap_or_default(),
+            ),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        let cfg_with_handler_cfg;
+        {
+            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
+            };
+        }
+
+        (cfg_with_handler_cfg, block_env)
+    }
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
@@ -490,10 +565,11 @@ where
     /// and EVM configuration.
     pub fn new(
         payload_config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        initialized_cfg: CfgEnvWithHandlerCfg,
+        initialized_block_env: BlockEnv,
         evm_config: EvmConfig,
     ) -> Self {
         let attributes = &payload_config.attributes;
-        let initialized_block_env = payload_config.initialized_block_env.clone();
 
         let is_regolith = payload_config.chain_spec.is_fork_active_at_timestamp(
             OptimismHardfork::Regolith,
@@ -520,7 +596,7 @@ where
             cumulative_gas_used: 0,
             evm_config,
             initialized_block_env,
-            initialized_cfg: payload_config.initialized_cfg.clone(),
+            initialized_cfg,
             chain_spec: payload_config.chain_spec.clone(),
             payload_attributes: attributes.clone(),
             parent_block: payload_config.parent_block.clone(),

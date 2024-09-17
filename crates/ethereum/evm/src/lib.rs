@@ -48,6 +48,8 @@ impl EthEvmConfig {
 }
 
 impl ConfigureEvmEnv for EthEvmConfig {
+    type Header = Header;
+
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,

@@ -1,4 +1,5 @@
 use reth_db_api::{database::Database, transaction::DbTx};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Database provider.
@@ -30,6 +31,9 @@ pub trait DBProvider: Send + Sync + Sized + 'static {
     fn commit(self) -> ProviderResult<bool> {
         Ok(self.into_tx().commit()?)
     }
+
+    /// Returns a reference to prune modes.
+    fn prune_modes_ref(&self) -> &PruneModes;
 }
 
 /// Database provider factory.

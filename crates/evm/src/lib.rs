@@ -108,6 +108,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+    /// The header type used by the EVM.
+    type Header;
+
     /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
     fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
         let mut tx_env = TxEnv::default();
@@ -127,7 +130,10 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         data: Bytes,
     );
 
-    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
+    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
+    ///
+    /// This must set the corresponding spec id in the handler cfg, based on timestamp or total
+    /// difficulty
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
@@ -158,6 +164,8 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
+    ///
+    /// Note: Implementers should ensure that all fields are required fields are filled.
     fn fill_cfg_and_block_env(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
