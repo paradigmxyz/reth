@@ -75,7 +75,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         // configure evm env based on parent block
-        let cfg = CfgEnv::default();
+        let cfg = CfgEnv::default().with_chain_id(config.chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
         let spec_id =
