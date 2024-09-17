@@ -7292,7 +7292,6 @@ dependencies = [
  "reth-db-common",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-exex-test-utils",
  "reth-exex-types",
  "reth-metrics",
  "reth-node-api",

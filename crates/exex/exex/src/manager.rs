@@ -810,11 +810,13 @@ impl Clone for ExExManagerHandle {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use reth_chainspec::MAINNET;
+    use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_exex_test_utils::test_exex_context_components;
     use reth_primitives::{Block, BlockNumHash, Header, SealedBlockWithSenders, B256};
-    use reth_provider::{BlockReader, BlockWriter, Chain};
+    use reth_provider::{
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockReader,
+        BlockWriter, Chain,
+    };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
 
     #[tokio::test]
@@ -1224,12 +1226,13 @@ mod tests {
     async fn exex_notifications_behind_head_canonical() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
-        let (genesis_hash, provider_factory, _, components) =
-            test_exex_context_components(MAINNET.clone()).await?;
-
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let provider = BlockchainProvider2::new(provider_factory.clone())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -1270,7 +1273,7 @@ mod tests {
 
         let mut notifications = ExExNotifications::new(
             node_head,
-            components.provider,
+            provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
         )
@@ -1300,11 +1303,13 @@ mod tests {
 
     #[tokio::test]
     async fn exex_notifications_same_head_canonical() -> eyre::Result<()> {
-        let (genesis_hash, provider_factory, _, components) =
-            test_exex_context_components(MAINNET.clone()).await?;
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let provider = BlockchainProvider2::new(provider_factory)?;
 
         let node_head =
             Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
@@ -1335,7 +1340,7 @@ mod tests {
 
         let mut notifications = ExExNotifications::new(
             node_head,
-            components.provider,
+            provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
         )
@@ -1351,12 +1356,13 @@ mod tests {
     async fn test_notifications_ahead_of_head() -> eyre::Result<()> {
         let mut rng = generators::rng();
 
-        let (genesis_hash, provider_factory, _, components) =
-            test_exex_context_components(MAINNET.clone()).await?;
-
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let provider = BlockchainProvider2::new(provider_factory)?;
 
         let exex_head_block = random_block(
             &mut rng,
@@ -1387,7 +1393,7 @@ mod tests {
 
         let mut notifications = ExExNotifications::new(
             node_head,
-            components.provider,
+            provider,
             EthExecutorProvider::mainnet(),
             notifications_rx,
         )

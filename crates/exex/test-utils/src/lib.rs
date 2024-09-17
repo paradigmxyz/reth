@@ -9,7 +9,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use futures_util::FutureExt;
-use rand::Rng;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
@@ -38,7 +37,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders, B256};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, ProviderFactory,
@@ -224,14 +223,20 @@ impl TestExExHandle {
     }
 }
 
-pub async fn test_exex_context_components(
+/// Creates a new [`ExExContext`].
+///
+/// This is a convenience function that does the following:
+/// 1. Sets up an [`ExExContext`] with all dependencies.
+/// 2. Inserts the genesis block of the provided (chain spec)[`ChainSpec`] into the storage.
+/// 3. Creates a channel for receiving events from the Execution Extension.
+/// 4. Creates a channel for sending notifications to the Execution Extension.
+///
+/// # Warning
+/// The genesis block is not sent to the notifications channel. The caller is responsible for
+/// doing this.
+pub async fn test_exex_context_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
-) -> eyre::Result<(
-    B256,
-    ProviderFactory<<RethFullAdapter<TmpDB, TestNode> as FullNodeTypes>::Types>,
-    TaskManager,
-    Adapter,
-)> {
+) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::new(chain_spec.clone());
     let executor = MockExecutorProvider::default();
@@ -249,11 +254,8 @@ pub async fn test_exex_context_components(
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
 
-    let mut rng = &mut rand::thread_rng();
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(SecretKey::new(&mut rng))
-            .listener_port(rng.gen())
-            .discovery_port(rng.gen())
+        NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
             .build(provider_factory.clone()),
     )
     .await?;
@@ -264,7 +266,7 @@ pub async fn test_exex_context_components(
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
-    let components = Adapter {
+    let components = NodeAdapter::<FullNodeTypesAdapter<NodeTypesWithDBAdapter<TestNode, _>, _>, _> {
         components: Components {
             transaction_pool,
             evm_config,
@@ -277,25 +279,6 @@ pub async fn test_exex_context_components(
         provider,
     };
 
-    Ok((genesis_hash, provider_factory, tasks, components))
-}
-
-/// Creates a new [`ExExContext`].
-///
-/// This is a convenience function that does the following:
-/// 1. Sets up an [`ExExContext`] with all dependencies.
-/// 2. Inserts the genesis block of the provided (chain spec)[`ChainSpec`] into the storage.
-/// 3. Creates a channel for receiving events from the Execution Extension.
-/// 4. Creates a channel for sending notifications to the Execution Extension.
-///
-/// # Warning
-/// The genesis block is not sent to the notifications channel. The caller is responsible for
-/// doing this.
-pub async fn test_exex_context_with_chain_spec(
-    chain_spec: Arc<ChainSpec>,
-) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
-    let (genesis_hash, provider_factory, tasks, components) =
-        test_exex_context_components(chain_spec).await?;
     let genesis = provider_factory
         .block_by_hash(genesis_hash)?
         .ok_or_else(|| eyre::eyre!("genesis block not found"))?
