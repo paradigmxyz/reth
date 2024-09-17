@@ -19,7 +19,7 @@ use reth_payload_builder::{
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, Header, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -27,10 +27,7 @@ use reth_provider::{
 use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::{
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Database, State,
-};
+use revm::{Database, State};
 use std::{
     fmt,
     future::Future,
@@ -852,21 +849,6 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
-
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
 
 /// Tells the payload builder how to react to payload request if there's no payload available yet.
