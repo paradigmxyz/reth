@@ -25,8 +25,8 @@ revm.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # async/futures
 futures-util.workspace = true
