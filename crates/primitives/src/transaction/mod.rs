@@ -75,7 +75,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::From)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
@@ -687,36 +687,6 @@ impl Transaction {
             Self::Eip7702(tx) => Some(tx),
             _ => None,
         }
-    }
-}
-
-impl From<TxLegacy> for Transaction {
-    fn from(tx: TxLegacy) -> Self {
-        Self::Legacy(tx)
-    }
-}
-
-impl From<TxEip2930> for Transaction {
-    fn from(tx: TxEip2930) -> Self {
-        Self::Eip2930(tx)
-    }
-}
-
-impl From<TxEip1559> for Transaction {
-    fn from(tx: TxEip1559) -> Self {
-        Self::Eip1559(tx)
-    }
-}
-
-impl From<TxEip4844> for Transaction {
-    fn from(tx: TxEip4844) -> Self {
-        Self::Eip4844(tx)
-    }
-}
-
-impl From<TxEip7702> for Transaction {
-    fn from(tx: TxEip7702) -> Self {
-        Self::Eip7702(tx)
     }
 }
 
