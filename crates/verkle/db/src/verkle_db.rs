@@ -43,7 +43,7 @@ impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> {
         let mut trie_updates: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
 
         // Process leaf table
-        for (key, value) in self.batch.leaf_table.iter() {
+        for (key, value) in &self.batch.leaf_table {
             let mut labelled_key = Vec::with_capacity(key.len() + 1);
             labelled_key.push(LEAF_TABLE_MARKER);
             labelled_key.extend_from_slice(key);
@@ -51,7 +51,7 @@ impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> {
         }
 
         // Process stem table
-        for (key, meta) in self.batch.stem_table.iter() {
+        for (key, meta) in &self.batch.stem_table {
             let mut labelled_key = Vec::with_capacity(key.len() + 1);
             labelled_key.push(STEM_TABLE_MARKER);
             labelled_key.extend_from_slice(key);
@@ -59,7 +59,7 @@ impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> {
         }
 
         // Process branch table
-        for (branch_id, b_child) in self.batch.branch_table.iter() {
+        for (branch_id, b_child) in &self.batch.branch_table {
             let mut labelled_key = Vec::with_capacity(branch_id.len() + 1);
             labelled_key.push(BRANCH_TABLE_MARKER);
             labelled_key.extend_from_slice(branch_id);
