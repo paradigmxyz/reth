@@ -1,7 +1,6 @@
-use verkle_trie::VerkleConfig;
-use reth_verkle_db::VerkleDb;
 use reth_provider::test_utils::create_test_provider_factory;
-
+use reth_verkle_db::VerkleDb;
+use verkle_trie::VerkleConfig;
 
 #[test]
 fn test_trie_root_commitment() {

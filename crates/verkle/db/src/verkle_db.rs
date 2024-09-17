@@ -1,12 +1,14 @@
-use reth_db::{
-    tables, transaction::DbTxMut
-};
-use reth_db_api::{
-    cursor::DbCursorRO,
-    transaction::DbTx,
-};
+use reth_db::{tables, transaction::DbTxMut};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use std::collections::HashMap;
-use verkle_trie::{from_to_bytes::{FromBytes, ToBytes}, database::{memory_db::MemoryDb, meta::{BranchChild, BranchMeta, StemMeta}, Flush, ReadOnlyHigherDb, WriteOnlyHigherDb}};
+use verkle_trie::{
+    database::{
+        memory_db::MemoryDb,
+        meta::{BranchChild, BranchMeta, StemMeta},
+        Flush, ReadOnlyHigherDb, WriteOnlyHigherDb,
+    },
+    from_to_bytes::{FromBytes, ToBytes},
+};
 
 // All nodes at this level or above will be cached in memory
 const CACHE_DEPTH: u8 = 4;
@@ -28,15 +30,14 @@ pub struct VerkleDb<'a, TX> {
     pub cache: MemoryDb,
 }
 
-impl<'a, TX> VerkleDb<'a, TX>{
-/// Create new [`VerkleDb`].
-pub fn new(tx: &'a TX) -> Self {
-    Self { tx, batch: MemoryDb::new(), cache: MemoryDb::new() }
-}
+impl<'a, TX> VerkleDb<'a, TX> {
+    /// Create new [`VerkleDb`].
+    pub fn new(tx: &'a TX) -> Self {
+        Self { tx, batch: MemoryDb::new(), cache: MemoryDb::new() }
+    }
 }
 
-impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> 
-{
+impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX> {
     fn flush(&mut self) {
         let now = std::time::Instant::now();
         let mut trie_updates: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
@@ -79,11 +80,7 @@ impl<'a, TX: DbTxMut + DbTx + Copy> Flush for VerkleDb<'a, TX>
         self.tx.commit().unwrap();
 
         let num_items = self.batch.num_items();
-        println!(
-            "write to batch time: {}, item count : {}",
-            now.elapsed().as_millis(),
-            num_items
-        );
+        println!("write to batch time: {}, item count : {}", now.elapsed().as_millis(), num_items);
 
         self.batch.clear();
     }
@@ -104,7 +101,8 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
         let mut labelled_key = Vec::with_capacity(key.len() + 1);
         labelled_key.push(LEAF_TABLE_MARKER);
         labelled_key.extend_from_slice(&key);
-        trie_cursor.seek_exact(labelled_key)
+        trie_cursor
+            .seek_exact(labelled_key)
             .ok()
             .and_then(|result| result)
             .and_then(|(_, value)| value.try_into().ok())
@@ -124,7 +122,8 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
         let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
         labelled_key.push(STEM_TABLE_MARKER);
         labelled_key.extend_from_slice(&stem_key);
-        trie_cursor.seek_exact(labelled_key)
+        trie_cursor
+            .seek_exact(labelled_key)
             .ok()
             .and_then(|result| result)
             .map(|(_, value)| StemMeta::from_bytes(value).unwrap())
@@ -145,7 +144,8 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
         labelled_key.push(BRANCH_TABLE_MARKER);
         labelled_key.extend_from_slice(key);
 
-        trie_cursor.seek_exact(labelled_key)
+        trie_cursor
+            .seek_exact(labelled_key)
             .ok()
             .and_then(|result| result)
             .map(|(_, value)| BranchMeta::from_bytes(value).unwrap())
@@ -167,7 +167,8 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
         labelled_key.extend_from_slice(branch_id);
         labelled_key.push(index);
 
-        trie_cursor.seek_exact(labelled_key)
+        trie_cursor
+            .seek_exact(labelled_key)
             .ok()
             .and_then(|result| result)
             .map(|(_, value)| BranchChild::from_bytes(value).unwrap())
@@ -197,10 +198,8 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
                 }
             }
         }
-        let mut children: HashMap<_, _> = branch_children
-            .into_iter()
-            .collect();
-        
+        let mut children: HashMap<_, _> = branch_children.into_iter().collect();
+
         // Then get the children from the batch
         let children_from_batch = self.batch.get_branch_children(branch_id);
         //
@@ -213,16 +212,17 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
     }
 
     fn get_stem_children(&self, stem_key: [u8; 31]) -> Vec<(u8, [u8; 32])> {
-        // Stems don't have a depth, however the children for all stem will always be on the same depth
-        // If we get any children for the stem in the cache storage, then this means we have collected all of them
-        // TODO this assumes that the cache is populated on startup from disk
+        // Stems don't have a depth, however the children for all stem will always be on the same
+        // depth If we get any children for the stem in the cache storage, then this means
+        // we have collected all of them TODO this assumes that the cache is populated on
+        // startup from disk
         let children = self.cache.get_stem_children(stem_key);
         if !children.is_empty() {
             return children;
         }
 
-        // It's possible that they are in disk storage and that batch storage has some recent updates
-        // First get the children from storage
+        // It's possible that they are in disk storage and that batch storage has some recent
+        // updates First get the children from storage
         let mut trie_cursor = self.tx.cursor_read::<tables::VerkleTrie>().ok().unwrap();
         let mut stem_children = Vec::with_capacity(256);
         let mut labelled_key = Vec::with_capacity(stem_key.len() + 1);
@@ -240,10 +240,10 @@ impl<'a, TX: DbTx> ReadOnlyHigherDb for VerkleDb<'a, TX> {
             }
         }
         let mut children: HashMap<_, _> = stem_children.into_iter().collect();
-        
+
         // Then get the children from the batch
         let children_from_batch = self.batch.get_stem_children(stem_key);
-        
+
         // Now insert the children from batch into the storage children as they will be fresher
         // overwriting if they have the same indices
         for (index, val) in children_from_batch {
@@ -276,11 +276,9 @@ impl<'a, TX: DbTx> WriteOnlyHigherDb for VerkleDb<'a, TX> {
         depth: u8,
     ) -> Option<BranchChild> {
         if depth <= CACHE_DEPTH {
-            self.cache
-                .add_stem_as_branch_child(branch_child_id.clone(), stem_id, depth);
+            self.cache.add_stem_as_branch_child(branch_child_id.clone(), stem_id, depth);
         }
-        self.batch
-            .add_stem_as_branch_child(branch_child_id, stem_id, depth)
+        self.batch.add_stem_as_branch_child(branch_child_id, stem_id, depth)
     }
 
     fn insert_branch(&mut self, key: Vec<u8>, meta: BranchMeta, depth: u8) -> Option<BranchMeta> {

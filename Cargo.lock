@@ -820,6 +820,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-bls12-381"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c775f0d12169cba7aae4caeb547bb6a50781c7449a8aa53793827c9ec4abf488"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defd9a439d56ac24968cca0571f598a61bc8c55f71d50a89cda591cb750670ba"
+dependencies = [
+ "ark-ff 0.4.2",
+ "ark-poly",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+ "derivative",
+ "hashbrown 0.13.2",
+ "itertools 0.10.5",
+ "num-traits",
+ "rayon",
+ "zeroize",
+]
+
+[[package]]
+name = "ark-ed-on-bls12-381-bandersnatch"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9cde0f2aa063a2a5c28d39b47761aa102bda7c13c84fc118a61b87c7b2f785c"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-std 0.4.0",
+]
+
+[[package]]
 name = "ark-ff"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -853,6 +895,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "paste",
+ "rayon",
  "rustc_version 0.4.0",
  "zeroize",
 ]
@@ -903,6 +946,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-poly"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d320bfc44ee185d899ccbadfa8bc31aab923ce1558716e1997a1e74057fe86bf"
+dependencies = [
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+ "derivative",
+ "hashbrown 0.13.2",
+]
+
+[[package]]
 name = "ark-serialize"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -918,9 +974,21 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb7b85a02b83d2f22f89bd5cac66c9c89474240cb6207cb1efc16d098e822a5"
 dependencies = [
+ "ark-serialize-derive",
  "ark-std 0.4.0",
  "digest 0.10.7",
  "num-bigint",
+]
+
+[[package]]
+name = "ark-serialize-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae3281bc6d0fd7e549af32b52511e1302185bd688fd3359fa36423346ff682ea"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -941,6 +1009,7 @@ checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
 dependencies = [
  "num-traits",
  "rand 0.8.5",
+ "rayon",
 ]
 
 [[package]]
@@ -1110,6 +1179,18 @@ dependencies = [
  "miniz_oxide",
  "object",
  "rustc-demangle",
+]
+
+[[package]]
+name = "banderwagon"
+version = "0.1.0"
+source = "git+https://github.com/crate-crypto/rust-verkle.git#442174edeb69f7827047132306d302345df12b83"
+dependencies = [
+ "ark-ec",
+ "ark-ed-on-bls12-381-bandersnatch",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "rayon",
 ]
 
 [[package]]
@@ -3439,6 +3520,9 @@ name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
+dependencies = [
+ "ahash",
+]
 
 [[package]]
 name = "hashbrown"
@@ -4057,6 +4141,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b694dc9f70c3bda874626d2aed13b780f137aab435f4e9814121955cf706122e"
 dependencies = [
  "memoffset",
+]
+
+[[package]]
+name = "ipa-multipoint"
+version = "0.1.0"
+source = "git+https://github.com/crate-crypto/rust-verkle.git#442174edeb69f7827047132306d302345df12b83"
+dependencies = [
+ "banderwagon",
+ "hex",
+ "itertools 0.10.5",
+ "rayon",
+ "sha2 0.9.9",
 ]
 
 [[package]]
@@ -8900,6 +8996,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-verkle-db"
+version = "1.0.4"
+dependencies = [
+ "alloy-rlp",
+ "auto_impl",
+ "banderwagon",
+ "criterion",
+ "derive_more",
+ "hex",
+ "ipa-multipoint",
+ "itertools 0.13.0",
+ "metrics",
+ "once_cell",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rayon",
+ "reth-chainspec",
+ "reth-db",
+ "reth-db-api",
+ "reth-execution-errors",
+ "reth-metrics",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages-types",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-common",
+ "revm",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "triehash",
+ "verkle-db",
+ "verkle-trie",
+]
+
+[[package]]
 name = "revm"
 version = "12.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10849,6 +10985,33 @@ dependencies = [
  "regex",
  "rustversion",
  "time",
+]
+
+[[package]]
+name = "verkle-db"
+version = "0.1.0"
+source = "git+https://github.com/crate-crypto/rust-verkle.git#442174edeb69f7827047132306d302345df12b83"
+
+[[package]]
+name = "verkle-trie"
+version = "0.1.0"
+source = "git+https://github.com/crate-crypto/rust-verkle.git#442174edeb69f7827047132306d302345df12b83"
+dependencies = [
+ "anyhow",
+ "banderwagon",
+ "hex",
+ "ipa-multipoint",
+ "itertools 0.10.5",
+ "once_cell",
+ "rand_chacha 0.3.1",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2 0.9.9",
+ "smallvec",
+ "tempfile",
+ "thiserror",
+ "verkle-db",
 ]
 
 [[package]]
