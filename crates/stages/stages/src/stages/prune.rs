@@ -47,7 +47,7 @@ impl<DB: Database> Stage<DB> for PruneStage {
             .delete_limit(self.commit_threshold)
             .build(provider.static_file_provider().clone());
 
-        let result = pruner.run(provider, input.target())?;
+        let result = pruner.run_with_provider(&provider.0, input.target())?;
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {

@@ -3,7 +3,7 @@
 use std::{sync::Arc, thread::available_parallelism};
 
 use alloy_primitives::{BlockNumber, B256};
-use eyre::Context;
+use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -23,6 +23,7 @@ use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB};
 use reth_node_core::{
+    args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     version::{
@@ -44,6 +45,7 @@ use reth_provider::{
     TreeViewer,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
+use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget, StageId};
@@ -855,35 +857,62 @@ where
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.
     pub fn invalid_block_hook(&self) -> eyre::Result<Box<dyn InvalidBlockHook>> {
-        Ok(if let Some(ref hook) = self.node_config().debug.invalid_block_hook {
-            let output_directory = self.data_dir().invalid_block_hooks();
-            let hooks = hook
-                .iter()
-                .copied()
-                .map(|hook| {
-                    let output_directory = output_directory.join(hook.to_string());
-                    fs::create_dir_all(&output_directory)?;
+        let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
+            return Ok(Box::new(NoopInvalidBlockHook::default()))
+        };
+        let healthy_node_rpc_client = self.get_healthy_node_client()?;
 
-                    Ok(match hook {
-                        reth_node_core::args::InvalidBlockHook::Witness => {
-                            Box::new(InvalidBlockWitnessHook::new(
-                                output_directory,
-                                self.blockchain_db().clone(),
-                                self.components().evm_config().clone(),
-                            )) as Box<dyn InvalidBlockHook>
-                        }
-                        reth_node_core::args::InvalidBlockHook::PreState |
-                        reth_node_core::args::InvalidBlockHook::Opcode => {
-                            eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                        }
-                    })
-                })
-                .collect::<Result<_, _>>()?;
+        let output_directory = self.data_dir().invalid_block_hooks();
+        let hooks = hook
+            .iter()
+            .copied()
+            .map(|hook| {
+                let output_directory = output_directory.join(hook.to_string());
+                fs::create_dir_all(&output_directory)?;
 
-            Box::new(InvalidBlockHooks(hooks))
-        } else {
-            Box::new(NoopInvalidBlockHook::default())
-        })
+                Ok(match hook {
+                    InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
+                        self.blockchain_db().clone(),
+                        self.components().evm_config().clone(),
+                        output_directory,
+                        healthy_node_rpc_client.clone(),
+                    )),
+                    InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
+                        eyre::bail!("invalid block hook {hook:?} is not implemented yet")
+                    }
+                } as Box<dyn InvalidBlockHook>)
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Box::new(InvalidBlockHooks(hooks)))
+    }
+
+    /// Returns an RPC client for the healthy node, if configured in the node config.
+    fn get_healthy_node_client(&self) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
+        self.node_config()
+            .debug
+            .healthy_node_rpc_url
+            .as_ref()
+            .map(|url| {
+                let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+
+                // Verify that the healthy node is running the same chain as the current node.
+                let chain_id = futures::executor::block_on(async {
+                    EthApiClient::<
+                        reth_rpc_types::Transaction,
+                        reth_rpc_types::Block,
+                        reth_rpc_types::Receipt,
+                    >::chain_id(&client)
+                    .await
+                })?
+                .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+                if chain_id.to::<u64>() != self.chain_id().id() {
+                    eyre::bail!("invalid chain id for healthy node: {chain_id}")
+                }
+
+                Ok(client)
+            })
+            .transpose()
     }
 }
 

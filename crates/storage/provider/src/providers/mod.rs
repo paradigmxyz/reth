@@ -14,6 +14,7 @@ use reth_blockchain_tree_api::{
 };
 use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubscriptions};
 use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
@@ -171,10 +172,15 @@ where
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     type DB = N::DB;
-    type Provider = DatabaseProviderRO<N::DB>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.database.provider()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.database.provider_rw().map(|p| p.0)
     }
 }
 

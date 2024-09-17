@@ -18,6 +18,7 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tracing.workspace = true
 reth-trie = { workspace = true, features = ["serde"] }
 
@@ -25,7 +26,11 @@ reth-trie = { workspace = true, features = ["serde"] }
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
 
+# async
+futures.workspace = true
+
 # misc
 eyre.workspace = true
+jsonrpsee.workspace = true
 pretty_assertions = "1.4"
 serde_json.workspace = true
