@@ -2301,7 +2301,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let blocking_task_pool = self.blocking_task_pool.clone();
 
         self.state_root_task_spawner.spawn_critical_blocking(
