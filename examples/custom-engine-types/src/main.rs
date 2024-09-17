@@ -30,7 +30,6 @@ use reth::{
         node::{NodeTypes, NodeTypesWithEngine},
         BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
-    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     providers::{CanonStateSubscriptions, StateProviderFactory},
     tasks::TaskManager,
     transaction_pool::TransactionPool,
@@ -56,7 +55,7 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, Header, Withdrawals, B256};
+use reth_primitives::{Address, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -314,7 +313,7 @@ where
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let PayloadConfig { parent_block, extra_data, attributes, chain_spec } = config;
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::default(),client,
+        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(chain_spec.clone())),client,
                                                                                                                      PayloadConfig { parent_block, extra_data, attributes: attributes.0, chain_spec })
     }
 }
