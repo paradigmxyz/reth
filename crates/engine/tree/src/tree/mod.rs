@@ -60,7 +60,7 @@ use tokio::sync::{
 };
 use tracing::*;
 
-mod config;
+pub mod config;
 mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
