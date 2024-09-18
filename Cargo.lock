@@ -8187,6 +8187,7 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
@@ -8748,6 +8749,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "reth-chainspec",
@@ -8765,6 +8767,7 @@ dependencies = [
 name = "reth-storage-errors"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",

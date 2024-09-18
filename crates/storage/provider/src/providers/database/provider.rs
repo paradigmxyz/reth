@@ -15,6 +15,7 @@ use crate::{
     StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
@@ -38,8 +39,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
-    Account, Block, BlockHashOrNumber, BlockWithSenders, Bytecode, GotExpected, Header, Receipt,
-    Requests, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
+    Account, Block, BlockWithSenders, Bytecode, GotExpected, Header, Receipt, Requests,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     Withdrawal, Withdrawals,
 };
