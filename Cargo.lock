@@ -6462,6 +6462,7 @@ name = "reth-cli-commands"
 version = "1.0.6"
 dependencies = [
  "ahash",
+ "alloy-eips",
  "alloy-primitives",
  "arbitrary",
  "backon",
