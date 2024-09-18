@@ -8,6 +8,7 @@ use crate::{
     HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -27,9 +28,9 @@ use reth_db_api::{
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_primitives::{
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
-    Block, BlockHashOrNumber, BlockWithSenders, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, Withdrawal, Withdrawals,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
