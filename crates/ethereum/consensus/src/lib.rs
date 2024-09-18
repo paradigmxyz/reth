@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
@@ -20,7 +20,7 @@ use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
-use std::{sync::Arc, time::SystemTime};
+use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
 /// The bound divisor of the gas limit, used in update calculations.
 const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
@@ -32,12 +32,12 @@ pub use validation::validate_block_post_execution;
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
 #[derive(Debug)]
-pub struct EthBeaconConsensus {
+pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
 }
 
-impl EthBeaconConsensus {
+impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
@@ -89,10 +89,12 @@ impl EthBeaconConsensus {
     }
 }
 
-impl Consensus for EthBeaconConsensus {
+impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus
+    for EthBeaconConsensus<ChainSpec>
+{
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
-        validate_header_base_fee(header, &self.chain_spec)?;
+        validate_header_base_fee(header, self.chain_spec.as_ref())?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
@@ -140,7 +142,7 @@ impl Consensus for EthBeaconConsensus {
         // Ace age did increment it by some formula that we need to follow.
         self.validate_against_parent_gas_limit(header, parent)?;
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(header, parent, self.chain_spec.as_ref())?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
@@ -209,7 +211,7 @@ impl Consensus for EthBeaconConsensus {
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, &self.chain_spec)
+        validate_block_pre_execution(block, self.chain_spec.as_ref())
     }
 
     fn validate_block_post_execution(
@@ -217,7 +219,12 @@ impl Consensus for EthBeaconConsensus {
         block: &BlockWithSenders,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+        validate_block_post_execution(
+            block,
+            self.chain_spec.as_ref(),
+            input.receipts,
+            input.requests,
+        )
     }
 }
 

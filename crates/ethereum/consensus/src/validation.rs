@@ -8,7 +8,7 @@ use reth_primitives::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
+pub fn validate_block_post_execution<ChainSpec: EthereumHardforks>(
     block: &BlockWithSenders,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],

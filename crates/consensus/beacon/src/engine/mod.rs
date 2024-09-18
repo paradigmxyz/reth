@@ -197,7 +197,7 @@ where
     /// The payload store.
     payload_builder: PayloadBuilderHandle<N::Engine>,
     /// Validator for execution payloads
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<N::ChainSpec>,
     /// Current blockchain tree action.
     blockchain_tree_action: Option<BlockchainTreeAction<N::Engine>>,
     /// Pending forkchoice update.

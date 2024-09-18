@@ -77,7 +77,9 @@ pub type DatabaseProviderRO<DB, Spec> = DatabaseProvider<<DB as Database>::TX, S
 /// Ideally this would be an alias type. However, there's some weird compiler error (<https://github.com/rust-lang/rust/issues/102211>), that forces us to wrap this in a struct instead.
 /// Once that issue is solved, we can probably revert back to being an alias type.
 #[derive(Debug)]
-pub struct DatabaseProviderRW<DB: Database, Spec>(pub DatabaseProvider<<DB as Database>::TXMut, Spec>);
+pub struct DatabaseProviderRW<DB: Database, Spec>(
+    pub DatabaseProvider<<DB as Database>::TXMut, Spec>,
+);
 
 impl<DB: Database, Spec> Deref for DatabaseProviderRW<DB, Spec> {
     type Target = DatabaseProvider<<DB as Database>::TXMut, Spec>;
@@ -93,7 +95,9 @@ impl<DB: Database, Spec> DerefMut for DatabaseProviderRW<DB, Spec> {
     }
 }
 
-impl<DB: Database, Spec> AsRef<DatabaseProvider<<DB as Database>::TXMut, Spec>> for DatabaseProviderRW<DB, Spec> {
+impl<DB: Database, Spec> AsRef<DatabaseProvider<<DB as Database>::TXMut, Spec>>
+    for DatabaseProviderRW<DB, Spec>
+{
     fn as_ref(&self) -> &DatabaseProvider<<DB as Database>::TXMut, Spec> {
         &self.0
     }
@@ -111,7 +115,9 @@ impl<DB: Database, Spec: Send + Sync + 'static> DatabaseProviderRW<DB, Spec> {
     }
 }
 
-impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>> for DatabaseProvider<<DB as Database>::TXMut, Spec> {
+impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>>
+    for DatabaseProvider<<DB as Database>::TXMut, Spec>
+{
     fn from(provider: DatabaseProviderRW<DB, Spec>) -> Self {
         provider.0
     }
