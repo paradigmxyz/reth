@@ -7228,6 +7228,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-storage-errors",
  "revm",
