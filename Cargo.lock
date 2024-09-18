@@ -6659,6 +6659,7 @@ dependencies = [
 name = "reth-db"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "arbitrary",
  "assert_matches",
  "bytes",
@@ -6698,6 +6699,7 @@ dependencies = [
 name = "reth-db-api"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "arbitrary",
  "bytes",
  "derive_more",
@@ -6751,6 +6753,7 @@ dependencies = [
 name = "reth-db-models"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "arbitrary",
  "bytes",
  "modular-bitfield",
@@ -8178,6 +8181,7 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
