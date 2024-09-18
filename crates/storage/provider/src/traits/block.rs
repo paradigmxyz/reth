@@ -90,7 +90,7 @@ pub trait BlockWriter: Send + Sync {
     /// - `TransactionBlocks` - Maps transaction numbers to block numbers
     fn insert_block_header_and_transaction_data(
         &self,
-        block: SealedBlockWithSenders,
+        block: &SealedBlockWithSenders,
         durations_recorder: &mut metrics::DurationsRecorder,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 

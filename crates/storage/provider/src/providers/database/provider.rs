@@ -21,6 +21,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
+use metrics::DurationsRecorder;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db::{
@@ -3698,8 +3699,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
     fn insert_block_header_and_transaction_data(
         &self,
-        block: SealedBlockWithSenders,
-        durations_recorder: &mut metrics::DurationsRecorder,
+        block: &SealedBlockWithSenders,
+        durations_recorder: &mut DurationsRecorder,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
 
@@ -3744,7 +3745,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         let mut tx_hash_numbers_elapsed = Duration::default();
 
         for (transaction, sender) in
-            block.block.body.transactions.into_iter().zip(block.senders.iter())
+            block.block.body.transactions.clone().into_iter().zip(block.senders.iter())
         {
             let hash = transaction.hash();
 
@@ -3826,7 +3827,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
     fn insert_block_additional_data(
         &self,
         block: SealedBlockWithSenders,
-        durations_recorder: &mut metrics::DurationsRecorder,
+        durations_recorder: &mut DurationsRecorder,
     ) -> ProviderResult<()> {
         let block_number = block.number;
 
@@ -3878,10 +3879,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks> + 
         block: SealedBlockWithSenders,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
-        let mut durations_recorder = metrics::DurationsRecorder::default();
+        let mut durations_recorder = DurationsRecorder::default();
 
         let block_indices =
-            self.insert_block_header_and_transaction_data(block.clone(), &mut durations_recorder)?;
+            self.insert_block_header_and_transaction_data(&block, &mut durations_recorder)?;
         self.insert_block_additional_data(block, &mut durations_recorder)?;
 
         debug!(
