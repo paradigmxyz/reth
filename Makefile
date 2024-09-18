@@ -8,7 +8,7 @@ MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
 DB_TOOLS_DIR = "db-tools"
 FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
 
-BUILD_PATH = "target"
+CARGO_TARGET_DIR ?= target
 
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
@@ -125,7 +125,7 @@ op-build-aarch64-apple-darwin:
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
-	cp $(BUILD_PATH)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
 	cd $(BIN_DIR) && \
 		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) && \
 		rm $(2)
@@ -219,11 +219,11 @@ docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with
 define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
-	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
+	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
 
 	$(MAKE) build-aarch64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/arm64
-	cp $(BUILD_PATH)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
+	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
 
 	docker buildx build --file ./Dockerfile.cross . \
 		--platform linux/amd64,linux/arm64 \
@@ -263,11 +263,11 @@ op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged w
 define op_docker_build_push
 	$(MAKE) op-build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
-	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/amd64/op-reth
+	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/amd64/op-reth
 
 	$(MAKE) op-build-aarch64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/arm64
-	cp $(BUILD_PATH)/aarch64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/arm64/op-reth
+	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/arm64/op-reth
 
 	docker buildx build --file ./DockerfileOp.cross . \
 		--platform linux/amd64,linux/arm64 \
@@ -306,7 +306,7 @@ db-tools: ## Compile MDBX debugging tools.
 .PHONY: update-book-cli
 update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(BUILD_PATH)/debug/reth
+	@./book/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
