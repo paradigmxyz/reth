@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256, U256};
+use rayon::ThreadPoolBuilder;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
     OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
@@ -549,8 +550,9 @@ where
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
+        let blocking_task_pool = BlockingTaskPool::new(
+            ThreadPoolBuilder::default().build().expect("failed to build blocking task pool"),
+        );
         Self {
             provider,
             executor_provider,
