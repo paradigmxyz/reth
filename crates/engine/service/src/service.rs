@@ -170,6 +170,7 @@ mod tests {
         let incoming_requests = UnboundedReceiverStream::new(rx);
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
+        let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
@@ -182,9 +183,6 @@ mod tests {
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
-
-        let task_spawner = Box::<TokioTaskExecutor>::default();
-
         let _eth_service = EngineService::new(
             consensus,
             executor_factory,
@@ -192,7 +190,7 @@ mod tests {
             client,
             Box::pin(incoming_requests),
             pipeline,
-            task_spawner,
+            pipeline_task_spawner,
             provider_factory,
             blockchain_db,
             pruner,
