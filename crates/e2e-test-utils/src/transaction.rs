@@ -3,10 +3,10 @@ use alloy_consensus::{
     TxEnvelope,
 };
 use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
+use alloy_primitives::{hex, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
 use eyre::Ok;
-use reth_primitives::{hex, Address, Bytes, TxKind, B256, U256};
 
 /// Helper for transaction operations
 #[derive(Debug)]
