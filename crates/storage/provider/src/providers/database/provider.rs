@@ -19,7 +19,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
-use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db::{
     cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState,
 };
@@ -126,7 +126,7 @@ impl<DB: Database, Spec> From<DatabaseProviderRW<DB, Spec>>
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
 #[derive(Debug)]
-pub struct DatabaseProvider<TX, Spec = ChainSpec> {
+pub struct DatabaseProvider<TX, Spec> {
     /// Database transaction.
     tx: TX,
     /// Chain spec
@@ -148,6 +148,14 @@ impl<TX, Spec> StaticFileProviderFactory for DatabaseProvider<TX, Spec> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider {
         self.static_file_provider.clone()
+    }
+}
+
+impl<TX: Send + Sync, Spec: EthChainSpec> ChainSpecProvider for DatabaseProvider<TX, Spec> {
+    type ChainSpec = Spec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
+        self.chain_spec.clone()
     }
 }
 
@@ -1345,14 +1353,6 @@ impl<TX: DbTxMut + DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
             }
         }
         Ok(())
-    }
-}
-
-impl<TX: DbTx, Spec: EthChainSpec> ChainSpecProvider for DatabaseProvider<TX, Spec> {
-    type ChainSpec = Spec;
-
-    fn chain_spec(&self) -> Arc<Spec> {
-        self.chain_spec.clone()
     }
 }
 

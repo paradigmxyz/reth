@@ -1,23 +1,24 @@
 use alloy_primitives::B256;
-use reth_db::Database;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{
     BlockBody, BlockNumber, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, U256,
 };
 use reth_provider::{
-    providers::StaticFileProvider, BlockWriter, DatabaseProviderRW, StageCheckpointWriter,
-    StaticFileWriter,
+    providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use tracing::info;
 
 /// Creates a dummy chain (with no transactions) up to the last OVM block and appends the
 /// first valid Bedrock block.
-pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
-    provider_rw: &DatabaseProviderRW<DB>,
+pub(crate) fn setup_op_mainnet_without_ovm<Provider>(
+    provider_rw: &Provider,
     static_file_provider: &StaticFileProvider,
-) -> Result<(), eyre::Error> {
+) -> Result<(), eyre::Error>
+where
+    Provider: StageCheckpointWriter + BlockWriter,
+{
     info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
 
     // Write OVM dummy data up to `BEDROCK_HEADER - 1` block
@@ -40,8 +41,8 @@ pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
 ///
 /// By appending it, static file writer also verifies that all segments are at the same
 /// height.
-fn append_bedrock_block<DB: Database>(
-    provider_rw: &DatabaseProviderRW<DB>,
+fn append_bedrock_block(
+    provider_rw: impl BlockWriter,
     sf_provider: &StaticFileProvider,
 ) -> Result<(), eyre::Error> {
     provider_rw.insert_block(
