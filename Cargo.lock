@@ -8512,6 +8512,7 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-sol-types",
  "derive_more",
