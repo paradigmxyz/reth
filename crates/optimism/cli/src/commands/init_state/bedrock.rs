@@ -77,40 +77,38 @@ fn append_bedrock_block<DB: Database>(
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
 fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
-    let mut headers_writer = sf_provider.latest_writer(StaticFileSegment::Headers)?;
-    let txs_writer = sf_provider.latest_writer(StaticFileSegment::Transactions)?;
-    let receipts_writer = sf_provider.latest_writer(StaticFileSegment::Receipts)?;
     let (tx, rx) = std::sync::mpsc::channel();
 
-    rayon::scope(|s| {
-        // Spawn jobs for incrementing the block end range of transactions and receipts
-        for mut writer in [txs_writer, receipts_writer] {
-            let tx_clone = tx.clone();
-            s.spawn(move |_| {
+    // Spawn jobs for incrementing the block end range of transactions and receipts
+    for segment in [StaticFileSegment::Transactions, StaticFileSegment::Receipts] {
+        let tx_clone = tx.clone();
+        let provider = sf_provider.clone();
+        std::thread::spawn(move || {
+            let result = provider.latest_writer(segment).and_then(|mut writer| {
                 for block_num in 1..BEDROCK_HEADER.number {
-                    if let Err(e) = writer.increment_block(block_num) {
-                        tx_clone.send(Err(e)).unwrap();
-                        return;
-                    }
+                    writer.increment_block(block_num)?;
                 }
-                tx_clone.send(Ok(())).unwrap();
+                Ok(())
             });
-        }
 
-        // Spawn job for appending empty headers
-        s.spawn(move |_| {
-            let mut empty_header = Header::default();
-            // TODO: should we fill with real parent_hash?
-            for block_num in 1..BEDROCK_HEADER.number {
-                empty_header.number = block_num;
-                if let Err(e) = headers_writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)
-                {
-                    tx.send(Err(e)).unwrap();
-                    return;
-                }
-            }
-            tx.send(Ok(())).unwrap();
+            tx_clone.send(result).unwrap();
         });
+    }
+
+    // Spawn job for appending empty headers
+    let provider = sf_provider.clone();
+    std::thread::spawn(move || {
+        let mut empty_header = Header::default();
+        let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
+            for block_num in 1..BEDROCK_HEADER.number {
+                // TODO: should we fill with real parent_hash?
+                empty_header.number = block_num;
+                writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
+            }
+            Ok(())
+        });
+
+        tx.send(result).unwrap();
     });
 
     // Catches any StaticFileWriter error.
@@ -124,7 +122,8 @@ fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Erro
     {
         assert_eq!(
             sf_provider.latest_writer(segment)?.user_header().block_end(),
-            Some(BEDROCK_HEADER.number - 1)
+            Some(BEDROCK_HEADER.number - 1),
+            "Static file segment {segment} was unsuccessful advancing its block height."
         );
     }
 

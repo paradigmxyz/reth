@@ -7922,7 +7922,6 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
- "rayon",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",

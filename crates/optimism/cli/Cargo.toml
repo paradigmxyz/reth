@@ -61,7 +61,6 @@ tokio = { workspace = true, features = [
 tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
-rayon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
