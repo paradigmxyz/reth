@@ -18,7 +18,7 @@ use crate::{
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use itertools::{izip, Itertools};
 use rayon::slice::ParallelSliceMut;
-use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpec, ChainSpecProvider, EthereumHardforks};
 use reth_db::{
     cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState,
 };
@@ -1592,6 +1592,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             }
         }
         Ok(())
+    }
+}
+
+impl<TX: DbTx> ChainSpecProvider for DatabaseProvider<TX> {
+    type ChainSpec = ChainSpec;
+
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.chain_spec.clone()
     }
 }
 
