@@ -665,6 +665,16 @@ Engine:
       --engine.experimental
           Enable the engine2 experimental features on reth binary
 
+      --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
+          Configure persistence threshold for engine experimental
+
+          [default: 2]
+
+      --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
+          Configure the target number of blocks to keep in memory
+
+          [default: 2]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
