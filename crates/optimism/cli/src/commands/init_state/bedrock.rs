@@ -120,7 +120,8 @@ fn append_dummy_chain(
         r?;
     }
 
-    // If, for any reason, rayon crashes this verifies if all segments are at the same target_height.
+    // If, for any reason, rayon crashes this verifies if all segments are at the same
+    // target_height.
     for segment in
         [StaticFileSegment::Headers, StaticFileSegment::Receipts, StaticFileSegment::Transactions]
     {
