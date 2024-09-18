@@ -105,7 +105,7 @@ where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
 {
     type Item = S::Item;
 
@@ -237,7 +237,7 @@ fn create_reorg_head<Provider, Evm>(
 ) -> RethResult<(ExecutionPayload, Option<CancunPayloadFields>)>
 where
     Provider: BlockReader + StateProviderFactory,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Header = Header>,
 {
     let chain_spec = payload_validator.chain_spec();
 

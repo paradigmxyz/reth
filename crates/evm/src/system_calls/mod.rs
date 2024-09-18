@@ -11,7 +11,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{Buf, Request};
+use reth_primitives::{Buf, Header, Request};
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use revm_primitives::{
     Address, BlockEnv, Bytes, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, FixedBytes,
@@ -39,7 +39,7 @@ pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = Evm::builder()
@@ -81,7 +81,7 @@ pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
         return Ok(())
@@ -152,7 +152,7 @@ pub fn post_block_withdrawal_requests_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // apply post-block EIP-7002 contract call
     let mut evm_post_block = Evm::builder()
@@ -180,7 +180,7 @@ pub fn apply_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());
@@ -282,7 +282,7 @@ pub fn post_block_consolidation_requests_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // apply post-block EIP-7251 contract call
     let mut evm_post_block = Evm::builder()
@@ -310,7 +310,7 @@ pub fn apply_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());

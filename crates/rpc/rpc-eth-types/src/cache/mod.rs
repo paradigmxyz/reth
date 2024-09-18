@@ -7,8 +7,8 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::{provider::EvmEnvProvider, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionSigned, TransactionSignedEcRecovered,
+    Block, BlockHashOrNumber, BlockWithSenders, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -106,7 +106,7 @@ impl EthStateCache {
     ) -> Self
     where
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-        EvmConfig: ConfigureEvm,
+        EvmConfig: ConfigureEvm<Header = Header>,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
     }
@@ -124,7 +124,7 @@ impl EthStateCache {
     where
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        EvmConfig: ConfigureEvm,
+        EvmConfig: ConfigureEvm<Header = Header>,
     {
         let EthStateCacheConfig { max_blocks, max_receipts, max_envs, max_concurrent_db_requests } =
             config;
@@ -316,7 +316,7 @@ impl<Provider, Tasks, EvmConfig> EthStateCacheService<Provider, Tasks, EvmConfig
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_new_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
@@ -403,7 +403,7 @@ impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Output = ();
 

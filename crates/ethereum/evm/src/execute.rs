@@ -67,7 +67,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -83,7 +83,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBlockExecutor<EvmConfig, DB>;
@@ -126,7 +126,7 @@ struct EthEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
     /// block, the total gas used and the list of EIP-7685 [requests](Request).
@@ -267,7 +267,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -356,7 +356,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -391,7 +391,7 @@ pub struct BlockAccessListExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> Executor<DB> for BlockAccessListExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -485,7 +485,7 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;

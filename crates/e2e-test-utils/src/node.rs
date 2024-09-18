@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, pin::Pin};
 
 use alloy_network::Network;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
@@ -16,7 +17,6 @@ use reth::{
 };
 use reth_chainspec::ChainSpec;
 use reth_node_builder::{EthApiTypes, NodeAddOns, NodeTypesWithEngine};
-use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use reth_rpc_types::WithOtherFields;
 use reth_stages_types::StageId;
 use tokio_stream::StreamExt;
