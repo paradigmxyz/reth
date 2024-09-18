@@ -23,7 +23,7 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
-alloy-primitives = { workspace = true }
+alloy-primitives.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
