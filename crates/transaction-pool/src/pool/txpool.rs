@@ -948,6 +948,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             max_account_slots: config.max_account_slots,
             price_bumps: config.price_bumps,
             local_transactions_config: config.local_transactions_config.clone(),
+            minimal_protocol_basefee: config.minimal_protocol_basefee,
+            block_gas_limit: config.gas_limit,
             ..Default::default()
         }
     }
