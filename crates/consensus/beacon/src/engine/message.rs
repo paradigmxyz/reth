@@ -8,6 +8,7 @@ use reth_rpc_types::engine::{
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use std::{
+    fmt::Display,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -159,4 +160,24 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,
+}
+
+impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NewPayload { payload, .. } => {
+                write!(f, "NewPayload({}, {})", payload.block_number(), payload.block_hash())
+            }
+            Self::ForkchoiceUpdated { state, payload_attrs, .. } => {
+                write!(
+                    f,
+                    "ForkchoiceUpdated {{ state: {:?}, payload_attrs: {:?} }}",
+                    state, payload_attrs
+                )
+            }
+            Self::TransitionConfigurationExchanged => {
+                write!(f, "TransitionConfigurationExchanged")
+            }
+        }
+    }
 }
