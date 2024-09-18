@@ -5,7 +5,12 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 
 use clap::{Args, Parser};
 use reth::{args::utils::DefaultChainSpecParser, cli::Cli};
-use reth_node_builder::EngineNodeLauncher;
+use reth_node_builder::{
+    engine_tree_config::{
+        TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
+    },
+    EngineNodeLauncher,
+};
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider2;
 
@@ -16,6 +21,14 @@ pub struct EngineArgs {
     /// Enable the engine2 experimental features on reth binary
     #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
+
+    /// Configure persistence threshold for engine experimental.
+    #[arg(long = "engine.persistence-threshold", requires = "experimental", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
+    pub persistence_threshold: u64,
+
+    /// Configure the target number of blocks to keep in memory.
+    #[arg(long = "engine.memory-block-buffer-target", requires = "experimental", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
+    pub memory_block_buffer_target: u64,
 }
 
 fn main() {
@@ -31,6 +44,9 @@ fn main() {
             let enable_engine2 = engine_args.experimental;
             match enable_engine2 {
                 true => {
+                    let engine_tree_config = TreeConfig::default()
+                        .with_persistence_threshold(engine_args.persistence_threshold)
+                        .with_memory_block_buffer_target(engine_args.memory_block_buffer_target);
                     let handle = builder
                         .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
                         .with_components(EthereumNode::components())
@@ -39,6 +55,7 @@ fn main() {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),
                                 builder.config().datadir(),
+                                engine_tree_config,
                             );
                             builder.launch_with(launcher)
                         })

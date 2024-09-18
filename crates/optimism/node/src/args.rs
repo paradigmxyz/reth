@@ -2,6 +2,10 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
+use reth_node_builder::engine_tree_config::{
+    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
+};
+
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Rollup")]
@@ -37,6 +41,14 @@ pub struct RollupArgs {
     /// Enable the engine2 experimental features on op-reth binary
     #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
+
+    /// Configure persistence threshold for engine experimental.
+    #[arg(long = "engine.persistence-threshold", requires = "experimental", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
+    pub persistence_threshold: u64,
+
+    /// Configure the target number of blocks to keep in memory.
+    #[arg(long = "engine.memory-block-buffer-target", requires = "experimental", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
+    pub memory_block_buffer_target: u64,
 }
 
 #[cfg(test)]
