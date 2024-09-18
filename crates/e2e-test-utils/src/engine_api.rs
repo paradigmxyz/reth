@@ -1,4 +1,5 @@
 use crate::traits::PayloadEnvelopeExt;
+use alloy_primitives::B256;
 use jsonrpsee::{
     core::client::ClientT,
     http_client::{transport::HttpBackend, HttpClient},
@@ -12,7 +13,6 @@ use reth::{
     },
 };
 use reth_payload_builder::PayloadId;
-use reth_primitives::B256;
 use reth_rpc_layer::AuthClientService;
 use std::marker::PhantomData;
 

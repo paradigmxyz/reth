@@ -12,7 +12,7 @@ use reth_primitives::{
         ResultAndState, TransactTo, TxEnv,
     },
     transaction::AccessListResult,
-    TransactionSignedEcRecovered,
+    Header, TransactionSignedEcRecovered,
 };
 use reth_provider::{ChainSpecProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
@@ -306,7 +306,7 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm;
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(&self, at: BlockId, f: F) -> Result<R, Self::Error>

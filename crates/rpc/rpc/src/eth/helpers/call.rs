@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use reth_evm::ConfigureEvm;
+use reth_primitives::Header;
 use reth_rpc_eth_api::helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking};
 
 use crate::EthApi;
@@ -13,7 +14,7 @@ impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Netw
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -21,7 +22,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 }

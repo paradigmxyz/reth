@@ -22,7 +22,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv;
+        EvmConfig: ConfigureEvmEnv<Header = Header>;
 
     /// Fills the default [`CfgEnvWithHandlerCfg`] and [BlockEnv] fields with values specific to the
     /// given [Header].
@@ -32,7 +32,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
@@ -50,7 +50,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv;
+        EvmConfig: ConfigureEvmEnv<Header = Header>;
 
     /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given
     /// [BlockHashOrNumber].
@@ -61,7 +61,7 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv;
+        EvmConfig: ConfigureEvmEnv<Header = Header>;
 
     /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given [Header].
     fn fill_cfg_env_with_header<EvmConfig>(
@@ -71,5 +71,5 @@ pub trait EvmEnvProvider: Send + Sync {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv;
+        EvmConfig: ConfigureEvmEnv<Header = Header>;
 }

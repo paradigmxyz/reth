@@ -151,12 +151,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
-use reth_rpc_types::BlobAndProofV1;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;

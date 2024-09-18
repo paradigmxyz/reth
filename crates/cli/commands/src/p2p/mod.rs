@@ -2,6 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
@@ -14,7 +15,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
-use reth_primitives::BlockHashOrNumber;
 
 mod rlpx;
 

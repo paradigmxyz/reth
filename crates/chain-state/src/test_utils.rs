@@ -2,6 +2,7 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use rand::{thread_rng, Rng};
@@ -10,8 +11,8 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Address, BlockNumber, Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
-    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, B256, U256,
+    Header, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders, Signature,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
 };
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};

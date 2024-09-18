@@ -1,6 +1,7 @@
+use alloy_primitives::BlockNumber;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
-use reth_primitives::{BlockNumHash, BlockNumber, SealedHeader};
+use reth_primitives::{BlockNumHash, SealedHeader};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
