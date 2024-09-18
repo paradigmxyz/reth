@@ -6861,6 +6861,7 @@ version = "1.0.6"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
+ "alloy-primitives",
  "alloy-rpc-types",
  "alloy-signer",
  "alloy-signer-local",
