@@ -3,7 +3,7 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
-use alloy_eips::{BlobAndProofV1, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4844::BlobAndProofV1, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};

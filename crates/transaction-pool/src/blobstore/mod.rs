@@ -1,6 +1,6 @@
 //! Storage for blob data of EIP4844 transactions.
 
-use alloy_eips::BlobAndProofV1;
+use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;

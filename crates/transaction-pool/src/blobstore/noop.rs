@@ -1,5 +1,5 @@
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionSidecar};
-use alloy_eips::BlobAndProofV1;
+use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::B256;
 
 /// A blobstore implementation that does nothing

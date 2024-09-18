@@ -1,7 +1,7 @@
 use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
-use alloy_eips::BlobAndProofV1;
+use alloy_eips::eip4844::BlobAndProofV1;
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
