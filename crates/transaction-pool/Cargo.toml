@@ -18,15 +18,15 @@ reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-primitives = { workspace = true, features = ["c-kzg", "secp256k1"] }
 reth-execution-types.workspace = true
-reth-rpc-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
 
 # ethereum
-alloy-rlp.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # async/futures
 futures-util.workspace = true

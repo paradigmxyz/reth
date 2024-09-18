@@ -28,6 +28,7 @@ reth-evm.workspace = true
 reth-transaction-pool.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # async
