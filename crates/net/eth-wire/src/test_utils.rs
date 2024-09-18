@@ -1,5 +1,7 @@
 //! Utilities for testing p2p protocol.
 
+#![allow(missing_docs)]
+
 use crate::{
     hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
     Status, UnauthedP2PStream,
