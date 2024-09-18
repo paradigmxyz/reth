@@ -404,13 +404,13 @@ reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "14.0.0", features = [
+revm = { version = "14.0.1", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-inspectors = "0.7.1"
-revm-primitives = { version = "9.0.0", features = [
+revm-inspectors = "0.7"
+revm-primitives = { version = "9.0.2", features = [
     "std",
 ], default-features = false }
 
