@@ -179,7 +179,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        UnifiedStorageWriter::commit_unwind(provider_rw.0, static_file_provider)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
         Ok(())
     }

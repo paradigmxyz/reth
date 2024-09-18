@@ -133,7 +133,7 @@ where
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
-    UnifiedStorageWriter::commit_unwind(provider_rw.0, static_file_provider)?;
+    UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
 
     Ok(hash)
 }

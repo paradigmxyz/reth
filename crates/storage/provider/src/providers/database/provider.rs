@@ -2555,10 +2555,7 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn take_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<ExecutionOutcome> {
+    fn take_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<ExecutionOutcome> {
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
         }
