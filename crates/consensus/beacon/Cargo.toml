@@ -48,6 +48,8 @@ thiserror.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
 
+reth-chainspec = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
@@ -79,4 +81,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-chainspec"
 ]

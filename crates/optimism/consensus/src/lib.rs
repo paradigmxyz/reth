@@ -51,7 +51,7 @@ impl OptimismBeaconConsensus {
 impl Consensus for OptimismBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
-        validate_header_base_fee(header, &self.chain_spec)
+        validate_header_base_fee(header, self.chain_spec.as_ref())
     }
 
     fn validate_header_against_parent(
@@ -65,7 +65,7 @@ impl Consensus for OptimismBeaconConsensus {
             validate_against_parent_timestamp(header, parent)?;
         }
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(header, parent, self.chain_spec.as_ref())?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {

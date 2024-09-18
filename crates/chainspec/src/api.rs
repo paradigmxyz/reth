@@ -11,6 +11,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug + 'static {
     /// Chain id.
     fn chain(&self) -> Chain;
 
+    /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 }
 
