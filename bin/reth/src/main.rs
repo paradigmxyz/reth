@@ -15,7 +15,7 @@ use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_provider::providers::BlockchainProvider2;
 
 /// Parameters for configuring the engine
-#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Engine")]
 pub struct EngineArgs {
     /// Enable the engine2 experimental features on reth binary
@@ -29,6 +29,16 @@ pub struct EngineArgs {
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", requires = "experimental", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
+}
+
+impl Default for EngineArgs {
+    fn default() -> Self {
+        Self {
+            experimental: false,
+            persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        }
+    }
 }
 
 fn main() {
