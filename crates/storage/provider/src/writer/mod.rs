@@ -3,6 +3,7 @@ use crate::{
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
@@ -12,9 +13,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
-};
+use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -543,15 +542,14 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
+    use alloy_primitives::{keccak256, B256, U256};
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives::{
-        keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{Account, Address, Receipt, Receipts, StorageEntry};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,

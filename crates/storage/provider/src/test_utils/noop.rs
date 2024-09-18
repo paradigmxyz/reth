@@ -4,6 +4,9 @@ use std::{
     sync::Arc,
 };
 
+use alloy_primitives::{
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+};
 use reth_chain_state::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
     ForkChoiceSubscriptions,
@@ -13,10 +16,9 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag,
-    BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Account, Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, BlockWithSenders, Bytecode,
+    Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
