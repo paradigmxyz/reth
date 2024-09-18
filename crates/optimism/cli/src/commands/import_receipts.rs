@@ -15,7 +15,7 @@ use reth_downloaders::{
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithEngine};
 use reth_node_core::version::SHORT_VERSION;
-use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_optimism_primitives::bedrock::is_dup_tx;
 use reth_primitives::Receipts;
 use reth_provider::{
     writer::UnifiedStorageWriter, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,

@@ -8,7 +8,7 @@ use reth_primitives::{transaction::AccessListResult, BlockId, BlockNumberOrTag};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
-    simulate::{SimBlock, SimulatedBlock},
+    simulate::{SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header,
     Index, StateContext, SyncStatus, TransactionRequest, Work,
@@ -210,9 +210,9 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject> {
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        opts: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>>;
+    ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -619,11 +619,11 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        opts: SimBlock,
+        payload: SimulatePayload,
         block_number: Option<BlockId>,
-    ) -> RpcResult<Vec<SimulatedBlock>> {
+    ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
-        Ok(EthCall::simulate_v1(self, opts, block_number).await?)
+        Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
     /// Handler for: `eth_call`

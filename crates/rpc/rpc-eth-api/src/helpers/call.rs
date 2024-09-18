@@ -7,6 +7,7 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
+    basefee::calc_next_block_base_fee,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo, TxEnv,
@@ -14,7 +15,7 @@ use reth_primitives::{
     transaction::AccessListResult,
     Header, TransactionSignedEcRecovered,
 };
-use reth_provider::{ChainSpecProvider, StateProvider};
+use reth_provider::{ChainSpecProvider, HeaderProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -23,16 +24,18 @@ use reth_rpc_eth_types::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance,
         cap_tx_gas_limit_with_caller_allowance, get_precompiles, CallFees,
     },
+    simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_rpc_types::{
-    simulate::{SimBlock, SimulatedBlock},
+    simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
+    Block, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo, TransactionRequest,
+    WithOtherFields,
 };
-use revm::{Database, DatabaseCommit};
-use revm_inspectors::access_list::AccessListInspector;
+use revm::{Database, DatabaseCommit, GetInspector};
+use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
@@ -56,10 +59,158 @@ pub trait EthCall: Call + LoadPendingBlock {
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
     fn simulate_v1(
         &self,
-        _opts: SimBlock,
-        _block_number: Option<BlockId>,
-    ) -> impl Future<Output = Result<Vec<SimulatedBlock>, Self::Error>> + Send {
-        async move { Err(EthApiError::Unsupported("eth_simulateV1 is not supported.").into()) }
+        payload: SimulatePayload,
+        block: Option<BlockId>,
+    ) -> impl Future<
+        Output = Result<
+            Vec<SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>>,
+            Self::Error,
+        >,
+    > + Send
+    where
+        Self: LoadBlock,
+    {
+        async move {
+            if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+            }
+
+            let SimulatePayload {
+                block_state_calls,
+                trace_transfers,
+                validation,
+                return_full_transactions,
+            } = payload;
+
+            if block_state_calls.is_empty() {
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+            }
+
+            // Build cfg and block env, we'll reuse those.
+            let (mut cfg, mut block_env, block) =
+                self.evm_env_at(block.unwrap_or_default()).await?;
+
+            // Gas cap for entire operation
+            let total_gas_limit = self.call_gas_limit() as u128;
+
+            let base_block = self.block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+            let mut parent_hash = base_block.header.hash();
+            let total_difficulty = LoadPendingBlock::provider(self)
+                .header_td_by_number(block_env.number.to())
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block))?;
+
+            // Only enforce base fee if validation is enabled
+            cfg.disable_base_fee = !validation;
+            // Always disable EIP-3607
+            cfg.disable_eip3607 = true;
+
+            let this = self.clone();
+            self.spawn_with_state_at_block(block, move |state| {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut blocks: Vec<
+                    SimulatedBlock<Block<WithOtherFields<reth_rpc_types::Transaction>>>,
+                > = Vec::with_capacity(block_state_calls.len());
+                let mut gas_used = 0;
+                for block in block_state_calls {
+                    // Increase number and timestamp for every new block
+                    block_env.number += U256::from(1);
+                    block_env.timestamp += U256::from(1);
+
+                    if validation {
+                        let chain_spec = LoadPendingBlock::provider(&this).chain_spec();
+                        let base_fee_params =
+                            chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
+                        let base_fee = if let Some(latest) = blocks.last() {
+                            let header = &latest.inner.header;
+                            calc_next_block_base_fee(
+                                header.gas_used,
+                                header.gas_limit,
+                                header.base_fee_per_gas.unwrap_or_default(),
+                                base_fee_params,
+                            )
+                        } else {
+                            base_block
+                                .header
+                                .next_block_base_fee(base_fee_params)
+                                .unwrap_or_default() as u128
+                        };
+                        block_env.basefee = U256::from(base_fee);
+                    } else {
+                        block_env.basefee = U256::ZERO;
+                    }
+
+                    let SimBlock { block_overrides, state_overrides, mut calls } = block;
+
+                    if let Some(block_overrides) = block_overrides {
+                        apply_block_overrides(block_overrides, &mut db, &mut block_env);
+                    }
+                    if let Some(state_overrides) = state_overrides {
+                        apply_state_overrides(state_overrides, &mut db)?;
+                    }
+
+                    if (total_gas_limit - gas_used) < block_env.gas_limit.to() {
+                        return Err(
+                            EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
+                        )
+                    }
+
+                    // Resolve transactions, populate missing fields and enforce calls correctness.
+                    let transactions = simulate::resolve_transactions(
+                        &mut calls,
+                        validation,
+                        block_env.gas_limit.to(),
+                        cfg.chain_id,
+                        &mut db,
+                    )?;
+
+                    let mut calls = calls.into_iter().peekable();
+                    let mut results = Vec::with_capacity(calls.len());
+
+                    while let Some(tx) = calls.next() {
+                        let env = this.build_call_evm_env(cfg.clone(), block_env.clone(), tx)?;
+
+                        let (res, env) = {
+                            if trace_transfers {
+                                this.transact_with_inspector(
+                                    &mut db,
+                                    env,
+                                    TransferInspector::new(false).with_logs(true),
+                                )?
+                            } else {
+                                this.transact(&mut db, env)?
+                            }
+                        };
+
+                        if calls.peek().is_some() {
+                            // need to apply the state changes of this call before executing the
+                            // next call
+                            db.commit(res.state);
+                        }
+
+                        results.push((env.tx.caller, res.result));
+                    }
+
+                    let block = simulate::build_block(
+                        results,
+                        transactions,
+                        &block_env,
+                        parent_hash,
+                        total_difficulty,
+                        return_full_transactions,
+                        &db,
+                    )?;
+
+                    parent_hash = block.inner.header.hash;
+                    gas_used += block.inner.header.gas_used;
+
+                    blocks.push(block);
+                }
+
+                Ok(blocks)
+            })
+            .await
+        }
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -303,6 +454,9 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Data access in default trait method implementations.
     fn call_gas_limit(&self) -> u64;
 
+    /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
+    fn max_simulate_blocks(&self) -> u64;
+
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -329,6 +483,24 @@ pub trait Call: LoadState + SpawnBlocking {
         EthApiError: From<DB::Error>,
     {
         let mut evm = self.evm_config().evm_with_env(db, env);
+        let res = evm.transact().map_err(Self::Error::from_evm_err)?;
+        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        Ok((res, env))
+    }
+
+    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// changes.
+    fn transact_with_inspector<DB>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+        inspector: impl GetInspector<DB>,
+    ) -> Result<(ResultAndState, EnvWithHandlerCfg), Self::Error>
+    where
+        DB: Database,
+        EthApiError: From<DB::Error>,
+    {
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -854,7 +1026,8 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_versioned_hashes,
             max_fee_per_blob_gas,
             authorization_list,
-            ..
+            transaction_type: _,
+            sidecar: _,
         } = request;
 
         let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
@@ -956,24 +1129,15 @@ pub trait Call: LoadState + SpawnBlocking {
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
 
-        // apply block overrides, we need to apply them first so that they take effect when we we
-        // create the evm env via `build_call_evm_env`, e.g. basefee
-        if let Some(mut block_overrides) = overrides.block {
-            if let Some(block_hashes) = block_overrides.block_hash.take() {
-                // override block hashes
-                db.block_hashes
-                    .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
-            }
-            apply_block_overrides(*block_overrides, &mut block);
+        if let Some(block_overrides) = overrides.block {
+            apply_block_overrides(*block_overrides, db, &mut block);
+        }
+        if let Some(state_overrides) = overrides.state {
+            apply_state_overrides(state_overrides, db)?;
         }
 
         let request_gas = request.gas;
         let mut env = self.build_call_evm_env(cfg, block, request)?;
-
-        // apply state overrides
-        if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db)?;
-        }
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit

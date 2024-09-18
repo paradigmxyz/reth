@@ -155,10 +155,10 @@ where
         // Generate an execution witness for the aggregated state of accessed accounts.
         // Destruct the cache database to retrieve the state provider.
         let state_provider = db.database.into_inner();
-        let witness = state_provider.witness(Default::default(), hashed_state.clone())?;
+        let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
+        let response = ExecutionWitness { state, keys: Some(state_preimages) };
         File::create_new(self.output_directory.join(format!(
             "{}_{}.json",
             block.number,
