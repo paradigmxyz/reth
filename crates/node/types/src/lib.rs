@@ -10,19 +10,13 @@
 
 use std::marker::PhantomData;
 
+use alloy_network::Network;
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
 use reth_engine_primitives::EngineTypes;
-
-/// Configures all the primitive types of the node.
-// TODO(mattsse): this is currently a placeholder
-pub trait NodePrimitives {}
-
-// TODO(mattsse): Placeholder
-impl NodePrimitives for () {}
 
 /// The type that configures the essential types of an Ethereum-like node.
 ///
@@ -31,7 +25,7 @@ impl NodePrimitives for () {}
 /// This trait is intended to be stateless and only define the types of the node.
 pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
-    type Primitives: NodePrimitives;
+    type Primitives: Network;
     /// The type used for configuration of the EVM.
     type ChainSpec: EthChainSpec;
 }
@@ -120,7 +114,7 @@ impl<P, C> AnyNodeTypes<P, C> {
 
 impl<P, C> NodeTypes for AnyNodeTypes<P, C>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    P: Network + Send + Sync + Unpin + 'static,
     C: EthChainSpec,
 {
     type Primitives = P;
@@ -155,7 +149,7 @@ impl<P, E, C> AnyNodeTypesWithEngine<P, E, C> {
 
 impl<P, E, C> NodeTypes for AnyNodeTypesWithEngine<P, E, C>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    P: Network + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec,
 {
@@ -165,7 +159,7 @@ where
 
 impl<P, E, C> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    P: Network + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec,
 {

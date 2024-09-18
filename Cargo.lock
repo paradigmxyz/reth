@@ -7919,6 +7919,7 @@ dependencies = [
 name = "reth-node-types"
 version = "1.0.7"
 dependencies = [
+ "alloy-network",
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
