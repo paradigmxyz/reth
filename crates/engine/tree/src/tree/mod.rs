@@ -43,7 +43,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_stages_api::ControlFlow;
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::async_root::{AsyncStateRoot, AsyncStateRootError};
 use std::{
@@ -546,7 +546,6 @@ where
         persistence: PersistenceHandle,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
-        state_root_task_spawner: Box<dyn TaskSpawner>,
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
@@ -594,7 +593,6 @@ where
         canonical_in_memory_state: CanonicalInMemoryState,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook>,
-        state_root_task_spawner: Box<dyn TaskSpawner>,
     ) -> (Sender<FromEngine<EngineApiRequest<T>>>, UnboundedReceiver<EngineApiEvent>) {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -623,7 +621,6 @@ where
             persistence,
             persistence_state,
             payload_builder,
-            state_root_task_spawner,
             config,
         );
         task.set_invalid_block_hook(invalid_block_hook);
@@ -2304,20 +2301,20 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
         let blocking_task_pool = self.blocking_task_pool.clone();
 
-        self.state_root_task_spawner.spawn_critical_blocking(
-            "state root task",
-            Box::pin(async move {
-                let res = AsyncStateRoot::new(consistent_view, blocking_task_pool, input)
-                    .incremental_root_with_updates()
-                    .await;
-                let _ = tx.send(res);
-            }),
-        );
+        rayon::spawn(move || {
+            let result: Result<(B256, TrieUpdates), AsyncStateRootError> =
+                futures::executor::block_on(async move {
+                    AsyncStateRoot::new(consistent_view, blocking_task_pool, input)
+                        .incremental_root_with_updates()
+                        .await
+                });
+            let _ = tx.send(result);
+        });
 
-        rx.blocking_recv()?
+        rx.recv()?
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2619,7 +2616,6 @@ mod tests {
     use reth_primitives::alloy_primitives::Sealable;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
-    use reth_tasks::TokioTaskExecutor;
     use reth_trie::updates::TrieUpdates;
     use std::{
         str::FromStr,
@@ -2731,8 +2727,6 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
-            let state_root_task_spawner = Box::<TokioTaskExecutor>::default();
-
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
                 executor_provider.clone(),
@@ -2744,7 +2738,6 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
-                state_root_task_spawner,
                 TreeConfig::default(),
             );
 

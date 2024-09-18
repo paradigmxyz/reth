@@ -70,7 +70,7 @@ where
         client: Client,
         incoming_requests: EngineMessageStream<N::Engine>,
         pipeline: Pipeline<N>,
-        task_spawner: Box<dyn TaskSpawner>,
+        pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -87,7 +87,6 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let state_root_task_spawner = task_spawner.clone();
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             executor_factory,
@@ -98,13 +97,11 @@ where
             canonical_in_memory_state,
             tree_config,
             invalid_block_hook,
-            state_root_task_spawner,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
-        let pipeline_task_spawner = task_spawner.clone();
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
         Self {

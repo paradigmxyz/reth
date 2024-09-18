@@ -19,7 +19,6 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
-use tokio::sync::oneshot;
 use tracing::*;
 
 /// Async state root calculator.
@@ -229,7 +228,7 @@ pub enum AsyncStateRootError {
     },
     /// Receive error
     #[error(transparent)]
-    Receive(#[from] oneshot::error::RecvError),
+    Receive(#[from] std::sync::mpsc::RecvError),
     /// Error while calculating storage root.
     #[error(transparent)]
     StorageRoot(#[from] StorageRootError),
