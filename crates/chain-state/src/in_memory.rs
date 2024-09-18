@@ -4,13 +4,14 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
+use alloy_primitives::{Address, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, TransactionMeta, TransactionSigned, TxHash, B256,
+    BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    TransactionMeta, TransactionSigned,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -830,11 +831,10 @@ impl NewCanonicalChain {
 mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
+    use alloy_primitives::{BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{
-        Account, BlockNumber, Bytecode, Bytes, Receipt, Requests, StorageKey, StorageValue,
-    };
+    use reth_primitives::{Account, Bytecode, Receipt, Requests};
     use reth_storage_api::{
         AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
         StorageRootProvider,
