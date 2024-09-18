@@ -1,18 +1,24 @@
 use std::collections::HashSet;
+use std::fmt::Display;
 use reth_primitives::{Address, B256, U256};
 use reth_primitives::revm_primitives::HashMap;
-use revm::TransitionAccount;
-
+use revm::{Database, Evm, State, TransitionAccount};
+use reth_storage_errors::provider::ProviderError;
 use crate::structs::{TelosAccountStateTableRow, TelosAccountTableRow};
 
 /// This function compares the state diffs between revm and Telos EVM contract
-pub fn compare_state_diffs(
+pub fn compare_state_diffs<Ext, DB>(
+    evm: &mut Evm<'_, Ext, &mut State<DB>>,
     revm_state_diffs: HashMap<Address,TransitionAccount>,
     statediffs_account: Vec<TelosAccountTableRow>,
     statediffs_accountstate: Vec<TelosAccountStateTableRow>,
     new_addresses_using_create: Vec<(u64,U256)>,
     new_addresses_using_openwallet: Vec<(u64,U256)>,
-) -> bool {
+) -> bool
+where
+    DB: Database,
+    DB::Error: Into<ProviderError> + Display,
+{
 
     println!("REVM State diffs: {:?}",revm_state_diffs);
     println!("TEVM State diffs account: {:?}",statediffs_account);
@@ -82,12 +88,23 @@ pub fn compare_state_diffs(
         let unrappwed_revm_side_row = revm_side_row.unwrap();
         // Check key existance
         let storage_row = unrappwed_revm_side_row.storage.get(&row.key);
-        if storage_row.is_none() {
-            panic!("Key not found on modified storage");
-        }
-        // Check value inequality
-        if storage_row.unwrap().present_value != row.value {
-            panic!("Difference in value on modified storage");
+        if let Some(storage_row) = storage_row {
+            // Check value inequality
+            if storage_row.unwrap().present_value != row.value {
+                panic!("Difference in value on modified storage");
+            }
+        } else {
+            // The TEVM state diffs will include all storage "modifications" even if the value is the same
+            //   so if it's not in the REVM diffs, we need to check if the REVM db matches the TEVM state diff
+            let revm_db: &mut &mut State<DB> = evm.db_mut();
+            let revm_row = revm_db.storage(row.address, row.key);
+            if let Ok(revm_row) = revm_row {
+                if revm_row != row.value {
+                    panic!("Difference in value on revm storage");
+                }
+            } else {
+                panic!("Key not found on revm storage");
+            }
         }
     }
 

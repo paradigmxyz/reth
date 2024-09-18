@@ -15,6 +15,7 @@ pub struct TelosAccountTableRow {
     /// Balance
     pub balance: U256
 }
+
 /// Telos EVM Account State Table Row
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelosAccountStateTableRow {

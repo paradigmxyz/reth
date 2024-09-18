@@ -9674,6 +9674,7 @@ name = "reth-telos-rpc-engine-api"
 version = "1.0.6"
 dependencies = [
  "reth-primitives 1.0.6",
+ "reth-storage-errors",
  "revm",
  "serde",
 ]
