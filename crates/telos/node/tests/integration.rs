@@ -99,7 +99,7 @@ async fn build_consensus_and_translator(
     ship_port: u16,
     chain_port: u16,
 ) -> (ConsensusClient, Translator, Option<Block>) {
-    let mut config = AppConfig {
+    let config = AppConfig {
         log_level: "debug".to_string(),
         chain_id: ChainId(41),
         execution_endpoint: format!("http://localhost:{}", reth_handle.execution_port),

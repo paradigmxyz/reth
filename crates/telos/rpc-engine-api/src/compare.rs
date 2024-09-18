@@ -91,7 +91,8 @@ where
         if let Some(storage_row) = storage_row {
             // Check value inequality
             if storage_row.present_value != row.value {
-                panic!("Difference in value on modified storage, address: {}, key: {}, revm value: {}, tevm value: {}",
+                panic!("Difference in value on modified storage: \nblock: {}\naddress: {}\nkey: {}\nrevm value: {}\ntevm value: {}",
+                       evm.block().number,
                        row.address,
                        row.key,
                        storage_row.present_value,
