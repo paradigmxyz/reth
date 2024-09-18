@@ -949,7 +949,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             price_bumps: config.price_bumps,
             local_transactions_config: config.local_transactions_config.clone(),
             minimal_protocol_basefee: config.minimal_protocol_basefee,
-            block_gas_limit: config.block_gas_limit,
+            block_gas_limit: config.gas_limit,
             ..Default::default()
         }
     }

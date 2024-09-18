@@ -45,8 +45,8 @@ pub struct PoolConfig {
     pub price_bumps: PriceBumpConfig,
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: u64,
-    /// The max gas limit of the block
-    pub block_gas_limit: u64,
+    /// The max gas limit for transactions in the pool
+    pub gas_limit: u64,
     /// How to handle locally received transactions:
     /// [`TransactionOrigin::Local`](TransactionOrigin).
     pub local_transactions_config: LocalTransactionConfig,
@@ -77,7 +77,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,

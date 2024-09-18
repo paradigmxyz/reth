@@ -445,8 +445,8 @@ TxPool:
 
           [default: 7]
 
-      --txpool.block-gas-limit <BLOCK_GAS_LIMIT>
-          The max gas limit of the block
+      --txpool.gas-limit <GAS_LIMIT>
+          The default enforced gas limit for transactions entering the pool
 
           [default: 30000000]
 
