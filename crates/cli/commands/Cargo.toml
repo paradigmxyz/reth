@@ -44,6 +44,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 itertools.workspace = true
