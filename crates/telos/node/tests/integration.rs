@@ -125,7 +125,7 @@ async fn build_consensus_and_translator(
         clean: true,
     };
 
-    let (c, lib) = build_consensus_client(&cli_args, &mut config).await.unwrap();
+    let (c, lib) = build_consensus_client(&cli_args, config.clone()).await.unwrap();
     let translator = Translator::new((&config).into());
 
     (c, translator, lib)
@@ -193,7 +193,7 @@ async fn testing_chain_sync() {
             sleep(Duration::from_secs(1));
             let latest_block = provider.get_block_number().await.unwrap();
             println!("Latest block: {latest_block}");
-            if latest_block > 50 {
+            if latest_block > 80 {
                 break;
             }
         }

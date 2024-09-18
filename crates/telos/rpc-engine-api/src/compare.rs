@@ -91,7 +91,12 @@ where
         if let Some(storage_row) = storage_row {
             // Check value inequality
             if storage_row.present_value != row.value {
-                panic!("Difference in value on modified storage");
+                panic!("Difference in value on modified storage, address: {}, key: {}, revm value: {}, tevm value: {}",
+                       row.address,
+                       row.key,
+                       storage_row.present_value,
+                       row.value
+                );
             }
         } else {
             // The TEVM state diffs will include all storage "modifications" even if the value is the same

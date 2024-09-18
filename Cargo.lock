@@ -866,7 +866,7 @@ dependencies = [
 [[package]]
 name = "antelope-client"
 version = "0.2.1"
-source = "git+https://github.com/telosnetwork/antelope-rs.git?branch=development#c1760e6c2d8cacfcf342e34c36749458c429808b"
+source = "git+https://github.com/telosnetwork/antelope-rs.git?branch=development#2587e09099f75b23b90849e00057ce67a2be684b"
 dependencies = [
  "antelope-client-macros",
  "async-trait",
@@ -5088,7 +5088,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6974,7 +6974,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-exex",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -7189,7 +7189,7 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-stages-api",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-telos-rpc-engine-api 1.0.6",
  "reth-testing-utils",
  "reth-trie",
@@ -7206,7 +7206,7 @@ dependencies = [
  "reth-consensus",
  "reth-execution-errors",
  "reth-primitives 1.0.6",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-telos-rpc-engine-api 1.0.6",
  "thiserror",
 ]
@@ -7300,7 +7300,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-evm",
  "reth-exex",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
@@ -7342,7 +7342,7 @@ dependencies = [
  "eyre",
  "libc",
  "rand 0.8.5",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "secp256k1",
  "thiserror",
 ]
@@ -7370,7 +7370,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7397,7 +7397,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -7481,7 +7481,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-db-api",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-libmdbx",
  "reth-metrics",
  "reth-nippy-jar",
@@ -7489,7 +7489,7 @@ dependencies = [
  "reth-primitives-traits 1.0.6",
  "reth-prune-types",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-tracing",
  "reth-trie-common 1.0.6",
  "rustc-hash 2.0.0",
@@ -7525,7 +7525,7 @@ dependencies = [
  "reth-primitives-traits 1.0.6",
  "reth-prune-types",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-trie-common 1.0.6",
  "serde",
  "test-fuzz",
@@ -7544,7 +7544,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-etl",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-primitives 1.0.6",
  "reth-primitives-traits 1.0.6",
  "reth-provider",
@@ -7848,7 +7848,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-forks 1.0.6",
  "reth-evm",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-payload-validator",
  "reth-primitives 1.0.6",
  "reth-provider",
@@ -7872,8 +7872,8 @@ dependencies = [
  "reth-blockchain-tree-api",
  "reth-consensus",
  "reth-execution-errors",
- "reth-fs-util",
- "reth-storage-errors",
+ "reth-fs-util 1.0.6",
+ "reth-storage-errors 1.0.6",
  "thiserror",
 ]
 
@@ -7994,7 +7994,7 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-forks"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-chains",
  "alloy-primitives 0.8.0",
@@ -8050,7 +8050,7 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives 1.0.6",
  "reth-prune-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-telos-rpc-engine-api 1.0.6",
  "revm",
  "revm-primitives",
@@ -8108,7 +8108,7 @@ dependencies = [
  "nybbles",
  "reth-consensus",
  "reth-prune-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "revm-primitives",
 ]
 
@@ -8201,6 +8201,16 @@ dependencies = [
 [[package]]
 name = "reth-fs-util"
 version = "1.0.6"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "reth-fs-util"
+version = "1.0.6"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "serde",
  "serde_json",
@@ -8327,7 +8337,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-metrics",
  "reth-net-banlist",
  "reth-network",
@@ -8392,7 +8402,7 @@ dependencies = [
  "reth-network-peers",
  "reth-network-types",
  "reth-primitives 1.0.6",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "tokio",
  "tracing",
 ]
@@ -8438,7 +8448,7 @@ dependencies = [
  "memmap2",
  "ph",
  "rand 0.8.5",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "serde",
  "sucds",
  "tempfile",
@@ -8545,7 +8555,7 @@ dependencies = [
  "reth-db-api",
  "reth-discv4",
  "reth-discv5",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
@@ -8561,7 +8571,7 @@ dependencies = [
  "reth-rpc-types 1.0.6",
  "reth-rpc-types-compat",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
@@ -8964,7 +8974,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9023,7 +9033,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9065,7 +9075,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-metrics",
  "reth-network-p2p",
  "reth-nippy-jar",
@@ -9073,7 +9083,7 @@ dependencies = [
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-telos-rpc-engine-api 1.0.6",
  "reth-testing-utils",
  "reth-trie",
@@ -9145,7 +9155,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-prune-types",
  "reth-storage-api",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-trie",
  "revm",
 ]
@@ -9447,7 +9457,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-types"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-primitives 0.8.0",
  "alloy-rpc-types",
@@ -9513,7 +9523,7 @@ dependencies = [
  "reth-revm",
  "reth-stages-api",
  "reth-static-file",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
@@ -9586,7 +9596,7 @@ dependencies = [
  "reth-stages",
  "reth-stages-types",
  "reth-static-file-types 1.0.6",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-testing-utils",
  "reth-tokio-util",
  "tempfile",
@@ -9607,7 +9617,7 @@ dependencies = [
 [[package]]
 name = "reth-static-file-types"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-primitives 0.8.0",
  "derive_more 1.0.0",
@@ -9626,7 +9636,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-prune-types",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-trie",
 ]
 
@@ -9636,8 +9646,19 @@ version = "1.0.6"
 dependencies = [
  "alloy-rlp",
  "derive_more 1.0.0",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-primitives 1.0.6",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "1.0.6"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
+dependencies = [
+ "alloy-rlp",
+ "derive_more 1.0.0",
+ "reth-fs-util 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
+ "reth-primitives 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
 ]
 
 [[package]]
@@ -9674,7 +9695,7 @@ name = "reth-telos-rpc-engine-api"
 version = "1.0.6"
 dependencies = [
  "reth-primitives 1.0.6",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "revm",
  "serde",
 ]
@@ -9682,9 +9703,11 @@ dependencies = [
 [[package]]
 name = "reth-telos-rpc-engine-api"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "reth-primitives 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
+ "reth-storage-errors 1.0.6 (git+https://github.com/telosnetwork/telos-reth?branch=telos-main)",
+ "revm",
  "serde",
 ]
 
@@ -9744,7 +9767,7 @@ dependencies = [
  "reth-chainspec",
  "reth-eth-wire-types",
  "reth-execution-types",
- "reth-fs-util",
+ "reth-fs-util 1.0.6",
  "reth-metrics",
  "reth-primitives 1.0.6",
  "reth-provider",
@@ -9783,7 +9806,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-provider",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-trie-common 1.0.6",
  "revm",
  "serde",
@@ -9824,7 +9847,7 @@ dependencies = [
 [[package]]
 name = "reth-trie-common"
 version = "1.0.6"
-source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#80bca14e63514ae345d8731b2ca3a9718b62878d"
+source = "git+https://github.com/telosnetwork/telos-reth?branch=telos-main#6c80cf29c4cf0f822a568789141ab900fe19ae95"
 dependencies = [
  "alloy-consensus",
  "alloy-genesis",
@@ -9862,7 +9885,7 @@ dependencies = [
  "reth-primitives 1.0.6",
  "reth-provider",
  "reth-stages-types",
- "reth-storage-errors",
+ "reth-storage-errors 1.0.6",
  "reth-trie",
  "reth-trie-common 1.0.6",
  "revm",
@@ -11091,7 +11114,7 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 [[package]]
 name = "telos-consensus-client"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=9a2137c578584d571854db03b4f981cfa4ea997a#9a2137c578584d571854db03b4f981cfa4ea997a"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=f26dc4ff646e14dd197604f5e1718e712e0422fe#f26dc4ff646e14dd197604f5e1718e712e0422fe"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -11127,7 +11150,7 @@ dependencies = [
 [[package]]
 name = "telos-translator-rs"
 version = "0.1.0"
-source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=9a2137c578584d571854db03b4f981cfa4ea997a#9a2137c578584d571854db03b4f981cfa4ea997a"
+source = "git+https://github.com/telosnetwork/telos-consensus-client?rev=f26dc4ff646e14dd197604f5e1718e712e0422fe#f26dc4ff646e14dd197604f5e1718e712e0422fe"
 dependencies = [
  "alloy",
  "alloy-consensus",
