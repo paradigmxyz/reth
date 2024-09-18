@@ -4,6 +4,8 @@ use reth_primitives::{Address, Bytes, Receipt, U256};
 /// Telos EVM Account Table Row
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelosAccountTableRow {
+    /// Removed - if true, this row was removed from storage
+    pub removed: bool,
     /// Address
     pub address: Address,
     /// Account
@@ -19,6 +21,8 @@ pub struct TelosAccountTableRow {
 /// Telos EVM Account State Table Row
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelosAccountStateTableRow {
+    /// Removed - if true, this row was removed from storage
+    pub removed: bool,
     /// Address
     pub address: Address,
     /// Key
