@@ -423,6 +423,299 @@ pub trait TransactionPool: Send + Sync + Clone {
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 }
 
+pub trait PoolInfo: Send + Sync + Clone {
+    /// Returns stats about the pool and all sub-pools.
+    fn pool_size(&self) -> PoolSize;
+
+    /// Returns the block the pool is currently tracking.
+    fn block_info(&self) -> BlockInfo;
+}
+
+pub trait TransactionPoolTypes {
+    /// The transaction type of the pool.
+    type Transaction: PoolTransaction<
+        Pooled = PooledTransactionsElementEcRecovered,
+        Consensus = TransactionSignedEcRecovered,
+    >;
+}
+
+pub trait TransactionHandler: Send + Sync + Clone + TransactionPoolTypes {
+    /// Imports an _external_ transaction.
+    fn add_external_transaction(
+        &self,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
+
+    /// Imports an _external_ transaction.
+    ///
+    /// This is intended to be used by the network to insert incoming transactions received over the
+    /// p2p network.
+    ///
+    /// Consumer: P2P
+    fn add_external_transactions(
+        &self,
+        transactions: Vec<Self::Transaction>,
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
+
+    /// Adds an _unvalidated_ transaction into the pool.
+    ///
+    /// Consumer: RPC
+    fn add_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
+
+    /// Adds the given _unvalidated_ transaction into the pool.
+    ///
+    /// Returns a list of results.
+    ///
+    /// Consumer: RPC
+    fn add_transactions(
+        &self,
+        origin: TransactionOrigin,
+        transactions: Vec<Self::Transaction>,
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
+
+    /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
+    ///
+    /// This is the same as [TransactionPool::add_transaction] but returns an event stream for the
+    /// given transaction.
+    ///
+    /// Consumer: Custom
+    fn add_transaction_and_subscribe(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send;
+}
+
+pub trait TransactionEventsListener: Send + Sync + Clone + TransactionPoolTypes {
+    /// Returns a new transaction change event stream for the given transaction.
+    ///
+    /// Returns `None` if the transaction is not in the pool.
+    fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
+
+    /// Returns a new transaction change event stream for _all_ transactions in the pool.
+    fn all_transactions_event_listener(&self) -> AllTransactionsEvents<Self::Transaction>;
+}
+
+pub trait TransactionListeners: Send + Sync + Clone + TransactionPoolTypes {
+    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pool that are allowed to be propagated.
+    ///
+    /// Note: This is intended for networking and will __only__ yield transactions that are allowed
+    /// to be propagated over the network, see also [TransactionListenerKind].
+    ///
+    /// Consumer: RPC/P2P
+    fn pending_transactions_listener(&self) -> Receiver<TxHash>;
+
+    /// Returns a new [Receiver] that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// commitments/proofs) for eip-4844 transactions inserted into the pool
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
+
+    /// Returns a new stream that yields new valid transactions added to the pool.
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
+
+    /// Returns a new Stream that yields new transactions added to the pending sub-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Pending](crate::SubPool).
+    fn new_pending_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction>;
+
+    /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::BaseFee](crate::SubPool).
+    fn new_basefee_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction>;
+
+    /// Returns a new Stream that yields new transactions added to the queued-pool.
+    ///
+    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
+    /// [SubPool::Queued](crate::SubPool).
+    fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction>;
+}
+
+pub trait TransactionPoolExplorer: Send + Sync + Clone + TransactionPoolTypes {
+    /// Returns the _hashes_ of all transactions in the pool.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
+    ///
+    /// Consumer: P2P
+    fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
+
+    /// Returns only the first `max` hashes of transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash>;
+
+    /// Returns the _full_ transaction objects all transactions in the pool.
+    ///
+    /// This is intended to be used by the network for the initial exchange of pooled transaction
+    /// _hashes_
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
+    ///
+    /// Caution: In case of blob transactions, this does not include the sidecar.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns only the first `max` transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns an iterator that yields transactions that are ready for block production.
+    ///
+    /// Consumer: Block production
+    fn best_transactions(
+        &self,
+    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
+
+    /// Returns all transactions that can be included in the next block.
+    ///
+    /// This is primarily used for the `txpool_` RPC namespace:
+    /// <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-txpool> which distinguishes
+    /// between `pending` and `queued` transactions, where `pending` are transactions ready for
+    /// inclusion in the next block and `queued` are transactions that are ready for inclusion in
+    /// future blocks.
+    ///
+    /// Consumer: RPC
+    fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that can be included in _future_ blocks.
+    ///
+    /// This and [Self::pending_transactions] are mutually exclusive.
+    ///
+    /// Consumer: RPC
+    fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions sent by a given user
+    fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns a transaction sent by a given user and a nonce
+    fn get_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    fn get_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
+    fn get_pending_transactions_by_origin(
+        &self,
+        origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::External)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
+    fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_transactions_by_origin(TransactionOrigin::Local)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
+    fn get_private_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::Private)
+    }
+
+    /// Returns all pending transactions that where submitted as [TransactionOrigin::External]
+    fn get_external_pending_transactions(
+        &self,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.get_pending_transactions_by_origin(TransactionOrigin::External)
+    }
+
+    /// Returns a set of all senders of transactions in the pool
+    fn unique_senders(&self) -> HashSet<Address>;
+
+    /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
+    /// store.
+    fn get_blob(&self, tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
+    /// blob store.
+    ///
+    /// This only returns the blobs that were found in the store.
+    /// If there's no blob it will not be returned.
+    fn get_all_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError>;
+
+    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
+    /// they were requested.
+    ///
+    /// Returns an error if any of the blobs are not found in the blob store.
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+}
+
+pub trait TransactionPoolManagement: Send + Sync + Clone + TransactionPoolTypes {
+    /// Removes all transactions corresponding to the given hashes.
+    ///
+    /// Also removes all _dependent_ transactions.
+    ///
+    /// Consumer: Utility
+    fn remove_transactions(
+        &self,
+        hashes: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Retains only those hashes that are unknown to the pool.
+    /// In other words, removes all transactions from the given set that are currently present in
+    /// the pool. Returns hashes already known to the pool.
+    ///
+    /// Consumer: P2P
+    fn retain_unknown<A>(&self, announcement: &mut A)
+    where
+        A: HandleMempoolData;
+
+    /// Notify the pool about transactions that are propagated to peers.
+    ///
+    /// Consumer: P2P
+    fn on_propagated(&self, txs: PropagatedTransactions);
+}
+
 /// Extension for [TransactionPool] trait that allows to set the current block info.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPoolExt: TransactionPool {
