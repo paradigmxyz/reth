@@ -47,16 +47,19 @@ where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
-    Ok(db
-        // Get the caller account.
-        .basic(env.caller)?
-        // Get the caller balance.
-        .map(|acc| acc.balance)
-        .unwrap_or_default()
-        // Subtract transferred value from the caller balance.
+    // Get the caller account.
+    let caller = db.basic(env.caller)?;
+    // Get the caller balance.
+    let balance = caller.map(|acc| acc.balance).unwrap_or_default();
+    // Get transaction value.
+    let value = env.value;
+    // Subtract transferred value from the caller balance. Return error if the caller has
+    // insufficient funds.
+    let balance = balance
         .checked_sub(env.value)
-        // Return error if the caller has insufficient funds.
-        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds)?
+        .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
+
+    Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.
         .checked_div(env.gas_price)
         // This will be 0 if gas price is 0. It is fine, because we check it before.
@@ -133,6 +136,7 @@ impl CallFees {
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
+                    // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
                     Ok(min(
                         max_fee,
                         block_base_fee.checked_add(max_priority_fee_per_gas).ok_or_else(|| {

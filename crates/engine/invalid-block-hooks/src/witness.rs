@@ -9,7 +9,9 @@ use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
     ConfigureEvm,
 };
-use reth_primitives::{keccak256, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256};
+use reth_primitives::{
+    keccak256, Header, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256,
+};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -50,7 +52,7 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
 impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
         &self,
@@ -236,7 +238,7 @@ where
 impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
         &self,

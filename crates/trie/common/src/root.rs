@@ -28,6 +28,10 @@ pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
     F: FnMut(&T, &mut Vec<u8>),
 {
+    if items.is_empty() {
+        return alloy_trie::EMPTY_ROOT_HASH;
+    }
+
     let mut value_buffer = Vec::new();
 
     let mut hb = HashBuilder::default();

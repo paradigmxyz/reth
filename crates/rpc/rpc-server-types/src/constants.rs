@@ -82,8 +82,6 @@ pub mod gas_oracle {
     /// for more complex calls.
     pub const RPC_DEFAULT_GAS_CAP: u64 = 50_000_000;
 
-    /// Gas per transaction not creating a contract.
-    pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
     /// Allowed error ratio for gas estimation
     /// Taken from Geth's implementation in order to pass the hive tests
     /// <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/internal/ethapi/api.go#L56>
