@@ -314,7 +314,7 @@ enum SenderRecoveryStageError {
     FailedRecovery(#[from] FailedSenderRecoveryError),
 
     /// Number of recovered senders does not match
-    #[error("failed to recover all senders from the batch: {_0}")]
+    #[error("mismatched sender count during recovery: {_0}")]
     RecoveredSendersMismatch(GotExpected<u64>),
 
     /// A different type of stage error occurred
