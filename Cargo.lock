@@ -7284,6 +7284,7 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.6"
 dependencies = [
+ "bincode",
  "eyre",
  "futures",
  "metrics",
@@ -7295,6 +7296,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex-types",
+ "reth-fs-util",
  "reth-metrics",
  "reth-node-api",
  "reth-node-core",

@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
 reth-exex-types.workspace = true
+reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
@@ -36,6 +37,7 @@ tokio-util.workspace = true
 tokio.workspace = true
 
 ## misc
+bincode = "1.3"
 eyre.workspace = true
 metrics.workspace = true
 
