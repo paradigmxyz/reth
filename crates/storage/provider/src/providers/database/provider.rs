@@ -331,7 +331,7 @@ impl<TX: DbTx, Spec: Send + Sync> DatabaseProvider<TX, Spec> {
         &self.tx
     }
 
-    /// Returns a reference to the [`ChainSpec`].
+    /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &Spec {
         &self.chain_spec
     }
