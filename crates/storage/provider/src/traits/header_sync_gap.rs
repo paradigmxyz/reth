@@ -1,6 +1,7 @@
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use reth_network_p2p::headers::downloader::SyncTarget;
-use reth_primitives::{BlockHashOrNumber, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
 use tokio::sync::watch;
 

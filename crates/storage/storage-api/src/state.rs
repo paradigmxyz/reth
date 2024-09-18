@@ -2,10 +2,11 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
     StorageRootProvider,
 };
+use alloy_eips::{BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockId, BlockNumHash, BlockNumberOrTag, Bytecode, KECCAK_EMPTY};
+use reth_primitives::{Bytecode, KECCAK_EMPTY};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Type alias of boxed [`StateProvider`].
