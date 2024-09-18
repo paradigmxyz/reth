@@ -220,7 +220,6 @@ where
             Box::pin(consensus_engine_stream),
             pipeline,
             Box::new(ctx.task_executor().clone()),
-            Box::new(ctx.task_executor().clone()),
             ctx.provider_factory().clone(),
             ctx.blockchain_db().clone(),
             pruner,

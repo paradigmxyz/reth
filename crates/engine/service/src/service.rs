@@ -70,8 +70,7 @@ where
         client: Client,
         incoming_requests: EngineMessageStream<N::Engine>,
         pipeline: Pipeline<N>,
-        pipeline_task_spawner: Box<dyn TaskSpawner>,
-        state_root_task_spawner: Box<dyn TaskSpawner>,
+        task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider2<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -88,6 +87,7 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
+        let state_root_task_spawner = task_spawner.clone();
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             executor_factory,
@@ -104,6 +104,7 @@ where
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
+        let pipeline_task_spawner = task_spawner.clone();
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
         Self {
@@ -172,7 +173,6 @@ mod tests {
         let incoming_requests = UnboundedReceiverStream::new(rx);
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
-        let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
@@ -186,7 +186,7 @@ mod tests {
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
 
-        let state_root_task_spawner = Box::<TokioTaskExecutor>::default();
+        let task_spawner = Box::<TokioTaskExecutor>::default();
 
         let _eth_service = EngineService::new(
             consensus,
@@ -195,8 +195,7 @@ mod tests {
             client,
             Box::pin(incoming_requests),
             pipeline,
-            pipeline_task_spawner,
-            state_root_task_spawner,
+            task_spawner,
             provider_factory,
             blockchain_db,
             pruner,
