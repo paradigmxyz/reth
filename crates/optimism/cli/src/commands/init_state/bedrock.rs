@@ -2,7 +2,8 @@ use alloy_primitives::B256;
 use reth_db::Database;
 use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
 use reth_primitives::{
-    BlockBody, Header, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, U256,
+    BlockBody, BlockNumber, Header, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, U256,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, DatabaseProviderRW, StageCheckpointWriter,
@@ -20,7 +21,7 @@ pub(crate) fn setup_op_mainnet_without_ovm<DB: Database>(
     info!(target: "reth::cli", "Setting up dummy OVM chain before importing state.");
 
     // Write OVM dummy data up to `BEDROCK_HEADER - 1` block
-    append_dummy_chain(static_file_provider)?;
+    append_dummy_chain(static_file_provider, BEDROCK_HEADER.number - 1)?;
 
     info!(target: "reth::cli", "Appending Bedrock block.");
 
@@ -71,12 +72,15 @@ fn append_bedrock_block<DB: Database>(
     Ok(())
 }
 
-/// Creates a dummy chain with no transactions/receipts up to `BEDROCK_HEADER - 1` block.
+/// Creates a dummy chain with no transactions/receipts up to `target_height` block inclusive.
 ///
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
-fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Error> {
+fn append_dummy_chain(
+    sf_provider: &StaticFileProvider,
+    target_height: BlockNumber,
+) -> Result<(), eyre::Error> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Spawn jobs for incrementing the block end range of transactions and receipts
@@ -85,7 +89,7 @@ fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Erro
         let provider = sf_provider.clone();
         std::thread::spawn(move || {
             let result = provider.latest_writer(segment).and_then(|mut writer| {
-                for block_num in 1..BEDROCK_HEADER.number {
+                for block_num in 1..=target_height {
                     writer.increment_block(block_num)?;
                 }
                 Ok(())
@@ -100,7 +104,7 @@ fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Erro
     std::thread::spawn(move || {
         let mut empty_header = Header::default();
         let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
-            for block_num in 1..BEDROCK_HEADER.number {
+            for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
                 empty_header.number = block_num;
                 writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
@@ -116,13 +120,13 @@ fn append_dummy_chain(sf_provider: &StaticFileProvider) -> Result<(), eyre::Erro
         r?;
     }
 
-    // If, for any reason, rayon crashes this verifies if all segments are at the same height.
+    // If, for any reason, rayon crashes this verifies if all segments are at the same target_height.
     for segment in
         [StaticFileSegment::Headers, StaticFileSegment::Receipts, StaticFileSegment::Transactions]
     {
         assert_eq!(
             sf_provider.latest_writer(segment)?.user_header().block_end(),
-            Some(BEDROCK_HEADER.number - 1),
+            Some(target_height),
             "Static file segment {segment} was unsuccessful advancing its block height."
         );
     }
