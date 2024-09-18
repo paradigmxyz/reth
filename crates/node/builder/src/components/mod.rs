@@ -27,6 +27,7 @@ use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
 use reth_node_api::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{ConfigureEvm, FullNodeTypes};
@@ -41,7 +42,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;
@@ -95,7 +96,7 @@ impl<Node, Pool, EVM, Executor, Cons> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
 {
@@ -136,7 +137,7 @@ impl<Node, Pool, EVM, Executor, Cons> Clone for Components<Node, Pool, EVM, Exec
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone,
 {

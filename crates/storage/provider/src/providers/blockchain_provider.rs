@@ -1000,7 +1000,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1015,7 +1015,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1031,7 +1031,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1045,7 +1045,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?

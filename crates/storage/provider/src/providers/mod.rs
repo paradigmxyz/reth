@@ -524,7 +524,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_env_at(cfg, block_env, at, evm_config)
     }
@@ -537,7 +537,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
@@ -549,7 +549,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
     }
@@ -561,7 +561,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }

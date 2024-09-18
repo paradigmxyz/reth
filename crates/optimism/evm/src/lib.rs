@@ -106,7 +106,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         let spec_id = revm_spec(
@@ -127,9 +127,29 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
         cfg_env.handler_cfg.is_optimism = self.chain_spec.is_optimism();
     }
 
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+        block_env.number = U256::from(header.number);
+        block_env.coinbase = header.beneficiary;
+        block_env.timestamp = U256::from(header.timestamp);
+        if after_merge {
+            block_env.prevrandao = Some(header.mix_hash);
+            block_env.difficulty = U256::ZERO;
+        } else {
+            block_env.difficulty = header.difficulty;
+            block_env.prevrandao = None;
+        }
+        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
+        block_env.gas_limit = U256::from(header.gas_limit);
+
+        // EIP-4844 excess blob gas of this block, introduced in Cancun
+        if let Some(excess_blob_gas) = header.excess_blob_gas {
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+        }
+    }
+
     fn next_cfg_and_block_env(
         &self,
-        parent: &Header,
+        parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         // configure evm env based on parent block

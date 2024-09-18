@@ -136,6 +136,7 @@ impl CallFees {
                             RpcInvalidTransactionError::TipAboveFeeCap.into(),
                         )
                     }
+                    // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
                     Ok(min(
                         max_fee,
                         block_base_fee.checked_add(max_priority_fee_per_gas).ok_or_else(|| {

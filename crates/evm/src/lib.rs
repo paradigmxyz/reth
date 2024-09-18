@@ -14,9 +14,7 @@ extern crate alloc;
 use core::ops::Deref;
 
 use crate::builder::RethEvmBuilder;
-use reth_primitives::{
-    Address, Header, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
-};
+use reth_primitives::{Address, TransactionSigned, TransactionSignedEcRecovered, B256, U256};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
@@ -139,30 +137,12 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     fn fill_cfg_env(
         &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     );
 
     /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
-        block_env.number = U256::from(header.number);
-        block_env.coinbase = header.beneficiary;
-        block_env.timestamp = U256::from(header.timestamp);
-        if after_merge {
-            block_env.prevrandao = Some(header.mix_hash);
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty;
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit);
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-        }
-    }
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool);
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
@@ -172,7 +152,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
-        header: &Header,
+        header: &Self::Header,
         total_difficulty: U256,
     ) {
         self.fill_cfg_env(cfg, header, total_difficulty);
@@ -187,7 +167,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
     fn next_cfg_and_block_env(
         &self,
-        parent: &Header,
+        parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }

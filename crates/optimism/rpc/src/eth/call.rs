@@ -2,7 +2,10 @@ use alloy_primitives::{Bytes, TxKind, U256};
 use reth_chainspec::ChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_primitives::revm_primitives::{BlockEnv, OptimismFields, TxEnv};
+use reth_primitives::{
+    revm_primitives::{BlockEnv, OptimismFields, TxEnv},
+    Header,
+};
 use reth_rpc_eth_api::{
     helpers::{Call, EthCall, LoadState, SpawnBlocking},
     FromEthApiError, IntoEthApiError,
@@ -31,7 +34,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
         self.inner.evm_config()
     }
 

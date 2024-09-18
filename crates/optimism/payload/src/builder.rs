@@ -48,7 +48,7 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// `OptimismPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
@@ -431,7 +431,7 @@ impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBu
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -516,7 +516,7 @@ pub struct OptimismBlockAttributes<EvmConfig: ConfigureEvm> {
 
 impl<EvmConfig> OptimismBlockAttributes<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     /// Creates a new `OptimismBlockAttributes` instance.
     /// Initializes the block attributes based on the provided payload configuration

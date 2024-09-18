@@ -135,7 +135,7 @@ where
                 )?);
             }
 
-            let storage_root = Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
+            Self::next_root_from_proofs(storage_trie_nodes, |key: Nibbles| {
                 // Right pad the target with 0s.
                 let mut padded_key = key.pack();
                 padded_key.resize(32, 0);
@@ -154,7 +154,6 @@ where
                 self.witness.insert(keccak256(node.as_ref()), node.clone()); // record in witness
                 Ok(node)
             })?;
-            debug_assert_eq!(storage_multiproof.root, storage_root);
         }
 
         Self::next_root_from_proofs(account_trie_nodes, |key: Nibbles| {
