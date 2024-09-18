@@ -626,7 +626,11 @@ impl Hardforks for ChainSpec {
     }
 }
 
-impl EthereumHardforks for ChainSpec {}
+impl EthereumHardforks for ChainSpec {
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
+        self.final_paris_total_difficulty(block_number)
+    }
+}
 
 /// Convert the given [`Genesis`] into an Ethereum [`ChainSpec`].
 #[cfg(not(feature = "optimism"))]

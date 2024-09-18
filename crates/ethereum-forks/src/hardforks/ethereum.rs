@@ -1,9 +1,6 @@
 use alloy_primitives::U256;
 
-use crate::{
-    hardforks::{ChainHardforks, Hardforks},
-    EthereumHardfork, ForkCondition,
-};
+use crate::{hardforks::Hardforks, EthereumHardfork, ForkCondition};
 
 /// Helper methods for Ethereum forks.
 pub trait EthereumHardforks: Hardforks {
@@ -58,14 +55,5 @@ pub trait EthereumHardforks: Hardforks {
     ///
     /// Note: technically this would also be valid for the block before the paris upgrade, but this
     /// edge case is omitted here.
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        let ForkCondition::TTD { total_difficulty, fork_block } =
-            self.fork(EthereumHardfork::Paris)
-        else {
-            return None
-        };
-        (block_number >= fork_block?).then_some(total_difficulty)
-    }
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256>;
 }
-
-impl EthereumHardforks for ChainHardforks {}
