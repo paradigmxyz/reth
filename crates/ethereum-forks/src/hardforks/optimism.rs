@@ -1,5 +1,5 @@
 use super::Hardforks;
-use crate::{ChainHardforks, OptimismHardfork};
+use crate::OptimismHardfork;
 
 /// Extends [`crate::EthereumHardforks`] with optimism helper methods.
 pub trait OptimismHardforks: Hardforks {
@@ -24,5 +24,3 @@ pub trait OptimismHardforks: Hardforks {
         self.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp)
     }
 }
-
-impl OptimismHardforks for ChainHardforks {}
