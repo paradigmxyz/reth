@@ -17,7 +17,7 @@ reth-codecs.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec"] }
 
 # ethereum
-alloy-primitives = { workspace = true }
+alloy-primitives.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
