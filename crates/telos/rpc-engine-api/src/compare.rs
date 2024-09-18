@@ -90,7 +90,7 @@ where
         let storage_row = unrappwed_revm_side_row.storage.get(&row.key);
         if let Some(storage_row) = storage_row {
             // Check value inequality
-            if storage_row.unwrap().present_value != row.value {
+            if storage_row.present_value != row.value {
                 panic!("Difference in value on modified storage");
             }
         } else {
