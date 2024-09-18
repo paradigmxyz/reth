@@ -549,7 +549,8 @@ where
         config: TreeConfig,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
-        let blocking_task_pool = BlockingTaskPool::build().unwrap();
+        let blocking_task_pool =
+            BlockingTaskPool::build().expect("failed to build blocking task pool");
         Self {
             provider,
             executor_provider,
