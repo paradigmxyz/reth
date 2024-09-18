@@ -152,7 +152,7 @@ impl<E> ExecutionStage<E> {
     /// been previously executed.
     fn adjust_prune_modes(
         &self,
-        provider: &impl StatsReader,
+        provider: impl StatsReader,
         start_block: u64,
         max_block: u64,
     ) -> Result<PruneModes, StageError> {
