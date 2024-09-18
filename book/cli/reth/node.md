@@ -440,6 +440,16 @@ TxPool:
 
           [default: 10]
 
+      --txpool.minimal-protocol-fee <MINIMAL_PROTOCOL_BASEFEE>
+          Minimum base fee required by the protocol
+
+          [default: 7]
+
+      --txpool.block-gas-limit <BLOCK_GAS_LIMIT>
+          The max gas limit of the block
+
+          [default: 30000000]
+
       --blobpool.pricebump <BLOB_TRANSACTION_PRICE_BUMP>
           Price bump percentage to replace an already existing blob transaction
 
