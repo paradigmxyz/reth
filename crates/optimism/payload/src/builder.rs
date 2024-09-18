@@ -401,7 +401,7 @@ where
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
-        db.merge_transitions(BundleRetention::PlainState);
+        db.merge_transitions(BundleRetention::Reverts);
 
         let block_number = op_block_attributes.initialized_block_env.number.to::<u64>();
         let receipts = Receipts { receipt_vec: vec![op_block_attributes.receipts.clone()] };
