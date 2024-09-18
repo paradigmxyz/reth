@@ -67,7 +67,7 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
-    builder: Builder,
+    builders: PayloadBuilderStack<Builder>,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
 }
@@ -83,7 +83,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         chain_spec: Arc<ChainSpec>,
-        builder: Builder,
+        builders: Builder,
     ) -> Self {
         Self {
             client,
@@ -92,7 +92,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             chain_spec,
-            builder,
+            builders: PayloadBuilderStack::new(vec![builders]),
             pre_cached: None,
         }
     }
@@ -192,7 +192,7 @@ where
             cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
-            builder: self.builder.clone(),
+            builders: self.builders.clone(),
         };
 
         // start the first job right away
@@ -349,7 +349,7 @@ where
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
-    builder: Builder,
+    builders: PayloadBuilderStack<Builder>,
 }
 
 impl<Client, Pool, Tasks, Builder> BasicPayloadJob<Client, Pool, Tasks, Builder>
@@ -374,7 +374,7 @@ where
         let best_payload = self.best_payload.clone();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
-        let builder = self.builder.clone();
+        let builder = self.builders.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
@@ -478,7 +478,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        self.builder.build_empty_payload(&self.client, self.config.clone())
+        self.builders.build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -508,7 +508,7 @@ where
                 best_payload: None,
             };
 
-            match self.builder.on_missing_payload(args) {
+            match self.builders.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
                 }
@@ -521,7 +521,7 @@ where
                     let (tx, rx) = oneshot::channel();
                     let client = self.client.clone();
                     let config = self.config.clone();
-                    let builder = self.builder.clone();
+                    let builder = self.builders.clone();
                     self.executor.spawn_blocking(Box::pin(async move {
                         let res = builder.build_empty_payload(&client, config);
                         let _ = tx.send(res);
