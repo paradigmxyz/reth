@@ -12,8 +12,8 @@ use reth_network_p2p::{
     BlockClient,
 };
 use reth_node_types::NodeTypesWithEngine;
-use reth_payload_builder::{PayloadBuilder, PayloadBuilderHandle};
-use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilder, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS, BlockNumHash, Head, Header, SealedBlock, SealedHeader,

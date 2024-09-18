@@ -1,5 +1,6 @@
 use crate::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
+    PayloadBuilderError, PayloadEvents, PayloadTypes,
 };
 use alloy_primitives::{Address, B256, U256};
 use reth_chain_state::ExecutedBlock;
@@ -10,6 +11,54 @@ use reth_rpc_types::{
     optimism::OptimismPayloadAttributes,
     Withdrawal,
 };
+use std::{future::Future, pin::Pin};
+use tokio::sync::oneshot;
+
+pub(crate) type PayloadFuture<P> =
+    Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
+/// A type that can request, subscribe to and resolve payloads.
+#[async_trait::async_trait]
+pub trait PayloadBuilder: Send + Unpin {
+    /// The Payload type for the builder.
+    type PayloadType: PayloadTypes;
+    /// The error type returned by the builder.
+    type Error;
+
+    /// Sends a message to the service to start building a new payload for the given payload
+    /// attributes and returns a future that resolves to the payload.
+    async fn send_and_resolve_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadFuture<<Self::PayloadType as PayloadTypes>::BuiltPayload>, Self::Error>;
+
+    /// Returns the best payload for the given identifier.
+    async fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<<Self::PayloadType as PayloadTypes>::BuiltPayload, Self::Error>>;
+
+    /// Sends a message to the service to start building a new payload for the given payload.
+    ///
+    /// This is the same as [`PayloadBuilder::new_payload`] but does not wait for the result
+    /// and returns the receiver instead
+    fn send_new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> oneshot::Receiver<Result<PayloadId, Self::Error>>;
+
+    /// Starts building a new payload for the given payload attributes.
+    ///
+    /// Returns the identifier of the payload.
+    async fn new_payload(
+        &self,
+        attr: <Self::PayloadType as PayloadTypes>::PayloadBuilderAttributes,
+    ) -> Result<PayloadId, Self::Error>;
+
+    /// Sends a message to the service to subscribe to payload events.
+    /// Returns a receiver that will receive them.
+    async fn subscribe(&self) -> Result<PayloadEvents<Self::PayloadType>, Self::Error>;
+}
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.

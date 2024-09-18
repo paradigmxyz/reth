@@ -15,6 +15,9 @@ pub enum PayloadBuilderError {
     /// An oneshot channels has been closed.
     #[error("sender has been dropped")]
     ChannelClosed,
+    /// If there's no payload to resolve.
+    #[error("missing payload")]
+    MissingPayload,
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),

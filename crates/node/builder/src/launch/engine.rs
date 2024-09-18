@@ -1,5 +1,12 @@
 //! Engine node related functionality.
 
+use crate::{
+    hooks::NodeHooks,
+    rpc::{launch_rpc_servers, EthApiBuilderProvider},
+    setup::build_networked_pipeline,
+    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -31,7 +38,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_payload_builder::PayloadBuilder;
+use reth_payload_primitives::PayloadBuilder;
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::{engine::ClientVersionV1, WithOtherFields};
@@ -41,14 +48,6 @@ use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    hooks::NodeHooks,
-    rpc::{launch_rpc_servers, EthApiBuilderProvider},
-    setup::build_networked_pipeline,
-    AddOns, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
-};
 
 /// The engine node launcher.
 #[derive(Debug)]

@@ -4,14 +4,14 @@
 //! Once a new payload is created, it is continuously updated.
 
 use crate::{
-    error::PayloadBuilderError,
-    events::{Events, PayloadEvents},
-    metrics::PayloadBuilderServiceMetrics,
-    traits::{PayloadFuture, PayloadJobGenerator},
-    KeepPayloadJobAlive, PayloadBuilder, PayloadJob,
+    metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
+    PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, Events, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
+    PayloadEvents, PayloadTypes,
+};
 use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{
@@ -27,6 +27,8 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
+type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 #[derive(Debug)]
 pub struct PayloadStore<T: PayloadTypes> {
@@ -37,7 +39,7 @@ pub struct PayloadStore<T: PayloadTypes> {
 
 impl<T> PayloadStore<T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
 {
     /// Resolves the payload job and returns the best payload that has been built so far.
     ///
@@ -103,7 +105,7 @@ pub struct PayloadBuilderHandle<T: PayloadTypes> {
 #[async_trait::async_trait]
 impl<T> PayloadBuilder for PayloadBuilderHandle<T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
 {
     type PayloadType = T;
     type Error = PayloadBuilderError;
@@ -156,7 +158,7 @@ where
 
 impl<T> PayloadBuilderHandle<T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
 {
     /// Creates a new payload builder handle for the given channel.
     ///
@@ -239,7 +241,7 @@ const PAYLOAD_EVENTS_BUFFER_SIZE: usize = 20;
 
 impl<Gen, St, T> PayloadBuilderService<Gen, St, T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
     Gen: PayloadJobGenerator,
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
@@ -353,7 +355,7 @@ where
 
 impl<Gen, St, T> Future for PayloadBuilderService<Gen, St, T>
 where
-    T: PayloadTypes + 'static,
+    T: PayloadTypes,
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,

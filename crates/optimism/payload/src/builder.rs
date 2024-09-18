@@ -12,8 +12,7 @@ use reth_evm::{
     system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_payload_builder::error::PayloadBuilderError;
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
 use reth_primitives::{
     constants::BEACON_NONCE,
     eip4844::calculate_excess_blob_gas,

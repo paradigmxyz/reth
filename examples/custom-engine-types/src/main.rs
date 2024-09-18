@@ -52,9 +52,9 @@ use reth_node_ethereum::{
     EthEvmConfig,
 };
 use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
-    PayloadBuilderService,
+    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
 };
+use reth_payload_primitives::PayloadBuilderError;
 use reth_primitives::{Address, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
