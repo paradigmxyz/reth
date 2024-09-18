@@ -1,3 +1,4 @@
+use alloy_primitives::Bytes;
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
 use reth_db_api::{
     database::Database,
@@ -5,7 +6,6 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_fs_util as fs;
-use reth_primitives::Bytes;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.

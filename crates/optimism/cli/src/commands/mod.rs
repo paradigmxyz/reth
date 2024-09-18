@@ -5,7 +5,7 @@ use import_receipts::ImportReceiptsOpCommand;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd, init_state,
+    config_cmd, db, dump_genesis, init_cmd,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -15,6 +15,7 @@ use std::fmt;
 mod build_pipeline;
 pub mod import;
 pub mod import_receipts;
+pub mod init_state;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
@@ -30,7 +31,7 @@ pub enum Commands<
     Init(init_cmd::InitCommand<Spec>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand<Spec>),
+    InitState(init_state::InitStateCommandOp<Spec>),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[command(name = "import-op")]
     ImportOp(ImportOpCommand<Spec>),

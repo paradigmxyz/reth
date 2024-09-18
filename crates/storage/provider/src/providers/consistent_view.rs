@@ -1,8 +1,10 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
+use alloy_primitives::B256;
 use reth_errors::ProviderError;
-use reth_primitives::{GotExpected, B256};
+use reth_primitives::GotExpected;
 use reth_storage_api::{BlockReader, DBProvider};
 use reth_storage_errors::provider::ProviderResult;
+
 use reth_trie::HashedPostState;
 use reth_trie_db::DatabaseHashedPostState;
 
