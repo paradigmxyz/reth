@@ -66,6 +66,7 @@ use std::{
 };
 use tokio::sync::watch;
 use tracing::{debug, error, warn};
+use metrics::DurationsRecorder;
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -3452,8 +3453,8 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     /// * `ProviderResult<StoredBlockBodyIndices>` - The indices of the transactions in the block
     fn insert_block_header_and_transaction_data(
         &self,
-        block: SealedBlockWithSenders,
-        durations_recorder: &mut metrics::DurationsRecorder,
+        block: &SealedBlockWithSenders,
+        durations_recorder: &mut DurationsRecorder,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
 
@@ -3497,7 +3498,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         let mut transactions_elapsed = Duration::default();
         let mut tx_hash_numbers_elapsed = Duration::default();
 
-        for (transaction, sender) in block.block.body.into_iter().zip(block.senders.iter()) {
+        for (transaction, sender) in block.block.body.clone().into_iter().zip(block.senders.iter()) {
             let hash = transaction.hash();
 
             if self
@@ -3578,7 +3579,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     fn insert_block_additional_data(
         &self,
         block: SealedBlockWithSenders,
-        durations_recorder: &mut metrics::DurationsRecorder,
+        durations_recorder: &mut DurationsRecorder,
     ) -> ProviderResult<()> {
         let block_number = block.number;
 
@@ -3637,10 +3638,10 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         block: SealedBlockWithSenders,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
-        let mut durations_recorder = metrics::DurationsRecorder::default();
+        let mut durations_recorder = DurationsRecorder::default();
 
         let block_indices =
-            self.insert_block_header_and_transaction_data(block.clone(), &mut durations_recorder)?;
+            self.insert_block_header_and_transaction_data(&block, &mut durations_recorder)?;
         self.insert_block_additional_data(block, &mut durations_recorder)?;
 
         debug!(
