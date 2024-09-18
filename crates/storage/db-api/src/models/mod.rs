@@ -4,8 +4,12 @@ use crate::{
     table::{Compress, Decode, Decompress, Encode},
     DatabaseError,
 };
+use alloy_primitives::{Address, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Address, B256, *};
+use reth_primitives::{
+    Account, Bytecode, GenesisAccount, Header, Receipt, Requests, SealedHeader, StorageEntry,
+    TransactionSignedNoHash, TxType,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
