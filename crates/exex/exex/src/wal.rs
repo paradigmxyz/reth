@@ -28,32 +28,39 @@ struct CachedBlock {
 
 #[derive(Debug)]
 pub(crate) struct Wal {
+    /// The path to the WAL file.
     path: PathBuf,
+    /// The file handle of the WAL file.
     file: File,
+    /// The block cache of the WAL. Acts as a FIFO queue with a maximum size of
+    /// [`MAX_CACHED_BLOCKS`].
+    ///
+    /// For each notification written to the WAL, there will be an entry per block written to
+    /// the cache with the same file offset as the notification in the WAL file.
     block_cache: VecDeque<CachedBlock>,
 }
 
 impl Wal {
     /// Creates a new instance of [`Wal`].
-    pub(crate) fn new(directory: PathBuf) -> Self {
+    pub(crate) fn new(directory: PathBuf) -> eyre::Result<Self> {
         let path = directory.join("latest.wal");
-        let file = File::create(&path).unwrap();
+        let file = File::create(&path)?;
 
         let mut wal = Self { path, file, block_cache: VecDeque::new() };
-        wal.fill_block_cache(u64::MAX).unwrap();
+        wal.fill_block_cache(u64::MAX)?;
 
-        wal
+        Ok(wal)
     }
 
     /// Fills the block cache with the notifications from the WAL file, up to the given offset in
     /// bytes, not inclusive.
     fn fill_block_cache(&mut self, to_offset: u64) -> eyre::Result<()> {
-        let reader = BufReader::new(&self.file);
-        let mut file_offset = 0;
         self.block_cache = VecDeque::new();
-        for line in reader.split(b'\n') {
-            let line = line.unwrap();
-            let chain: Chain = bincode::deserialize(&line).unwrap();
+
+        let mut file_offset = 0;
+        for line in BufReader::new(&self.file).split(b'\n') {
+            let line = line?;
+            let chain: Chain = bincode::deserialize(&line)?;
             for block in chain.blocks().values() {
                 self.block_cache.push_back(CachedBlock {
                     file_offset,
@@ -227,13 +234,17 @@ impl Wal {
             return Ok(())
         };
 
-        let old_file_path = self.path.with_extension("tmp");
-        reth_fs_util::rename(&self.path, &old_file_path)?;
+        // Rename the existing WAL file to a temporary one.
+        let tmp_file_path = self.path.with_extension("tmp");
+        reth_fs_util::rename(&self.path, &tmp_file_path)?;
 
-        let mut old_file = File::open(&old_file_path)?;
+        // Open the temporary file for reading and seek to the first notification containing an
+        // unfinalized block.
+        let mut old_file = File::open(&tmp_file_path)?;
         old_file.seek(SeekFrom::Start(unfinalized_from_offset))?;
-        let mut new_file = File::create(&self.path)?;
 
+        // Copy the notifications with unfinalized blocks to the new file.
+        let mut new_file = File::create(&self.path)?;
         loop {
             let mut buffer = [0; 4096];
             let read = old_file.read(&mut buffer)?;
@@ -244,10 +255,11 @@ impl Wal {
             }
         }
 
-        reth_fs_util::remove_file(old_file_path)?;
-
+        // Remove the temporary file and update the file handle with the new one.
+        reth_fs_util::remove_file(tmp_file_path)?;
         self.file = new_file;
 
+        // Fill the block cache with the notifications from the new file.
         self.fill_block_cache(u64::MAX)?;
 
         Ok(())
