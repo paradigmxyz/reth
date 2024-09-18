@@ -44,10 +44,11 @@ pub type PeerId = alloy_primitives::B512;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
-    type Transaction: PoolTransaction<
-        Pooled = PooledTransactionsElementEcRecovered,
-        Consensus = TransactionSignedEcRecovered,
-    >;
+    type Transaction: PoolTransaction;
+    // <
+    //     Pooled = PooledTransactionsElementEcRecovered,
+    //     Consensus = TransactionSignedEcRecovered,
+    // >;
 
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
@@ -922,11 +923,11 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + Clone {
 
 /// An extension trait that provides additional interfaces for the
 /// [`EthTransactionValidator`](crate::EthTransactionValidator).
-pub trait EthPoolTransaction:
-    PoolTransaction<
-    Pooled = PooledTransactionsElementEcRecovered,
-    Consensus = TransactionSignedEcRecovered,
->
+pub trait EthPoolTransaction: PoolTransaction
+// <
+//     Pooled = PooledTransactionsElementEcRecovered,
+//     Consensus = TransactionSignedEcRecovered,
+// >
 {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;

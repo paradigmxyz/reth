@@ -18,7 +18,7 @@ use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     BlockNumberOrTag, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned,
+    TransactionSigned, TransactionSignedEcRecovered,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -107,6 +107,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         + Send
         + 'static,
     P: TransactionPoolExt + 'static,
+    <P as TransactionPool>::Transaction: From<PooledTransactionsElementEcRecovered>,
+    <P as TransactionPool>::Transaction: TryFrom<TransactionSignedEcRecovered>,
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -342,11 +344,13 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     .ok()
                                 })
                                 .map(|tx| {
-                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled(tx)
+                                    <P as TransactionPool>::Transaction::from(tx)
+                                    // <<P as TransactionPool>::Transaction as
+                                    // PoolTransaction>::from_pooled(tx)
                                 })
                         } else {
-
-                            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
+                            <P as TransactionPool>::Transaction::try_from(tx).ok()
+                            // <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();

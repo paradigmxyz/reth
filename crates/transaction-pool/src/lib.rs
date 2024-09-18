@@ -155,7 +155,9 @@ use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{BlobTransactionSidecar, PooledTransactionsElement};
+use reth_primitives::{
+    BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElement,
+};
 use reth_rpc_types::BlobAndProofV1;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -324,6 +326,7 @@ where
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: IntoRecoveredTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
@@ -546,6 +549,7 @@ where
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: IntoRecoveredTransaction,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
     S: BlobStore,
 {
