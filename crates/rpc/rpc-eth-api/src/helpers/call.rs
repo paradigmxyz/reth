@@ -4,6 +4,7 @@
 use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use alloy_primitives::{Bytes, TxKind, B256, U256};
 use futures::Future;
+use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     basefee::calc_next_block_base_fee,
@@ -12,7 +13,7 @@ use reth_primitives::{
         ResultAndState, TransactTo, TxEnv,
     },
     transaction::AccessListResult,
-    TransactionSignedEcRecovered,
+    Header, TransactionSignedEcRecovered,
 };
 use reth_provider::{ChainSpecProvider, HeaderProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
@@ -26,9 +27,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_server_types::constants::gas_oracle::{
-    CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
-};
+use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_rpc_types::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -461,7 +460,7 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm;
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(&self, at: BlockId, f: F) -> Result<R, Self::Error>

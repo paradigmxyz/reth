@@ -13,6 +13,7 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
+use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
@@ -34,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::ProviderNodeTypes;
+use super::{DatabaseProvider, ProviderNodeTypes};
 
 /// The main type for interacting with the blockchain.
 ///
@@ -263,10 +264,15 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
-    type Provider = DatabaseProviderRO<N::DB>;
+    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
+    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        self.database.provider()
+        self.database.database_provider_ro()
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        self.database.database_provider_rw()
     }
 }
 
@@ -994,7 +1000,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1009,7 +1015,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?
@@ -1025,7 +1031,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
@@ -1039,7 +1045,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider for BlockchainProvider2<N> {
         evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number)?

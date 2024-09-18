@@ -1,10 +1,11 @@
+use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},
     tables,
     transaction::DbTxMut,
 };
-use reth_primitives::{Account, StorageEntry, B256, U256};
+use reth_primitives::{Account, StorageEntry};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},

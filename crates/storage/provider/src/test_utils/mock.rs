@@ -146,8 +146,13 @@ impl MockEthProvider {
 impl DatabaseProviderFactory for MockEthProvider {
     type DB = DatabaseMock;
     type Provider = DatabaseProvider<TxMock>;
+    type ProviderRW = DatabaseProvider<TxMock>;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 }
@@ -675,7 +680,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -688,7 +693,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -700,7 +705,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -712,7 +717,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }

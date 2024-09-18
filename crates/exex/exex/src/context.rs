@@ -30,13 +30,18 @@ pub struct ExExContext<Node: FullNodeComponents> {
     ///
     /// Once an [`ExExNotification`](crate::ExExNotification) is sent over the channel, it is
     /// considered delivered by the node.
-    pub notifications: ExExNotifications<Node>,
+    pub notifications: ExExNotifications<Node::Provider, Node::Executor>,
 
     /// node components
     pub components: Node,
 }
 
-impl<Node: FullNodeComponents> Debug for ExExContext<Node> {
+impl<Node> Debug for ExExContext<Node>
+where
+    Node: FullNodeComponents,
+    Node::Provider: Debug,
+    Node::Executor: Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExContext")
             .field("head", &self.head)

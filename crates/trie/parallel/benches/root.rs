@@ -1,9 +1,10 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use rayon::ThreadPoolBuilder;
-use reth_primitives::{Account, B256, U256};
+use reth_primitives::Account;
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, StateChangeWriter,
     TrieWriter,

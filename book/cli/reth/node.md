@@ -550,6 +550,7 @@ Debug:
 
           Example: `witness,prestate`
 
+          [default: witness]
           [possible values: witness, pre-state, opcode]
 
       --debug.healthy-node-rpc-url <URL>
