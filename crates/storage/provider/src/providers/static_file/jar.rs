@@ -48,7 +48,7 @@ impl<'a> StaticFileJarProvider<'a> {
     where
         'b: 'a,
     {
-        let result = StaticFileCursor::new(self.value(), self.mmap_handle())?;
+        let result = StaticFileCursor::new(self.value(), self.reader_handle())?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(

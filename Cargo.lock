@@ -8630,6 +8630,7 @@ dependencies = [
  "reth-exex",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-nippy-jar",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

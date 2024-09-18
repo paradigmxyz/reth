@@ -1,4 +1,6 @@
-use crate::{writer::OFFSET_SIZE_BYTES, NippyJar, NippyJarError, NippyJarHeader};
+use crate::{
+    reader::DataReader, writer::OFFSET_SIZE_BYTES, NippyJar, NippyJarError, NippyJarHeader,
+};
 use std::{
     cmp::Ordering,
     fs::{File, OpenOptions},
