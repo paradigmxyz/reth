@@ -1,31 +1,35 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    RequestsProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    AccountReader, BlockExecutionReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProvider,
+    EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_db::mock::{DatabaseMock, TxMock};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, Header, Receipt, SealedBlock,
+    BlockNumberOrTag, BlockWithSenders, Bytecode, Bytes, GotExpected, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{StageCheckpointReader, StateProofProvider};
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_api::{
+    DatabaseProviderFactory, StageCheckpointReader, StateProofProvider, StorageRootProvider,
+};
+use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdates, AccountProof, HashedPostState,
-    HashedStorage,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
@@ -136,6 +140,20 @@ impl MockEthProvider {
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
+    }
+}
+
+impl DatabaseProviderFactory for MockEthProvider {
+    type DB = DatabaseMock;
+    type Provider = DatabaseProvider<TxMock>;
+    type ProviderRW = DatabaseProvider<TxMock>;
+
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 }
 
@@ -568,20 +586,15 @@ impl StageCheckpointReader for MockEthProvider {
 }
 
 impl StateRootProvider for MockEthProvider {
-    fn hashed_state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn hashed_state_root_from_nodes(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
-    ) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn hashed_state_root_with_updates(
+    fn state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -589,38 +602,46 @@ impl StateRootProvider for MockEthProvider {
         Ok((state_root, Default::default()))
     }
 
-    fn hashed_storage_root(
+    fn state_root_from_nodes_with_updates(
         &self,
-        _address: Address,
-        _hashed_storage: HashedStorage,
-    ) -> ProviderResult<B256> {
-        Ok(B256::default())
-    }
-
-    fn hashed_state_root_from_nodes_with_updates(
-        &self,
-        _nodes: TrieUpdates,
-        _hashed_state: HashedPostState,
-        _prefix_sets: TriePrefixSetsMut,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))
     }
 }
 
-impl StateProofProvider for MockEthProvider {
-    fn hashed_proof(
+impl StorageRootProvider for MockEthProvider {
+    fn storage_root(
         &self,
-        _hashed_state: HashedPostState,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
+}
+
+impl StateProofProvider for MockEthProvider {
+    fn proof(
+        &self,
+        _input: TrieInput,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Ok(MultiProof::default())
+    }
+
     fn witness(
         &self,
-        _overlay: HashedPostState,
+        _input: TrieInput,
         _target: HashedPostState,
     ) -> ProviderResult<HashMap<B256, Bytes>> {
         Ok(HashMap::default())
@@ -634,7 +655,7 @@ impl StateProvider for MockEthProvider {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         let lock = self.accounts.lock();
-        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
@@ -659,7 +680,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -672,7 +693,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -684,7 +705,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -696,7 +717,7 @@ impl EvmEnvProvider for MockEthProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -783,5 +804,20 @@ impl ChangeSetReader for MockEthProvider {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+}
+
+impl BlockExecutionReader for MockEthProvider {
+    fn get_block_and_execution_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Chain> {
+        Ok(Chain::default())
+    }
+}
+
+impl StateReader for MockEthProvider {
+    fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+        Ok(None)
     }
 }

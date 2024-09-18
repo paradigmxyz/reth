@@ -78,14 +78,17 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    CanonicalStateUpdate, ChangedAccount, PoolConfig, TransactionOrdering, TransactionValidator,
+    CanonicalStateUpdate, PoolConfig, TransactionOrdering, TransactionValidator,
 };
+use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
+
 use reth_primitives::{
-    Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
-    PooledTransactionsElement, TransactionSigned, TxHash, B256,
+    BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction, PooledTransactionsElement,
+    TransactionSigned,
 };
 use std::{
     collections::{HashMap, HashSet},

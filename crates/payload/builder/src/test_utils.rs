@@ -15,16 +15,16 @@ use std::{
 };
 
 /// Creates a new [`PayloadBuilderService`] for testing purposes.
-pub fn test_payload_service<Engine>() -> (
+pub fn test_payload_service<T>() -> (
     PayloadBuilderService<
         TestPayloadJobGenerator,
         futures_util::stream::Empty<CanonStateNotification>,
-        Engine,
+        T,
     >,
-    PayloadBuilderHandle<Engine>,
+    PayloadBuilderHandle<T>,
 )
 where
-    Engine: PayloadTypes<
+    T: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
@@ -33,9 +33,9 @@ where
 }
 
 /// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
-pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
+pub fn spawn_test_payload_service<T>() -> PayloadBuilderHandle<T>
 where
-    Engine: PayloadTypes<
+    T: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
@@ -82,7 +82,12 @@ impl PayloadJob for TestPayloadJob {
     type BuiltPayload = EthBuiltPayload;
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        Ok(EthBuiltPayload::new(self.attr.payload_id(), Block::default().seal_slow(), U256::ZERO))
+        Ok(EthBuiltPayload::new(
+            self.attr.payload_id(),
+            Block::default().seal_slow(),
+            U256::ZERO,
+            None,
+        ))
     }
 
     fn payload_attributes(&self) -> Result<EthPayloadBuilderAttributes, PayloadBuilderError> {

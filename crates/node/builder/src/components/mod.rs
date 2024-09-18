@@ -25,7 +25,9 @@ use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_network_api::FullNetwork;
+use reth_node_api::NodeTypesWithEngine;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_primitives::Header;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{ConfigureEvm, FullNodeTypes};
@@ -35,12 +37,12 @@ use crate::{ConfigureEvm, FullNodeTypes};
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
+pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvm<Header = Header>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;
@@ -67,7 +69,7 @@ pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Unpin + Send + Sync 
     fn network(&self) -> &Self::Network;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<NodeTypes::Engine>;
+    fn payload_builder(&self) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
 }
 
 /// All the components of the node.
@@ -86,7 +88,7 @@ pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus> {
     /// The network implementation of the node.
     pub network: NetworkHandle,
     /// The handle to the payload builder service.
-    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
 }
 
 impl<Node, Pool, EVM, Executor, Cons> NodeComponents<Node>
@@ -94,7 +96,7 @@ impl<Node, Pool, EVM, Executor, Cons> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
 {
@@ -124,7 +126,9 @@ where
         &self.network
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+    fn payload_builder(
+        &self,
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
         &self.payload_builder
     }
 }
@@ -133,7 +137,7 @@ impl<Node, Pool, EVM, Executor, Cons> Clone for Components<Node, Pool, EVM, Exec
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvm<Header = Header>,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone,
 {

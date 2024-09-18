@@ -9,7 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod finished_height;
+mod head;
 mod notification;
 
 pub use finished_height::FinishedExExHeight;
+pub use head::ExExHead;
 pub use notification::ExExNotification;

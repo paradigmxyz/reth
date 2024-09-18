@@ -1,10 +1,10 @@
+use alloy_primitives::{B256, U256};
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_payload_primitives::EngineObjectValidationError;
-use reth_primitives::{B256, U256};
 use reth_rpc_types::ToRpcError;
 use thiserror::Error;
 
@@ -41,6 +41,12 @@ pub enum EngineApiError {
     PayloadRequestTooLarge {
         /// The length that was requested.
         len: u64,
+    },
+    /// Too many requested versioned hashes for blobs request
+    #[error("requested blob count too large: {len}")]
+    BlobRequestTooLarge {
+        /// The length that was requested.
+        len: usize,
     },
     /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
@@ -117,10 +123,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
-                _,
-            )) |
             EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
@@ -147,7 +151,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 error.to_string(),
                 None::<()>,
             ),
-            EngineApiError::PayloadRequestTooLarge { .. } => {
+            EngineApiError::PayloadRequestTooLarge { .. } |
+            EngineApiError::BlobRequestTooLarge { .. } => {
                 jsonrpsee_types::error::ErrorObject::owned(
                     REQUEST_TOO_LARGE_CODE,
                     REQUEST_TOO_LARGE_MESSAGE,

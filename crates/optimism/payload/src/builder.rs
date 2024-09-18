@@ -4,20 +4,29 @@ use crate::{
     error::OptimismPayloadBuilderError,
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
+use alloy_primitives::U256;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{
+    system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv,
+    NextBlockEnvAttributes,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
+    constants::BEACON_NONCE,
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
+    proofs,
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
+use reth_transaction_pool::{
+    noop::NoopTransactionPool, BestTransactionsAttributes, TransactionPool,
+};
 use reth_trie::HashedPostState;
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -59,13 +68,32 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
         self.compute_pending_block
     }
 }
+impl<EvmConfig> OptimismPayloadBuilder<EvmConfig>
+where
+    EvmConfig: ConfigureEvmEnv<Header = Header>,
+{
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    fn cfg_and_block_env(
+        &self,
+        config: &PayloadConfig<OptimismPayloadBuilderAttributes>,
+        parent: &Header,
+    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: config.attributes.timestamp(),
+            suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
+            prev_randao: config.attributes.prev_randao(),
+        };
+        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+    }
+}
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -74,7 +102,14 @@ where
         &self,
         args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
     ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError> {
-        optimism_payload_builder(self.evm_config.clone(), args, self.compute_pending_block)
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(
+            self.evm_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            self.compute_pending_block,
+        )
     }
 
     fn on_missing_payload(
@@ -86,139 +121,26 @@ where
         MissingPayloadBehaviour::AwaitInProgress
     }
 
+    // NOTE: this should only be used for testing purposes because this doesn't have access to L1
+    // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
     fn build_empty_payload(
         &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
-        let extra_data = config.extra_data();
-        let PayloadConfig {
-            initialized_block_env,
-            parent_block,
-            attributes,
-            chain_spec,
-            initialized_cfg,
-            ..
-        } = config;
-
-        debug!(target: "payload_builder", parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building empty payload");
-
-        let state = client.state_by_block_hash(parent_block.hash()).map_err(|err| {
-                warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to get state for empty payload");
-                err
-            })?;
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state))
-            .with_bundle_update()
-            .build();
-
-        let base_fee = initialized_block_env.basefee.to::<u64>();
-        let block_number = initialized_block_env.number.to::<u64>();
-        let block_gas_limit: u64 =
-            initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
-
-        // apply eip-4788 pre block contract call
-        pre_block_beacon_root_contract_call(
-            &mut db,
-            &self.evm_config,
-            &chain_spec,
-            &initialized_cfg,
-            &initialized_block_env,
-            block_number,
-            attributes.payload_attributes.timestamp,
-            attributes.payload_attributes.parent_beacon_block_root,
-        )
-        .map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to apply beacon root contract call for empty payload"
-            );
-            PayloadBuilderError::Internal(err.into())
-        })?;
-
-        let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
-            &mut db,
-            &chain_spec,
-            attributes.payload_attributes.timestamp,
-            attributes.payload_attributes.withdrawals.clone(),
-        )
-        .map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to commit withdrawals for empty payload"
-            );
-            err
-        })?;
-
-        // merge all transitions into bundle state, this would apply the withdrawal balance
-        // changes and 4788 contract call
-        db.merge_transitions(BundleRetention::PlainState);
-
-        // calculate the state root
-        let bundle_state = db.take_bundle();
-        let state_root = db.database.state_root(&bundle_state).map_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_block.hash(),
-                %err,
-                "failed to calculate state root for empty payload"
-            );
-            err
-        })?;
-
-        let mut excess_blob_gas = None;
-        let mut blob_gas_used = None;
-
-        if chain_spec.is_cancun_active_at_timestamp(attributes.payload_attributes.timestamp) {
-            excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_block.timestamp) {
-                let parent_excess_blob_gas = parent_block.excess_blob_gas.unwrap_or_default();
-                let parent_blob_gas_used = parent_block.blob_gas_used.unwrap_or_default();
-                Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
-            } else {
-                // for the first post-fork block, both parent.blob_gas_used and
-                // parent.excess_blob_gas are evaluated as 0
-                Some(calculate_excess_blob_gas(0, 0))
-            };
-
-            blob_gas_used = Some(0);
-        }
-
-        let header = Header {
-            parent_hash: parent_block.hash(),
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: initialized_block_env.coinbase,
-            state_root,
-            transactions_root: EMPTY_TRANSACTIONS,
-            withdrawals_root,
-            receipts_root: EMPTY_RECEIPTS,
-            logs_bloom: Default::default(),
-            timestamp: attributes.payload_attributes.timestamp,
-            mix_hash: attributes.payload_attributes.prev_randao,
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
-            number: parent_block.number + 1,
-            gas_limit: block_gas_limit,
-            difficulty: U256::ZERO,
-            gas_used: 0,
-            extra_data,
-            blob_gas_used,
-            excess_blob_gas,
-            parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-            requests_root: None,
+        let args = BuildArguments {
+            client,
+            config,
+            // we use defaults here because for the empty payload we don't need to execute anything
+            pool: NoopTransactionPool::default(),
+            cached_reads: Default::default(),
+            cancel: Default::default(),
+            best_payload: None,
         };
-
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
-        let sealed_block = block.seal_slow();
-
-        Ok(OptimismBuiltPayload::new(
-            attributes.payload_attributes.payload_id(),
-            sealed_block,
-            U256::ZERO,
-            chain_spec,
-            attributes,
-            None,
-        ))
+        let (cfg_env, block_env) = self.cfg_and_block_env(&args.config, &args.config.parent_block);
+        optimism_payload(self.evm_config.clone(), args, cfg_env, block_env, false)?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -231,13 +153,15 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub(crate) fn optimism_payload_builder<EvmConfig, Pool, Client>(
+pub(crate) fn optimism_payload<EvmConfig, Pool, Client>(
     evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    initialized_cfg: CfgEnvWithHandlerCfg,
+    initialized_block_env: BlockEnv,
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -247,15 +171,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
-    let extra_data = config.extra_data();
-    let PayloadConfig {
-        initialized_block_env,
-        initialized_cfg,
-        parent_block,
-        attributes,
-        chain_spec,
-        ..
-    } = config;
+    let PayloadConfig { parent_block, attributes, chain_spec, extra_data } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
@@ -289,8 +205,6 @@ where
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
-        block_number,
-        attributes.payload_attributes.timestamp,
         attributes.payload_attributes.parent_beacon_block_root,
     )
     .map_err(|err| {
@@ -519,8 +433,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome =
-        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let execution_outcome = ExecutionOutcome::new(
+        db.take_bundle(),
+        vec![receipts.clone()].into(),
+        block_number,
+        Vec::new(),
+    );
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -534,15 +452,13 @@ where
     let hashed_state = HashedPostState::from_bundle_state(&execution_outcome.state().state);
     let (state_root, trie_output) = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.hashed_state_root_with_updates(hashed_state.clone()).inspect_err(
-            |err| {
-                warn!(target: "payload_builder",
-                    parent_hash=%parent_block.hash(),
-                    %err,
-                    "failed to calculate state root for empty payload"
-                );
-            },
-        )?
+        state_provider.db.state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+            warn!(target: "payload_builder",
+                parent_hash=%parent_block.hash(),
+                %err,
+                "failed to calculate state root for empty payload"
+            );
+        })?
     };
 
     // create the block header

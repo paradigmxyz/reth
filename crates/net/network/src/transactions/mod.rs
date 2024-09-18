@@ -47,7 +47,9 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned, TxHash, B256};
+use reth_primitives::{
+    PooledTransactionsElement, TransactionSigned, TransactionSignedEcRecovered, TxHash, B256,
+};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1022,13 +1024,7 @@ where
                         entry.get_mut().insert(peer_id);
                     }
                     Entry::Vacant(entry) => {
-                        if !self.bad_imports.contains(tx.hash()) {
-                            // this is a new transaction that should be imported into the pool
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
-                            new_txs.push(pool_transaction);
-
-                            entry.insert(HashSet::from([peer_id]));
-                        } else {
+                        if self.bad_imports.contains(tx.hash()) {
                             trace!(target: "net::tx",
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
@@ -1036,6 +1032,12 @@ where
                                 "received a known bad transaction from peer"
                             );
                             has_bad_transactions = true;
+                        } else {
+                            // this is a new transaction that should be imported into the pool
+                            let pool_transaction = Pool::Transaction::from_pooled(tx);
+                            new_txs.push(pool_transaction);
+
+                            entry.insert(HashSet::from([peer_id]));
                         }
                     }
                 }
@@ -1395,9 +1397,11 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
+    fn new<T: PoolTransaction<Consensus = TransactionSignedEcRecovered>>(
+        tx: Arc<ValidPoolTransaction<T>>,
+    ) -> Self {
         let size = tx.encoded_length();
-        let transaction = Arc::new(tx.transaction.clone().into().into_signed());
+        let transaction = Arc::new(tx.transaction.clone().into_consensus().into_signed());
         Self { size, transaction }
     }
 }

@@ -4,6 +4,8 @@ Start the node
 
 ```bash
 $ reth node --help
+```
+```txt
 Usage: reth node [OPTIONS]
 
 Options:
@@ -56,7 +58,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
 Networking:
@@ -213,6 +215,16 @@ Networking:
 
           [default: 131072]
 
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -230,7 +242,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -254,7 +266,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -522,8 +534,22 @@ Debug:
       --debug.reorg-frequency <REORG_FREQUENCY>
           If provided, the chain will be reorged at specified frequency
 
+      --debug.reorg-depth <REORG_DEPTH>
+          The reorg depth for chain reorgs
+
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
+
+      --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
+          Determines which type of invalid block hook to install
+
+          Example: `witness,prestate`
+
+          [default: witness]
+          [possible values: witness, pre-state, opcode]
+
+      --debug.healthy-node-rpc-url <URL>
+          The RPC URL of a healthy node to use for comparing invalid block hook results against.
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -565,7 +591,60 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
+          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
+
+      --block-interval <BLOCK_INTERVAL>
+          Minimum pruning interval measured in blocks
+
+          [default: 0]
+
+      --prune.senderrecovery.full
+          Prunes all sender recovery data
+
+      --prune.senderrecovery.distance <BLOCKS>
+          Prune sender recovery data before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.senderrecovery.before <BLOCK_NUMBER>
+          Prune sender recovery data before the specified block number. The specified block number is not pruned
+
+      --prune.transactionlookup.full
+          Prunes all transaction lookup data
+
+      --prune.transactionlookup.distance <BLOCKS>
+          Prune transaction lookup data before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.transactionlookup.before <BLOCK_NUMBER>
+          Prune transaction lookup data before the specified block number. The specified block number is not pruned
+
+      --prune.receipts.full
+          Prunes all receipt data
+
+      --prune.receipts.distance <BLOCKS>
+          Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.receipts.before <BLOCK_NUMBER>
+          Prune receipts before the specified block number. The specified block number is not pruned
+
+      --prune.accounthistory.full
+          Prunes all account history
+
+      --prune.accounthistory.distance <BLOCKS>
+          Prune account before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.accounthistory.before <BLOCK_NUMBER>
+          Prune account history before the specified block number. The specified block number is not pruned
+
+      --prune.storagehistory.full
+          Prunes all storage history data
+
+      --prune.storagehistory.distance <BLOCKS>
+          Prune storage history before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.storagehistory.before <BLOCK_NUMBER>
+          Prune storage history before the specified block number. The specified block number is not pruned
+
+      --prune.receiptslogfilter <FILTER_CONFIG>
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
 Engine:
       --engine.experimental

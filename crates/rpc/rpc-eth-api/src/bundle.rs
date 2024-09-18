@@ -2,8 +2,8 @@
 //!
 //! See also <https://docs.flashbots.net/flashbots-auction/searchers/advanced/rpc-endpoint>
 
+use alloy_primitives::{Bytes, B256};
 use jsonrpsee::proc_macros::rpc;
-use reth_primitives::{Bytes, B256};
 use reth_rpc_types::mev::{
     CancelBundleRequest, CancelPrivateTransactionRequest, EthBundleHash, EthCallBundle,
     EthCallBundleResponse, EthSendBundle, PrivateTransactionRequest,

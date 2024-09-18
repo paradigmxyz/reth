@@ -32,6 +32,9 @@ reth-rpc-types-compat.workspace = true
 jsonrpsee-types.workspace = true
 jsonrpsee.workspace = true
 
+# ethereum
+alloy-primitives.workspace = true
+
 futures-util.workspace = true
 eyre.workspace = true
 tokio.workspace = true

@@ -1,19 +1,24 @@
 //! Command for debugging in-memory merkle trie calculation.
 
-use std::{path::PathBuf, sync::Arc};
-
+use crate::{
+    args::NetworkArgs,
+    utils::{get_single_body, get_single_header},
+};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_node_api::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_ethereum::EthExecutorProvider;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     writer::UnifiedStorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter,
@@ -25,22 +30,17 @@ use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
-
-use crate::{
-    args::NetworkArgs,
-    macros::block_executor,
-    utils::{get_single_body, get_single_header},
-};
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.
 /// The script will then download the block from p2p network and attempt to calculate and verify
 /// merkle root for it.
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -54,12 +54,12 @@ pub struct Command {
     skip_node_depth: Option<usize>,
 }
 
-impl Command {
-    async fn build_network(
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+    async fn build_network<N: NodeTypesWithDB<ChainSpec = C::ChainSpec>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<N>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -77,8 +77,12 @@ impl Command {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
         let provider = provider_factory.provider()?;
 
@@ -132,11 +136,11 @@ impl Command {
             provider_factory.static_file_provider(),
         ));
 
-        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
+        let block_execution_output = executor.execute(
             (
                 &block
                     .clone()
@@ -147,8 +151,7 @@ impl Command {
             )
                 .into(),
         )?;
-        let execution_outcome =
-            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
+        let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(

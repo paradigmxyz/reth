@@ -1,9 +1,11 @@
 //! Storage for blob data of EIP4844 transactions.
 
+use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
-use reth_primitives::{BlobTransactionSidecar, B256};
+use reth_primitives::BlobTransactionSidecar;
+use reth_rpc_types::BlobAndProofV1;
 use std::{
     fmt,
     sync::atomic::{AtomicUsize, Ordering},
@@ -63,6 +65,12 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+
+    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
+    fn get_by_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;

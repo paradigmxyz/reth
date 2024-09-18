@@ -1,8 +1,10 @@
+use std::collections::hash_map;
+
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use alloy_primitives::{keccak256, Address, BlockNumber, B256};
 use reth_db::{cursor::DbCursorRO, models::BlockNumberAddress, tables, DatabaseError};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StorageRootError;
-use reth_primitives::{keccak256, Address, BlockNumber, B256};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
 };
@@ -84,7 +86,9 @@ impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {
             let (BlockNumberAddress((_, storage_address)), storage_change) = entry?;
             if storage_address == address {
                 let hashed_slot = keccak256(storage_change.key);
-                storage.storage.insert(hashed_slot, storage_change.value);
+                if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
+                    entry.insert(storage_change.value);
+                }
             }
         }
         Ok(storage)
