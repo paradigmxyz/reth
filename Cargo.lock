@@ -8027,6 +8027,11 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.7"
+dependencies = [
+ "alloy-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+]
 
 [[package]]
 name = "reth-optimism-rpc"
