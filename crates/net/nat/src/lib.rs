@@ -51,6 +51,7 @@ pub enum NatResolver {
     /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
     /// Resolve external IP via the network interface.
+    #[cfg(not(target_os = "windows"))]
     NetIf,
     /// Resolve nothing
     None,
