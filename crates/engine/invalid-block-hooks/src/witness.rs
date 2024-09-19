@@ -9,7 +9,9 @@ use reth_evm::{
     system_calls::{apply_beacon_root_contract_call, apply_blockhashes_contract_call},
     ConfigureEvm,
 };
-use reth_primitives::{keccak256, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256};
+use reth_primitives::{
+    keccak256, Header, Receipt, SealedBlockWithSenders, SealedHeader, B256, U256,
+};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -50,7 +52,7 @@ impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
 impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
         &self,
@@ -83,7 +85,7 @@ where
         // Apply pre-block system contract calls.
         apply_beacon_root_contract_call(
             &self.evm_config,
-            &self.provider.chain_spec(),
+            self.provider.chain_spec().as_ref(),
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
@@ -153,10 +155,10 @@ where
         // Generate an execution witness for the aggregated state of accessed accounts.
         // Destruct the cache database to retrieve the state provider.
         let state_provider = db.database.into_inner();
-        let witness = state_provider.witness(Default::default(), hashed_state.clone())?;
+        let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness { witness, state_preimages: Some(state_preimages) };
+        let response = ExecutionWitness { state, keys: Some(state_preimages) };
         File::create_new(self.output_directory.join(format!(
             "{}_{}.json",
             block.number,
@@ -236,7 +238,7 @@ where
 impl<P, EvmConfig> InvalidBlockHook for InvalidBlockWitnessHook<P, EvmConfig>
 where
     P: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvm<Header = Header>,
 {
     fn on_invalid_block(
         &self,

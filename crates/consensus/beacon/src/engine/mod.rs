@@ -197,7 +197,7 @@ where
     /// The payload store.
     payload_builder: PayloadBuilderHandle<N::Engine>,
     /// Validator for execution payloads
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<N::ChainSpec>,
     /// Current blockchain tree action.
     blockchain_tree_action: Option<BlockchainTreeAction<N::Engine>>,
     /// Pending forkchoice update.
@@ -462,7 +462,8 @@ where
     ) -> bool {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if self.blockchain.chain_spec().is_optimism() {
+        if reth_chainspec::EthChainSpec::chain(self.blockchain.chain_spec().as_ref()).is_optimism()
+        {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,

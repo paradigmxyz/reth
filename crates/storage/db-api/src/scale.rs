@@ -2,7 +2,7 @@ use crate::{
     table::{Compress, Decompress},
     DatabaseError,
 };
-use reth_primitives::*;
+use alloy_primitives::U256;
 
 mod sealed {
     pub trait Sealed {}

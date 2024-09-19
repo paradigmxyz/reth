@@ -66,7 +66,7 @@ pub trait LoadPendingBlock: EthApiTypes {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm;
+    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header>;
 
     /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
     ///
@@ -387,7 +387,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
-            &chain_spec,
+            chain_spec.as_ref(),
             block_env.timestamp.try_into().unwrap_or(u64::MAX),
             &withdrawals.clone().unwrap_or_default(),
         );

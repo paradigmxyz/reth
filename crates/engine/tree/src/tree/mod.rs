@@ -15,6 +15,7 @@ use reth_blockchain_tree::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
@@ -60,7 +61,7 @@ use tokio::sync::{
 };
 use tracing::*;
 
-mod config;
+pub mod config;
 mod invalid_block_hook;
 mod metrics;
 use crate::{engine::EngineApiRequest, tree::metrics::EngineApiMetrics};
@@ -457,11 +458,11 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
+pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<Spec>,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
     /// The half for sending messages to the engine.
@@ -497,7 +498,9 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes> {
     invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
-impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTreeHandler<P, E, T> {
+impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<P, E, T, Spec>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
@@ -518,12 +521,13 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug> std::fmt::Debug for EngineApiTr
     }
 }
 
-impl<P, E, T> EngineApiTreeHandler<P, E, T>
+impl<P, E, T, Spec> EngineApiTreeHandler<P, E, T, Spec>
 where
     P: DatabaseProviderFactory + BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     <P as DatabaseProviderFactory>::Provider: BlockReader,
     E: BlockExecutorProvider,
     T: EngineTypes,
+    Spec: Send + Sync + EthereumHardforks + 'static,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[allow(clippy::too_many_arguments)]
@@ -531,7 +535,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -576,7 +580,7 @@ where
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         persistence: PersistenceHandle,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState,
@@ -631,7 +635,7 @@ where
         loop {
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
-                    debug!(target: "engine::tree", ?msg, "received new engine message");
+                    debug!(target: "engine::tree", %msg, "received new engine message");
                     if let Err(fatal) = self.on_engine_message(msg) {
                         error!(target: "engine::tree", %fatal, "insert block fatal error");
                         return
@@ -2274,6 +2278,10 @@ where
             for block in blocks.iter().rev() {
                 input.append_cached_ref(block.trie_updates(), block.hashed_state())
             }
+        } else {
+            // The block attaches to canonical persisted parent.
+            let revert_state = consistent_view.revert_state(parent_hash)?;
+            input.append(revert_state);
         }
 
         // Extend with block we are validating root for.
@@ -2647,7 +2655,8 @@ mod tests {
     }
 
     struct TestHarness {
-        tree: EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
+        tree:
+            EngineApiTreeHandler<MockEthProvider, MockExecutorProvider, EthEngineTypes, ChainSpec>,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes>>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
         blocks: Vec<ExecutedBlock>,

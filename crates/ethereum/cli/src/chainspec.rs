@@ -109,8 +109,8 @@ mod tests {
 }"#;
 
         let spec = <EthChainSpecParser as ChainSpecParser>::parse(s).unwrap();
-        assert!(spec.hardforks.is_shanghai_active_at_timestamp(0));
-        assert!(spec.hardforks.is_cancun_active_at_timestamp(0));
-        assert!(spec.hardforks.is_prague_active_at_timestamp(0));
+        assert!(spec.is_shanghai_active_at_timestamp(0));
+        assert!(spec.is_cancun_active_at_timestamp(0));
+        assert!(spec.is_prague_active_at_timestamp(0));
     }
 }

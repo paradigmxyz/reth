@@ -1,9 +1,10 @@
 use crate::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
 };
+use alloy_primitives::{Address, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
-use reth_primitives::{Address, SealedBlock, Withdrawals, B256, U256};
+use reth_primitives::{SealedBlock, Withdrawals};
 use reth_rpc_types::{
     engine::{PayloadAttributes as EthPayloadAttributes, PayloadId},
     optimism::OptimismPayloadAttributes,
@@ -143,4 +144,15 @@ impl PayloadAttributes for OptimismPayloadAttributes {
 
         Ok(())
     }
+}
+
+/// A builder that can return the current payload attribute.
+pub trait PayloadAttributesBuilder: std::fmt::Debug + Send + Sync + 'static {
+    /// The payload attributes type returned by the builder.
+    type PayloadAttributes: PayloadAttributes;
+    /// The error type returned by [`PayloadAttributesBuilder::build`].
+    type Error: std::error::Error + Send + Sync;
+
+    /// Return a new payload attribute from the builder.
+    fn build(&self) -> Result<Self::PayloadAttributes, Self::Error>;
 }
