@@ -41,6 +41,16 @@ where
     for row in &statediffs_accountstate {
         modified_addresses.insert(row.address);
     }
+    for (address,account) in &revm_state_diffs {
+        // There is a situation that revm produce a state diff for an account but the critical values (balance,nonce,code,storage) are not actually changed and we should exclude them to make comparison
+        if account.storage.len() == 0 && !account.storage_was_destroyed {
+            if let (Some(info),Some(previous_info)) = (account.info.clone(),account.previous_info.clone()) {
+                if info.balance == previous_info.balance && info.nonce == previous_info.nonce && info.code_hash == previous_info.code_hash {
+                    modified_addresses.insert(*address);
+                }
+            }
+        }
+    }
     
     if modified_addresses.len() != revm_state_diffs.len() {
         panic!("Difference in number of modified addresses");
