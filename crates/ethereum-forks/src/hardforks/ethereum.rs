@@ -3,6 +3,7 @@ use alloy_primitives::U256;
 use crate::{hardforks::Hardforks, EthereumHardfork, ForkCondition};
 
 /// Helper methods for Ethereum forks.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait EthereumHardforks: Hardforks {
     /// Convenience method to check if [`EthereumHardfork::Shanghai`] is active at a given
     /// timestamp.

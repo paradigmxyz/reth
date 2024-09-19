@@ -97,7 +97,7 @@ where
         requests: block.requests,
     };
 
-    validate_block_pre_execution(&block, chain_spec.as_ref())?;
+    validate_block_pre_execution(&block, &chain_spec)?;
 
     Ok(block)
 }

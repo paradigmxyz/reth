@@ -150,7 +150,7 @@ where
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.evm_config,
-            self.chain_spec.as_ref(),
+            &self.chain_spec,
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,

@@ -94,7 +94,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
 {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
-        validate_header_base_fee(header, self.chain_spec.as_ref())?;
+        validate_header_base_fee(header, &self.chain_spec)?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
@@ -142,7 +142,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         // Ace age did increment it by some formula that we need to follow.
         self.validate_against_parent_gas_limit(header, parent)?;
 
-        validate_against_parent_eip1559_base_fee(header, parent, self.chain_spec.as_ref())?;
+        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
@@ -211,7 +211,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, self.chain_spec.as_ref())
+        validate_block_pre_execution(block, &self.chain_spec)
     }
 
     fn validate_block_post_execution(
@@ -219,12 +219,7 @@ impl<ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensu
         block: &BlockWithSenders,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(
-            block,
-            self.chain_spec.as_ref(),
-            input.receipts,
-            input.requests,
-        )
+        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
     }
 }
 
