@@ -234,20 +234,16 @@ impl Wal {
             return Ok(())
         };
 
-        // Rename the existing WAL file to a temporary one.
-        let tmp_file_path = self.path.with_extension("tmp");
-        reth_fs_util::rename(&self.path, &tmp_file_path)?;
-
-        // Open the temporary file for reading and seek to the first notification containing an
+        // Seek the original file to the first notification containing an
         // unfinalized block.
-        let mut old_file = File::open(&tmp_file_path)?;
-        old_file.seek(SeekFrom::Start(unfinalized_from_offset))?;
+        self.file.seek(SeekFrom::Start(unfinalized_from_offset))?;
 
-        // Copy the notifications with unfinalized blocks to the new file.
-        let mut new_file = File::create(&self.path)?;
+        // Open the temporary file for writing and copy the notifications with unfinalized blocks
+        let tmp_file_path = self.path.with_extension("tmp");
+        let mut new_file = File::create(&tmp_file_path)?;
         loop {
             let mut buffer = [0; 4096];
-            let read = old_file.read(&mut buffer)?;
+            let read = self.file.read(&mut buffer)?;
             new_file.write_all(&buffer[..read])?;
 
             if read < 1024 {
@@ -255,8 +251,8 @@ impl Wal {
             }
         }
 
-        // Remove the temporary file and update the file handle with the new one.
-        reth_fs_util::remove_file(tmp_file_path)?;
+        // Rename the temporary file to the WAL file and update the file handle with it
+        reth_fs_util::rename(&tmp_file_path, &self.path)?;
         self.file = new_file;
 
         // Fill the block cache with the notifications from the new file.
