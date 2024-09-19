@@ -36,7 +36,8 @@ pub(crate) struct Wal {
     /// [`MAX_CACHED_BLOCKS`].
     ///
     /// For each notification written to the WAL, there will be an entry per block written to
-    /// the cache with the same file offset as the notification in the WAL file.
+    /// the cache with the same file offset as the notification in the WAL file. I.e. for each
+    /// notification, there may be multiple blocks in the cache.
     block_cache: VecDeque<CachedBlock>,
 }
 
@@ -82,6 +83,10 @@ impl Wal {
 
     /// Commits the notification to WAL. If the notification contains a
     /// reverted chain, the WAL is truncated.
+    ///
+    /// 1. If there's a reverted chain, walks the WAL file from the end and truncates all blocks
+    ///    from that were reverted.
+    /// 2. If there's a committed chain, encodes the whole notification and writes it to the WAL.
     pub(crate) fn commit(&mut self, notification: &ExExNotification) -> eyre::Result<()> {
         if let Some(reverted_chain) = notification.reverted_chain() {
             let mut truncate_to = None;
@@ -133,8 +138,18 @@ impl Wal {
         Ok(())
     }
 
-    /// Rollbacks the WAL to the given block, inclusive. Returns the block number and hash of the
-    /// lowest removed block.
+    /// Rollbacks the WAL to the given block, inclusive.
+    ///
+    /// 1. Walks the WAL file from the end and searches for the first notification where committed
+    ///    chain contains a block with the same number and hash as `to_block`.
+    /// 2. If the notification is found, truncates the WAL file to the offset of the notification.
+    ///    It means that if the notificaiton contains both given block and blocks before it, the
+    ///    whole notification will be truncated.
+    ///
+    /// # Returns
+    ///
+    /// The block number and hash of the lowest removed block. The caller is expected to backfill
+    /// the blocks between the returned block and the given `to_block`, if there's any.
     pub(crate) fn rollback(
         &mut self,
         to_block: BlockNumHash,
@@ -159,6 +174,7 @@ impl Wal {
 
                 self.file.seek(SeekFrom::Start(block.file_offset))?;
                 let notification: ExExNotification = bincode::deserialize_from(&self.file)?;
+                // TODO(alexey): what if there's no committed chain?
                 lowest_removed_block = notification
                     .committed_chain()
                     .as_ref()
@@ -173,17 +189,23 @@ impl Wal {
 
         if let Some(truncate_to) = truncate_to {
             self.file.set_len(truncate_to)?;
+        } else {
+            self.fill_block_cache(u64::MAX)?;
         }
 
         Ok(lowest_removed_block)
     }
 
     /// Finalizes the WAL to the given block, inclusive.
+    ///
+    /// 1. Finds an offset of the notification with first unfinalized block (first notification
+    ///    containing a committed block higher than `to_block`). If the notificatin includes both
+    ///    finalized and non-finalized blocks, the offset will include this notification (i.e.
+    ///    consider this notification unfinalized).
+    /// 2. Creates a new file and copies all notifications starting from the offset (inclusive) to
+    ///    the end of the original file.
+    /// 3. Renames the new file to the original file.
     pub(crate) fn finalize(&mut self, to_block: BlockNumHash) -> eyre::Result<()> {
-        // Find an offset where the unfinalized blocks start. If the notificatin includes both
-        // finalized and non-finalized blocks, it will not be truncated and the offset will
-        // include it.
-
         // First, walk cache to find the offset of the notification with the finalized block.
         let mut unfinalized_from_offset = None;
         while let Some(cached_block) = self.block_cache.pop_front() {
