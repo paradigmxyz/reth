@@ -1,6 +1,6 @@
 use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
@@ -235,20 +235,8 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub const fn is_eth(&self) -> bool {
-        matches!(
-            self.chain.kind(),
-            ChainKind::Named(
-                NamedChain::Mainnet |
-                    NamedChain::Morden |
-                    NamedChain::Ropsten |
-                    NamedChain::Rinkeby |
-                    NamedChain::Goerli |
-                    NamedChain::Kovan |
-                    NamedChain::Holesky |
-                    NamedChain::Sepolia
-            )
-        )
+    pub const fn is_ethereum(&self) -> bool {
+        self.chain.is_ethereum()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
