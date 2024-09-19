@@ -106,7 +106,7 @@ impl fmt::Display for DatabaseWriteError {
             f,
             "write operation {:?} failed for key \"{}\" in table {}: {}",
             self.operation,
-            reth_primitives::hex::encode(&self.key),
+            alloy_primitives::hex::encode(&self.key),
             self.table_name,
             self.info
         )

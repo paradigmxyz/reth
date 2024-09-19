@@ -4,7 +4,7 @@ This document contains some of our research in how other codebases designed vari
 
 ## P2P
 
-* [`Sentry`](https://github.com/vorot93/sentry), a pluggable p2p node following the [Erigon gRPC architecture](https://erigon.substack.com/p/current-status-of-silkworm-and-silkrpc):
+* [`Sentry`](https://erigon.gitbook.io/erigon/advanced-usage/sentry), a pluggable p2p node following the [Erigon gRPC architecture](https://erigon.substack.com/p/current-status-of-silkworm-and-silkrpc):
     * [`vorot93`](https://github.com/vorot93/) first started by implementing a rust devp2p stack in [`devp2p`](https://github.com/vorot93/devp2p)
     * vorot93 then started work on sentry, using devp2p, to satisfy the erigon architecture of modular components connected with gRPC.
     * The code from rust-ethereum/devp2p was merged into sentry, and rust-ethereum/devp2p was archived

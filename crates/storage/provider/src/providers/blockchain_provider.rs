@@ -7,6 +7,8 @@ use crate::{
     RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -19,10 +21,9 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
-    BlockNumberOrTag, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
+    Account, Block, BlockWithSenders, EthereumHardforks, Header, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    TransactionSignedNoHash, Withdrawal, Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -1395,6 +1396,8 @@ mod tests {
         writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, StaticFileProviderFactory, StaticFileWriter,
     };
+    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1407,14 +1410,14 @@ mod tests {
     use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{
-        BlockHashOrNumber, BlockNumHash, BlockNumberOrTag, BlockWithSenders, Receipt, SealedBlock,
-        SealedBlockWithSenders, StaticFileSegment, TransactionMeta, TransactionSignedNoHash,
-        Withdrawals, B256,
+        BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders, StaticFileSegment,
+        TransactionMeta, TransactionSignedNoHash, Withdrawals,
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-        StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
+        ReceiptProviderIdExt, RequestsProvider, StateProviderFactory, TransactionVariant,
+        TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1490,7 +1493,7 @@ mod tests {
             .collect();
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = factory.database_provider_rw()?;
 
         // Insert blocks into the database
         for block in &database_blocks {

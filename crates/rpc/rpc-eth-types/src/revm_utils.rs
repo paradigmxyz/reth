@@ -206,8 +206,12 @@ impl CallFees {
     }
 }
 
-/// Applies the given block overrides to the env
-pub fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+/// Applies the given block overrides to the env and updates overridden block hashes in the db.
+pub fn apply_block_overrides<DB>(
+    overrides: BlockOverrides,
+    db: &mut CacheDB<DB>,
+    env: &mut BlockEnv,
+) {
     let BlockOverrides {
         number,
         difficulty,
@@ -216,8 +220,13 @@ pub fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
         coinbase,
         random,
         base_fee,
-        block_hash: _,
+        block_hash,
     } = overrides;
+
+    if let Some(block_hashes) = block_hash {
+        // override block hashes
+        db.block_hashes.extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+    }
 
     if let Some(number) = number {
         env.number = number;

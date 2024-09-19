@@ -1,10 +1,10 @@
 //! Engine tree configuration.
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
 /// How close to the canonical head we persist blocks.
-const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;

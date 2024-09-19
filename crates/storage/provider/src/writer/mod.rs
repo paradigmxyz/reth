@@ -3,6 +3,7 @@ use crate::{
     writer::static_file::StaticFileWriter,
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateChangeWriter, StateWriter, TrieWriter,
 };
+use alloy_primitives::{BlockNumber, B256, U256};
 use reth_chain_state::ExecutedBlock;
 use reth_db::{
     cursor::DbCursorRO,
@@ -12,9 +13,7 @@ use reth_db::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256,
-};
+use reth_primitives::{Header, SealedBlock, StaticFileSegment, TransactionSignedNoHash};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     DBProvider, HeaderProvider, ReceiptWriter, StageCheckpointWriter, TransactionsProviderExt,
@@ -47,11 +46,8 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     /// # Parameters
     /// - `database`: An optional reference to a database provider.
     /// - `static_file`: An optional mutable reference to a static file instance.
-    pub fn new<P>(database: &'a P, static_file: Option<ProviderSF>) -> Self
-    where
-        P: AsRef<ProviderDB>,
-    {
-        Self { database: database.as_ref(), static_file }
+    pub const fn new(database: &'a ProviderDB, static_file: Option<ProviderSF>) -> Self {
+        Self { database, static_file }
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider and a static
@@ -60,7 +56,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     where
         P: AsRef<ProviderDB>,
     {
-        Self::new(database, Some(static_file))
+        Self::new(database.as_ref(), Some(static_file))
     }
 
     /// Creates a new instance of [`UnifiedStorageWriter`] from a database provider.
@@ -68,7 +64,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     where
         P: AsRef<ProviderDB>,
     {
-        Self::new(database, None)
+        Self::new(database.as_ref(), None)
     }
 
     /// Returns a reference to the database writer.
@@ -543,15 +539,15 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
+    use alloy_primitives::{keccak256, B256, U256};
     use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives::{
-        keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
-    };
+    use reth_primitives::{Account, Address, Receipt, Receipts, StorageEntry};
+    use reth_storage_api::DatabaseProviderFactory;
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -758,7 +754,7 @@ mod tests {
     #[test]
     fn write_to_db_storage() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address_a = Address::ZERO;
         let address_b = Address::repeat_byte(0xff);
@@ -953,7 +949,7 @@ mod tests {
     #[test]
     fn write_to_db_multiple_selfdestructs() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account_info = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -1268,7 +1264,7 @@ mod tests {
     #[test]
     fn storage_change_after_selfdestruct_within_block() {
         let factory = create_test_provider_factory();
-        let provider = factory.provider_rw().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
 
         let address1 = Address::random();
         let account1 = RevmAccountInfo { nonce: 1, ..Default::default() };
@@ -1418,7 +1414,7 @@ mod tests {
             .collect();
 
         let provider_factory = create_test_provider_factory();
-        let provider_rw = provider_factory.provider_rw().unwrap();
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
 
         // insert initial state to the database
         let tx = provider_rw.tx_ref();

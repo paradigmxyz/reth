@@ -7,6 +7,8 @@ use crate::{
     PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
@@ -15,10 +17,9 @@ use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    U256,
+    Block, BlockWithSenders, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader,
+    StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash, Withdrawal,
+    Withdrawals,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -633,6 +634,7 @@ mod tests {
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
+    use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
@@ -641,7 +643,7 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_primitives::{StaticFileSegment, TxNumber, B256, U256};
+    use reth_primitives::StaticFileSegment;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
@@ -791,8 +793,9 @@ mod tests {
         );
 
         // Checkpoint and no gap
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
-            provider.static_file_provider().latest_writer(StaticFileSegment::Headers).unwrap();
+            static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
         static_file_writer.append_header(head.header(), U256::ZERO, &head.hash()).unwrap();
         static_file_writer.commit().unwrap();
         drop(static_file_writer);

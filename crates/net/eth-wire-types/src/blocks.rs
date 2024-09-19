@@ -2,9 +2,10 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -110,10 +111,10 @@ mod tests {
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
         HeadersDirection,
     };
+    use alloy_primitives::{hex, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxKind,
-        TxLegacy, U256,
+        BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxLegacy,
     };
     use std::str::FromStr;
 
