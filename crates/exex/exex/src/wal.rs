@@ -37,6 +37,9 @@ pub(crate) struct Wal {
     /// For each notification written to the WAL, there will be an entry per block written to
     /// the cache with the same file offset as the notification in the WAL file. I.e. for each
     /// notification, there may be multiple blocks in the cache.
+    ///
+    /// This cache is needed only for convenience, so we can avoid walking the WAL file every time
+    /// we want to find a notification corresponding to a block.
     block_cache: VecDeque<CachedBlock>,
 }
 
