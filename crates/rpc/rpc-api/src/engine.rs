@@ -3,7 +3,7 @@
 //! This contains the `engine_` namespace and the subset of the `eth_` namespace that is exposed to
 //! the consensus client.
 
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4844::BlobAndProofV1, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -15,8 +15,8 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlobAndProofV1, BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log,
-    SyncStatus, TransactionRequest,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, JsonStorageKey, Log, SyncStatus,
+    TransactionRequest,
 };
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
