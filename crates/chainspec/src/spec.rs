@@ -536,8 +536,11 @@ impl ChainSpec {
                     ..Default::default()
                 }
             }
-            ForkCondition::TTD { total_difficulty, .. } => {
+            ForkCondition::TTD { total_difficulty, fork_block: None } => {
                 Head { total_difficulty, ..Default::default() }
+            }
+            ForkCondition::TTD { total_difficulty, fork_block: Some(number) } => {
+                Head { total_difficulty, number, ..Default::default() }
             }
             ForkCondition::Never => unreachable!(),
         }
@@ -923,6 +926,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Muir Glacier at genesis.
+    pub fn muir_glacier_activated(mut self) -> Self {
+        self = self.istanbul_activated();
+        self.hardforks.insert(EthereumHardfork::MuirGlacier, ForkCondition::Block(0));
+        self
+    }
+
     /// Enable Berlin at genesis.
     pub fn berlin_activated(mut self) -> Self {
         self = self.istanbul_activated();
@@ -934,6 +944,20 @@ impl ChainSpecBuilder {
     pub fn london_activated(mut self) -> Self {
         self = self.berlin_activated();
         self.hardforks.insert(EthereumHardfork::London, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Arrow Glacier at genesis.
+    pub fn arrow_glacier_activated(mut self) -> Self {
+        self = self.london_activated();
+        self.hardforks.insert(EthereumHardfork::ArrowGlacier, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Gray Glacier at genesis.
+    pub fn gray_glacier_activated(mut self) -> Self {
+        self = self.arrow_glacier_activated();
+        self.hardforks.insert(EthereumHardfork::GrayGlacier, ForkCondition::Block(0));
         self
     }
 
@@ -1428,15 +1452,19 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::GrayGlacier,
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 15537394 },
+                ),
+                (
+                    EthereumHardfork::Paris,
+                    ForkId { hash: ForkHash([0xbf, 0xe7, 0x0a, 0x5e]), next: 1681338455 },
                 ),
                 (
                     EthereumHardfork::Shanghai,
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
+                    ForkId { hash: ForkHash([0xa7, 0x01, 0xb4, 0xc9]), next: 1710338135 },
                 ),
                 (
                     EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
                 ),
             ],
         );
@@ -1557,24 +1585,25 @@ Post-merge hard forks (timestamp based):
                     ForkId { hash: ForkHash([0x20, 0xc3, 0x27, 0xfc]), next: 15050000 },
                 ),
                 (
-                    Head { number: 15050000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
-                ),
-                // First Shanghai block
+                    Head { number: 15050000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 15537394 },
+                ), // First Gray Glacier block
+                (
+                    Head { number: 15537394, timestamp: 1667999999, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbf, 0xe7, 0x0a, 0x5e]), next: 1681338455 },
+                ), // First Paris block
                 (
                     Head { number: 20000000, timestamp: 1681338455, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
-                ),
-                // First Cancun block
+                    ForkId { hash: ForkHash([0xa7, 0x01, 0xb4, 0xc9]), next: 1710338135 },
+                ), // First Shanghai block
                 (
-                    Head { number: 20000001, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ),
-                // Future Cancun block
+                    Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
+                    ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
+                ), // First Cancun block
                 (
-                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ),
+                    Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
+                ), // Future Cancun block
             ],
         );
     }
@@ -1775,28 +1804,36 @@ Post-merge hard forks (timestamp based):
                 ), // Last Arrow Glacier block
                 (
                     Head { number: 15050000, timestamp: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 15537394 },
                 ), // First Gray Glacier block
                 (
-                    Head { number: 19999999, timestamp: 1667999999, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                    Head { number: 15537393, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 15537394 },
                 ), // Last Gray Glacier block
                 (
+                    Head { number: 15537394, timestamp: 1667999999, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbf, 0xe7, 0x0a, 0x5e]), next: 1681338455 },
+                ), // First Paris block
+                (
+                    Head { number: 19999999, timestamp: 1667999999, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbf, 0xe7, 0x0a, 0x5e]), next: 1681338455 },
+                ), // Last Paris block
+                (
                     Head { number: 20000000, timestamp: 1681338455, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
-                ), // Last Shanghai block
+                    ForkId { hash: ForkHash([0xa7, 0x01, 0xb4, 0xc9]), next: 1710338135 },
+                ), // First Shanghai block
                 (
                     Head { number: 20000001, timestamp: 1710338134, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
-                ), // First Cancun block
+                    ForkId { hash: ForkHash([0xa7, 0x01, 0xb4, 0xc9]), next: 1710338135 },
+                ), // Last Shanghai block
                 (
                     Head { number: 20000002, timestamp: 1710338135, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ), // Future Cancun block
+                    ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
+                ), // First Cancun block
                 (
                     Head { number: 20000003, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
-                ),
+                    ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
+                ), // Future Cancun block
             ],
         );
     }
@@ -2444,7 +2481,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_eth_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 },
+            ForkId { hash: ForkHash([0x74, 0x9e, 0x0c, 0xdc]), next: 0 },
             MAINNET.latest_fork_id()
         )
     }
