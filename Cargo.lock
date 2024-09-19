@@ -6267,6 +6267,7 @@ dependencies = [
 name = "reth-basic-payload-builder"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "futures-core",
  "futures-util",
@@ -8076,6 +8077,7 @@ dependencies = [
 name = "reth-payload-builder"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "futures-util",
  "metrics",
  "pin-project",
@@ -8098,6 +8100,7 @@ dependencies = [
 name = "reth-payload-primitives"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
