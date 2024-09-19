@@ -22,6 +22,7 @@ reth-eth-wire-types.workspace = true
 reth-network-peers.workspace = true
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # metrics

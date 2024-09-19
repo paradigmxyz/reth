@@ -48,6 +48,7 @@ macro_rules! fuzz_type_and_name {
 #[cfg(test)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
+    use alloy_eips::BlockHashOrNumber;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
     use reth_codecs::add_arbitrary_tests;
     use reth_eth_wire::{
@@ -56,7 +57,7 @@ pub mod fuzz_rlp {
         NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
         PooledTransactions, Receipts, Status, Transactions,
     };
-    use reth_primitives::{BlockHashOrNumber, TransactionSigned};
+    use reth_primitives::TransactionSigned;
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
