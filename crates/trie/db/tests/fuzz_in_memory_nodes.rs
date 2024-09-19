@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
 use reth_db::{
