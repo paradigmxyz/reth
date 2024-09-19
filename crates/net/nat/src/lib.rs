@@ -70,7 +70,7 @@ impl fmt::Display for NatResolver {
             Self::Upnp => f.write_str("upnp"),
             Self::PublicIp => f.write_str("publicip"),
             Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
-            Self::NetIf => f.write_str("networkinterface"),
+            Self::NetIf => f.write_str("netif"),
             Self::None => f.write_str("none"),
         }
     }
@@ -96,6 +96,7 @@ impl FromStr for NatResolver {
             "upnp" => Self::Upnp,
             "none" => Self::None,
             "publicip" | "public-ip" => Self::PublicIp,
+            "netif" => Self::NetIf,
             s => {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
