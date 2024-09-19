@@ -61,8 +61,8 @@ impl Wal {
         let mut file_offset = 0;
         for line in BufReader::new(&self.file).split(b'\n') {
             let line = line?;
-            let chain: Chain = bincode::deserialize(&line)?;
-            for block in chain.blocks().values() {
+            let notification: ExExNotification = bincode::deserialize(&line)?;
+            for block in notification.committed_chain().unwrap_or_default().blocks().values() {
                 self.block_cache.push_back(CachedBlock {
                     file_offset,
                     block: (block.number, block.hash()).into(),
