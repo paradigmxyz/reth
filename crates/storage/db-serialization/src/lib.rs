@@ -12,6 +12,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+extern crate core;
 
 mod encode;
 pub use encode::Encode;
@@ -20,6 +21,13 @@ pub use decode::Decode;
 
 mod error;
 pub use error::DecodeError;
+
+mod compress;
+pub use compress::Compress;
+
+mod decompress;
+pub use decompress::Decompress;
+
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
