@@ -13,6 +13,9 @@ use reth_db::TransactionHashNumbers;
 use reth_db_api::cursor::DbCursorRW;
 use std::collections::HashSet;
 
+mod utils;
+use utils::*;
+
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
@@ -252,5 +255,3 @@ where
     })
     .unwrap();
 }
-
-include!("./utils.rs");

@@ -10,6 +10,9 @@ use reth_db_api::{
     transaction::DbTx,
 };
 
+mod utils;
+use utils::*;
+
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
@@ -291,5 +294,3 @@ where
 
     // group.bench_function(format!("{}.RandomRead", T::NAME), |b| {});
 }
-
-include!("./utils.rs");
