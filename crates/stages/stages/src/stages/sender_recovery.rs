@@ -194,8 +194,6 @@ where
             rayon::spawn(move || {
                 let mut rlp_buf = Vec::with_capacity(128);
                 for (number, tx) in chunk {
-                    rlp_buf.clear();
-
                     let res = tx
                         .value()
                         .map_err(|err| Box::new(SenderRecoveryStageError::StageError(err.into())))

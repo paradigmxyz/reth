@@ -1,4 +1,5 @@
 use super::TestStageDB;
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_provider::{DatabaseProvider, ProviderError};
 use reth_stages_api::{
@@ -19,7 +20,8 @@ pub(crate) enum TestRunnerError {
 
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner {
-    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>> + 'static;
+    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>
+        + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;

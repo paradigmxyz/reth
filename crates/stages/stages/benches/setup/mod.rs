@@ -1,5 +1,6 @@
 #![allow(unreachable_pub)]
 use itertools::concat;
+use reth_chainspec::ChainSpec;
 use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -29,7 +30,7 @@ use reth_trie_db::DatabaseStateRoot;
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>>,
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
 >(
     stage: S,
     db: &TestStageDB,
@@ -59,13 +60,10 @@ pub(crate) fn stage_unwind<
     });
 }
 
-pub(crate) fn unwind_hashes<
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>>,
->(
-    stage: S,
-    db: &TestStageDB,
-    range: StageRange,
-) {
+pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
+where
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+{
     let (input, unwind) = range;
 
     let mut stage = stage;

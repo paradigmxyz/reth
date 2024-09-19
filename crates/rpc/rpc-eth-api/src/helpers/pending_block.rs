@@ -387,7 +387,7 @@ pub trait LoadPendingBlock: EthApiTypes {
 
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
-            &chain_spec,
+            chain_spec.as_ref(),
             block_env.timestamp.try_into().unwrap_or(u64::MAX),
             &withdrawals.clone().unwrap_or_default(),
         );

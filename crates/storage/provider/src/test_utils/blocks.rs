@@ -18,7 +18,10 @@ use revm::{
 use std::str::FromStr;
 
 /// Assert genesis block
-pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: SealedBlock) {
+pub fn assert_genesis_block<DB: Database, Spec: Send + Sync>(
+    provider: &DatabaseProviderRW<DB, Spec>,
+    g: SealedBlock,
+) {
     let n = g.number;
     let h = B256::ZERO;
     let tx = provider;
