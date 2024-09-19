@@ -167,7 +167,7 @@ where
         &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, N::Network, TaskExecutor, N::Provider>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self::with_spawner(ctx))
+        Box::new(Self::with_spawner)
     }
 }
 
