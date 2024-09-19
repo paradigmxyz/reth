@@ -1,12 +1,12 @@
 #![allow(unreachable_pub)]
 use itertools::concat;
-use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account, Address, SealedBlock, B256, U256};
-use reth_provider::TrieWriter;
+use reth_provider::{DatabaseProvider, DatabaseProviderFactory, TrieWriter};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
@@ -16,7 +16,7 @@ use reth_testing_utils::generators::{
     random_eoa_accounts, BlockRangeParams,
 };
 use reth_trie::StateRoot;
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path};
 use tokio::runtime::Handle;
 
 mod constants;
@@ -28,7 +28,9 @@ use reth_trie_db::DatabaseStateRoot;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
-pub(crate) fn stage_unwind<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
+pub(crate) fn stage_unwind<
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>>,
+>(
     stage: S,
     db: &TestStageDB,
     range: StageRange,
@@ -57,7 +59,9 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
     });
 }
 
-pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
+pub(crate) fn unwind_hashes<
+    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut>>,
+>(
     stage: S,
     db: &TestStageDB,
     range: StageRange,
@@ -65,7 +69,7 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
     let (input, unwind) = range;
 
     let mut stage = stage;
-    let provider = db.factory.provider_rw().unwrap();
+    let provider = db.factory.database_provider_rw().unwrap();
 
     StorageHashingStage::default().unwind(&provider, unwind).unwrap();
     AccountHashingStage::default().unwind(&provider, unwind).unwrap();

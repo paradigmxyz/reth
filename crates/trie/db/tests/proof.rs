@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, Account};

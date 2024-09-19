@@ -422,7 +422,7 @@ impl RpcInvalidTransactionError {
 
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
-    const fn error_code(&self) -> i32 {
+    pub const fn error_code(&self) -> i32 {
         match self {
             Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
@@ -576,7 +576,8 @@ impl RevertError {
         }
     }
 
-    const fn error_code(&self) -> i32 {
+    /// Returns error code to return for this error.
+    pub const fn error_code(&self) -> i32 {
         EthRpcErrorCode::ExecutionError.code()
     }
 }

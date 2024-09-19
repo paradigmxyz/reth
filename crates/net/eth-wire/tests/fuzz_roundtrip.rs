@@ -46,6 +46,7 @@ macro_rules! fuzz_type_and_name {
 }
 
 #[cfg(test)]
+#[allow(missing_docs)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use alloy_primitives::B256;
 use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};

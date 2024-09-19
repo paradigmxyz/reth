@@ -6847,6 +6847,7 @@ dependencies = [
 name = "reth-downloaders"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "futures",
@@ -7007,7 +7008,6 @@ dependencies = [
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
- "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-payload-validator",
@@ -7075,6 +7075,7 @@ dependencies = [
 name = "reth-eth-wire"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -7110,6 +7111,7 @@ version = "1.0.7"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
+ "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
  "bytes",
@@ -7228,6 +7230,7 @@ dependencies = [
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-storage-errors",
  "revm",
@@ -7507,6 +7510,7 @@ name = "reth-network"
 version = "1.0.7"
 dependencies = [
  "alloy-node-bindings",
+ "alloy-primitives",
  "alloy-provider",
  "alloy-rlp",
  "aquamarine",
@@ -7585,6 +7589,7 @@ dependencies = [
 name = "reth-network-p2p"
 version = "1.0.7"
 dependencies = [
+ "alloy-primitives",
  "auto_impl",
  "derive_more",
  "futures",
@@ -8027,6 +8032,11 @@ dependencies = [
 [[package]]
 name = "reth-optimism-primitives"
 version = "1.0.7"
+dependencies = [
+ "alloy-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+]
 
 [[package]]
 name = "reth-optimism-rpc"
@@ -8181,6 +8191,7 @@ dependencies = [
 name = "reth-provider"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
@@ -8506,6 +8517,7 @@ dependencies = [
 name = "reth-rpc-eth-types"
 version = "1.0.7"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-sol-types",
  "derive_more",
@@ -8665,11 +8677,9 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-consensus",
- "reth-db-api",
  "reth-errors",
  "reth-metrics",
  "reth-network-p2p",
- "reth-node-types",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
@@ -8741,6 +8751,7 @@ dependencies = [
 name = "reth-storage-api"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "reth-chainspec",
@@ -8758,6 +8769,7 @@ dependencies = [
 name = "reth-storage-errors"
 version = "1.0.7"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",

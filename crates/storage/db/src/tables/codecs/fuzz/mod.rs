@@ -41,6 +41,7 @@ macro_rules! impl_fuzzer_with_input {
 
                 #[cfg(test)]
                 #[allow(dead_code)]
+                #[allow(missing_docs)]
                 #[test_fuzz::test_fuzz]
                 pub fn fuzz(obj: $input_type)  {
                     let obj: $name = obj.into();
@@ -48,6 +49,7 @@ macro_rules! impl_fuzzer_with_input {
                 }
 
                 #[test]
+                #[allow(missing_docs)]
                 pub fn test() {
                     fuzz($input_type::default())
                 }

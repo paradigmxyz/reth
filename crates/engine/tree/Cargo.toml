@@ -31,7 +31,6 @@ reth-revm.workspace = true
 reth-rpc-types.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
-reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-trie-parallel.workspace = true
 

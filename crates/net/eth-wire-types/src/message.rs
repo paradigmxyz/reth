@@ -13,8 +13,8 @@ use super::{
 };
 use crate::{EthVersion, SharedTransactions};
 
+use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_primitives::bytes::{Buf, BufMut};
 use std::{fmt::Debug, sync::Arc};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
@@ -496,8 +496,8 @@ mod tests {
     use crate::{
         message::RequestPair, EthMessage, EthMessageID, GetNodeData, NodeData, ProtocolMessage,
     };
+    use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
-    use reth_primitives::hex;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];

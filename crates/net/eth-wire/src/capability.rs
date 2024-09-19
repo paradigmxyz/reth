@@ -7,8 +7,8 @@ use crate::{
     version::ParseVersionError,
     Capability, EthMessage, EthMessageID, EthVersion,
 };
+use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
-use reth_primitives::bytes::Bytes;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
