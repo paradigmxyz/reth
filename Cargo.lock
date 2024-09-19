@@ -2721,7 +2721,6 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-payload-builder",
- "reth-payload-primitives",
  "reth-primitives",
  "reth-rpc-types",
  "reth-tracing",
@@ -2782,7 +2781,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-ethereum",
  "reth-payload-builder",
- "reth-payload-primitives",
  "reth-primitives",
  "tracing",
 ]
