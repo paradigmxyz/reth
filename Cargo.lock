@@ -7284,7 +7284,6 @@ dependencies = [
 name = "reth-exex"
 version = "1.0.6"
 dependencies = [
- "bincode",
  "eyre",
  "futures",
  "metrics",
@@ -7311,10 +7310,8 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
- "rmp",
  "rmp-serde",
  "secp256k1",
- "serde",
  "tempfile",
  "tokio",
  "tokio-util",
