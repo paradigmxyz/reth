@@ -288,7 +288,7 @@ where
         let timestamp = op_block_attributes.payload_attributes.timestamp();
 
         let receipts_root = execution_outcome
-            .optimism_receipts_root_slow(block_number, chain_spec.as_ref(), timestamp)
+            .optimism_receipts_root_slow(block_number, &chain_spec, timestamp)
             .expect("Number is in range");
 
         let logs_bloom =

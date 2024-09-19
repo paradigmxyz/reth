@@ -15,7 +15,6 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::ChainInfo;
-use reth_db::Database;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::ExecutionOutcome;
@@ -36,7 +35,7 @@ use std::{
 };
 use tracing::trace;
 
-use super::{DatabaseProvider, ProviderNodeTypes};
+use super::ProviderNodeTypes;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -187,7 +186,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
     /// 2. The in-block transaction index.
     fn block_state_by_tx_id(
         &self,
-        provider: &DatabaseProviderRO<N::DB>,
+        provider: &DatabaseProviderRO<N::DB, N::ChainSpec>,
         id: TxNumber,
     ) -> ProviderResult<Option<(Option<Arc<BlockState>>, usize)>> {
         // Get the last block number stored in the database
@@ -265,8 +264,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider2<N> {
     type DB = N::DB;
-    type Provider = DatabaseProvider<<N::DB as Database>::TX>;
-    type ProviderRW = DatabaseProvider<<N::DB as Database>::TXMut>;
+    type Provider = <ProviderFactory<N> as DatabaseProviderFactory>::Provider;
+    type ProviderRW = <ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
         self.database.database_provider_ro()

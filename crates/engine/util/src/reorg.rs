@@ -50,7 +50,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
+pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -59,7 +59,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     /// Evm configuration.
     evm_config: Evm,
     /// Payload validator.
-    payload_validator: ExecutionPayloadValidator,
+    payload_validator: ExecutionPayloadValidator<Spec>,
     /// The frequency of reorgs.
     frequency: usize,
     /// The depth of reorgs.
@@ -75,13 +75,13 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm> {
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm> {
+impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provider, Evm, Spec> {
     /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator,
+        payload_validator: ExecutionPayloadValidator<Spec>,
         frequency: usize,
         depth: usize,
     ) -> Self {
@@ -100,12 +100,13 @@ impl<S, Engine: EngineTypes, Provider, Evm> EngineReorg<S, Engine, Provider, Evm
     }
 }
 
-impl<S, Engine, Provider, Evm> Stream for EngineReorg<S, Engine, Provider, Evm>
+impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider, Evm, Spec>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     type Item = S::Item;
 
@@ -227,10 +228,10 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm>(
+fn create_reorg_head<Provider, Evm, Spec>(
     provider: &Provider,
     evm_config: &Evm,
-    payload_validator: &ExecutionPayloadValidator,
+    payload_validator: &ExecutionPayloadValidator<Spec>,
     mut depth: usize,
     next_payload: ExecutionPayload,
     next_cancun_fields: Option<CancunPayloadFields>,
@@ -238,6 +239,7 @@ fn create_reorg_head<Provider, Evm>(
 where
     Provider: BlockReader + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header>,
+    Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
 

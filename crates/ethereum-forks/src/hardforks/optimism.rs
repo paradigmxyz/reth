@@ -1,7 +1,8 @@
-use crate::{ChainHardforks, EthereumHardforks, OptimismHardfork};
+use super::Hardforks;
+use crate::OptimismHardfork;
 
 /// Extends [`crate::EthereumHardforks`] with optimism helper methods.
-pub trait OptimismHardforks: EthereumHardforks {
+pub trait OptimismHardforks: Hardforks {
     /// Convenience method to check if [`OptimismHardfork::Bedrock`] is active at a given block
     /// number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
@@ -23,5 +24,3 @@ pub trait OptimismHardforks: EthereumHardforks {
         self.fork(OptimismHardfork::Granite).active_at_timestamp(timestamp)
     }
 }
-
-impl OptimismHardforks for ChainHardforks {}

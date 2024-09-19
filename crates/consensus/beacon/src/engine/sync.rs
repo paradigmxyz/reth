@@ -517,7 +517,7 @@ mod tests {
         fn build<N>(
             self,
             pipeline: Pipeline<N>,
-            chain_spec: Arc<ChainSpec>,
+            chain_spec: Arc<N::ChainSpec>,
         ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
             N: ProviderNodeTypes,
