@@ -142,7 +142,7 @@ impl Wal {
     /// 1. Walks the WAL file from the end and searches for the first notification where committed
     ///    chain contains a block with the same number and hash as `to_block`.
     /// 2. If the notification is found, truncates the WAL file to the offset of the notification.
-    ///    It means that if the notificaiton contains both given block and blocks before it, the
+    ///    It means that if the notification contains both given block and blocks before it, the
     ///    whole notification will be truncated.
     ///
     /// # Returns
