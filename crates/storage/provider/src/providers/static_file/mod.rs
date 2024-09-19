@@ -14,8 +14,6 @@ use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
-const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
-
 /// Alias type for each specific `NippyJar`.
 type LoadedJarRef<'a> = dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
@@ -62,7 +60,7 @@ mod tests {
     use rand::seq::SliceRandom;
     use reth_db::{CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers};
     use reth_db_api::transaction::DbTxMut;
-    use reth_primitives::static_file::find_fixed_range;
+    use reth_primitives::static_file::{find_fixed_range, DEFAULT_BLOCKS_PER_STATIC_FILE};
     use reth_testing_utils::generators::{self, random_header_range};
 
     #[test]
@@ -74,9 +72,10 @@ mod tests {
         // Data sources
         let factory = create_test_provider_factory();
         let static_files_path = tempfile::tempdir().unwrap();
-        let static_file = static_files_path
-            .path()
-            .join(StaticFileSegment::Headers.filename(&find_fixed_range(*range.end())));
+        let static_file = static_files_path.path().join(
+            StaticFileSegment::Headers
+                .filename(&find_fixed_range(*range.end(), DEFAULT_BLOCKS_PER_STATIC_FILE)),
+        );
 
         // Setup data
         let mut headers = random_header_range(

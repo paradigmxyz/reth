@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -554,7 +555,7 @@ impl PruneCheckpointReader for NoopProvider {
 
 impl StaticFileProviderFactory for NoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider {
-        StaticFileProvider::default()
+        StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
     }
 }
 
