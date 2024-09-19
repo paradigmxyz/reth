@@ -254,6 +254,7 @@ impl StaticFileProviderInner {
 
 impl StaticFileProvider {
     /// Set a custom number of blocks per file.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn with_custom_blocks_per_file(self, blocks_per_file: u64) -> Self {
         let mut provider =
             Arc::try_unwrap(self.0).expect("should be called when initializing only");
