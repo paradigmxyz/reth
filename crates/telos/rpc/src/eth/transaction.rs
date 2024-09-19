@@ -79,11 +79,11 @@ where
 {
     /// Sets a `TelosClient` for `eth_sendRawTransaction` to forward transactions to.
     pub fn set_telos_client(&self, telos_client: TelosClient) {
-        *self.telos_client.write() = Some(telos_client);
+        self.telos_client.set(telos_client).expect("Telos client can be set only once");
     }
 
     /// Returns the `TelosClient` if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<TelosClient> {
-        self.telos_client.read().clone()
+        self.telos_client.get().cloned()
     }
 }

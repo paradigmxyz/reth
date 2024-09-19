@@ -36,6 +36,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use tokio::sync::OnceCell;
 use crate::error::TelosEthApiError;
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
@@ -56,9 +57,10 @@ pub type EthApiNodeBackend<N> = EthApiInner<
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
+#[derive(Clone)]
 pub struct TelosEthApi<N: FullNodeComponents> {
     inner: Arc<EthApiNodeBackend<N>>,
-    telos_client: parking_lot::RwLock<Option<TelosClient>>,
+    telos_client: Arc<OnceCell<TelosClient>>,
 }
 
 impl<N: FullNodeComponents> TelosEthApi<N> {
@@ -83,20 +85,7 @@ impl<N: FullNodeComponents> TelosEthApi<N> {
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), telos_client: parking_lot::RwLock::new(None) }
-    }
-}
-
-impl<N> Clone for TelosEthApi<N>
-where
-    N: FullNodeComponents,
-    Self: Send + Sync,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            telos_client: parking_lot::RwLock::new(self.telos_client.read().clone()),
-        }
+        Self { inner: Arc::new(inner), telos_client: Arc::new(OnceCell::new()) }
     }
 }
 
