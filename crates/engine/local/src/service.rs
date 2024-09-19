@@ -11,7 +11,7 @@ use reth_beacon_consensus::EngineNodeTypes;
 use reth_engine_tree::persistence::PersistenceHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, PayloadAttributesBuilder, PayloadBuilderAttributes, PayloadTypes,
+    BuiltPayload, PayloadAttributesBuilder, PayloadBuilder, PayloadBuilderAttributes, PayloadTypes,
 };
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
