@@ -1,6 +1,6 @@
 //! Utils for `stages`.
 use reth_config::config::EtlConfig;
-use reth_db::{BlockNumberList, Database};
+use reth_db::BlockNumberList;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::sharded_key::NUM_OF_INDICES_IN_SHARD,
@@ -10,7 +10,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::BlockNumber;
-use reth_provider::DatabaseProviderRW;
+use reth_provider::DBProvider;
 use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
@@ -35,15 +35,15 @@ const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 ///
 /// As a result, the `Collector` will contain entries such as `(Address1.3, [1,2,3])` and
 /// `(Address1.300, [100,300])`. The entries may be stored across one or more files.
-pub(crate) fn collect_history_indices<DB, CS, H, P>(
-    provider: &DatabaseProviderRW<DB>,
+pub(crate) fn collect_history_indices<Provider, CS, H, P>(
+    provider: &Provider,
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
-    DB: Database,
+    Provider: DBProvider,
     CS: Table,
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq + Hash,
@@ -102,8 +102,8 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<DB, H, P>(
-    provider: &DatabaseProviderRW<DB>,
+pub(crate) fn load_history_indices<Provider, H, P>(
+    provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
     sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
@@ -111,7 +111,7 @@ pub(crate) fn load_history_indices<DB, H, P>(
     get_partial: impl Fn(<H as Table>::Key) -> P,
 ) -> Result<(), StageError>
 where
-    DB: Database,
+    Provider: DBProvider<Tx: DbTxMut>,
     H: Table<Value = BlockNumberList>,
     P: Copy + Default + Eq,
 {

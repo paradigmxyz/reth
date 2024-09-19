@@ -12,8 +12,8 @@ use crate::{
     HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, RevertsInit,
     StageCheckpointReader, StateChangeWriter, StateProviderBox, StateReader, StateWriter,
-    StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
@@ -33,7 +33,7 @@ use reth_db_api::{
     },
     table::Table,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    DatabaseError, DbTxUnwindExt,
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -132,14 +132,16 @@ pub struct DatabaseProvider<TX> {
 }
 
 impl<TX> DatabaseProvider<TX> {
-    /// Returns a static file provider
-    pub const fn static_file_provider(&self) -> &StaticFileProvider {
-        &self.static_file_provider
-    }
-
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+}
+
+impl<TX> StaticFileProviderFactory for DatabaseProvider<TX> {
+    /// Returns a static file provider
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.static_file_provider.clone()
     }
 }
 
@@ -204,7 +206,7 @@ impl<TX: DbTx + 'static> TryIntoHistoricalStateProvider for DatabaseProvider<TX>
     }
 }
 
-impl<DB: Database> DatabaseProviderRW<DB> {
+impl<Tx: DbTx + DbTxMut + 'static> DatabaseProvider<Tx> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -953,216 +955,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(self.tx.commit()?)
     }
 
-    /// Remove the last N blocks of state.
-    ///
-    /// The latest state will be unwound
-    ///
-    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
-    ///    transaction ids.
-    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
-    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
-    ///    the changesets.
-    ///    - In order to have both the old and new values in the changesets, we also access the
-    ///      plain state tables.
-    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
-    ///    we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the plain state
-    ///     3. Save the old value to the local state
-    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
-    ///    have seen before we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the local state
-    ///     3. Set the local state to the value in the changeset
-    pub fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        if range.is_empty() {
-            return Ok(())
-        }
-
-        // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
-
-        // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
-        let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
-
-        let storage_range = BlockNumberAddress::range(range.clone());
-
-        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
-
-        // This is not working for blocks that are not at tip. as plain state is not the last
-        // state of end range. We should rename the functions or add support to access
-        // History state. Accessing history state can be tricky but we are not gaining
-        // anything.
-        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        let (state, _) = self.populate_bundle_state(
-            account_changeset,
-            storage_changeset,
-            &mut plain_accounts_cursor,
-            &mut plain_storage_cursor,
-        )?;
-
-        // iterate over local plain state remove all account and all storages.
-        for (address, (old_account, new_account, storage)) in &state {
-            // revert account if needed.
-            if old_account != new_account {
-                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
-                if let Some(account) = old_account {
-                    plain_accounts_cursor.upsert(*address, *account)?;
-                } else if existing_entry.is_some() {
-                    plain_accounts_cursor.delete_current()?;
-                }
-            }
-
-            // revert storages
-            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
-                // delete previous value
-                // TODO: This does not use dupsort features
-                if plain_storage_cursor
-                    .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
-                {
-                    plain_storage_cursor.delete_current()?
-                }
-
-                // insert value if needed
-                if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, storage_entry)?;
-                }
-            }
-        }
-
-        // iterate over block body and remove receipts
-        self.remove::<tables::Receipts>(from_transaction_num..=to_transaction_num)?;
-
-        Ok(())
-    }
-
-    /// Take the last N blocks of state, recreating the [`ExecutionOutcome`].
-    ///
-    /// The latest state will be unwound and returned back with all the blocks
-    ///
-    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
-    ///    transaction ids.
-    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
-    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
-    ///    the changesets.
-    ///    - In order to have both the old and new values in the changesets, we also access the
-    ///      plain state tables.
-    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
-    ///    we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the plain state
-    ///     3. Save the old value to the local state
-    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
-    ///    have seen before we:
-    ///     1. Take the old value from the changeset
-    ///     2. Take the new value from the local state
-    ///     3. Set the local state to the value in the changeset
-    pub fn take_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<ExecutionOutcome> {
-        if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
-        }
-        let start_block_number = *range.start();
-
-        // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
-
-        // get transaction receipts
-        let from_transaction_num =
-            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
-        let to_transaction_num =
-            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
-
-        let storage_range = BlockNumberAddress::range(range.clone());
-
-        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
-
-        // This is not working for blocks that are not at tip. as plain state is not the last
-        // state of end range. We should rename the functions or add support to access
-        // History state. Accessing history state can be tricky but we are not gaining
-        // anything.
-        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
-        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
-        // populate bundle state and reverts from changesets / state cursors, to iterate over,
-        // remove, and return later
-        let (state, reverts) = self.populate_bundle_state(
-            account_changeset,
-            storage_changeset,
-            &mut plain_accounts_cursor,
-            &mut plain_storage_cursor,
-        )?;
-
-        // iterate over local plain state remove all account and all storages.
-        for (address, (old_account, new_account, storage)) in &state {
-            // revert account if needed.
-            if old_account != new_account {
-                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
-                if let Some(account) = old_account {
-                    plain_accounts_cursor.upsert(*address, *account)?;
-                } else if existing_entry.is_some() {
-                    plain_accounts_cursor.delete_current()?;
-                }
-            }
-
-            // revert storages
-            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
-                // delete previous value
-                // TODO: This does not use dupsort features
-                if plain_storage_cursor
-                    .seek_by_key_subkey(*address, *storage_key)?
-                    .filter(|s| s.key == *storage_key)
-                    .is_some()
-                {
-                    plain_storage_cursor.delete_current()?
-                }
-
-                // insert value if needed
-                if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, storage_entry)?;
-                }
-            }
-        }
-
-        // iterate over block body and create ExecutionResult
-        let mut receipt_iter =
-            self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
-
-        let mut receipts = Vec::with_capacity(block_bodies.len());
-        // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
-                }
-            }
-            receipts.push(block_receipts);
-        }
-
-        Ok(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            receipts.into(),
-            start_block_number,
-            Vec::new(),
-        ))
-    }
-
     /// Remove list of entries from the table. Returns the number of entries removed.
     #[inline]
     pub fn remove<T: Table>(
@@ -1356,7 +1148,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             return Ok(())
         }
 
-        self.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+        self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             range.clone(),
         )?;
         self.remove::<tables::CanonicalHeaders>(range.clone())?;
@@ -1399,7 +1191,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             return Ok(Vec::new())
         }
 
-        self.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+        self.tx.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
             range.clone(),
         )?;
         let block_header_hashes = self.take::<tables::CanonicalHeaders>(range.clone())?;
@@ -1478,65 +1270,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         }
 
         Ok(blocks)
-    }
-
-    /// Unwind table by some number key.
-    /// Returns number of rows unwound.
-    ///
-    /// Note: Key is not inclusive and specified key would stay in db.
-    #[inline]
-    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<usize, DatabaseError>
-    where
-        T: Table<Key = u64>,
-    {
-        self.unwind_table::<T, _>(num, |key| key)
-    }
-
-    /// Unwind the table to a provided number key.
-    /// Returns number of rows unwound.
-    ///
-    /// Note: Key is not inclusive and specified key would stay in db.
-    pub(crate) fn unwind_table<T, F>(
-        &self,
-        key: u64,
-        mut selector: F,
-    ) -> Result<usize, DatabaseError>
-    where
-        T: Table,
-        F: FnMut(T::Key) -> u64,
-    {
-        let mut cursor = self.tx.cursor_write::<T>()?;
-        let mut reverse_walker = cursor.walk_back(None)?;
-        let mut deleted = 0;
-
-        while let Some(Ok((entry_key, _))) = reverse_walker.next() {
-            if selector(entry_key.clone()) <= key {
-                break
-            }
-            reverse_walker.delete_current()?;
-            deleted += 1;
-        }
-
-        Ok(deleted)
-    }
-
-    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table.
-    ///
-    /// Note: Range is inclusive and first key in the range is removed.
-    pub fn unwind_table_by_walker<T1, T2>(
-        &self,
-        range: impl RangeBounds<T1::Key>,
-    ) -> Result<(), DatabaseError>
-    where
-        T1: Table,
-        T2: Table<Key = T1::Value>,
-    {
-        let mut cursor = self.tx.cursor_write::<T1>()?;
-        let mut walker = cursor.walk_range(range)?;
-        while let Some((_, value)) = walker.next().transpose()? {
-            self.tx.delete::<T2>(value, None)?;
-        }
-        Ok(())
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
@@ -2716,6 +2449,213 @@ impl<TX: DbTxMut + DbTx> StateChangeWriter for DatabaseProvider<TX> {
         }
 
         Ok(())
+    }
+
+    /// Remove the last N blocks of state.
+    ///
+    /// The latest state will be unwound
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
+        if range.is_empty() {
+            return Ok(())
+        }
+
+        // We are not removing block meta as it is used to get block changesets.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let (state, _) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over local plain state remove all account and all storages.
+        for (address, (old_account, new_account, storage)) in &state {
+            // revert account if needed.
+            if old_account != new_account {
+                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                if let Some(account) = old_account {
+                    plain_accounts_cursor.upsert(*address, *account)?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
+                }
+            }
+
+            // revert storages
+            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
+                // delete previous value
+                // TODO: This does not use dupsort features
+                if plain_storage_cursor
+                    .seek_by_key_subkey(*address, *storage_key)?
+                    .filter(|s| s.key == *storage_key)
+                    .is_some()
+                {
+                    plain_storage_cursor.delete_current()?
+                }
+
+                // insert value if needed
+                if !old_storage_value.is_zero() {
+                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                }
+            }
+        }
+
+        // iterate over block body and remove receipts
+        self.remove::<tables::Receipts>(from_transaction_num..=to_transaction_num)?;
+
+        Ok(())
+    }
+
+    /// Take the last N blocks of state, recreating the [`ExecutionOutcome`].
+    ///
+    /// The latest state will be unwound and returned back with all the blocks
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    fn take_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<ExecutionOutcome> {
+        if range.is_empty() {
+            return Ok(ExecutionOutcome::default())
+        }
+        let start_block_number = *range.start();
+
+        // We are not removing block meta as it is used to get block changesets.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        // populate bundle state and reverts from changesets / state cursors, to iterate over,
+        // remove, and return later
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over local plain state remove all account and all storages.
+        for (address, (old_account, new_account, storage)) in &state {
+            // revert account if needed.
+            if old_account != new_account {
+                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                if let Some(account) = old_account {
+                    plain_accounts_cursor.upsert(*address, *account)?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
+                }
+            }
+
+            // revert storages
+            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
+                // delete previous value
+                // TODO: This does not use dupsort features
+                if plain_storage_cursor
+                    .seek_by_key_subkey(*address, *storage_key)?
+                    .filter(|s| s.key == *storage_key)
+                    .is_some()
+                {
+                    plain_storage_cursor.delete_current()?
+                }
+
+                // insert value if needed
+                if !old_storage_value.is_zero() {
+                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                }
+            }
+        }
+
+        // iterate over block body and create ExecutionResult
+        let mut receipt_iter =
+            self.take::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::with_capacity(block_bodies.len());
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_receipts.push(Some(receipt));
+                }
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts.into(),
+            start_block_number,
+            Vec::new(),
+        ))
     }
 }
 

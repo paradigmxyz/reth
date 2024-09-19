@@ -1415,8 +1415,9 @@ mod tests {
     };
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-        StateProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
+        ReceiptProviderIdExt, RequestsProvider, StateProviderFactory, TransactionVariant,
+        TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1492,7 +1493,7 @@ mod tests {
             .collect();
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = factory.database_provider_rw()?;
 
         // Insert blocks into the database
         for block in &database_blocks {
