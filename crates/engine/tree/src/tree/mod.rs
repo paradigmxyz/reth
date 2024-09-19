@@ -2278,6 +2278,10 @@ where
             for block in blocks.iter().rev() {
                 input.append_cached_ref(block.trie_updates(), block.hashed_state())
             }
+        } else {
+            // The block attaches to canonical persisted parent.
+            let revert_state = consistent_view.revert_state(parent_hash)?;
+            input.append(revert_state);
         }
 
         // Extend with block we are validating root for.
