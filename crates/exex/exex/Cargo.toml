@@ -16,7 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
-reth-exex-types.workspace = true
+reth-exex-types = { workspace = true, features = ["serde"] }
 reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true

@@ -9,7 +9,6 @@ use std::{
 
 use reth_exex_types::ExExNotification;
 use reth_primitives::BlockNumHash;
-use reth_provider::Chain;
 use reth_tracing::tracing::debug;
 
 /// The maximum number of blocks to cache in the WAL.
