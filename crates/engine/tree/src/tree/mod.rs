@@ -492,12 +492,10 @@ pub struct EngineApiTreeHandler<P, E, T: EngineTypes, Spec> {
     payload_builder: PayloadBuilderHandle<T>,
     /// Configuration settings.
     config: TreeConfig,
-    /// An invalid block hook.
-    invalid_block_hook: Box<dyn InvalidBlockHook>,
-    /// Temporary flag to disable parallel state root.
-    parallel_state_root_enabled: bool,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
+    /// An invalid block hook.
+    invalid_block_hook: Box<dyn InvalidBlockHook>,
 }
 
 impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
@@ -517,9 +515,8 @@ impl<P: Debug, E: Debug, T: EngineTypes + Debug, Spec: Debug> std::fmt::Debug
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
-            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
-            .field("parallel_state_root_enabled", &self.parallel_state_root_enabled)
             .field("metrics", &self.metrics)
+            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .finish()
     }
 }
@@ -562,10 +559,9 @@ where
             canonical_in_memory_state,
             payload_builder,
             config,
+            metrics: Default::default(),
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
-            parallel_state_root_enabled: false,
-            metrics: Default::default(),
         }
     }
 
@@ -2186,7 +2182,7 @@ where
         // we are computing in parallel, because we initialize a different database transaction
         // per thread and it might end up with a different view of the database.
         let persistence_in_progress = self.persistence_state.in_progress();
-        if self.parallel_state_root_enabled && !persistence_in_progress {
+        if !persistence_in_progress {
             state_root_result = match self
                 .compute_state_root_in_parallel(block.parent_hash, &hashed_state)
             {
