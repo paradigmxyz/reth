@@ -909,8 +909,8 @@ impl StaticFileProvider {
                     return Ok(Some(res))
                 }
                 range = SegmentRangeInclusive::new(
-                    range.start().saturating_sub(DEFAULT_BLOCKS_PER_STATIC_FILE),
-                    range.end().saturating_sub(DEFAULT_BLOCKS_PER_STATIC_FILE),
+                    range.start().saturating_sub(self.blocks_per_file),
+                    range.end().saturating_sub(self.blocks_per_file),
                 );
             }
         }
